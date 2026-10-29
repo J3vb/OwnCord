@@ -127,7 +127,7 @@ function searchText(member: Member): string {
 
 /** Bucket keys of the OFFLINE and ONLINE groups; role buckets are keyed by
  *  lowercased role name. ONLINE holds online members whose roles are all
- *  un-hoisted (WP 6.3d). */
+ *  un-hoisted. */
 const OFFLINE = Symbol("offline");
 const ONLINE = Symbol("online");
 type BucketKey = string | typeof OFFLINE | typeof ONLINE;

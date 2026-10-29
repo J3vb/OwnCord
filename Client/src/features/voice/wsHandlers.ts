@@ -52,7 +52,7 @@ import { WsErrorCode } from "@lib/protocolTypes";
  * from either path — or both, on the same session — without redundantly
  * re-invoking the livekit calls once already applied.
  *
- * OC-0246: a moderator restriction must also be released once it is lifted.
+ * A moderator restriction must also be released once it is lifted.
  * `setMuted`/`setDeafened` deliberately send no voice_mute/voice_deafen frame
  * (unlike the user's own toggle), so nothing else ever un-applies a
  * moderator-imposed local mute/deafen — without this, the falling edge
@@ -114,7 +114,7 @@ function enforceModeratorAudioState(
  * snapshot.
  */
 export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">) => void {
-  // OC-0201: snapshot the current voice channel's peer roster BEFORE the
+  // Snapshot the current voice channel's peer roster BEFORE the
   // wholesale replace below, so the reconciliation branch further down
   // can tell who left while the socket was down. Must run before
   // setVoiceStates() overwrites voiceUsers with the fresh payload.
@@ -123,7 +123,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
     prevVoiceChannelId !== null
       ? new Set(voiceStore.getState().voiceUsers.get(prevVoiceChannelId)?.keys() ?? [])
       : new Set<number>();
-  // OC-0246: same reasoning as the VOICE_STATE handler — snapshot the
+  // Same reasoning as the VOICE_STATE handler — snapshot the
   // pre-resync moderator flags before setVoiceStates() overwrites them,
   // so a moderator restriction lifted while we were disconnected (and
   // still applied locally from before the drop) is released here too.
@@ -154,7 +154,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
     const voiceSessionActive = voiceStore.getState().voiceStatus !== "idle";
     if (selfVoiceState !== undefined && voiceSessionActive) {
       // A LiveKit session survived a WS drop that outlived it (nothing
-      // tears voice down on a socket drop alone) — OC-0014: this full
+      // tears voice down on a socket drop alone): this full
       // resync is the only place a moderator mute/deafen issued while we
       // were disconnected ever reaches us, since the mustFullResync tier
       // that produced this `ready` never replays the voice_state that
@@ -179,7 +179,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
       noteWatchingResync();
       clearPeerWatching();
 
-      // OC-0201: same gap, for E2EE. A full resync never replays the
+      // Same gap, for E2EE. A full resync never replays the
       // voice_leave for anyone who departed our voice channel during the
       // outage — handleParticipantLeft (the only path that prunes a
       // departed peer's key, rotates for membership forward secrecy, and
@@ -204,7 +204,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
         }
       }
       // The same gap for the camera and share flags: an announce sent while
-      // the socket was down never reached the server (WP 1C-8).
+      // the socket was down never reached the server.
       for (const uid of left) setPeerVideoDecode(uid, undefined);
       void livekitSession().then(
         ({ handleParticipantLeft, reconcileVideoFlags, resendWatching }) => {
@@ -221,13 +221,13 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
   };
 }
 
-/** The identity slice of `ready` (F3): publish our identity public key. */
+/** The identity slice of `ready`: publish our identity public key. */
 export function publishReadyIdentity(
   api: DispatchApi | undefined,
   payload: Payload<"ready">,
 ): void {
   const currentUserId = authStore.getState().user?.id ?? 0;
-  // F3: publish our long-term identity public key so peers can pin+verify
+  // Publish our long-term identity public key so peers can pin+verify
   // us in voice. Idempotent (no PATCH when the server copy already matches)
   // and fire-and-forget — never block the ready flow. Username is required
   // by the server's profile update, so it rides along with the key.
@@ -245,7 +245,7 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   // Auto-join voice channel if the event is for the current user
   const currentUserId = authStore.getState().user?.id ?? 0;
   const isSelf = payload.user_id === currentUserId;
-  // OC-0246: snapshot the pre-update moderator flags before updateVoiceState
+  // Snapshot the pre-update moderator flags before updateVoiceState
   // overwrites them, so enforceModeratorAudioState can detect a falling
   // edge (a restriction that WAS in effect and is now lifted) rather than
   // only ever seeing the post-update state.
@@ -278,7 +278,7 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   );
 }
 
-// Tell the member who moved them (WP 8.4b). A moderator move is final once the
+// Tell the member who moved them. A moderator move is final once the
 // server sends it, so unlike the AFK notice this does not wait for the join's
 // acknowledgement. The mover's name or the channel may be unknown to this
 // client; the message degrades rather than names nobody.
@@ -306,7 +306,7 @@ export function handleVoiceMoved(
   log.info("Moved to another voice channel by a moderator", {
     toChannelId: payload.to_channel_id,
   });
-  // RT-12: a move is a deliberate membership change, so a pending
+  // A move is a deliberate membership change, so a pending
   // restart-rejoin for the old channel must not fire.
   cancelVoiceRejoin(clock);
   // Noted at once, so the leave sound queued by the voice_leave just before
@@ -332,7 +332,7 @@ export function handleVoiceDisconnected(
   payload: Payload<"voice_disconnected">,
   clock: ReconnectClock,
 ): void {
-  // OC-0031: this can arrive well after the kick already tore the
+  // This can arrive well after the kick already tore the
   // session down at the SFU (queued behind a backed-up outbound send
   // buffer) — by the time it's delivered the user may have already
   // rejoined this channel or another. Guard on channel match, same as
@@ -341,11 +341,11 @@ export function handleVoiceDisconnected(
   // Read the store before leaveVoiceChannel() below clears
   // currentChannelId.
   //
-  // OC-0033: on the ordinary kick path, the server sends voice_leave to
+  // On the ordinary kick path, the server sends voice_leave to
   // the leaver (finishVoiceLeave) BEFORE handleVoiceModKickV2 sends this
   // voice_disconnected, so the sibling VOICE_LEAVE handler has typically
   // already nulled currentChannelId by the time this arrives. That's not
-  // the OC-0031 staleness (a rejoin into a *different* channel) — treat
+  // the staleness (a rejoin into a *different* channel) — treat
   // a cleared store as not-stale so the kick reason still gets shown.
   const cur = voiceStore.getState().currentChannelId;
   const stale = cur !== null && cur !== payload.channel_id;
@@ -355,7 +355,7 @@ export function handleVoiceDisconnected(
     });
     return;
   }
-  // RT-12: a kick is a deliberate membership change, so a pending
+  // A kick is a deliberate membership change, so a pending
   // restart-rejoin must not put the user back.
   cancelVoiceRejoin(clock);
   clearAfkMove();
@@ -366,13 +366,13 @@ export function handleVoiceDisconnected(
 }
 
 export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: ReconnectClock): void {
-  // OC-0283: removeVoiceUser() below always mutates the roster before
+  // removeVoiceUser() below always mutates the roster before
   // handleParticipantLeft below runs, and a pre-mutation snapshot (the
-  // OC-0239 attempt this replaced) reads "still present" on every
+  // earlier attempt this replaced) reads "still present" on every
   // genuine departure too — a departing peer is only ever removed from
   // the roster by this very handler, so any roster read taken here, at
   // any point relative to that mutation, cannot tell a genuine departure
-  // apart from the OC-0213 stale-leave case. Don't try; see
+  // apart from the stale-leave case. Don't try; see
   // E2EEManager.handleParticipantLeft for the current defense.
   removeVoiceUser(payload);
   const currentUserId = authStore.getState().user?.id ?? 0;
@@ -392,7 +392,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // Notify E2EE state machine so key holder can rotate the room key, and
   // (when applicable) tear down the media session — both through one lazy
   // import so the two effects cannot land in different ticks.
-  // OC-0311: voice_leave is broadcast to the whole channelReadAudience,
+  // voice_leave is broadcast to the whole channelReadAudience,
   // i.e. everyone with READ_MESSAGES on THAT channel — not just its
   // voice participants. Scope the E2EE notification to this client's own
   // voice channel so a peer leaving a channel we merely read (and never
@@ -420,7 +420,7 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
       if (loopMayOwn) leaveVoiceChannel();
     }
   });
-  // RT-12: a self voice_leave means the user is out of voice for real — their
+  // A self voice_leave means the user is out of voice for real — their
   // own Disconnect, or a server-initiated eviction. Either way a pending
   // restart-rejoin must not fire. Cancelled on `isSelf` rather than the
   // channel match above: the restart drop already nulled currentChannelId, so
@@ -517,7 +517,7 @@ export function handleVoiceE2eeOffer(payload: Payload<"voice_e2ee_offer">): void
  * join in flight; never consumes the frame.
  */
 export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | undefined): void {
-  // OC-0224: the sidebar/widget optimistically writes currentChannelId
+  // The sidebar/widget optimistically writes currentChannelId
   // before the server answers voice_join (VoiceCallbacks.onVoiceJoin,
   // voiceStatus="joining"). A first-time join refusal earns no
   // voice_leave (there was no previous channel to leave), so nothing
@@ -531,8 +531,8 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
   // join too. An older server sends the refusal with no id, so an id-less
   // error still counts when its code is one a join refusal can carry
   // (joinRequest.ts). A channel *switch* refusal hits the same guard: the
-  // self voice_leave for the OLD channel that precedes it no longer resets voiceStatus (OC-0015 —
-  // that voice_leave's channel no longer matches the already-updated
+  // self voice_leave for the OLD channel that precedes it no longer resets
+  // voiceStatus (that voice_leave's channel no longer matches the already-updated
   // currentChannelId, so it must not tear down the NEW channel's
   // optimistic state either), so voiceStatus is still "joining" when
   // this error lands and the guard clears it here instead. A plain
@@ -542,11 +542,11 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
   // FORBIDDEN, NOT_FOUND, archived-channel BAD_REQUEST) never reaches
   // voiceJoinLeaveCurrent server-side, so no voice_leave is broadcast and
   // the OLD channel's LiveKit room is still connected (mic still
-  // published) while the store already points at the NEW channel
-  // (OC-0193). isVoiceSessionActive() distinguishes that live-or-in-flight
+  // published) while the store already points at the NEW channel.
+  // isVoiceSessionActive() distinguishes that live-or-in-flight
   // case from the first-time-join refusal; tearing it down here also
   // sends voice_leave so the server/SFU state matches the now-cleared
-  // store. OC-0249: isVoiceConnected() (Room !== null) reads false for
+  // store. isVoiceConnected() (Room !== null) reads false for
   // the entire "connecting" state — the very state a join is in while
   // voiceStatus is "joining" and connectAndSetup() still awaits
   // createRoom()/resolveLiveKitUrl() — so an unrelated error landing in

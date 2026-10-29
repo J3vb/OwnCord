@@ -1,8 +1,8 @@
 /**
  * A peer's E2EE identity verification (F3 TOFU) as the call surfaces show it:
  * the shield's look, and the re-trust prompt a blocked peer's shield opens.
- * Shared by the server-channel roster (ChannelSidebar) and the DM call panel
- * (D-09), so both draw the same states and re-pin the same way.
+ * Shared by the server-channel roster (ChannelSidebar) and the DM call panel,
+ * so both draw the same states and re-pin the same way.
  */
 
 import type { IconName } from "../../lib/icons";
@@ -24,7 +24,7 @@ const log = createLogger("peer-verification");
  *  for this peer (a new device) that was accepted automatically, a muted shield when the peer published no key
  *  (legacy), a red shield-alert when the peer is blocked (pinned key no longer
  *  delivered, or a bad signature), and an amber shield-question when the local
- *  pin store could not be read (DC-08). */
+ *  pin store could not be read. */
 export function verifyPresentation(v: PeerVerification): {
   icon: IconName;
   color: string;
@@ -63,7 +63,7 @@ export function verifyPresentation(v: PeerVerification): {
   }
   // "unverified" — the remaining status: peer published no identity key (legacy).
   // No identity key means no safety number; the per-call session fingerprint
-  // is the only value that can be compared out of band (OC-0003).
+  // is the only value that can be compared out of band.
   return {
     icon: "shield",
     color: "var(--text-muted, #949ba4)",
@@ -76,7 +76,7 @@ export function verifyPresentation(v: PeerVerification): {
 
 /** Tooltip for the local user's own shield: the safety number peers see for
  *  us (F3), then the per-call session fingerprint a peer who sees us as
- *  unverified compares against (OC-0003). Null when there is neither. */
+ *  unverified compares against. Null when there is neither. */
 export function ownIdentityTitle(
   safetyNumber: string | null,
   sessionFingerprint: string | null,
@@ -102,7 +102,7 @@ function closeIdentityModal(): void {
 }
 
 /** Open the re-pin prompt for a blocked peer. `lifetimeSignal` is the opening
- *  surface's own lifetime, never a per-render signal (OC-0281). */
+ *  surface's own lifetime, never a per-render signal. */
 export async function openIdentityMismatchModal(
   userId: number,
   username: string,
@@ -134,13 +134,13 @@ export async function openIdentityMismatchModal(
   // The SIDEBAR (or a newer open) may have superseded us during the async
   // compute — but NOT a mere re-render: `lifetimeSignal` is the sidebar's own
   // factory-lifetime signal (aborted only in destroy()), not the per-render
-  // one that renderChannels() replaces on every redraw (OC-0281). Binding this
+  // one that renderChannels() replaces on every redraw. Binding this
   // check to the render signal made an unrelated re-render landing mid-compute
   // (a message in another channel, a peer toggling mute) turn the click into a
   // silent no-op.
   if (lifetimeSignal.aborted) return;
   closeIdentityModal();
-  // Lazy: a feature must not statically import the UI layer (ARCH-06).
+  // Lazy: a feature must not statically import the UI layer.
   const { createIdentityMismatchModal } = await import("../../components/IdentityMismatchModal");
   if (lifetimeSignal.aborted) return;
   const modal = createIdentityMismatchModal({
@@ -189,6 +189,6 @@ export async function openIdentityMismatchModal(
   activeIdentityModal = modal;
   // Close if the owning sidebar is destroyed while the modal is still open —
   // NOT on a re-render, which is why this is `lifetimeSignal` and not the
-  // render-scoped signal (OC-0281).
+  // render-scoped signal.
   lifetimeSignal.addEventListener("abort", closeIdentityModal, { once: true });
 }

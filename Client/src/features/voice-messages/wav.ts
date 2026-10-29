@@ -1,4 +1,4 @@
-/** The PCM fallback's encoder (WP 8.9): 16-bit mono WAV, built in JS. */
+/** The PCM fallback's encoder: 16-bit mono WAV, built in JS. */
 
 export const WAV_RATE = 16_000;
 

@@ -1,5 +1,5 @@
 /**
- * The Moderation Center destination (B9-11, Q2): what the shell imports. The
+ * The Moderation Center destination: what the shell imports. The
  * queue and its evidence load on first open, so they stay out of the MainPage
  * chunk, and nothing is read until a MODERATE_MEMBERS holder opens it.
  */

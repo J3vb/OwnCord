@@ -1,5 +1,5 @@
 /**
- * The local report form (B9-10, BPR-070): report a message, one of its
+ * The local report form: report a message, one of its
  * attachments, or a user to this server's moderators.
  *
  * The target is the caller's actual local identifier; the server derives the

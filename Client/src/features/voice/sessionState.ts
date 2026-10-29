@@ -31,7 +31,7 @@ export type PendingVoiceJoin = {
 };
 
 /** Discriminated-union session state. All connection-lifecycle fields live here.
- *  The "connecting" variant also carries the BUG-142 monotonic generation counter
+ *  The "connecting" variant also carries the monotonic generation counter
  *  (joinGeneration) so superseded-join detection is co-located with the state. */
 export type SessionState =
   | { readonly type: "idle" }

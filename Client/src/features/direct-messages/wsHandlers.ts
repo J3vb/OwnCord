@@ -110,7 +110,7 @@ export function applyReadyBlocks(api: DispatchApi | undefined): void {
   // clear it and re-fetch our own outgoing blocks authoritatively.
   clearBlockedByThem();
   if (api !== undefined) {
-    // OC-0218: snapshot the revision blocksStore was at right before
+    // Snapshot the revision blocksStore was at right before
     // issuing this fetch. If the user blocks/unblocks someone (via
     // memberPanel's onToggleBlock -> setUserBlockedByMe) while
     // this GET is in flight, that per-user delta bumps the revision;

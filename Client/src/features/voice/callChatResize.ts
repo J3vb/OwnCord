@@ -1,6 +1,6 @@
 /**
  * callChatResize — the drag handle between the call grid and its chat (the
- * call view with the chat beside it, WP 6.1b). It sets `--call-chat-width` on
+ * call view with the chat beside it). It sets `--call-chat-width` on
  * the chat column, which `.chat-area--call-chat` reads for its second track,
  * and keeps the grid at least CALL_GRID_MIN_PX wide. VideoModeController
  * attaches it while the split shows and refits it when the chat column resizes.

@@ -1,5 +1,5 @@
 /**
- * The Safety tab's appeals (B9-16): file an appeal against an own moderation
+ * The Safety tab's appeals: file an appeal against an own moderation
  * action, withdraw one, and track each appeal's status.
  *
  * - Eligibility is the server's: only a history row the server marks

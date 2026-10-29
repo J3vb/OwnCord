@@ -20,7 +20,7 @@
 // screen picker's desktop portal dialog), so they keep working while the
 // window is hidden, and the track each returns is the local preview.
 //
-// Lifecycle (B7-11): the Tauri subscription is registered per connect() and
+// Lifecycle: the Tauri subscription is registered per connect() and
 // released in disconnect() with the late-resolve guard, and disconnect() is
 // scoped to this room's own native session id, so a superseded attempt tears
 // down only its own room. Every renderer, the camera track and the screen
@@ -43,9 +43,9 @@ import type {
 } from "../../../platform/contracts/nativeVoice";
 import { nativeCounters } from "./counters";
 
-/** OC-0473: how often a remote participant whose frames stopped decrypting
+/** How often a remote participant whose frames stopped decrypting
  *  is re-reported — the web E2EE worker's cadence, so the shared streak grace
- *  (OC-0452) in `lib/roomEventHandlers.ts` applies to the native path
+ *  in `lib/roomEventHandlers.ts` applies to the native path
  *  unchanged. Unlike the web worker's, these reports are not rate-limited, so
  *  the native room recovers after the short quiet gap (`isNativeRoom`). */
 const DECRYPT_REPORT_MS = 1000;
@@ -151,7 +151,7 @@ export class NativeRemotePublication {
   readonly kind: string;
   readonly source: string;
   isSubscribed = true;
-  /** Video: whether the SFU sends it, and at which layer (P3-07). A fresh
+  /** Video: whether the SFU sends it, and at which layer. A fresh
    *  subscription comes at the top one. */
   isEnabled = true;
   private quality: NativeVideoQuality = "high";
@@ -282,7 +282,7 @@ interface NativeLocalPublication {
 const STATS_SHARE_MS = 1500;
 
 /** Stands in for livekit-client's `PCTransport` where connectionStats and
- *  livekitDiagnostics read it (WP LP-5). */
+ *  livekitDiagnostics read it. */
 class NativeStatsTransport {
   constructor(
     private readonly room: NativeRoom,
@@ -357,7 +357,7 @@ export class NativeRoom {
     return this.state === "connected";
   }
   readonly remoteParticipants = new Map<string, NativeRemoteParticipant>();
-  /** OC-0473: one re-report per remote identity whose frames stopped
+  /** One re-report per remote identity whose frames stopped
    *  decrypting; cleared when they decrypt again or the peer leaves. */
   private readonly decryptTimers = new Map<string, ReturnType<typeof setInterval>>();
   readonly localParticipant = {
@@ -521,7 +521,7 @@ export class NativeRoom {
   }
   /** Push-to-talk for the native room, which has no web mic processor to
    *  gate (AudioPipeline.setPttGated): the key flips the session's gate,
-   *  which zeroes the open capture's frames (DP-30, D5). It never opens or
+   *  which zeroes the open capture's frames. It never opens or
    *  closes the capture, so a press is not clipped by a device reopen and
    *  never opens a microphone the user muted. */
   setPttGated(gated: boolean): void {
@@ -1350,13 +1350,13 @@ export class NativeRoom {
             this.emit(RoomEvent.EncryptionError, new Error("native E2EE not active"));
           break;
         }
-        // OC-0473: a remote peer's frames stopped (or resumed) decrypting.
+        // A remote peer's frames stopped (or resumed) decrypting.
         // The backend reports each transition once; re-report the failure the
         // way the web worker does (an InvalidKey decrypt error once a second)
         // until the peer decrypts again, so the shared streak grace degrades
         // a failure that persists and the quiet gap after `encrypted` clears
         // it. Tracked per identity, so a peer whose audio decrypts while its
-        // camera does not reads as decrypting (the pre-OC-0473 behaviour).
+        // camera does not reads as decrypting.
         this.clearDecryptTimer(event.identity);
         if (!event.encrypted) {
           const identity = event.identity;

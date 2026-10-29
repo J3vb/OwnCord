@@ -1,5 +1,5 @@
 /**
- * The eager half of the inline message editor (WP 3A-8): one cached dynamic
+ * The eager half of the inline message editor: one cached dynamic
  * import, so the editor and its copy stay out of the main-page chunk until the
  * first edit (or the idle preload after the list mounts).
  */

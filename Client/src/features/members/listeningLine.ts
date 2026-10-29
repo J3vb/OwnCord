@@ -1,5 +1,5 @@
 /**
- * The "Listening to <player>" wording for a song (WP 8.10), shared by the
+ * The "Listening to <player>" wording for a song, shared by the
  * member row, the DM row and the profile cards. Pure. The profile card itself
  * (`listeningCard.ts`) is separate: only the lazy popup and sidebar load it.
  */

@@ -1,5 +1,5 @@
 /**
- * Voice UI sounds (DP-40): a short chime on join/leave — yours and another
+ * Voice UI sounds: a short chime on join/leave — yours and another
  * member's in your channel — and on mute/unmute and deafen/undeafen.
  *
  * The sounds themselves and their shared output device live in
@@ -9,7 +9,7 @@
  *
  * Two edges are deliberately excluded:
  *  - push-to-talk: `pttGated` is never read, so a PTT press/release makes no
- *    sound (D5);
+ *    sound;
  *  - the wholesale roster replacement (`setVoiceStates`) that the initial
  *    `ready` and a full reconnect resync use: instead of watching the roster
  *    maps, this reads `getVoiceRosterRevision`, which only the incremental
@@ -21,7 +21,7 @@
  * after a join did. A moderator move plays its own tone in place of the join.
  *
  * DM calls are `call-ring.ts`'s; the incoming ringtone is exempt from the
- * deafen gate per D2, so it does not route through here.
+ * deafen gate, so it does not route through here.
  */
 
 import {
@@ -95,7 +95,7 @@ function canPlay(): boolean {
   return loadPref<boolean>("voiceSounds", true);
 }
 
-/** The per-sound switch (WP M-8) each voice sound answers to. */
+/** The per-sound switch each voice sound answers to. */
 const SOUND_SWITCH: Readonly<Record<VoiceSound, SoundSwitch>> = {
   join: "joinLeave",
   leave: "joinLeave",
@@ -194,7 +194,7 @@ export function startVoiceUiSounds(): () => void {
       finish();
       return;
     }
-    // While deafened, nothing else plays (D2 exempts only the ringtone).
+    // While deafened, nothing else plays (only the ringtone is exempt).
     if (next.localDeafened) {
       finish();
       return;

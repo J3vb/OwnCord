@@ -1,4 +1,4 @@
-// Moderation Center handler bodies (B9-11), called only from lib/dispatcher.ts.
+// Moderation Center handler bodies, called only from lib/dispatcher.ts.
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyPayload } from "@lib/types";
 import { noteAppealChange, noteQueueChange, setMemberTimeouts } from "./store";
