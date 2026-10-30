@@ -36,6 +36,10 @@ export interface LifecycleSample {
   /** Where the attached nodes are at this sample. Not asserted: a failing
    *  `nodes` bar prints its diff, so the report names what moved. */
   dom?: DomBreakdown;
+  /** Detached DOM nodes JS still holds, by heap-snapshot name. Taken only at
+   *  the 5-cycle samples (a snapshot costs about a second); a failing `nodes`
+   *  bar prints its diff, so the report names what is held. */
+  detached?: Record<string, number>;
 }
 
 /**
@@ -171,6 +175,46 @@ async function countInstances(cdp: CDPSession, prototype: string, filter: string
   return typeof counted.result.value === "number" ? counted.result.value : 0;
 }
 
+/** The parts of a V8 heap snapshot that `detachedByName` reads. */
+export interface HeapSnapshotJson {
+  snapshot: { meta: { node_fields: string[] } };
+  nodes: number[];
+  strings: string[];
+}
+
+/**
+ * Detached DOM nodes in a heap snapshot, counted by name. Chromium marks them
+ * with `detachedness` 2 and, in older builds, names them `Detached <...>`;
+ * either one counts, and the prefix is dropped from the key.
+ */
+export function detachedByName(heap: HeapSnapshotJson): Record<string, number> {
+  const fields = heap.snapshot.meta.node_fields;
+  const width = fields.length;
+  const nameAt = fields.indexOf("name");
+  const detachedAt = fields.indexOf("detachedness");
+  const counts: Record<string, number> = {};
+  for (let i = 0; i < heap.nodes.length; i += width) {
+    const name = heap.strings[heap.nodes[i + nameAt]!] ?? "";
+    const marked = detachedAt >= 0 && heap.nodes[i + detachedAt] === 2;
+    if (!marked && !name.startsWith("Detached ")) continue;
+    const key = name.replace(/^Detached /, "");
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+async function takeHeapSnapshot(cdp: CDPSession): Promise<HeapSnapshotJson> {
+  const chunks: string[] = [];
+  const onChunk = ({ chunk }: { chunk: string }) => chunks.push(chunk);
+  cdp.on("HeapProfiler.addHeapSnapshotChunk", onChunk);
+  try {
+    await cdp.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
+  } finally {
+    cdp.off("HeapProfiler.addHeapSnapshotChunk", onChunk);
+  }
+  return JSON.parse(chunks.join("")) as HeapSnapshotJson;
+}
+
 /**
  * Quiesce the page, then read every metric. Callers pass the same `cdp` session
  * for the whole run so the object groups are released between samples.
@@ -259,6 +303,8 @@ export async function sampleLifecycle(
     return { attached: count(document), regions };
   });
   const heap = await cdp.send("Runtime.getHeapUsage");
+  const detached =
+    cycle > 0 && cycle % 5 === 0 ? detachedByName(await takeHeapSnapshot(cdp)) : undefined;
   await page.waitForTimeout(Math.max(0, firstLedgerAt + 1000 - Date.now()));
   const secondLedger = await readLedger();
   const ledger = {
@@ -300,6 +346,7 @@ export async function sampleLifecycle(
     ),
     heapUsed: heap.usedSize,
     dom,
+    ...(detached !== undefined ? { detached } : {}),
   };
 }
 
@@ -308,7 +355,7 @@ export async function sampleLifecycle(
 export type SlopeCeilings = Partial<Record<CountMetric, number>>;
 
 export interface BarResult {
-  metric: keyof Omit<LifecycleSample, "cycle" | "cycleAt" | "dom">;
+  metric: keyof Omit<LifecycleSample, "cycle" | "cycleAt" | "dom" | "detached">;
   warm: number | null;
   final: number;
   slope: number;
@@ -521,6 +568,14 @@ export function describeDomDiff(from: LifecycleSample, to: LifecycleSample): str
     const a = from.dom.regions[key] ?? 0;
     const b = to.dom.regions[key] ?? 0;
     if (a !== b) parts.push(`${key} ${a}→${b}`);
+  }
+  if (from.detached !== undefined && to.detached !== undefined) {
+    const names = new Set([...Object.keys(from.detached), ...Object.keys(to.detached)]);
+    for (const name of [...names].toSorted()) {
+      const a = from.detached[name] ?? 0;
+      const b = to.detached[name] ?? 0;
+      if (a !== b) parts.push(`held ${name} ${a}→${b}`);
+    }
   }
   return ` [${parts.join(", ")}]`;
 }
