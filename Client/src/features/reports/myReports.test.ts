@@ -172,6 +172,10 @@ describe("My reports", () => {
   it("says so in the pane when the section fails to load", async () => {
     vi.doMock("./myReports", () => Promise.reject(new Error("chunk failed")));
     try {
+      // vitest 5 registers a doMock on the next import, and a second import
+      // started in the same tick skips the wait and gets the real module. The
+      // pane starts two imports at once, so register the mock first.
+      await expect(import("./myReports")).rejects.toThrow();
       const pane = buildSafetyPane(tab.signal, api);
       // Other Safety sections keep their own (empty) alert regions; find ours.
       await vi.waitFor(() =>
@@ -182,6 +186,9 @@ describe("My reports", () => {
       expect(signals).toEqual([]);
     } finally {
       vi.doUnmock("./myReports");
+      // Same reason as above: apply the unmock before the next test's pane
+      // starts its imports.
+      await import("./myReports");
     }
   });
 
