@@ -1,5 +1,5 @@
 {
-  "nextId": 527,
+  "nextId": 529,
   "findings": [
     {
       "id": "OC-0001",
@@ -12179,6 +12179,50 @@
       "lens": "client-state",
       "finder": "claude",
       "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0527",
+      "title": "One failed accept on the Linux video preview socket ended every camera, screen and remote video preview for the rest of the call",
+      "file": "Client/src-tauri/src/native_voice/video.rs",
+      "line": 170,
+      "severity": "low",
+      "why": "The accept loop returned on its first accept error, which dropped the listener and every open preview connection until the call was rejoined.",
+      "repro": "On Linux native voice, a single failed accept on the local frame socket stops all video previews.",
+      "evidence": "accept_loop logged and returned on Err; run_accept_loop in proxy_common.rs tolerates errors.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/video.rs a_failed_accept_does_not_end_the_frame_socket",
+        "revertProof": "fail"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "tauri-rust",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0528",
+      "title": "Every incoming WebSocket frame was fully parsed in the desktop proxy only to look for the sign-in reply",
+      "file": "Client/src-tauri/src/ws_proxy.rs",
+      "line": 381,
+      "severity": "low",
+      "why": "is_auth_ok built a full JSON tree for every server frame, including the large ready payload, although the sign-in reply is sent once.",
+      "repro": "Any connected desktop session: each inbound text frame is parsed in Rust before being forwarded.",
+      "evidence": "No text check ran before serde_json::from_str in is_auth_ok.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/ws_proxy.rs auth_ok_check_skips_frames_that_do_not_mention_it and only_an_auth_ok_frame_activates_the_session",
+        "revertProof": "fail"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "tauri-rust",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
     }
   ]
 }

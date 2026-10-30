@@ -53,6 +53,14 @@ and only when it changes something a contributor or fork holder must do
 
 - The Android app is on the release page: download `OwnCord_<version>_arm64.apk` and install it (Android asks once to allow installs from your browser). After that the app updates itself: it shows "Update available", downloads the new version and opens Android's installer, where you tap Install. Your sign-in and settings stay.
 
+**Voice**
+
+- On Linux, one failed connection on the local video preview socket stopped every camera, screen and remote video preview until the call was rejoined — the socket now keeps accepting connections.
+
+**Desktop UI**
+
+- Sign-in checks on incoming server messages in the desktop app no longer read every message in full — they skip messages that cannot be the sign-in reply.
+
 **Phones and touch screens**
 
 - Message actions, the emoji/GIF/sticker picker and member profiles open as bottom sheets on phones: big reaction buttons, full-width picker, large Message and Call buttons. Swipe down, tap outside or press Back to close. The header search box is a search icon.
