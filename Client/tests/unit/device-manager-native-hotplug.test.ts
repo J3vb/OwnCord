@@ -64,7 +64,7 @@ describe("DeviceManager on the native device watch", () => {
   };
 
   const nativeChange = async (): Promise<void> => {
-    for (const handler of [...nativeWatch.handlers]) handler();
+    for (const handler of nativeWatch.handlers) handler();
     await vi.advanceTimersByTimeAsync(600);
   };
   const makeRoom = () => ({
