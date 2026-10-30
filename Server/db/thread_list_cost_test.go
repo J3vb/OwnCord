@@ -3,7 +3,6 @@ package db_test
 import (
 	"context"
 	"slices"
-	"sort"
 	"testing"
 	"time"
 
@@ -147,7 +146,7 @@ func TestListThreadsBy_PageCostDoesNotGrowWithForumSize(t *testing.T) {
 			}
 			runs = append(runs, time.Since(start))
 		}
-		sort.Slice(runs, func(i, j int) bool { return runs[i] < runs[j] })
+		slices.Sort(runs)
 		return runs[len(runs)/2]
 	}
 	page, full := median(10), median(threads+10)
