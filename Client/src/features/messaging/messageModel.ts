@@ -16,6 +16,7 @@ import type {
   ReactionSummary,
   ReferencedMessage,
   MessageResponse,
+  ImportedAuthor,
 } from "../../lib/types";
 
 // -----------------------------------------------------------------------------
@@ -82,6 +83,8 @@ export interface Message {
   readonly sticker?: MessageStickerInfo;
   /** Set on a thread's starter message; threadsStore holds the live state. */
   readonly thread?: ThreadInfo;
+  /** Set on an imported message: the Discord author shown in place of `user`. */
+  readonly importedAuthor?: ImportedAuthor;
 }
 
 /** A reaction toggle applied optimistically, awaiting its server echo. Keyed
@@ -223,6 +226,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     ...(response.poll !== undefined && { poll: toPollView(response.poll) }),
     ...(response.sticker !== undefined && { sticker: response.sticker }),
     ...(response.thread !== undefined && { thread: response.thread }),
+    ...(response.imported_author !== undefined && { importedAuthor: response.imported_author }),
   };
 }
 

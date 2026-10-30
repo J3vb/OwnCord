@@ -8,6 +8,7 @@ package dbgen
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const createImportAccount = `-- name: CreateImportAccount :execresult
@@ -103,6 +104,52 @@ func (q *Queries) GetImportAccountID(ctx context.Context) (int64, error) {
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const getImportAuthorsByMessageIDs = `-- name: GetImportAuthorsByMessageIDs :many
+SELECT message_id, name, color
+FROM message_import_authors WHERE message_id IN (/*SLICE:ids*/?)
+`
+
+type GetImportAuthorsByMessageIDsRow struct {
+	MessageID int64   `json:"messageId"`
+	Name      string  `json:"name"`
+	Color     *string `json:"color"`
+}
+
+// The name and colour a client shows for imported messages. The Discord user
+// id stays server-side.
+func (q *Queries) GetImportAuthorsByMessageIDs(ctx context.Context, ids []int64) ([]GetImportAuthorsByMessageIDsRow, error) {
+	query := getImportAuthorsByMessageIDs
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetImportAuthorsByMessageIDsRow{}
+	for rows.Next() {
+		var i GetImportAuthorsByMessageIDsRow
+		if err := rows.Scan(&i.MessageID, &i.Name, &i.Color); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getImportChannelPlacement = `-- name: GetImportChannelPlacement :one

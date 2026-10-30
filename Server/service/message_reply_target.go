@@ -32,10 +32,12 @@ func (s *MessageService) checkReplyTarget(ctx context.Context, p SendMessagePara
 }
 
 // replyPingTarget is the user id a reply_ping adds to the mention set, 0 for
-// none: the ping is off, the send is no reply, the parent author is unknown, or
-// the sender replies to their own message.
+// none: the ping is off, the send is no reply, the parent author is unknown, the
+// parent is an imported message (its owner is the hidden import account, not a
+// person), or the sender replies to their own message.
 func replyPingTarget(p SendMessageParams, ref *db.ReferencedMessage) int64 {
-	if !p.ReplyPing || p.ReplyTo == nil || ref == nil || ref.User == nil || ref.User.ID == p.UserID {
+	if !p.ReplyPing || p.ReplyTo == nil || ref == nil || ref.User == nil || ref.User.ID == p.UserID ||
+		ref.ImportedAuthor != nil {
 		return 0
 	}
 	return ref.User.ID

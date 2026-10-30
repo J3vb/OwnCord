@@ -11,6 +11,12 @@ import { parseTimestamp } from "@lib/text/formatting";
 import { messagingText } from "../i18n/messaging";
 import { createAvatarElement } from "./message-list/avatar";
 import { renderMessageContent } from "./message-list/content-parser";
+import type { ImportedAuthor } from "@lib/types";
+import {
+  createImportedAvatar,
+  createImportedName,
+  createImportedTag,
+} from "./message-list/importedAuthor";
 
 export interface PinnedMessage {
   readonly id: number;
@@ -24,6 +30,8 @@ export interface PinnedMessage {
   readonly mentions?: readonly number[];
   readonly mentionsEveryone?: boolean;
   readonly mentionRoles?: readonly number[];
+  /** Set on an imported message: shown in place of `author` and `avatar`. */
+  readonly importedAuthor?: ImportedAuthor;
 }
 
 export interface PinnedMessagesOptions {
@@ -63,17 +71,26 @@ function renderPinnedItem(msg: PinnedMessage, canUnpin: boolean): HTMLDivElement
   // Row: avatar + body
   const row = createElement("div", { class: "pinned-msg__row" });
 
-  const avatar = createAvatarElement(
-    { username: msg.author, avatar: msg.avatar },
-    { className: "pinned-msg__avatar", background: msg.avatarColor },
-  );
+  const imported = msg.importedAuthor;
+  const avatar =
+    imported === undefined
+      ? createAvatarElement(
+          { username: msg.author, avatar: msg.avatar },
+          { className: "pinned-msg__avatar", background: msg.avatarColor },
+        )
+      : createImportedAvatar(imported, "pinned-msg__avatar");
 
   const body = createElement("div", { class: "pinned-msg__body" });
 
   const head = createElement("div", { class: "pinned-msg__head" });
-  const authorEl = createElement("span", { class: "pinned-msg__author" }, msg.author);
+  const authorEl =
+    imported === undefined
+      ? createElement("span", { class: "pinned-msg__author" }, msg.author)
+      : createImportedName(imported, "pinned-msg__author");
   const timeEl = createElement("span", { class: "pinned-msg__time" }, formatPinTime(msg.timestamp));
-  appendChildren(head, authorEl, timeEl);
+  appendChildren(head, authorEl);
+  if (imported !== undefined) head.appendChild(createImportedTag());
+  head.appendChild(timeEl);
 
   // Rendered like the message list (markdown, mentions, emoji, spoilers); the
   // card's CSS clamps it, so a long pin cannot outgrow the panel.
