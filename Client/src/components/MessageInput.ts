@@ -440,6 +440,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     expired?: boolean;
     /** Put back after a send did not carry it; cleared by a fresh upload. */
     unsent?: boolean;
+    /** A draft moved into this file, returned to the composer if the upload fails. */
+    draftText?: string;
   }[] = [];
   /** Uploads getDraft() handed to the draft; destroy() leaves them running. */
   const handedOff = new Set<DraftUpload>();
@@ -1061,13 +1063,12 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // emoji the server accepts. Checked before the debounce stamp below so a
     // refused send does not suppress the next one.
     if ([...typed].length > MAX_MESSAGE_LEN) {
-      const draft = textarea.value.trim();
       showUploadError(
         messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }),
-        canAttachLongText(draft)
+        canAttachLongText(textarea.value.trim())
           ? {
               label: messagingText("error.tooLongAsFile", { name: LONG_PASTE_FILENAME }),
-              onClick: () => sendDraftAsFile(draft),
+              onClick: sendDraftAsFile,
             }
           : undefined,
       );
@@ -1148,16 +1149,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     );
   }
 
-  /** Moves a draft that is too long to send into a pending message.txt. */
-  function sendDraftAsFile(draft: string): void {
+  /** Moves a draft that is too long to send into a pending message.txt. The
+   *  text is read now, not when Send was refused: formatting shortcuts change
+   *  it without an input event that would clear the refusal. */
+  function sendDraftAsFile(): void {
     if (textarea === null) return;
+    const draft = textarea.value.trim();
+    if (!canAttachLongText(draft)) return;
     const file = new File([draft], LONG_PASTE_FILENAME, { type: "text/plain" });
     textarea.value = "";
     pickedMentions = [];
     autoResize();
     clearUploadError();
     textarea.focus();
-    void handlePasteFile(file);
+    void handlePasteFile(file, draft);
   }
 
   /** A paste that would take the message past the limit goes up as
@@ -1419,7 +1424,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     item.appendChild(btn);
   }
 
-  async function handlePasteFile(file: File): Promise<void> {
+  async function handlePasteFile(file: File, draftText?: string): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
     if (disabledReason !== null) return;
     if (uploadsDisabledByServer()) {
@@ -1476,6 +1481,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       filename: file.name,
       previewEl: item,
       file,
+      ...(draftText === undefined ? {} : { draftText }),
     };
     pendingAttachments.push(pending);
     await runUpload(pending, file);
@@ -1537,6 +1543,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   /** Show `handle` on `pending`'s chip until it settles. */
+  /** A draft whose file failed to upload goes back in front of anything typed since. */
+  function restoreDraftText(text: string | undefined): void {
+    if (text === undefined || textarea === null) return;
+    const typed = textarea.value.trim();
+    textarea.value = typed === "" ? text : `${text}\n${typed}`;
+    autoResize();
+  }
+
   async function followUpload(
     pending: (typeof pendingAttachments)[number],
     handle: DraftUpload,
@@ -1591,6 +1605,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         progressBar.remove();
       } else {
         removePreviewItem(item);
+        restoreDraftText(pending.draftText);
       }
       const errMsg = errorText(err, messagingText("error.uploadFailed"));
       showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
