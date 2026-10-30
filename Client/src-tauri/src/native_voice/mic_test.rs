@@ -48,6 +48,9 @@ pub struct MicTestOptions {
     pub output_gain: f32,
     /// The voice gate's threshold (0: no gate).
     pub threshold: f32,
+    /// The voice gate also asks RNNoise's verdict (automatic sensitivity).
+    #[serde(default)]
+    pub speech: bool,
     /// Capture and report levels only: no output is opened or played.
     #[serde(default)]
     pub monitor: bool,
@@ -66,6 +69,8 @@ pub enum MicTestUpdate {
     VoiceGate {
         threshold: f32,
         retune: bool,
+        #[serde(default)]
+        speech: bool,
     },
     OutputGain {
         gain: f32,
@@ -172,7 +177,8 @@ impl MicTest {
             on_gate,
             on_level,
         );
-        test.capture.set_voice_gate(opts.threshold, false);
+        test.capture
+            .set_voice_gate(opts.threshold, false, opts.speech);
         test.capture.set_input_gain(opts.input_gain / 100.0);
         if let Err(e) = test.capture.set_device(&opts.input) {
             // A fallback has re-selected the default; with no device at all
@@ -190,8 +196,12 @@ impl MicTest {
         match update {
             MicTestUpdate::Processing { audio } => self.set_audio_processing(audio),
             MicTestUpdate::InputGain { percent } => self.capture.set_input_gain(percent / 100.0),
-            MicTestUpdate::VoiceGate { threshold, retune } => {
-                self.capture.set_voice_gate(threshold, retune);
+            MicTestUpdate::VoiceGate {
+                threshold,
+                retune,
+                speech,
+            } => {
+                self.capture.set_voice_gate(threshold, retune, speech);
             }
             MicTestUpdate::OutputGain { .. } | MicTestUpdate::OutputDevice { .. }
                 if self.monitor => {}
@@ -372,6 +382,7 @@ mod tests {
             input_gain: 100.0,
             output_gain: 0.5,
             threshold: 0.0,
+            speech: false,
             monitor: false,
         };
         let test = tokio::task::spawn_blocking(move || {

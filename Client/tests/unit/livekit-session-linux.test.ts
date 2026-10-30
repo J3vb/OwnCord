@@ -354,7 +354,8 @@ describe("LiveKitSession on the Linux native backend", () => {
       ],
     ]);
     expect(host.commands[2]).toEqual(["setPttGated", [1, false]]);
-    expect(host.commands[3]).toEqual(["setVoiceGate", [1, 0.05]]);
+    // Automatic sensitivity (the default) also asks RNNoise's verdict.
+    expect(host.commands[3]).toEqual(["setVoiceGate", [1, 0.05, false, true]]);
     expect(host.commands[4]).toEqual(["setMicrophone", [1, true]]);
     expect(webKeyProvider.setKey).not.toHaveBeenCalled();
     expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");

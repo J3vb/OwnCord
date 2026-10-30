@@ -77,9 +77,9 @@ export const nativeVoice: NativeVoice = {
     invokeOrThrow<void>("native_voice_set_microphone", { session, enabled, bitrate }),
   setPttGated: (session, gated) =>
     invokeOrThrow<void>("native_voice_set_ptt_gated", { session, gated }),
-  async setVoiceGate(session, threshold, retune) {
+  async setVoiceGate(session, threshold, retune, speech) {
     try {
-      await invoke<void>("native_voice_set_voice_gate", { session, threshold, retune });
+      await invoke<void>("native_voice_set_voice_gate", { session, threshold, retune, speech });
     } catch (err) {
       // The host rejects with its reason as a string; callers log it.
       throw err instanceof Error ? err : new Error(String(err));

@@ -910,7 +910,14 @@ of each processed 10 ms frame against `vadThreshold`, with its ~32 ms attack,
 after a ~500 ms hold there), ~500 ms start-up grace and a 50 ms lookahead
 (`lib/voice/gateScale.ts` holds the slider's decibel scale), and its
 `voiceGate` events drive the local speaking ring as the web detector's
-verdicts do. The capture shares the
+verdicts do. With automatic sensitivity (`speech` on the command) the gate
+also reads RNNoise's per-frame speech probability, the return of
+`nnnoiseless`'s `process_frame`, under the web detector's rule: a frame
+counts toward opening only when it clears the level and RNNoise calls it a
+voice (≥ 0.5), and toward closing when it drops under the close level or
+RNNoise stops calling it one (< 0.15). The processor then runs RNNoise for
+the verdict alone while Enhanced Noise Suppression is off, and the audio
+goes out undenoised. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
 sound server tore down, switches back to a chosen microphone once it is listed
 again, and, while "System default" is selected, follows the default source as

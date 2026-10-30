@@ -880,7 +880,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
             el
               .querySelector<HTMLElement>("[data-testid='auto-sensitivity'] [role='switch']")!
               .click(),
-          { kind: "voiceGate", threshold: 0.05, retune: false },
+          { kind: "voiceGate", threshold: 0.05, retune: false, speech: true },
         ],
         [
           "mode switch to Push to Talk",
