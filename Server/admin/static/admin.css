@@ -537,6 +537,7 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
    been laid out once. */
 .log-line{padding:1px 0;content-visibility:auto;contain-intrinsic-size:auto 20px}
 .log-jump{position:absolute;right:16px;bottom:12px;border-radius:var(--radius-pill);box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.log-jump[hidden]{display:none}
 .level-toggle .lvl-n{font-family:var(--font-mono);font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
 .log-line .log-ts{color:var(--text-muted);margin-right:8px}
 .log-line .log-lvl{display:inline-block;width:44px;font-weight:700;margin-right:6px}
