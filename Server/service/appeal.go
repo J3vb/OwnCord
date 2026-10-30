@@ -523,6 +523,11 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 		db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}, s.checkModeratorAuthority)
 	if err != nil {
 		slog.Error("appeal decide: transaction error", "appeal_id", appeal.ID, "action_id", action.ID, "err", err)
+		// A failed reversal has its own conflict outcome below; any other error
+		// is a database failure, not a lost race.
+		if result != db.AppealWriteReversalFailed {
+			return fmt.Errorf("%w: %w", ErrInternal, err)
+		}
 	}
 	switch result {
 	case db.AppealWriteOK:
@@ -533,7 +538,7 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	case db.AppealWriteForbidden:
 		// The decider's own bit was revoked, or a ban landed, after requireModerate.
 		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
-	default: // db.AppealWriteConflict, including the plain Go error case above.
+	default: // db.AppealWriteConflict: the observed row changed or was already decided.
 		return fmt.Errorf("%w: appeal already decided or withdrawn", ErrConflict)
 	}
 	if appealPostWriteHookForTest != nil {

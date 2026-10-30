@@ -1,5 +1,5 @@
 {
-  "nextId": 529,
+  "nextId": 532,
   "findings": [
     {
       "id": "OC-0001",
@@ -12221,6 +12221,69 @@
       "found": "2026-10-30",
       "hunt": "bug-hunt-2026-10-30",
       "lens": "tauri-rust",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0529",
+      "title": "Manual backup and restore in the admin panel were cut off after 30 seconds on a big database",
+      "file": "Server/admin/handlers_backup.go",
+      "line": 26,
+      "severity": "medium",
+      "why": "The server's 30 second write timeout applied to POST /backup and the restore route, which write nothing until the copy and verification finish. The panel showed an error although the work completed, and a retry of the backup made a second full copy. The download link already extends its deadline.",
+      "repro": "Back up or restore a database whose copy takes longer than 30 seconds; the panel reports a failure.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/backup_deadline_test.go (TestManualBackup_OutlivesWriteTimeout, TestRestore_OutlivesWriteTimeout)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "error-paths",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0530",
+      "title": "A database error while deciding an appeal was reported as already decided or withdrawn",
+      "file": "Server/service/appeal.go",
+      "line": 520,
+      "severity": "low",
+      "why": "Decide mapped any non-conflict transaction error to the 409 conflict outcome, so a moderator saw 'already decided' for a database failure.",
+      "repro": "Fail the decide transaction; the response is 409 instead of a server error.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/appeal_test.go (TestAppeal_DecideDatabaseErrorIsInternal, TestAppeal_DecideReversalFailureStaysAConflict)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "error-paths",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0531",
+      "title": "Out-of-range event_persistence values in config.yaml or the environment were not clamped",
+      "file": "Server/config/bounds.go",
+      "line": 33,
+      "severity": "low",
+      "why": "The admin panel validates the event_persistence keys, but values from the file or environment skipped that range check, so a huge batch_size, replay_ring_size or retention_hours reached the persister and could crash boot.",
+      "repro": "Set event_persistence.batch_size to 9223372036854775807 in config.yaml and start the server.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/config/config_test.go (TestLoadEventPersistenceBoundsAreClamped)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "integer-bounds",
       "finder": "claude",
       "fixedDate": "2026-10-30"
     }
