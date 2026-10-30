@@ -25,32 +25,61 @@ type readStmtCache struct {
 
 const maxReadStmts = 256
 
+// maxPaddedIDs is the largest bucket padIDs pads to. It covers a full pinned
+// list (MaxPinnedMessages + 1 rows); SQL with more placeholders than this is
+// one-off and is never cached.
+const maxPaddedIDs = 1024
+
 var errStmtCacheClosed = errors.New("read statement cache closed")
 
 // stmt returns the prepared statement for query, preparing it once, or nil
-// when the cache is full. database/sql re-prepares it on each reader
-// connection that runs it.
+// when the cache is full or the SQL has more placeholders than padIDs pads.
+// database/sql re-prepares it on each reader connection that runs it. The
+// prepare waits for a pool connection, so it runs outside mu: a cache hit must
+// not queue behind it.
 func (c *readStmtCache) stmt(ctx context.Context, pool *sql.DB, query string) (*sql.Stmt, error) {
+	if strings.Count(query, "?") > maxPaddedIDs {
+		return nil, nil
+	}
+	c.mu.Lock()
+	s, ok := c.stmts[query]
+	closed, full := c.closed, len(c.stmts) >= maxReadStmts
+	c.mu.Unlock()
+	switch {
+	case closed:
+		return nil, errStmtCacheClosed
+	case ok:
+		return s, nil
+	case full:
+		return nil, nil
+	}
+	prepared, err := pool.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("prepare: %w", err)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return nil, errStmtCacheClosed
+		return nil, errors.Join(errStmtCacheClosed, prepared.Close())
 	}
 	if s, ok := c.stmts[query]; ok {
+		// Another caller prepared the same SQL while this one waited.
+		if err := prepared.Close(); err != nil {
+			return nil, fmt.Errorf("close duplicate statement: %w", err)
+		}
 		return s, nil
 	}
 	if len(c.stmts) >= maxReadStmts {
+		if err := prepared.Close(); err != nil {
+			return nil, fmt.Errorf("close statement past the cap: %w", err)
+		}
 		return nil, nil
-	}
-	s, err := pool.PrepareContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("prepare: %w", err)
 	}
 	if c.stmts == nil {
 		c.stmts = make(map[string]*sql.Stmt)
 	}
-	c.stmts[query] = s
-	return s, nil
+	c.stmts[query] = prepared
+	return prepared, nil
 }
 
 // close closes every cached statement; later lookups fail.
@@ -117,7 +146,7 @@ func padIDs[T any](ids []T) []T {
 	for size < n {
 		size *= 2
 	}
-	if size == n || size > 256 {
+	if size == n || size > maxPaddedIDs {
 		return ids
 	}
 	out := make([]T, size)

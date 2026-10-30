@@ -309,7 +309,7 @@ func (t *dbtx) PrepareContext(ctx context.Context, query string) (*sql.Stmt, err
 
 func (t *dbtx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	pool := t.pool(query)
-	if pool == t.reader && t.stmts != nil && cachedReads(ctx) {
+	if t.stmts != nil && cachedReads(ctx) && isReadOnlySQL(query) {
 		return t.stmts.query(ctx, pool, query, args...)
 	}
 	return pool.QueryContext(ctx, query, args...)
@@ -398,14 +398,16 @@ func migrateEmbedded(database *DB) error {
 // Close releases the underlying database connections (both pools).
 func (d *DB) Close() error {
 	d.closed.Store(true)
-	stmtErr := d.readStmts.close()
 	// PRAGMA optimize may write statistics, so it runs on the writer.
 	_, _ = d.writer.Exec("PRAGMA optimize;")
 	var readerErr error
 	if d.reader != d.writer {
 		readerErr = d.reader.Close()
 	}
-	err := errors.Join(stmtErr, d.writer.Close(), readerErr)
+	writerErr := d.writer.Close()
+	// Statements close after the pools: closing a pool wakes a cached query
+	// waiting for a connection, which a statement Close would otherwise wait on.
+	err := errors.Join(d.readStmts.close(), writerErr, readerErr)
 	// Release the process lock only after the pools close, so a successor can
 	// rely on this process being done writing.
 	if d.lockRelease != nil {

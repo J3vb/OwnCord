@@ -4,13 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"strconv"
+	"strings"
 	"testing"
 )
 
 func TestPadIDs(t *testing.T) {
 	cases := []struct {
 		n, want int
-	}{{0, 0}, {1, 8}, {8, 8}, {9, 16}, {50, 64}, {256, 256}, {300, 300}}
+	}{{0, 0}, {1, 8}, {8, 8}, {9, 16}, {50, 64}, {256, 256}, {300, 512}, {1001, 1024}, {1025, 1025}}
 	for _, c := range cases {
 		ids := make([]int64, c.n)
 		for i := range ids {
@@ -45,6 +46,13 @@ func TestReadStmtCache_FullRunsUnprepared(t *testing.T) {
 		d.readStmts.stmts[string(rune('a'+i%26))+strconv.Itoa(i)] = nil
 	}
 	d.readStmts.mu.Unlock()
+	// The placeholder entries are not real statements; drop them before the
+	// DB's own cleanup closes the cache, even when the test fails early.
+	t.Cleanup(func() {
+		d.readStmts.mu.Lock()
+		d.readStmts.stmts = nil
+		d.readStmts.mu.Unlock()
+	})
 
 	rows, err := d.queryCached(ctx, "SELECT 1")
 	if err != nil {
@@ -53,10 +61,32 @@ func TestReadStmtCache_FullRunsUnprepared(t *testing.T) {
 	_ = rows.Close()
 	d.readStmts.mu.Lock()
 	n := len(d.readStmts.stmts)
-	d.readStmts.stmts = nil
 	d.readStmts.mu.Unlock()
 	if n != maxReadStmts {
 		t.Errorf("cache grew to %d entries, want it held at %d", n, maxReadStmts)
+	}
+}
+
+// SQL with more placeholders than padIDs pads runs unprepared, so a long
+// one-off IN list cannot fill the cache.
+func TestReadStmtCache_LongInListNotCached(t *testing.T) {
+	d := openMigratedMemoryInternal(t)
+	n := maxPaddedIDs + 1
+	query := "SELECT 1 WHERE 1 IN (" + strings.Repeat("?,", n-1) + "?)"
+	args := make([]any, n)
+	for i := range args {
+		args[i] = i
+	}
+	rows, err := d.queryCached(context.Background(), query, args...)
+	if err != nil {
+		t.Fatalf("queryCached with %d placeholders: %v", n, err)
+	}
+	_ = rows.Close()
+	d.readStmts.mu.Lock()
+	got := len(d.readStmts.stmts)
+	d.readStmts.mu.Unlock()
+	if got != 0 {
+		t.Errorf("cache holds %d entries after a %d-placeholder query, want 0", got, n)
 	}
 }
 
