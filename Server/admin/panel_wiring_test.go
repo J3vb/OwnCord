@@ -119,7 +119,7 @@ func TestAdminPanelRetentionIsWired(t *testing.T) {
 // strings — naive UTC with no zone — and new Date() reads that non-ISO form
 // as LOCAL time. expires_at in the same row carries an explicit Z and was
 // therefore right, so the table contradicted itself. The rendered cells are
-// checked in Client/tests/contract (server-admin-static-panel.test.ts).
+// checked in Client/tests/contract (serverAdminStaticPanel/).
 func TestAdminPanelTokenTimestampsParsedAsUTC(t *testing.T) {
 	source := adminPanelSource(t)
 

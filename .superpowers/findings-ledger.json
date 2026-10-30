@@ -7804,7 +7804,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8241,7 +8241,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8356,7 +8356,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8492,7 +8492,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8562,7 +8562,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8631,7 +8631,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8769,7 +8769,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/auditAndActions.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -9127,7 +9127,7 @@
       "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/retentionAndNav.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -9150,7 +9150,7 @@
       "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
