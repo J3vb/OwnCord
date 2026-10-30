@@ -6,125 +6,102 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ClientError represents an error to send back to the requesting client.
-// It implements the error interface so it can be used as Result.Error.
+// ClientError is an error to send back to the requesting client; usable as Result.Error.
 type ClientError struct {
 	Code    string
 	Message string
-	// ThreadID, when non-zero, rides in the error payload as thread_id: the
-	// existing thread a THREAD_EXISTS refusal names.
+	// ThreadID, when non-zero, is the thread_id a THREAD_EXISTS refusal names.
 	ThreadID int64
 }
 
 func (e ClientError) Error() string { return e.Code + ": " + e.Message }
 
-// Result is returned by V2 handlers. It describes the outcome of processing
-// a Command: zero or more Events to emit, an optional error, and an optional
-// Reply (ACK) to send back to the sender.
+// Result is returned by V2 handlers: Events to emit, an optional error and an
+// optional Reply (ACK) to the sender.
 type Result struct {
-	// Events to route to other clients via EmitEvents.
 	Events []Event
-	// Error, if non-nil, is sent to the client. Use ClientError for
-	// user-facing errors; other error types are treated as internal.
+	// Error, if non-nil, is sent to the client; ClientError is user-facing, other
+	// types are treated as internal.
 	Error error
-	// Reply is an optional raw JSON ACK sent only to the sender
-	// (e.g. chat_send_ok with the new message ID).
+	// Reply is a raw JSON ACK sent only to the sender (e.g. chat_send_ok).
 	Reply []byte
-	// SetChannelID, if non-nil, updates the client's focused channel.
-	// Used by channel_focus to mutate client state from a V2 handler.
+	// SetChannelID, if non-nil, updates the client's focused channel (channel_focus).
 	SetChannelID *int64
-	// DeferChannelFocus, if non-nil, is set by channel_focus when the focus
-	// budget is spent. The applier remembers the channel as the client's latest
-	// focus intent (superseding any earlier deferred one) and applies it once
-	// the rate window frees, so a burst of channel switches (holding Alt+Down)
-	// still ends subscribed to the channel the user landed on.
+	// DeferChannelFocus, if non-nil, is set by channel_focus when the focus budget is
+	// spent. The applier remembers it as the latest focus intent (superseding any
+	// earlier deferred one) and applies it once the rate window frees, so a burst of
+	// channel switches still ends on the channel the user landed on.
 	DeferChannelFocus *int64
-	// DeferChannelFocusNoRead is true when the deferred frame said read:false,
-	// so the drain does not mark the channel read. Meaningful only with
-	// DeferChannelFocus.
+	// DeferChannelFocusNoRead is true when the deferred frame said read:false, so the
+	// drain does not mark the channel read. Only meaningful with DeferChannelFocus.
 	DeferChannelFocusNoRead bool
-	// SetThreadID, if non-nil, moves the client's second focus slot (the thread
-	// panel, thread_focus); 0 closes it. Applied with the same live
-	// revalidation as SetChannelID.
+	// SetThreadID, if non-nil, moves the second focus slot (thread_focus); 0 closes
+	// it. Revalidated live like SetChannelID.
 	SetThreadID *int64
-	// SetPresence, if non-nil, records the presence the handler just
-	// committed as the client's live presence (presentableMembers and
-	// presence snapshots read it). Applied before Events are emitted, so a
-	// ready or snapshot built after the presence frame was queued cannot miss
-	// the change.
+	// SetPresence, if non-nil, records the presence the handler just committed as the
+	// client's live presence. Applied before Events are emitted so a ready or snapshot
+	// built after the presence frame was queued cannot miss it.
 	SetPresence *livePresence
-	// SetActivity, if non-nil, asks the applier to swap the connection's game
-	// activity (next, nil clears it) and broadcast the presence frame that
-	// shows it, but only while the connection still holds its user's slot
-	// (activity_update). The frame is built there, not in Events,
-	// because only the applier sees the live status it must carry.
+	// SetActivity, if non-nil, swaps the connection's game activity (nil clears) and
+	// broadcasts the presence frame showing it, only while the connection still holds
+	// its user's slot (activity_update). The frame is built in the applier, not
+	// Events, because only it sees the live status the frame must carry.
 	SetActivity *activityChange
-	// SetListening is SetActivity's twin for the song (listening_update):
-	// swap the connection's listening value (next, nil clears it) and
-	// broadcast the presence frame that shows it.
+	// SetListening is SetActivity's twin for the song (listening_update).
 	SetListening *listeningChange
-	// SetE2EEAnnounce, if non-nil, replaces the client's stored voice E2EE
-	// announce (ECDH key, F3 TOFU signature, video decode list) so the
-	// late-joiner replay, resume and grace-window paths relay it. nil means
-	// no change.
+	// SetE2EEAnnounce, if non-nil, replaces the client's stored voice E2EE announce
+	// so late-joiner replay, resume and grace-window paths relay it.
 	SetE2EEAnnounce *e2eeAnnounce
-	// SetVoiceWatching, if non-nil, asks the applier to store the sender's
-	// watched-screen-share set on its voice slot and, only if the slot is still
-	// in that channel, relay it to the channel (voice_watch). The relay is not
-	// in Events: the applier emits it after the guarded store succeeds.
+	// SetVoiceWatching, if non-nil, stores the sender's watched-screen-share set on
+	// its voice slot and, only if the slot is still in that channel, relays it
+	// (voice_watch). The relay is emitted by the applier after the guarded store
+	// succeeds, not in Events.
 	SetVoiceWatching *voiceWatchSet
-	// SetVoiceJoinToken, if non-nil, caches the voice join token on the client.
-	// Used by voice_token_refresh when falling back to the DB for the token.
+	// SetVoiceJoinToken, if non-nil, caches the voice join token on the client
+	// (voice_token_refresh falling back to the DB).
 	SetVoiceJoinToken *string
-	// JoinVoice, if true, triggers the hub's voice-join routine after the handler
-	// returns. voice_join's effect is a large, hub-coupled sequence (DB
-	// persistence, LiveKit token, existing-state fan-out, key-holder election,
-	// topic subscription) that also invokes the leave routine on a channel
-	// switch, so the applier runs handleVoiceJoin (re-parsing the envelope
-	// payload it already validated) rather than re-expressing it as pure events.
+	// JoinVoice, if true, runs the hub's voice-join routine after the handler returns.
+	// It is a large hub-coupled sequence that also invokes the leave routine on a
+	// channel switch, so the applier runs handleVoiceJoin (re-parsing the validated
+	// payload) rather than re-expressing it as events.
 	JoinVoice bool
-	// LeaveVoice, if true, triggers the hub's voice-leave routine after the
-	// handler returns. handleVoiceLeave stays hub-internal because disconnect and
-	// channel-switch cleanup call it un-throttled; only the message dispatch
-	// moved to V2 (which does the rate-limit before setting this flag).
+	// LeaveVoice, if true, runs the hub's voice-leave routine after the handler
+	// returns. handleVoiceLeave stays hub-internal because disconnect and
+	// channel-switch cleanup call it un-throttled; only the message dispatch (which
+	// rate-limits first) moved to V2.
 	LeaveVoice bool
-	// LeaveVoiceReason is the machine-readable reason the leave is being
-	// triggered; it is logged on the "voice leave" line so an operator can tell
-	// one teardown path from another (SRE-M2). Only meaningful alongside
-	// LeaveVoice. Use one of the voiceLeaveReason* constants.
+	// LeaveVoiceReason is the machine-readable reason, logged on the "voice leave"
+	// line to tell teardown paths apart. Only meaningful with LeaveVoice; use a
+	// voiceLeaveReason* constant.
 	LeaveVoiceReason string
 }
 
 // Event is the base interface for all server-to-client events.
 type Event interface {
-	// EventType returns the outbound message type constant (e.g. MsgTypeChatMessage).
 	EventType() string
-	// deliveryClass names the route emitEventsFrom delivers the event on. It
-	// is unexported, so Event is sealed to this package and every event type
-	// must choose a route; see delivery_class.go.
+	// deliveryClass names the route emitEventsFrom delivers on. Unexported, so Event
+	// is sealed to this package and every event type must choose a route
+	// (delivery_class.go).
 	deliveryClass() deliveryClass
 }
 
-// ── Routing interfaces ──────────────────────────────────────────────────────
-// emitEventsFrom switches on Event.deliveryClass to decide how to deliver each
-// Event, then asserts the one interface its class needs. Order no longer
-// matters: a DM event implements both SequencedDMEvent and ChannelEvent, but its
-// class says which route it takes.
+// emitEventsFrom switches on Event.deliveryClass to pick the route, then asserts
+// the one interface its class needs. A DM event implements both SequencedDMEvent
+// and ChannelEvent; its class says which route it takes.
 
-// ChannelEvent routes through Hub.broadcastChannelEvent (sequenced,
-// replayable): a metadata kind still goes straight to BroadcastToChannel, but
-// a content-bearing kind (contentBearingKinds, ws/nsfw_content.go) is
-// narrowed to channelContentAudience — CanReadContent over today's actual
-// topic subscribers, so a labelled channel's content withholds from an
-// unacknowledged member even though they are subscribed.
+// ChannelEvent routes through Hub.broadcastChannelEvent (sequenced, replayable):
+// metadata kinds go to BroadcastToChannel, while content-bearing kinds
+// (contentBearingKinds) are narrowed to channelContentAudience (CanReadContent
+// over the actual topic subscribers), so a labelled channel's content is withheld
+// from an unacknowledged subscriber.
 type ChannelEvent interface {
 	Event
 	ChannelID() int64
 	Payload() []byte
 }
 
-// ExcludeSenderEvent routes to Hub.broadcastExclude (ephemeral, not replayed).
-// Used for typing indicators in non-DM channels.
+// ExcludeSenderEvent routes to Hub.broadcastExclude (ephemeral, not replayed), for
+// typing indicators in non-DM channels.
 type ExcludeSenderEvent interface {
 	Event
 	ChannelID() int64
@@ -132,8 +109,8 @@ type ExcludeSenderEvent interface {
 	Payload() []byte
 }
 
-// SequencedDMEvent routes to Hub.sendSequencedToUsers (sequenced, replayable).
-// Used for chat messages, edits, deletes, and reactions in DM channels.
+// SequencedDMEvent routes to Hub.sendSequencedToUsers (sequenced, replayable), for
+// DM chat messages, edits, deletes and reactions.
 type SequencedDMEvent interface {
 	Event
 	ChannelID() int64
@@ -141,26 +118,22 @@ type SequencedDMEvent interface {
 	Payload() []byte
 }
 
-// UserTargetedEvent routes to Hub.SendToUser (direct delivery to one user).
 type UserTargetedEvent interface {
 	Event
 	TargetUserID() int64
 	Payload() []byte
 }
 
-// BroadcastAllEvent routes to Hub.BroadcastToAll (channelID=0, all clients).
 type BroadcastAllEvent interface {
 	Event
 	Payload() []byte
 }
 
-// VoiceVisibilityEvent routes to Hub.broadcastVoiceEvent: server-wide in scope,
-// but delivered only to clients whose role may READ the named channel, and
-// tagged with it so reconnect replay filters it the same way. MUST be checked
-// before BroadcastAllEvent, which it would otherwise satisfy. UserID is the
-// event's subject (whose voice state changed) — the sender-aware DM
-// audience needs it to filter a one-to-one DM voice call the same way chat
-// does; every other channel type ignores it.
+// VoiceVisibilityEvent routes to Hub.broadcastVoiceEvent: server-wide in scope but
+// delivered only to clients whose role may READ the channel, and tagged with it so
+// replay filters the same way. Must be checked before BroadcastAllEvent, which it
+// would otherwise satisfy. UserID is the subject whose voice state changed; the
+// sender-aware DM audience needs it to filter a 1:1 DM call like chat.
 type VoiceVisibilityEvent interface {
 	Event
 	VisibleChannelID() int64
@@ -168,8 +141,8 @@ type VoiceVisibilityEvent interface {
 	Payload() []byte
 }
 
-// VoiceChannelEvent routes to Hub.sendToVoiceChannelExcept (ephemeral,
-// targets voice channel participants excluding sender).
+// VoiceChannelEvent routes to Hub.sendToVoiceChannelExcept (ephemeral, voice
+// participants excluding the sender).
 type VoiceChannelEvent interface {
 	Event
 	VoiceChannelID() int64
@@ -177,10 +150,10 @@ type VoiceChannelEvent interface {
 	Payload() []byte
 }
 
-// VoiceChannelGuardedEvent routes to Hub.sendToUserIfInVoiceChannel —
-// atomic check-and-send that verifies the target is still in the expected
-// voice channel before delivering the message, all under a single h.mu.RLock.
-// Used by voice_e2ee_offer to prevent TOCTOU races with concurrent voice_leave.
+// VoiceChannelGuardedEvent routes to Hub.sendToUserIfInVoiceChannel: an atomic
+// check-and-send under one h.mu.RLock that the target is still in the expected
+// voice channel, preventing TOCTOU races with a concurrent voice_leave
+// (voice_e2ee_offer).
 type VoiceChannelGuardedEvent interface {
 	Event
 	VoiceChannelID() int64
@@ -188,13 +161,9 @@ type VoiceChannelGuardedEvent interface {
 	Payload() []byte
 }
 
-// ── Concrete event structs ──────────────────────────────────────────────────
-
-// channelEvt is a sequenced, replayable event scoped to one channel: a chat
-// message, edit, delete, reaction update or plugin broadcast in a non-DM
-// channel. evType carries the outbound wire type — the same "type as a field"
-// shape CallSignalEvent below already uses, and every kind reaches
-// EmitEvents' ChannelEvent branch identically.
+// channelEvt is a sequenced, replayable event scoped to one non-DM channel (chat
+// message, edit, delete, reaction update, plugin broadcast). evType carries the
+// wire type, as CallSignalEvent does.
 type channelEvt struct {
 	evType    string
 	channelID int64
@@ -206,43 +175,38 @@ func (e channelEvt) deliveryClass() deliveryClass { return classChannel }
 func (e channelEvt) ChannelID() int64             { return e.channelID }
 func (e channelEvt) Payload() []byte              { return e.payload }
 
-// ActivityEvent feeds the channel_activity coalescer (channel_activity.go). It
-// is deliberately not a ChannelEvent: nothing is sequenced, stored or sent to
-// a topic when it is emitted.
+// ActivityEvent feeds the channel_activity coalescer. Deliberately not a
+// ChannelEvent: nothing is sequenced, stored or sent to a topic.
 type ActivityEvent interface {
 	Event
 	ActivityNote() activityNote
 }
 
-// channelActivityEvt is the committed non-DM send the coalescer is told about.
 type channelActivityEvt struct {
 	channelID int64
 	msgID     int64
 	authorID  int64
 	mentions  []int64
-	// roleUsers are the holders of the roles the message pinged; they count
-	// as direct mentions exactly like mentions do.
+	// roleUsers are the holders of the pinged roles; they count as direct mentions.
 	roleUsers []int64
 	everyone  bool
 	hereOnly  bool
 	readBy    int64
-	// readUpTo is the pointer a read mark is set to; readSet is false for a
-	// mark through everything noted so far (see readThroughNoted).
+	// readUpTo is the pointer a read mark is set to; readSet is false for a mark
+	// through everything noted so far (readThroughNoted).
 	readUpTo int64
 	readSet  bool
 }
 
-// readThroughNoted is the upTo that channelReadEvt takes for a focus that marks
-// the channel read at its latest message: the coalescer then reads through
-// every message it has noted, as before the pointer moved.
+// readThroughNoted is the upTo for a focus that marks the channel read at its
+// latest message: the coalescer reads through every message it has noted.
 const readThroughNoted int64 = -1
 
 // channelReadEvt tells the coalescer a user marked a channel read, so a pending
-// hint for what they have read is not sent. upTo is the pointer the database
-// returned after a mark_read or mark_unread (it may be lower than before, for
-// mark_unread); 0 means a focus that marks the channel read at everything
-// noted so far. upTo 0 is a real pointer (mark_unread of a channel's first
-// message), so the through-everything case is readThroughNoted, not 0.
+// hint for it is not sent. upTo is the pointer the database returned after
+// mark_read or mark_unread (possibly lower than before). 0 is a real pointer
+// (mark_unread of a first message), so the through-everything case is
+// readThroughNoted.
 func channelReadEvt(userID, channelID, upTo int64) ActivityEvent {
 	return channelActivityEvt{channelID: channelID, readBy: userID, readUpTo: upTo, readSet: upTo >= 0}
 }
@@ -253,10 +217,9 @@ func (e channelActivityEvt) ActivityNote() activityNote {
 	return activityNote(e)
 }
 
-// dmEvt is channelEvt's DM counterpart: the same frame addressed to a DM
-// channel's participants instead of its topic subscribers. It satisfies
-// SequencedDMEvent AND ChannelEvent, which is why EmitEvents must check
-// SequencedDMEvent first.
+// dmEvt is channelEvt's DM counterpart, addressed to a DM's participants instead
+// of topic subscribers. It satisfies both SequencedDMEvent and ChannelEvent, so
+// EmitEvents must check SequencedDMEvent first.
 type dmEvt struct {
 	evType         string
 	channelID      int64
@@ -270,7 +233,6 @@ func (e dmEvt) ChannelID() int64             { return e.channelID }
 func (e dmEvt) ParticipantIDs() []int64      { return slices.Clone(e.participantIDs) }
 func (e dmEvt) Payload() []byte              { return e.payload }
 
-// TypingChannelEvent is a typing indicator broadcast to a channel, excluding sender.
 type TypingChannelEvent struct {
 	channelID     int64
 	excludeUserID int64
@@ -283,15 +245,12 @@ func (e TypingChannelEvent) ChannelID() int64             { return e.channelID }
 func (e TypingChannelEvent) ExcludeUserID() int64         { return e.excludeUserID }
 func (e TypingChannelEvent) Payload() []byte              { return e.payload }
 
-// TypingDMEvent is a typing indicator sent to DM participants, excluding sender.
-// It satisfies UserTargetedEvent structurally (DM typing excludes the sender
-// and is delivered directly to each other participant), but EmitEvents
-// special-cases it onto h.SendToUserLow — the direct-delivery counterpart of
-// TypingChannelEvent's broadcastExcludeLow — rather than the UserTargetedEvent
-// default of h.SendToUserHigh, so this ephemeral frame shares the same
-// drop-on-overflow durability as its channel sibling instead of the
-// disconnect-on-overflow behavior meant for durable targeted events like DM
-// opens and mentions.
+// TypingDMEvent is a typing indicator sent to DM participants, excluding the
+// sender. It satisfies UserTargetedEvent, but EmitEvents routes it onto
+// SendToUserLow (the direct counterpart of TypingChannelEvent's
+// broadcastExcludeLow) instead of SendToUserHigh, so this ephemeral frame is
+// dropped on overflow rather than disconnecting the client as durable targeted
+// events (DM opens, mentions) do.
 type TypingDMEvent struct {
 	targetUserID int64
 	payload      []byte
@@ -302,12 +261,11 @@ func (e TypingDMEvent) deliveryClass() deliveryClass { return classTypingDM }
 func (e TypingDMEvent) TargetUserID() int64          { return e.targetUserID }
 func (e TypingDMEvent) Payload() []byte              { return e.payload }
 
-// PresenceEvent is a presence update broadcast to all connected clients.
-// userID identifies whose presence this is, so EmitEvents can invalidate any
-// stale entry the connect/disconnect coalescer still holds for that user.
-//
-// bare, set only when payload carries a game or a song, is the same frame with
-// both null. emitPresence sends it when member activity was switched off after
+// PresenceEvent is a presence update broadcast to all connected clients. userID
+// lets EmitEvents invalidate any stale entry the connect/disconnect coalescer
+// holds. bare, set only when payload carries a game or song, is the same frame
+// with both null; emitPresence sends it when member activity was switched off
+// after the handler snapshotted them.
 // the handler snapshotted them.
 type PresenceEvent struct {
 	userID  int64
@@ -320,13 +278,11 @@ func (e PresenceEvent) deliveryClass() deliveryClass { return classPresence }
 func (e PresenceEvent) Payload() []byte              { return e.payload }
 
 // PresenceOthersEvent is the public half of an invisible user's presence: the
-// mapped ("offline") payload, broadcast to everyone except the user it
-// describes. Satisfies ExcludeSenderEvent with a channel id of 0; EmitEvents
-// special-cases it onto h.BroadcastToAllExcept (normal priority, sequenced,
-// replayable) rather than the ExcludeSenderEvent default of
-// broadcastExcludeLow, so this frame shares the same durable per-client FIFO
-// as every other source of the same user's presence instead of the
-// ephemeral, drop-on-overflow one built for typing indicators.
+// mapped "offline" payload broadcast to everyone except its subject. It satisfies
+// ExcludeSenderEvent with channel id 0, but EmitEvents routes it onto
+// BroadcastToAllExcept (normal priority, sequenced, replayable) instead of
+// broadcastExcludeLow, so it shares the durable per-client FIFO of the same user's
+// other presence frames rather than the drop-on-overflow one built for typing.
 type PresenceOthersEvent struct {
 	excludeUserID int64
 	payload       []byte
@@ -338,13 +294,10 @@ func (e PresenceOthersEvent) ChannelID() int64             { return 0 }
 func (e PresenceOthersEvent) ExcludeUserID() int64         { return e.excludeUserID }
 func (e PresenceOthersEvent) Payload() []byte              { return e.payload }
 
-// PresenceSelfEvent is the private half: the owner's own true status, sent
-// only to them. Without it a user who went invisible would be told they are
-// offline by the very broadcast that hid them, and would re-announce online on
-// the next reconnect.
-//
-// bare is PresenceEvent's: the same frame with a null game and song, or nil
-// when the frame carries neither.
+// PresenceSelfEvent is the private half: the owner's own true status, sent only
+// to them. Without it the broadcast that hid them would tell them they are
+// offline, and they would re-announce online on the next reconnect. bare is as in
+// PresenceEvent (nil when the frame has no game or song).
 type PresenceSelfEvent struct {
 	targetUserID int64
 	payload      []byte
@@ -356,13 +309,11 @@ func (e PresenceSelfEvent) deliveryClass() deliveryClass { return classPresenceS
 func (e PresenceSelfEvent) TargetUserID() int64          { return e.targetUserID }
 func (e PresenceSelfEvent) Payload() []byte              { return e.payload }
 
-// presenceEvents builds the events one presence change needs.
-//
-// The common case is one global broadcast. Invisible is the exception and the
-// reason this helper exists: what others see and what the owner sees differ,
-// so the broadcast excludes the owner and a second, targeted event carries
-// their real status. Every presence emitter goes through here, so no new call
-// site can leak an invisible user by forgetting the mapping.
+// presenceEvents builds the events one presence change needs: normally one global
+// broadcast. For invisible, what others see differs from what the owner sees, so
+// the broadcast excludes the owner and a second targeted event carries their real
+// status. Every presence emitter goes through here so no call site can leak an
+// invisible user by forgetting the mapping.
 func presenceEvents(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []Event {
 	public := db.BroadcastStatus(status)
 	if public == status {
@@ -375,16 +326,10 @@ func presenceEvents(userID int64, status string, customStatus *string, activity 
 	return []Event{
 		PresenceOthersEvent{
 			excludeUserID: userID,
-			// customStatus is blanked, not passed through: the status here
-			// already collapsed to "offline" (public != status), and the real
-			// free-text status would be a tell that this "offline" member is
-			// actually online. Mirrors hub_broadcast.go's BroadcastPresence,
-			// the connect/reconnect sibling of this same event, and
-			// db.MemberSummary.ForViewer, which blanks the same field the
-			// same way for the ready payload.
-			// activity and listening are blanked for the same reason: a game
-			// or a song on an "offline" member would give the invisible user
-			// away.
+			// customStatus, activity and listening are blanked: the status already collapsed
+			// to "offline", and a free-text status, game or song on an "offline" member would
+			// give the invisible user away. Mirrors BroadcastPresence and
+			// db.MemberSummary.ForViewer.
 			payload: buildPresenceMsg(userID, public, nil, nil, nil),
 		},
 		PresenceSelfEvent{
@@ -395,8 +340,8 @@ func presenceEvents(userID int64, status string, customStatus *string, activity 
 	}
 }
 
-// VoiceStateEvent is a voice state update fanned out to the clients whose role
-// may READ the voice channel it describes. Satisfies VoiceVisibilityEvent.
+// VoiceStateEvent is a voice state update fanned out to clients whose role may READ
+// the channel.
 type VoiceStateEvent struct {
 	voiceChannelID int64
 	userID         int64
@@ -409,7 +354,6 @@ func (e VoiceStateEvent) VisibleChannelID() int64      { return e.voiceChannelID
 func (e VoiceStateEvent) UserID() int64                { return e.userID }
 func (e VoiceStateEvent) Payload() []byte              { return e.payload }
 
-// VoiceE2EEAnnounceEvent relays an ECDH public key to other voice channel participants.
 type VoiceE2EEAnnounceEvent struct {
 	voiceChannelID int64
 	excludeUserID  int64
@@ -422,9 +366,8 @@ func (e VoiceE2EEAnnounceEvent) VoiceChannelID() int64        { return e.voiceCh
 func (e VoiceE2EEAnnounceEvent) ExcludeUserID() int64         { return e.excludeUserID }
 func (e VoiceE2EEAnnounceEvent) Payload() []byte              { return e.payload }
 
-// VoiceE2EEOfferGuardedEvent relays an encrypted room key to a specific user,
-// using atomic check-and-send to verify the target is still in the same voice
-// channel. Satisfies VoiceChannelGuardedEvent.
+// VoiceE2EEOfferGuardedEvent relays an encrypted room key to one user via the
+// atomic check-and-send that the target is still in the same voice channel.
 type VoiceE2EEOfferGuardedEvent struct {
 	voiceChannelID int64
 	targetUserID   int64
@@ -437,9 +380,8 @@ func (e VoiceE2EEOfferGuardedEvent) VoiceChannelID() int64        { return e.voi
 func (e VoiceE2EEOfferGuardedEvent) TargetUserID() int64          { return e.targetUserID }
 func (e VoiceE2EEOfferGuardedEvent) Payload() []byte              { return e.payload }
 
-// threadFollowEvt delivers a thread_follow_update to one user.
-// Unsequenced and on the low queue like mention_count: a missed frame costs
-// nothing, because ready.threads is authoritative.
+// threadFollowEvt delivers a thread_follow_update to one user, unsequenced on the
+// low queue: a missed frame costs nothing since ready.threads is authoritative.
 type threadFollowEvt struct {
 	targetUserID int64
 	payload      []byte
@@ -450,7 +392,6 @@ func (e threadFollowEvt) deliveryClass() deliveryClass { return classTypingDM }
 func (e threadFollowEvt) TargetUserID() int64          { return e.targetUserID }
 func (e threadFollowEvt) Payload() []byte              { return e.payload }
 
-// DMChannelOpenEvent sends a dm_channel_open notification to a specific user.
 type DMChannelOpenEvent struct {
 	targetUserID int64
 	payload      []byte
@@ -461,15 +402,11 @@ func (e DMChannelOpenEvent) deliveryClass() deliveryClass { return classUserTarg
 func (e DMChannelOpenEvent) TargetUserID() int64          { return e.targetUserID }
 func (e DMChannelOpenEvent) Payload() []byte              { return e.payload }
 
-// DMRequestEvent announces a message request to its recipient: sent
-// once on creation, by the sender's chat_send handler
-// (handlers_chat.go, for every id in SendMessageResult.RequestCreatedFor),
-// and again with a new state on every recipient transition
-// (api/dm_request_handler.go). Unsequenced and NOT replayed, like
-// DMChannelOpenEvent — a client that misses it recovers from
-// GET /api/v1/dm-requests, the persisted source of truth, not the ring
-// buffer, so unlike DMChannelOpenEvent this does not need to bump the
-// hub's visibility watermark.
+// DMRequestEvent announces a message request to its recipient: once on creation
+// (handlers_chat.go) and again with a new state on every recipient transition
+// (api/dm_request_handler.go). Unsequenced and not replayed; a client that misses
+// it recovers from GET /api/v1/dm-requests, the persisted source of truth, so
+// unlike DMChannelOpenEvent it need not bump the visibility watermark.
 type DMRequestEvent struct {
 	targetUserID int64
 	payload      []byte
@@ -480,10 +417,9 @@ func (e DMRequestEvent) deliveryClass() deliveryClass { return classUserTargeted
 func (e DMRequestEvent) TargetUserID() int64          { return e.targetUserID }
 func (e DMRequestEvent) Payload() []byte              { return e.payload }
 
-// CallSignalEvent delivers a DM call signal (call_incoming / call_declined) to
-// one participant. Satisfies UserTargetedEvent, so an offline addressee is a
-// no-op — which is the correct behaviour for ringing: a ring that arrives
-// after the fact is worse than no ring.
+// CallSignalEvent delivers a DM call signal (call_incoming / call_declined) to one
+// participant. It satisfies UserTargetedEvent, so an offline addressee is a
+// no-op, correct for ringing: a late ring is worse than none.
 type CallSignalEvent struct {
 	eventType    string
 	targetUserID int64

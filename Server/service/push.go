@@ -26,34 +26,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// maxPushSubscriptionsPerUser bounds how many devices one account may keep
-// subscribed at once; the 11th subscription evicts the oldest by
-// last_seen_at.
-//
-// ponytail: constant; make it a bounded key when an operator asks.
+// maxPushSubscriptionsPerUser bounds the devices one account may keep subscribed;
+// the 11th evicts the oldest by last_seen_at.
 const maxPushSubscriptionsPerUser = 10
 
 const (
-	// pushDefaultTTL is the staleness window used when no TTL has been
-	// installed (or an install of 0/negative asked for the default).
-	pushDefaultTTL = 90 * 24 * time.Hour
-	// pushMaxEndpointLen bounds the push endpoint URL.
-	pushMaxEndpointLen = 2048
-	// pushMaxDeviceNameRunes bounds the operator/UI-facing device label.
+	// pushDefaultTTL is the staleness window when no TTL (or 0/negative) is installed.
+	pushDefaultTTL         = 90 * 24 * time.Hour
+	pushMaxEndpointLen     = 2048
 	pushMaxDeviceNameRunes = 64
-	// pushP256dhLen / pushAuthLen are the Web Push credential shapes: a
-	// 65-byte uncompressed P-256 point (0x04 prefix) and a 16-byte auth
-	// secret.
+	// pushP256dhLen / pushAuthLen are the Web Push credential shapes: a 65-byte
+	// uncompressed P-256 point (0x04 prefix) and a 16-byte auth secret.
 	pushP256dhLen = 65
 	pushAuthLen   = 16
 )
 
-// ErrInvalidSubscription wraps every reason Subscribe refuses an input;
-// handlers answer 400 INVALID_INPUT.
+// ErrInvalidSubscription wraps every reason Subscribe refuses an input; handlers
+// answer 400 INVALID_INPUT.
 var ErrInvalidSubscription = errors.New("invalid push subscription")
 
-// PushSubscribeInput is the caller-supplied shape Subscribe validates. There
-// is no user id here on purpose: the row's owner is always the session's.
+// PushSubscribeInput is the shape Subscribe validates. It has no user id on
+// purpose: the row's owner is always the session's.
 type PushSubscribeInput struct {
 	Endpoint   string
 	P256dh     string
@@ -61,10 +54,9 @@ type PushSubscribeInput struct {
 	DeviceName string
 }
 
-// PushService stores Web Push subscriptions (migration 045). Nothing
-// here dispatches a push — that is PushDispatcher's job. Rotation is an
-// operator action (replace the VAPID key file or env var, then restart),
-// not a method on this service: SetVAPIDKey is called once, at start-up.
+// PushService stores Web Push subscriptions; dispatching is PushDispatcher's job.
+// VAPID rotation is an operator action (replace the key file or env var, restart),
+// not a method: SetVAPIDKey is called once, at start-up.
 type PushService struct {
 	st Store
 
@@ -76,17 +68,15 @@ type PushService struct {
 	contact string
 }
 
-// NewPushService constructs a PushService with no key installed yet
-// (PublicKey reports ok=false) and the default 90-day staleness window.
+// NewPushService constructs a PushService with no key installed (PublicKey
+// reports ok=false) and the default 90-day staleness window.
 func NewPushService(st Store) *PushService {
 	return &PushService{st: st, ttl: pushDefaultTTL}
 }
 
-// SetVAPIDKey installs the running VAPID key. The composition root calls
-// this once at start-up, unconditionally — regardless of push.enabled,
-// because the sweep needs the key id to recognise (and remove) rows a
-// rotation orphaned even while the feature is off. A nil key clears it back
-// to the not-installed state.
+// SetVAPIDKey installs the running VAPID key. The root calls it once at start-up
+// regardless of push.enabled: the sweep needs the key id to remove rows a rotation
+// orphaned even while the feature is off. A nil key clears it.
 func (s *PushService) SetVAPIDKey(priv *ecdh.PrivateKey) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -101,9 +91,8 @@ func (s *PushService) SetVAPIDKey(priv *ecdh.PrivateKey) {
 	s.keyID = hex.EncodeToString(sum[:8])
 }
 
-// SetSubscriptionTTL installs the staleness window Sweep uses. d <= 0 means
-// "use the default", so an un-set config value cannot silently disable the
-// sweep.
+// SetSubscriptionTTL installs the staleness window Sweep uses; d <= 0 means the
+// default, so an unset config cannot silently disable the sweep.
 func (s *PushService) SetSubscriptionTTL(d time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -113,19 +102,18 @@ func (s *PushService) SetSubscriptionTTL(d time.Duration) {
 	s.ttl = d
 }
 
-// SetContact installs push.contact, the mailto address VAPID JWTs
-// carry as their "sub" claim. Empty (the default) means the claim is
-// omitted entirely, not sent as "mailto:" — an empty sub is not a valid
-// contact and a push service is entitled to reject it.
+// SetContact installs push.contact, the mailto address carried as the VAPID JWT
+// "sub". Empty omits the claim: an empty "mailto:" is not a valid contact and a
+// push service may reject it.
 func (s *PushService) SetContact(contact string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.contact = contact
 }
 
-// PublicKey returns the running key's public bytes — base64url, no padding,
-// the 65-byte uncompressed point — and its key id, the hex of the first 8
-// bytes of SHA-256(public key bytes). ok is false until a key is installed.
+// PublicKey returns the running key's public bytes (base64url, no padding, the
+// 65-byte uncompressed point) and key id (hex of the first 8 bytes of
+// SHA-256(public key)); ok is false until a key is installed.
 func (s *PushService) PublicKey() (publicKeyB64URL, keyID string, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,10 +132,9 @@ func (s *PushService) currentTTL() time.Duration {
 	return s.ttl
 }
 
-// Subscribe validates in, then upserts the row for userID under the running
-// VAPID key id and trims the user's rows to the device cap, evicting the
-// oldest by last_seen_at. Re-subscribing the same endpoint is the refresh
-// path: the upsert bumps last_seen_at rather than adding a row.
+// Subscribe validates in, upserts the row for userID under the running VAPID key
+// id and trims to the device cap, evicting the oldest by last_seen_at.
+// Re-subscribing the same endpoint refreshes last_seen_at instead of adding a row.
 func (s *PushService) Subscribe(ctx context.Context, userID int64, in PushSubscribeInput) (int64, error) {
 	p256dh, auth, deviceName, err := validatePushSubscription(in)
 	if err != nil {
@@ -160,9 +147,8 @@ func (s *PushService) Subscribe(ctx context.Context, userID int64, in PushSubscr
 	return id, nil
 }
 
-// List returns userID's subscriptions under the running VAPID key. A row
-// written under a since-rotated key is invisible here — the
-// sweep is what removes it.
+// List returns userID's subscriptions under the running VAPID key; a row written
+// under a since-rotated key is invisible until the sweep removes it.
 func (s *PushService) List(ctx context.Context, userID int64) ([]db.PushSubscription, error) {
 	rows, err := s.st.ListPushSubscriptions(ctx, userID, s.currentKeyID())
 	if err != nil {
@@ -171,9 +157,8 @@ func (s *PushService) List(ctx context.Context, userID int64) ([]db.PushSubscrip
 	return rows, nil
 }
 
-// Revoke deletes id, scoped to userID so one user can never revoke
-// another's subscription by guessing an id. ErrNotFound when the id does
-// not exist or belongs to someone else.
+// Revoke deletes id, scoped to userID so one user cannot revoke another's by
+// guessing; ErrNotFound when the id does not exist or is someone else's.
 func (s *PushService) Revoke(ctx context.Context, userID, id int64) error {
 	ok, err := s.st.DeletePushSubscription(ctx, userID, id)
 	if err != nil {
@@ -185,10 +170,9 @@ func (s *PushService) Revoke(ctx context.Context, userID, id int64) error {
 	return nil
 }
 
-// Sweep deletes every subscription past the staleness window and, once a
-// key is installed, every subscription whose vapid_key_id no longer
-// matches it — the staleness sweep and the rotation sweep in one pass
-// (decisions 2 and 5). With no key installed it sweeps by time only.
+// Sweep deletes every subscription past the staleness window and, once a key is
+// installed, every one whose vapid_key_id no longer matches (staleness and
+// rotation in one pass). With no key it sweeps by time only.
 func (s *PushService) Sweep(ctx context.Context) (int64, error) {
 	cutoff := time.Now().Add(-s.currentTTL())
 	n, err := s.st.SweepPushSubscriptions(ctx, cutoff, s.currentKeyID())
@@ -198,32 +182,27 @@ func (s *PushService) Sweep(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// ErrPushNotConfigured is returned by vapidAuthorization before any VAPID
-// key has been installed — SetVAPIDKey runs unconditionally at start-up,
-// so in production this only fires in the instant before that stage
-// runs.
+// ErrPushNotConfigured is returned by vapidAuthorization before a VAPID key is
+// installed; SetVAPIDKey runs at start-up, so in production this only fires just
+// before that stage.
 var ErrPushNotConfigured = errors.New("push: no VAPID key installed")
 
-// vapidTokenTTL is the RFC 8292 JWT lifetime (12h). RFC
-// 8292 recommends staying well under 24h so a leaked token cannot be
-// replayed indefinitely.
+// vapidTokenTTL is the RFC 8292 JWT lifetime (12h); the RFC recommends well under
+// 24h so a leaked token cannot be replayed indefinitely.
 const vapidTokenTTL = 12 * time.Hour
 
-// vapidClaims is the RFC 8292 JWT claim set. Sub is omitted (not sent as an
-// empty "mailto:") when push.contact is unset — encoding/json's omitempty
-// on a string drops it precisely then.
+// vapidClaims is the RFC 8292 JWT claim set. Sub is omitted (not an empty
+// "mailto:") when push.contact is unset, which omitempty does.
 type vapidClaims struct {
 	Aud string `json:"aud"`
 	Exp int64  `json:"exp"`
 	Sub string `json:"sub,omitempty"`
 }
 
-// webOrigin serialises u's origin per RFC 6454 SS4: lowercase scheme,
-// lowercase host, and the port omitted when it is the scheme's default —
-// "https://PUSH.EXAMPLE.NET:443/x" and "https://push.example.net/x" name
-// the same origin, and a push service comparing the VAPID "aud" claim
-// byte-for-byte against its own origin string must see the same bytes
-// either way.
+// webOrigin serialises u's origin per RFC 6454: lowercase scheme and host, port
+// omitted when default. "https://PUSH.EXAMPLE.NET:443/x" and
+// "https://push.example.net/x" are one origin, and a push service comparing the
+// VAPID "aud" byte-for-byte must see the same bytes.
 func webOrigin(u *url.URL) string {
 	scheme := strings.ToLower(u.Scheme)
 	host := normaliseOriginHost(u.Hostname())
@@ -233,17 +212,13 @@ func webOrigin(u *url.URL) string {
 	return scheme + "://" + host
 }
 
-// normaliseOriginHost is the host component of webOrigin's result:
-//   - an IP literal (v4 or v6) is re-bracketed if it is v6 -- url.Hostname()
-//     strips the brackets a URI writes an IPv6 host with, and "aud" needs
-//     them back or the value parses as a hostname full of colons;
-//   - anything else is folded to its canonical ASCII (Punycode) form with
-//     golang.org/x/net/idna's Lookup profile (RFC 5891 SS5), which also
-//     case-folds -- an uppercase Unicode label and its lowercase spelling
-//     must produce the same origin string. idna is already in go.mod
-//     (pulled in transitively); this is the first direct import of it.
-//     A host idna refuses is lowercased instead, ASCII-only, same as
-//     before this fix.
+// normaliseOriginHost is webOrigin's host component:
+//   - an IP literal is re-bracketed if v6: url.Hostname() strips the brackets and
+//     "aud" needs them back or it parses as a hostname full of colons;
+//   - anything else is folded to canonical ASCII (Punycode) with idna's Lookup
+//     profile (RFC 5891), which also case-folds, so an uppercase Unicode label and
+//     its lowercase spelling give one origin. A host idna refuses is
+//     ASCII-lowercased.
 func normaliseOriginHost(host string) string {
 	if ip, err := netip.ParseAddr(host); err == nil {
 		if ip.Is6() {
@@ -257,10 +232,9 @@ func normaliseOriginHost(host string) string {
 	return strings.ToLower(host)
 }
 
-// normalisePort returns port's canonical decimal form ("0443" -> "443"),
-// so a numerically-default port in a non-canonical spelling is still
-// recognised as default by webOrigin. A non-numeric port (never valid in a
-// URL, but url.URL does not itself refuse one) passes through unchanged.
+// normalisePort returns port's canonical decimal form ("0443" -> "443"), so a
+// non-canonical default port is still recognised as default. A non-numeric port
+// passes through unchanged.
 func normalisePort(port string) string {
 	n, err := strconv.Atoi(port)
 	if err != nil {
@@ -269,8 +243,8 @@ func normalisePort(port string) string {
 	return strconv.Itoa(n)
 }
 
-// defaultPortFor is the scheme's default port per RFC 6454; "" for any
-// other scheme, which webOrigin then never treats as default.
+// defaultPortFor is the scheme's default port per RFC 6454, "" for any other
+// scheme (never treated as default).
 func defaultPortFor(scheme string) string {
 	switch scheme {
 	case "https":
@@ -282,17 +256,12 @@ func defaultPortFor(scheme string) string {
 	}
 }
 
-// vapidAuthorization builds the RFC 8292 VAPID Authorization header value
-// for a push to endpoint: an ES256-signed JWT with header
-// {"typ":"JWT","alg":"ES256"}, claims aud (the endpoint's scheme://host),
-// exp (now+12h) and sub ("mailto:"+push.contact, omitted when empty), and
-// the header value "vapid t=<jwt>, k=<public key>". The private scalar
-// never leaves this method — every caller gets a finished header value, not
-// a key or a raw signature.
-//
-// The signature is raw r||s (64 octets, RFC 8292's JWS encoding), not
-// ASN.1: a JOSE ES256 signature is defined that way (RFC 7518 SS3.4), and a
-// push service validates it as such.
+// vapidAuthorization builds the RFC 8292 VAPID Authorization value for a push to
+// endpoint: an ES256 JWT with header {"typ":"JWT","alg":"ES256"}, claims aud
+// (scheme://host), exp (now+12h) and sub ("mailto:"+push.contact, omitted when
+// empty), as "vapid t=<jwt>, k=<public key>". The private scalar never leaves this
+// method. The signature is raw r||s (64 octets, RFC 7518 3.4), not ASN.1, as a
+// push service validates it.
 func (s *PushService) vapidAuthorization(endpoint string) (string, error) {
 	s.mu.Lock()
 	priv, pubB64, contact := s.priv, s.pubB64, s.contact
@@ -335,7 +304,7 @@ func (s *PushService) vapidAuthorization(endpoint string) (string, error) {
 }
 
 // validatePushSubscription checks in and returns the canonical (decoded and
-// re-encoded raw-url-base64) forms of the credential fields the row stores.
+// re-encoded raw-url-base64) credential forms the row stores.
 func validatePushSubscription(in PushSubscribeInput) (p256dh, auth, deviceName string, err error) {
 	if len(in.Endpoint) > pushMaxEndpointLen {
 		return "", "", "", fmt.Errorf("%w: endpoint is too long", ErrInvalidSubscription)
@@ -374,10 +343,8 @@ func validatePushSubscription(in PushSubscribeInput) (p256dh, auth, deviceName s
 		in.DeviceName, nil
 }
 
-// decodePushBase64 accepts both padded and unpadded base64url, by trimming
-// any "=" padding before decoding with the raw (unpadded) encoding — a
-// browser's PushSubscription.toJSON() and various client libraries disagree
-// on which form they emit.
+// decodePushBase64 accepts padded and unpadded base64url by trimming "=" before
+// the raw decode; browsers' PushSubscription.toJSON() and client libraries disagree.
 func decodePushBase64(s string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(strings.TrimRight(s, "="))
 }

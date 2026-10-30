@@ -9,14 +9,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ─── Access explanation and override preview ───────────────────────
-//
-// Both answer from the canonical predicates (permissions.Explain) over a
-// Subject resolved live by permissions.Checker.Subject — the same resolution
-// the authorization paths use, never the 30s cache, and never a session: an
-// admin asks about a member without acting as them. The only rule applied on
-// top is account admission (ban, unapproved registration), which gates every
-// session before any channel predicate runs.
+// Access explanation and override preview. Both answer from the canonical
+// predicates (permissions.Explain) over a Subject resolved live by
+// permissions.Checker.Subject, the resolution the authorization paths use, never
+// the 30s cache and never a session: an admin asks about a member without acting as
+// them. The only rule applied on top is account admission (ban, unapproved
+// registration), which gates every session before any channel predicate.
 
 // AccessRestrictions are the non-role facts that feed a member's decisions.
 type AccessRestrictions struct {
@@ -51,7 +49,7 @@ type accessMember struct {
 }
 
 // accountBlock is session admission: a banned or unapproved account holds no
-// session, so no channel predicate can ever allow it anything.
+// session, so no channel predicate can allow it anything.
 func accountBlock(u *db.User) string {
 	if auth.IsEffectivelyBanned(u) {
 		return "account is banned"
@@ -104,10 +102,9 @@ func (s *ChannelService) loadAccessMember(ctx context.Context, userID int64, ch 
 	return &accessMember{user: user, role: role, held: ids, masks: masks, subject: sub, blockMsg: accountBlock(user)}, nil
 }
 
-// withRoleOverride returns the member's subject with roleID's channel
-// override replaced by allow/deny. A member holding several roles is resolved
-// per role (every held role gets a layer, only roleID's override changes), so
-// the proposal composes exactly as a saved override would.
+// withRoleOverride returns the member's subject with roleID's channel override
+// replaced by allow/deny. A member with several roles is resolved per role (only
+// roleID's override changes), so the proposal composes as a saved override would.
 func (m *accessMember) withRoleOverride(roleID, allow, deny int64) permissions.Subject {
 	sub := m.subject
 	if len(m.held) <= 1 {
@@ -147,9 +144,9 @@ func (m *accessMember) decisions(sub permissions.Subject) []permissions.Decision
 }
 
 // ExplainAccess reports userID's effective decision for action in the guild
-// channel ch and the rules behind it. The read is audited: it discloses a
-// member's restriction state, so like editing that member's override it is
-// refused for a member ranked at or above the actor.
+// channel ch and the rules behind it. The read is audited: it discloses a member's
+// restriction state, so like editing their override it is refused for a member
+// ranked at or above the actor.
 func (s *ChannelService) ExplainAccess(ctx context.Context, actorID int64, actorRole *db.Role, userID int64, ch *db.Channel, action string) (AccessExplanation, error) {
 	if _, err := permissions.Explain(permissions.Action(action), permissions.Subject{}); err != nil {
 		return AccessExplanation{}, fmt.Errorf("%w%.0w", err, ErrBadRequest)
@@ -210,15 +207,13 @@ type AccessPreview struct {
 	Members   []MemberAccessChange `json:"members"`
 }
 
-// PreviewOverride evaluates a proposed override on ch — the role layer for
-// roleID, or the member layer for userID (exactly one is non-zero) — against
-// the same predicates as ExplainAccess, and returns every member whose
-// decision for any action changes. A role or member ranked at or above the
-// actor is refused, as editing its override is. Nothing is written except
-// the audit row; the save path re-checks its own authority on PUT.
-//
-// ponytail: one live Subject per member of the role (a few indexed reads
-// each); batch the reads if a role grows to tens of thousands of members.
+// PreviewOverride evaluates a proposed override on ch (the role layer for roleID,
+// or the member layer for userID; exactly one is non-zero) against ExplainAccess's
+// predicates and returns every member whose decision for any action changes. A
+// role or member ranked at or above the actor is refused, as editing its override
+// is. Only the audit row is written; the save path re-checks its own authority.
+// ponytail: one live Subject per member of the role (a few indexed reads each);
+// batch the reads if a role grows to tens of thousands of members.
 func (s *ChannelService) PreviewOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID, userID, allowRaw, denyRaw int64) (AccessPreview, error) {
 	if (roleID == 0) == (userID == 0) {
 		return AccessPreview{}, fmt.Errorf("exactly one of role_id or user_id is required%.0w", ErrBadRequest)

@@ -36,9 +36,8 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	if expiresInHours > maxInviteExpiryHoursVal {
 		expiresInHours = maxInviteExpiryHoursVal
 	}
-	// A negative count or expiry silently meant "unlimited"/"never expires";
-	// reject it instead, so the caller cannot create a state they did not ask
-	// for (F23).
+	// A negative count or expiry silently meant "unlimited"/"never expires"; reject it
+	// so the caller cannot create a state they did not ask for.
 	if maxUses < 0 || expiresInHours < 0 {
 		return nil, fmt.Errorf("%w: max_uses and expires_in_hours must not be negative", ErrBadRequest)
 	}
@@ -77,9 +76,9 @@ func (s *InviteService) ListInvites(ctx context.Context) ([]*db.Invite, error) {
 	return invites, nil
 }
 
-// ListInviteRedemptions returns who redeemed an invite, newest first, so an
-// owner can trace a leaked invite to its redeemer (O1). The invite is resolved
-// by code first; an unknown code is ErrNotFound rather than an empty history.
+// ListInviteRedemptions returns who redeemed an invite, newest first, so an owner
+// can trace a leaked invite to its redeemer. The invite is resolved by code first;
+// an unknown code is ErrNotFound rather than an empty history.
 func (s *InviteService) ListInviteRedemptions(ctx context.Context, code string) ([]*db.InviteRedemption, error) {
 	invite, err := s.st.GetInvite(ctx, code)
 	if err != nil || invite == nil {

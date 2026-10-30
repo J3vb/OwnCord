@@ -13,12 +13,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ─── Threads ───────────────────────────────────────────────────────
-//
-// A thread is a channel row of type 'thread' under a text channel (migration
-// 074). It has no permission state of its own: who may see, read or post is
-// answered by its parent, plus the thread's lock. The rules here are the
-// design's section 4.
+// Threads: a thread is a channel row of type 'thread' under a text channel
+// (migration 074). It has no permission state of its own: who may see, read or
+// post is answered by its parent plus the thread's lock.
 
 const (
 	// MaxThreadNameLen bounds a thread's name, in runes.
@@ -35,12 +32,12 @@ const (
 	ThreadListDefaultLimit = 50
 )
 
-// ThreadInfo is the wire shape of a thread. It aliases the db shape so the ws
-// transport depends on service, not db.
+// ThreadInfo is the wire shape of a thread, aliased so the ws transport depends on
+// service, not db.
 type ThreadInfo = db.ThreadInfo
 
-// ErrThreadExists means the message already has a thread. It is always carried
-// by a *ThreadExistsError that names the winner, and refines ErrConflict.
+// ErrThreadExists means the message already has a thread. It always rides a
+// *ThreadExistsError naming the winner, and refines ErrConflict.
 var ErrThreadExists = errors.New("a thread already exists for this message")
 
 // ThreadExistsError is the loser's answer to a create race.
@@ -53,10 +50,9 @@ func (e *ThreadExistsError) Error() string {
 // Unwrap lets errors.Is match both ErrThreadExists and ErrConflict.
 func (e *ThreadExistsError) Unwrap() []error { return []error{ErrThreadExists, ErrConflict} }
 
-// ThreadStore is the persistence slice behind the thread operations. *db.DB
-// satisfies it; a Store that does not leaves them answering ErrInternal. It
-// sits beside Store rather than on it because Store's surface is ratcheted
-// (datastore_ratchet_test.go).
+// ThreadStore is the persistence behind the thread operations. *db.DB satisfies
+// it; a Store that does not makes them answer ErrInternal. Kept beside Store
+// because Store's surface is ratcheted (datastore_ratchet_test.go).
 type ThreadStore interface {
 	GetThreadByStarter(ctx context.Context, starterID int64) (*db.ThreadInfo, error)
 	CreateThread(ctx context.Context, n db.NewThread) (info *db.ThreadInfo, created bool, err error)
@@ -76,8 +72,7 @@ type ThreadService struct {
 	limiter *auth.RateLimiter
 }
 
-// NewThreadService creates a ThreadService. Its thread persistence is the
-// ThreadStore slice of st.
+// NewThreadService creates a ThreadService over the ThreadStore slice of st.
 func NewThreadService(st Store, perms *PermissionService, limiter *auth.RateLimiter) *ThreadService {
 	ts, _ := st.(ThreadStore)
 	return &ThreadService{st: st, ts: ts, perms: perms, limiter: limiter}
@@ -124,15 +119,11 @@ func cleanThreadName(name string) (string, error) {
 	return cleaned, nil
 }
 
-// Create starts a thread on a message of a text channel. It returns the thread
-// and whether this call created it.
-//
-// Create is idempotent on the starter message, not on a request key: a message
-// has at most one thread (the unique starter index), so a retry by the thread's
-// owner finds it and gets it back with created false. Anyone else who tries a
-// message that already has a thread gets *ThreadExistsError naming it, which
-// is also how the loser of a race learns the winner (the writer serialises
-// racing creates and the index is the backstop).
+// Create starts a thread on a message of a text channel and reports whether this
+// call created it. It is idempotent on the starter message (the unique starter
+// index), not on a request key: the thread's owner retrying gets it back with
+// created false, and anyone else gets *ThreadExistsError naming it, which is also
+// how the loser of a race learns the winner.
 func (s *ThreadService) Create(ctx context.Context, p CreateThreadParams) (info *db.ThreadInfo, created bool, err error) {
 	ts, err := s.store()
 	if err != nil {
@@ -153,13 +144,13 @@ func (s *ThreadService) Create(ctx context.Context, p CreateThreadParams) (info 
 		ParentID: p.ChannelID, StarterMessageID: p.MessageID, OwnerID: p.UserID,
 		Name: name, AutoArchiveMinutes: minutes,
 	}
-	// A retry of an earlier create is answered before the create budget, so a
-	// lost thread_create_ok never costs a second token.
+	// A retry is answered before the create budget, so a lost thread_create_ok never
+	// costs a second token.
 	if prior, perr := ts.GetThreadByStarter(ctx, p.MessageID); perr != nil {
 		return nil, false, fmt.Errorf("%w: load thread: %w", ErrInternal, perr)
 	} else if prior != nil && s.ownRetry(prior, p) {
-		// Still ahead of the rate limiter, but not ahead of the view gate: an
-		// owner who has since lost the parent gets nothing back.
+		// Ahead of the rate limiter but not the view gate: an owner who has since lost
+		// the parent gets nothing back.
 		if err := s.requireCanView(ctx, p); err != nil {
 			return nil, false, err
 		}
@@ -194,7 +185,7 @@ func (s *ThreadService) ownRetry(t *db.ThreadInfo, p CreateThreadParams) bool {
 }
 
 // requireCanView is the read half of the create gate: the parent exists and the
-// caller can see it. A parent the caller cannot see is not found.
+// caller can see it; otherwise not found.
 func (s *ThreadService) requireCanView(ctx context.Context, p CreateThreadParams) error {
 	parent, err := s.st.GetChannel(ctx, p.ChannelID)
 	if err != nil {
@@ -213,8 +204,8 @@ func (s *ThreadService) requireCanView(ctx context.Context, p CreateThreadParams
 	return nil
 }
 
-// requireCanStart is the create gate: the parent is a live text channel and the
-// caller may send there (READ and SEND, not timed out, not archived).
+// requireCanStart is the create gate: the parent is a live text channel the caller
+// may send in (READ and SEND, not timed out, not archived).
 func (s *ThreadService) requireCanStart(ctx context.Context, p CreateThreadParams) error {
 	parent, err := s.st.GetChannel(ctx, p.ChannelID)
 	if err != nil {
@@ -248,10 +239,9 @@ type UpdateThreadParams struct {
 	TagIDs *[]int64
 }
 
-// threadActor resolves who is asking about a thread: the thread, its owner
-// verdict and whether the caller moderates it (READ and MANAGE_MESSAGES in the
-// parent, resolved through the thread's own channel row). A thread the caller
-// cannot see is not found.
+// threadActor resolves the thread, whether the caller owns it, and whether they
+// moderate it (READ and MANAGE_MESSAGES in the parent, via the thread's own channel
+// row). A thread the caller cannot see is not found.
 func (s *ThreadService) threadActor(ctx context.Context, ts ThreadStore, userID, threadID int64) (info *db.ThreadInfo, isOwner, isMod bool, err error) {
 	if threadID <= 0 {
 		return nil, false, false, fmt.Errorf("%w: thread_id must be positive", ErrBadRequest)
@@ -281,10 +271,9 @@ func (s *ThreadService) threadActor(ctx context.Context, ts ThreadStore, userID,
 	return info, isOwner, sub.Has(permissions.ManageMessages), nil
 }
 
-// Update renames, archives, unarchives, locks or retimes a thread. The owner
-// may rename, archive, unarchive and change the period; a moderator may do all
-// of it and lock. A locked thread belongs to moderators alone, so the owner
-// cannot change it, and only a moderator unarchives it.
+// Update renames, archives, unarchives, locks or retimes a thread. The owner may
+// rename, archive, unarchive and change the period; a moderator may also lock. A
+// locked thread belongs to moderators alone.
 func (s *ThreadService) Update(ctx context.Context, p UpdateThreadParams) (*db.ThreadInfo, error) {
 	ts, err := s.store()
 	if err != nil {

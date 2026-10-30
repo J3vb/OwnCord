@@ -124,17 +124,14 @@ func voiceModNotInVoice() *Result {
 	return &Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in a voice channel"}}
 }
 
-// voiceModNoSession answers a target with no voice session. Authorization
-// before existence: with no session to
-// build a channel Subject from, still run the SAME canonical authorizers (no
-// second one) on a Subject built from just the actor's base role and a zero
-// channel — their DM branch and channel-override layer are both no-ops
-// against a zero Channel, so this reduces to exactly the base-bit check the
-// full, in-voice path would fail on for the SAME actor regardless of channel.
-// An actor holding neither bit gets the SAME 403 here as the in-voice failure,
-// so a target in voice and one not in voice are byte-identical refusals —
-// probing voice presence this way learns nothing. Only a holder ever reaches
-// the VoiceError.
+// voiceModNoSession answers a target with no voice session. Authorization comes
+// before existence: with no session to build a channel Subject from, it runs the
+// SAME canonical authorizers on a Subject built from the actor's base role and a
+// zero channel (their DM branch and channel-override layer are no-ops against a
+// zero Channel), which reduces to the base-bit check the in-voice path would fail on
+// for the same actor. An actor holding neither bit gets the SAME 403 as the in-voice
+// failure, so probing voice presence learns nothing. Only a holder reaches the
+// VoiceError.
 func voiceModNoSession(ctx context.Context, d VoiceDeps, move bool, baseSub permissions.Subject, targetRole *db.Role) *Result {
 	if !move && permissions.AuthorizeVoiceModerator(baseSub) != nil {
 		return voiceModMissing(move)
@@ -145,15 +142,13 @@ func voiceModNoSession(ctx context.Context, d VoiceDeps, move bool, baseSub perm
 	return voiceModNotInVoice()
 }
 
-// voiceModInChannel authorizes the actor in the TARGET's channel (one
-// canonical authorizer per bit): the actor's BASE
-// role must hold the command's bit on its own, and the bit must be effective
-// in the target's channel too, so a role-layer or user-layer deny on that
-// channel holds; READ_MESSAGES so a room hidden from the actor
-// cannot be moderated; and for a DM call the actor's own membership, since
-// voice_mod_kick and friends carry no channel id from the client. The DM
-// refusal keeps the exact shape of "target not in voice" so the actor learns
-// nothing about a call they are not in.
+// voiceModInChannel authorizes the actor in the TARGET's channel (one canonical
+// authorizer per bit): the actor's BASE role must hold the command's bit, and the
+// bit must be effective in the target's channel too, so a role-layer or user-layer
+// deny there holds; READ_MESSAGES, so a hidden room cannot be moderated; and for a
+// DM call the actor's own membership, since voice_mod_kick and friends carry no
+// channel id. The DM refusal keeps the exact shape of "target not in voice" so the
+// actor learns nothing about a call they are not in.
 func voiceModInChannel(ctx context.Context, d VoiceDeps, actorID int64, st *db.VoiceState, move, outranked bool, targetRole *db.Role) (*db.VoiceState, bool, *Result) {
 	ch, err := d.Reader.GetChannel(ctx, st.ChannelID)
 	if err != nil {
@@ -194,12 +189,10 @@ func voiceModInChannel(ctx context.Context, d VoiceDeps, actorID int64, st *db.V
 	return st, false, nil
 }
 
-// requireMoverCanSee refuses a move whose destination the mover cannot view.
-// A hidden room answers exactly as a room that does not exist, so a move
-// cannot place someone in, or reveal, a channel the mover cannot see. An
-// archived destination is left to the target's CanJoinVoice check, which
-// answers it; CanViewChannel reports it only to an actor who would otherwise
-// see the room.
+// requireMoverCanSee refuses a move whose destination the mover cannot view. A
+// hidden room answers exactly as a room that does not exist, so a move cannot place
+// someone in, or reveal, a channel the mover cannot see. An archived destination is
+// left to the target's CanJoinVoice check.
 func requireMoverCanSee(ctx context.Context, d VoiceDeps, actorID int64, dest *db.Channel) *Result {
 	sub, err := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, actorID, dest, false)
 	if err != nil {

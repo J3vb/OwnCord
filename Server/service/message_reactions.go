@@ -23,11 +23,10 @@ func (s *MessageService) RemoveReaction(ctx context.Context, userID, msgID int64
 }
 
 // GetReactionUsers returns the users who reacted to msgID with emoji, capped at
-// db.MaxReactionUsers. Gated by the same read check as fetching the channel's
-// history, so a reaction pill never leaks membership of a channel the caller
-// cannot read. The message must live in channelID — the URL's channel is what
-// the permission check ran against, so a mismatch is a not-found, not a
-// silently-broader lookup.
+// db.MaxReactionUsers. It shares the history read gate so a reaction pill never
+// leaks membership of a channel the caller cannot read. The message must live in
+// channelID (the channel the permission check ran against); a mismatch is
+// not-found, not a broader lookup.
 func (s *MessageService) GetReactionUsers(ctx context.Context, userID, channelID, msgID int64, emoji string) ([]db.ReactionUser, error) {
 	if msgID <= 0 {
 		return nil, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
@@ -55,12 +54,10 @@ func (s *MessageService) GetReactionUsers(ctx context.Context, userID, channelID
 	return users, nil
 }
 
-// maxReactionRunes bounds a reaction string. Reactions are free-form text, so
-// the ceiling has to clear the longest thing a client can legitimately react
-// with: a custom emoji is stored as its ":shortcode:" literal, which is
-// MaxShortcodeLen plus the two colons. Deriving it keeps the two from drifting
-// into an emoji that renders in a message but is silently refused as a
-// reaction. Unicode emoji, even long ZWJ sequences, sit far below this.
+// maxReactionRunes bounds a reaction string. A custom emoji is stored as its
+// ":shortcode:" literal, so the ceiling is derived from MaxShortcodeLen plus the
+// two colons; that keeps an emoji that renders in a message from being refused as
+// a reaction. Unicode emoji, even long ZWJ sequences, sit far below it.
 const maxReactionRunes = MaxShortcodeLen + 2
 
 // validateEmoji applies the shared shape rules for a reaction emoji: non-empty,
@@ -101,9 +98,8 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 		return nil, err
 	}
 
-	// A missing id, a deleted message and a channel the caller may not read all
-	// answer identically: the history read check runs before any
-	// message-state-specific answer.
+	// A missing id, a deleted message and an unreadable channel all answer
+	// identically: the history read check runs before any message-state answer.
 	msg, err := s.st.GetMessage(ctx, msgID)
 	if err != nil || msg == nil {
 		return nil, errReactionTargetNotFound()
@@ -158,36 +154,31 @@ func (s *MessageService) handleReaction(ctx context.Context, userID, msgID int64
 	return result, nil
 }
 
-// reactionAudience resolves the channel a message lives in and enforces the
-// channel-scoped gates on reacting in it — archived, DM participation, DM
-// block, and the non-DM READ_MESSAGES|ADD_REACTIONS check. The gates its
-// caller keeps (rate limit, message id, emoji validity, channel read check,
-// deleted message) stay in handleReaction and still run first. It also returns
-// the DM participant ids, resolved here so they exist before anything is
+// reactionAudience resolves the message's channel and enforces the channel-scoped
+// gates on reacting: archived, DM participation, DM block, and the non-DM
+// READ_MESSAGES|ADD_REACTIONS check. The gates handleReaction keeps (rate limit,
+// message id, emoji validity, channel read check, deleted message) still run
+// first. It also returns the DM participant ids, resolved before anything is
 // mutated. The order of the checks is load-bearing.
 func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID int64) ([]int64, bool, error) {
-	// Fail closed, mirroring EditMessage/DeleteMessage (message_crud.go): a
-	// lookup failure must not fall through to the non-DM permission branch
-	// below. That branch passes on the base role mask alone
-	// (READ_MESSAGES|ADD_REACTIONS, no per-channel override exists for a DM),
-	// skipping both IsDMParticipant and RequireDMReachable entirely.
+	// Fail closed, as EditMessage/DeleteMessage (message_crud.go): a lookup failure
+	// must not fall through to the non-DM branch, which passes on the base role mask
+	// alone (no per-channel override exists for a DM) and skips IsDMParticipant and
+	// RequireDMReachable.
 	ch, chErr := s.st.GetChannel(ctx, channelID)
 	if chErr != nil || ch == nil {
 		return nil, false, errReactionTargetNotFound()
 	}
 	isDM := ch.Type == "dm"
 
-	// Archived channels are read-only. handleReaction bypasses
-	// checkSendPermission (it runs its own DM/permission branch below), so it
-	// needs the shared gate directly — see requireChannelWritable in
-	// message_perms.go.
+	// Archived channels are read-only. This path skips checkSendPermission, so it
+	// needs the gate directly (requireChannelWritable in message_perms.go).
 	if err := requireChannelWritable(ch); err != nil {
 		return nil, false, err
 	}
 
-	// permissions.CanAddReaction is the one predicate every reaction
-	// gate — DM and non-DM alike — routes through now, so a timeout's
-	// restriction applies here the same way it applies to a send.
+	// permissions.CanAddReaction is the one predicate every reaction gate routes
+	// through, so a timeout restricts reactions as it does a send.
 	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, true)
 	if subErr != nil {
 		return nil, false, fmt.Errorf("%w: cannot react to this message", ErrForbidden)
@@ -201,12 +192,10 @@ func (s *MessageService) reactionAudience(ctx context.Context, userID, channelID
 		if err := denial(permissions.CanAddReaction(sub)); err != nil {
 			return nil, false, err
 		}
-		// Resolve the fan-out audience before mutating anything. Participants
-		// are unaffected by the reaction itself, so failing here is cheap;
-		// fetching this after AddReaction/RemoveReaction commits (as this
-		// used to) risked a reaction persisted with no participant list to
-		// broadcast it to, which reactionV2Handler would then fan out to
-		// nobody while reporting success to the caller.
+		// Resolve the fan-out audience before mutating anything: participants are
+		// unaffected by the reaction, so failing here is cheap, whereas failing after the
+		// commit would persist a reaction with nobody to broadcast it to while reporting
+		// success.
 		ids, pErr := s.DMAudience(ctx, channelID, userID)
 		if pErr != nil {
 			slog.Error("MessageService.handleReaction DMAudience", "err", pErr, "channel_id", channelID)

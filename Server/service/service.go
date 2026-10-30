@@ -1,7 +1,6 @@
-// Package service provides the domain service layer for OwnCord.
-// Services encapsulate business logic (validation, permission checks, DB operations)
-// that was previously scattered across REST and WebSocket handlers.
-// Both REST and WS handlers become thin adapters that call service methods.
+// Package service is the domain service layer: validation, permission checks and
+// DB operations shared by the REST and WebSocket handlers, which stay thin
+// adapters over it.
 package service
 
 import (
@@ -14,11 +13,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// traceCall starts a span for a service entry point and returns a done func
-// that records the call's duration against ServiceCallDurationSec and ends
-// the span. Both are no-ops in the default build. The metric label is the
-// span name's method segment ("BlockService.BlockUser" -> "BlockUser"), which
-// is what every call site used to pass by hand.
+// traceCall starts a span for a service entry point and returns a done func that
+// records the call's duration against ServiceCallDurationSec and ends the span;
+// both are no-ops in the default build. The metric label is the span name's method
+// segment ("BlockService.BlockUser" -> "BlockUser").
 func traceCall(ctx context.Context, pkg, name string, attrs ...telemetry.Attr) (context.Context, func()) {
 	ctx, span := telemetry.GlobalTracer(pkg).Start(ctx, name, attrs...)
 	start := time.Now()
@@ -30,8 +28,8 @@ func traceCall(ctx context.Context, pkg, name string, attrs ...telemetry.Attr) (
 	}
 }
 
-// Services bundles all domain services for dependency injection.
-// Handlers receive this struct instead of raw *db.DB references.
+// Services bundles all domain services; handlers receive it instead of raw
+// *db.DB references.
 type Services struct {
 	Messages    *MessageService
 	Channels    *ChannelService
@@ -46,82 +44,76 @@ type Services struct {
 	Settings    *SettingsService
 	Uploads     *UploadService
 	Voice       *VoiceService
-	// Stickers is the custom sticker set, gated like Emoji. Nil when
-	// the store cannot hold stickers.
+	// Stickers is the custom sticker set, gated like Emoji; nil when the store cannot
+	// hold stickers.
 	Stickers *StickerService
-	// ChannelPrivacy is the channel-level private flag (3D-6).
+	// ChannelPrivacy is the channel-level private flag.
 	ChannelPrivacy *ChannelPrivacyService
 	Tokens         *TokenService
 	Sessions       *SessionService
 	Setup          *SetupService
-	// Erasure runs account erasure for the self-service route and the admin
-	// route alike; the composition root installs the upload storage
-	// on it and the maintenance loop resumes its unfinished jobs.
+	// Erasure runs account erasure for the self-service and admin routes; the
+	// composition root installs upload storage and the maintenance loop resumes its
+	// jobs.
 	Erasure *ErasureService
-	// Retention is the message-retention policy and sweep; the
-	// composition root installs the upload storage and the marker store.
+	// Retention is the message-retention policy and sweep; the composition root
+	// installs upload storage and the marker store.
 	Retention *RetentionService
-	// Auth is set by the composition root once the hub exists; the admin
-	// panel's owner-only recovery issuance shares it.
+	// Auth is set by the composition root once the hub exists; the admin panel's
+	// owner-only recovery issuance shares it.
 	Auth *AuthService
 	// Reports is the local report intake and moderator queue.
 	Reports *ReportService
 	// Appeals is the rate-limited appeal against a moderation action.
 	Appeals *AppealService
-	// Push stores Web Push subscriptions; the composition root
-	// installs the VAPID key and the staleness TTL on it. A pointer field
-	// so Services stays comparable (admin/services_bundle_test.go compares
-	// two *Services with `!=`).
+	// Push stores Web Push subscriptions; the composition root installs the VAPID key
+	// and the staleness TTL. A pointer so Services stays comparable
+	// (admin/services_bundle_test.go compares two *Services with `!=`).
 	Push *PushService
-	// MessageRequests is the first-contact gate and trusted-sender
-	// bookkeeping; Messages holds a pointer to it too
-	// (MessageService.SetMessageRequests), which is where the gate actually
-	// runs (service/message_crud.go's OpenDM accumulation).
+	// MessageRequests is the first-contact gate; Messages holds a pointer to it too
+	// (SetMessageRequests), which is where the gate runs (OpenDM accumulation in
+	// message_crud.go).
 	MessageRequests *MessageRequestService
-	// NSFW owns the per-user, per-channel acknowledgement row; the
-	// four content read paths (REST, search, socket, attachments) resolve it
-	// through permissions.CanReadContent.
+	// NSFW owns the per-user, per-channel acknowledgement row that the four content
+	// read paths (REST, search, socket, attachments) resolve through
+	// permissions.CanReadContent.
 	NSFW *NSFWService
-	// GIFFavorites is the per-user saved-GIF list (migration 059).
+	// GIFFavorites is the per-user saved-GIF list.
 	GIFFavorites *GIFFavoriteService
-	// UserNotes is the private per-user profile note (migration 069). It is nil
-	// when the Store does not also satisfy UserNoteStore (a test double), and
-	// the profile routes then leave the note routes out.
+	// UserNotes is the private per-user profile note; nil when the Store lacks
+	// UserNoteStore (a test double), and the profile routes then omit the note routes.
 	UserNotes *UserNoteService
-	// Privacy is the per-user DM privacy setting (migration 070). It is nil
-	// when the Store does not also satisfy PrivacyStore (a test double), and
-	// the profile routes then leave the privacy routes out.
+	// Privacy is the per-user DM privacy setting; nil when the Store lacks
+	// PrivacyStore (a test double), and the profile routes then omit the privacy
+	// routes.
 	Privacy *PrivacyService
-	// PushDispatch is Web Push dispatch, nil unless
-	// the composition root constructed it — which it does only when both
-	// push.enabled and push.dispatch_enabled are true. Exists on Services
-	// so the metrics route can read its counters; MessageService gets it
-	// separately, through SetPushNotifier.
+	// PushDispatch is Web Push dispatch, built only when both push.enabled and
+	// push.dispatch_enabled are true. It is on Services so the metrics route can read
+	// its counters; MessageService gets it through SetPushNotifier.
 	PushDispatch *PushDispatcher
-	// Attention is the admin attention panel's state, nil until the
-	// composition root builds it over the hub's counters.
+	// Attention is the admin attention panel's state, nil until the composition root
+	// builds it over the hub's counters.
 	Attention *AttentionService
-	// StatusExpiry clears custom statuses at their expiry. The composition
-	// root installs its notifier and runs it; ChannelService wakes it when a
-	// status with an expiry is set.
+	// StatusExpiry clears custom statuses at their expiry. The composition root
+	// installs its notifier and runs it; ChannelService wakes it on a status with an
+	// expiry.
 	StatusExpiry *CustomStatusExpirer
-	// PollExpiry ends polls at their expiry and tells the notifier. The
-	// composition root installs its notifier and runs it. It is nil when the
-	// Store does not also serve polls (a test double). MessageService wakes it
-	// when a poll is created.
+	// PollExpiry ends polls at their expiry and tells the notifier; the composition
+	// root installs the notifier and runs it. Nil when the Store does not serve polls
+	// (a test double). MessageService wakes it when a poll is created.
 	PollExpiry *PollExpirer
-	// CallLog writes the call log rows of DM calls from voice presence (WP
-	// 3B-9). The hub installs its sink; the composition root starts it.
+	// CallLog writes the call log rows of DM calls from voice presence. The hub
+	// installs its sink; the composition root starts it.
 	CallLog *CallLogService
-	// Threads owns thread create, update, delete and listing. The
-	// archiver and the hub share it.
+	// Threads owns thread create, update, delete and listing; the archiver and the
+	// hub share it.
 	Threads *ThreadService
-	// ThreadArchiver archives idle threads. The composition root
-	// installs its notifier and runs it.
+	// ThreadArchiver archives idle threads; the composition root installs its
+	// notifier and runs it.
 	ThreadArchiver *ThreadArchiver
-	// Welcome greets each new member in the admin-chosen channel. It
-	// is nil when the Store cannot insert the row (a test double); the
-	// composition root installs its notifier and shares it with AuthService.
+	// Welcome greets each new member in the admin-chosen channel; nil when the Store
+	// cannot insert the row (a test double). The composition root installs its
+	// notifier and shares it with AuthService.
 	Welcome *WelcomeService
 }
 
@@ -139,13 +131,12 @@ func New(st Store, limiter *auth.RateLimiter) *Services {
 	moderation.users = users
 	blocks := NewBlockService(st)
 	messages := NewMessageService(st, permSvc, limiter)
-	// The report-linked removal entry point (ActOnReport, kind="removal")
-	// needs MessageService's own authorization and effect — never a second
-	// copy of DeleteMessage's checks.
+	// The report-linked removal entry point needs MessageService's own authorization
+	// and effect, never a second copy of DeleteMessage's checks.
 	moderation.messages = messages
-	// Erasure must flush any queued mention-badge increment before its own
-	// reversal, or a message the subject sent inside the worker's coalesce
-	// window is reversed without its increment ever having landed (P5-O05).
+	// Erasure must flush any queued mention-badge increment before its own reversal,
+	// or a message sent inside the worker's coalesce window is reversed without its
+	// increment ever having landed.
 	erasure.flushMentions = messages.FlushAllPendingMentionCounts
 	messageRequests := NewMessageRequestService(st, blocks)
 	messages.SetMessageRequests(messageRequests)

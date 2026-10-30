@@ -8,17 +8,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ErrNotNSFW is returned when the caller tries to acknowledge a channel that
-// is not labelled — there is nothing to consent to. The api layer maps it to
-// its own 409 NOT_NSFW code rather than the generic CONFLICT.
+// ErrNotNSFW is returned when the caller tries to acknowledge a channel that is
+// not labelled (nothing to consent to). The api layer maps it to its own 409
+// NOT_NSFW rather than CONFLICT.
 var ErrNotNSFW = errors.New("channel is not labelled nsfw")
 
-// NSFWService owns the per-user, per-channel acknowledgement row (migration
-// 047): whether a channel's labelled content may reach a
-// given reader. See docs/architecture/community-services.md section S4 for
-// the abuse cases and data-ownership rules this backs, and
-// permissions.CanReadContent for the predicate every content path resolves
-// this row into.
+// NSFWService owns the per-user, per-channel acknowledgement row (migration 047):
+// whether a channel's labelled content may reach a reader. See
+// docs/architecture/community-services.md section S4;
+// permissions.CanReadContent is the predicate every content path resolves it into.
 type NSFWService struct {
 	st    Store
 	perms *PermissionService
@@ -29,12 +27,10 @@ func NewNSFWService(st Store, perms *PermissionService) *NSFWService {
 	return &NSFWService{st: st, perms: perms}
 }
 
-// checkVisible resolves channelID and asserts the caller may see it at all
-// (permissions.CanViewChannel — visibility, not content): the acknowledge/
-// revoke endpoints ask nothing more than the channel already answers to
-// every other visibility-gated surface (ready, the sidebar). A channel the
-// caller cannot see is reported as ErrNotFound, matching every other
-// visibility refusal in this package.
+// checkVisible resolves channelID and asserts the caller may see it
+// (permissions.CanViewChannel, visibility not content): acknowledge and revoke ask
+// no more than every other visibility-gated surface does. An invisible channel is
+// ErrNotFound.
 func (s *NSFWService) checkVisible(ctx context.Context, userID, channelID int64) error {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
@@ -56,25 +52,18 @@ func (s *NSFWService) checkVisible(ctx context.Context, userID, channelID int64)
 	return nil
 }
 
-// nsfwAcknowledgeRaceHook, when non-nil, runs once per Acknowledge call
-// immediately after checkVisible succeeds and immediately before the atomic
-// insert. Test-only (always nil in production): lets a test unlabel
-// the channel exactly in that window, reproducing the interleaving
-// deterministically instead of chasing a real goroutine race.
+// nsfwAcknowledgeRaceHook, when non-nil, runs in Acknowledge after checkVisible
+// and before the atomic insert. Test-only (nil in production): lets a test unlabel
+// the channel in exactly that window.
 var nsfwAcknowledgeRaceHook func()
 
 // Acknowledge records userID's consent to channelID's labelled content.
-// Idempotent (the underlying INSERT OR IGNORE): acknowledging twice succeeds
-// silently. Refuses ErrNotFound on an invisible channel and ErrNotNSFW on
-// one that is not labelled — there is nothing to acknowledge.
-//
-// The label check and the insert are ONE writer
-// transaction (db.AcknowledgeNSFW), so a relabel or unlabel landing between
-// a separate check and a separate insert can no longer make this trust
-// stale consent — and, unlike a rows-affected-only answer, "already
-// acknowledged" and "not labelled" can no longer be confused by a SEPARATE
-// disambiguating read racing a concurrent revoke: db.AcknowledgeNSFW answers
-// both questions from inside the one transaction that did the insert.
+// Idempotent (INSERT OR IGNORE). ErrNotFound on an invisible channel, ErrNotNSFW on
+// an unlabelled one.
+// The label check and insert are ONE writer transaction (db.AcknowledgeNSFW), so a
+// relabel between a separate check and insert cannot make this trust stale
+// consent, and "already acknowledged" cannot be confused with "not labelled" by a
+// separate read racing a revoke: both answers come from the one transaction.
 func (s *NSFWService) Acknowledge(ctx context.Context, userID, channelID int64) error {
 	if err := s.checkVisible(ctx, userID, channelID); err != nil {
 		return err
@@ -92,12 +81,10 @@ func (s *NSFWService) Acknowledge(ctx context.Context, userID, channelID int64) 
 	return nil
 }
 
-// Revoke deletes userID's acknowledgement of channelID, taking effect on the
-// caller's very next read. Idempotent: revoking a row that does not exist
-// (never acknowledged, or the channel was since unlabelled and its rows
-// already cleared) succeeds silently — there is no "not labelled" refusal
-// here, because revoking is safe regardless of the channel's current label
-// state. Still requires visibility (ErrNotFound), matching Acknowledge.
+// Revoke deletes userID's acknowledgement of channelID, effective on the caller's
+// next read. Idempotent: revoking a missing row (never acknowledged, or cleared by
+// an unlabel) succeeds silently, since revoking is safe whatever the channel's
+// label. Still requires visibility (ErrNotFound).
 func (s *NSFWService) Revoke(ctx context.Context, userID, channelID int64) error {
 	if err := s.checkVisible(ctx, userID, channelID); err != nil {
 		return err

@@ -19,10 +19,10 @@ import (
 // MessageRetryWindow bounds both client retry lifetime and server receipts.
 const MessageRetryWindow = 24 * time.Hour
 
-// messageDeliveryParams validates the immutable logical id. Embedding time in
-// the id lets the server safely reject old retries after receipt pruning.
-// Content is left empty: the caller fills in the sanitized text once the send
-// gates have run, since a receipt lookup does not need it.
+// messageDeliveryParams validates the immutable logical id. Embedding time in the
+// id lets the server reject old retries after receipt pruning. Content is left
+// empty: the caller fills in the sanitized text after the send gates, since a
+// receipt lookup does not need it.
 func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliveryParams, error) {
 	if p.ClientMessageID == "" {
 		return nil, nil
@@ -49,19 +49,13 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 		Content     string
 		ReplyTo     *int64
 		Attachments []string
-		// omitempty keeps a false ping hashing exactly as the struct did before
-		// the field existed, so receipts written earlier still match.
-		ReplyPing bool `json:",omitempty"`
-		// Same for the forwarded message's id: zero for every send
-		// that predates forwarding.
-		ForwardOf int64 `json:",omitempty"`
-		// And the canonical poll input: empty for every send that
-		// is not a poll_create, so older receipts hash the same.
-		Poll string `json:",omitempty"`
-		// And the forum post's title and tags.
+		// omitempty keeps a false ping hashing as before the field existed, so earlier
+		// receipts still match; the same holds for each field below.
+		ReplyPing bool   `json:",omitempty"`
+		ForwardOf int64  `json:",omitempty"`
+		Poll      string `json:",omitempty"`
 		ForumPost string `json:",omitempty"`
-		// And the sticker's id: zero for every other send.
-		StickerID int64 `json:",omitempty"`
+		StickerID int64  `json:",omitempty"`
 	}{p.ChannelID, p.Content, p.ReplyTo, attachments, p.ReplyPing, p.ForwardOf, p.Poll, p.ForumPost, p.StickerID})
 	if err != nil {
 		return nil, fmt.Errorf("%w: fingerprint message: %w", ErrInternal, err)
@@ -74,11 +68,10 @@ func messageDeliveryParams(p SendMessageParams, floorMS int64) (*db.MessageDeliv
 	}, nil
 }
 
-// answerSendRetry runs ahead of the channel, permission and content gates. A
-// retry of an accepted send is answered from its receipt: the message already
-// exists, so a permission change since then must not turn its acknowledgment
-// into a refusal. Otherwise it returns the parsed key, or nil for a
-// send without one.
+// answerSendRetry runs ahead of the channel, permission and content gates. A retry
+// of an accepted send is answered from its receipt: the message exists, so a later
+// permission change must not turn its acknowledgment into a refusal. Otherwise it
+// returns the parsed key, or nil for a send without one.
 func (s *MessageService) answerSendRetry(ctx context.Context, p SendMessageParams) (*db.MessageDeliveryParams, *SendMessageResult, error) {
 	if err := s.sendMessageRateGate(p); err != nil {
 		return nil, nil, err
@@ -113,8 +106,8 @@ func (s *MessageService) sendMessageRateGate(p SendMessageParams) error {
 }
 
 // errAllAttachmentsSkipped is the error for a send with no text whose every
-// attachment was skipped. It satisfies errors.Is for both ErrBadRequest (older
-// callers) and ErrAttachmentsUnavailable (the precise wire code).
+// attachment was skipped; it matches ErrBadRequest (older callers) and
+// ErrAttachmentsUnavailable (the precise wire code).
 func errAllAttachmentsSkipped() error {
 	return fmt.Errorf("%w: %w: none of the attachments could be sent", ErrBadRequest, ErrAttachmentsUnavailable)
 }
@@ -144,11 +137,11 @@ func skippedAttachmentIDs(requested, linked []string) []string {
 }
 
 // replaySkipped derives the skipped ids for a retry answered from a receipt.
-// Receipts do not store them: the payload hash binds the retry to the same
-// ordered id list, and a live message's attachment rows are never unlinked
-// while its receipt still answers, so requested minus linked is exact. A read
-// failure logs and returns nil, so the ack is the plain ack and never a false
-// "skipped" that would make the client re-attach files that did send.
+// Receipts do not store them: the payload hash binds the retry to the same ordered
+// id list and a live message's attachment rows are never unlinked while its
+// receipt answers, so requested minus linked is exact. A read failure logs and
+// returns nil, so the ack is plain and never a false "skipped" that would make the
+// client re-attach files that did send.
 func (s *MessageService) replaySkipped(ctx context.Context, p SendMessageParams, msgID int64) []string {
 	if len(p.AttachmentIDs) == 0 {
 		return nil
@@ -191,9 +184,9 @@ func messageDeliveryError(err error) error {
 	}
 }
 
-// persistMessage preserves the older send path for clients without a key.
-// Keyed sends commit attachment links with the receipt so a retry never sees
-// an accepted receipt for a message whose attachment ownership later fails.
+// persistMessage is the send path for clients without a key. Keyed sends commit
+// attachment links with the receipt so a retry never sees an accepted receipt for
+// a message whose attachment ownership later fails.
 func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams, content string, mentions mentionSet, delivery *db.MessageDeliveryParams) (*db.Message, []db.AttachmentInfo, []string, bool, error) {
 	if delivery == nil {
 		msg, err := s.st.CreateMessageWithMentions(ctx, p.ChannelID, p.UserID, content, p.ReplyTo, mentions.UserIDs, mentions.ReplyPingUserID, mentions.Everyone, mentions.RoleIDs)
@@ -221,9 +214,9 @@ func (s *MessageService) persistMessage(ctx context.Context, p SendMessageParams
 	return saved.Message, attachments[saved.Message.ID], skippedAttachmentIDs(p.AttachmentIDs, saved.LinkedAttachmentIDs), false, nil
 }
 
-// checkMessageSlowMode is charged only for a new send. A matching receipt
-// returns before it, as it does before the permission gates; only the general
-// rate limit runs for a retry.
+// checkMessageSlowMode is charged only for a new send: a matching receipt returns
+// before it, as before the permission gates; a retry meets only the general rate
+// limit.
 func (s *MessageService) checkMessageSlowMode(ctx context.Context, p SendMessageParams, ch *db.Channel) error {
 	if ch.Type != "dm" && ch.SlowMode > 0 && !s.perms.HasChannelPerm(ctx, p.UserID, p.ChannelID, permissions.ManageMessages) {
 		slowKey := auth.Key(auth.Key("slow", p.UserID), p.ChannelID)

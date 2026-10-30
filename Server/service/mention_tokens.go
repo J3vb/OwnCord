@@ -8,19 +8,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// mentionTokenRe finds every mention form in one pass. The first alternative is
-// the id form: "<@123>" (user, group 2 is the id) or "<@&5>" (role, group 1 is
-// "&"). It is tried first at each position so the "<" of "<@7>" is never taken
-// as the preceding character of a legacy @7 username token.
-//
-// The second alternative is the legacy @token that stands alone as a word.
-// Group 3 is the preceding character, which must be start-of-string or a
-// non-word non-@ rune ("mail@example" and "@@name" never resolve); group 4 is
-// the token; group 5 captures a trailing "@" so address-shaped text like
-// "@bob@example.com" is rejected as a whole rather than half-matched. The token
-// charset is letters, digits, underscore, dot and hyphen — usernames may hold
-// any printable rune, but only this subset is addressable without an explicit
-// delimiter.
+// mentionTokenRe finds every mention form in one pass. The first alternative is the
+// id form: "<@123>" (user, group 2 the id) or "<@&5>" (role, group 1 is "&"),
+// tried first at each position so the "<" of "<@7>" is never the preceding
+// character of a legacy @7 token.
+// The second alternative is the legacy @token standing alone as a word. Group 3 is
+// the preceding character, which must be start-of-string or a non-word non-@ rune
+// ("mail@example" and "@@name" never resolve); group 4 is the token; group 5
+// captures a trailing "@" so "@bob@example.com" is rejected whole. The token
+// charset is letters, digits, underscore, dot and hyphen: usernames may hold any
+// printable rune, but only this subset is addressable without a delimiter.
 var mentionTokenRe = regexp.MustCompile(`<@(&?)([0-9]{1,18})>|(^|[^\p{L}\p{N}_@])@([\p{L}\p{N}_.-]{1,64})(@?)`)
 
 // mentionCandidate is one @token and the username spellings it may resolve to,

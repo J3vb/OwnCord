@@ -9,9 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// threadChangedInterval is the window the thread_changed coalescer holds a
-// thread to: at most one frame per thread per window. A var so tests can
-// shorten it.
+// threadChangedInterval is the window the thread_changed coalescer holds a thread
+// to: at most one frame per thread per window. A var so tests can shorten it.
 var threadChangedInterval = 2 * time.Second
 
 // threadFlushTimeout bounds one flush's database read.
@@ -24,9 +23,8 @@ type threadNote struct {
 	deleted  bool
 }
 
-// ThreadNoteEvent feeds the thread_changed coalescer. It is deliberately not a
-// ChannelEvent: nothing is sequenced when it is emitted, the coalescer
-// sequences the frame when it flushes.
+// ThreadNoteEvent feeds the thread_changed coalescer. Not a ChannelEvent: nothing is
+// sequenced on emit; the coalescer sequences the frame when it flushes.
 type ThreadNoteEvent interface {
 	Event
 	ThreadNote() threadNote
@@ -155,18 +153,17 @@ func (h *Hub) flushThreadChanged(threadID int64, e *threadTimer) {
 // land an unfollow or a delete in exactly that window.
 var threadFollowBeforeSendHook func()
 
-// sendThreadFollowUpdates tells each connected follower of t that they follow
-// it, with its current state, so a rename, archive, lock or new message reaches
-// the sidebar row of a client that did not hear thread_changed (its parent is
-// not the focused channel), and a user a post just made a follower hears it
-// from the flush that post raised. A follower is only a candidate: it must also
-// be in the parent's read audience (and have acknowledged an NSFW parent), so a
-// user who lost the parent hears nothing and the follow row stays for when they
-// regain it. The audience read is not atomic with the send, so the entry is
-// checked live and the followers read again after it: an unfollow or a delete
-// that committed meanwhile has already sent its own following:false, and this
-// frame must not follow it. A failed read drops the frames, since ready is
-// authoritative.
+// sendThreadFollowUpdates tells each connected follower of t that they follow it,
+// with its current state, so a rename, archive, lock or new message reaches the
+// sidebar row of a client that did not hear thread_changed (its parent is not the
+// focused channel), and a user a post just made a follower hears it. A follower is
+// only a candidate: it must also be in the parent's read audience (and have
+// acknowledged an NSFW parent), so a user who lost the parent hears nothing and the
+// follow row stays for when they regain it. The audience read is not atomic with the
+// send, so the entry is checked live and the followers read again after it: an
+// unfollow or delete that committed meanwhile has already sent its own
+// following:false, and this frame must not follow it. A failed read drops the
+// frames, since ready is authoritative.
 func (h *Hub) sendThreadFollowUpdates(ctx context.Context, t *service.ThreadInfo, e *threadTimer) {
 	audience, forumScoped := h.threadFollowAudience(ctx, t)
 	if len(audience) == 0 {

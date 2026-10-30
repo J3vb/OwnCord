@@ -15,9 +15,9 @@ import (
 // new member. A missing or blank row means welcome messages are off.
 const WelcomeChannelKey = "welcome_channel_id"
 
-// WelcomeStore is the slice of the database the welcome writer adds to Store:
-// the insert of the welcome row. *db.DB satisfies it. It is a slice interface
-// declared here so Store, whose size is pinned, does not grow.
+// WelcomeStore is the slice of the database the welcome writer adds to Store: the
+// insert of the welcome row. *db.DB satisfies it; declared here so Store, whose
+// size is pinned, does not grow.
 type WelcomeStore interface {
 	InsertWelcomeRow(ctx context.Context, channelID, userID int64, content string) (*db.WelcomeRow, error)
 }
@@ -39,9 +39,9 @@ type WelcomeNotifier interface {
 	WelcomeRow(ctx context.Context, res *WelcomeResult)
 }
 
-// WelcomeService writes the line that greets a new member in the channel the
-// admin picked. Everything it does is best effort: a failure is
-// logged and never reaches the registration or approval that triggered it.
+// WelcomeService writes the line greeting a new member in the admin-picked
+// channel. All best effort: a failure is logged and never reaches the registration
+// or approval that triggered it.
 type WelcomeService struct {
 	st       Store
 	store    WelcomeStore
@@ -82,12 +82,11 @@ func WelcomeChannelID(stored string) int64 {
 // responses on a context detached from the request.
 const welcomeTimeout = 5 * time.Second
 
-// Greet writes the welcome row for userID, who has just become a usable
-// member, and delivers it. It returns nothing: with no channel picked, a
-// channel that is gone, archived or not a text channel, or any store fault,
-// nothing is written and a registration is never failed. It runs on a context
-// detached from ctx, so a caller that dropped after the account committed
-// still gets its welcome; welcomeTimeout bounds it.
+// Greet writes the welcome row for userID, who just became a usable member, and
+// delivers it. It returns nothing: with no channel picked, a channel that is gone,
+// archived or not text, or any store fault, nothing is written and a registration
+// is never failed. It runs on a context detached from ctx so a caller that dropped
+// after the account committed still gets its welcome; welcomeTimeout bounds it.
 func (s *WelcomeService) Greet(ctx context.Context, userID int64) {
 	if s == nil {
 		return
