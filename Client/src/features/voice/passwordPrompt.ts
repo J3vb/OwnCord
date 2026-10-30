@@ -7,7 +7,7 @@ import { uiStore } from "../../stores/ui.store";
 import { registerSessionReset } from "../../lib/sessionRegistry";
 import { showToast } from "../../lib/toast";
 import { createLogger } from "../../lib/logger";
-import type { MountableComponent } from "../../lib/safe-render";
+import type { MountableComponent } from "../../lib/text/safeRender";
 import type { PasswordProblem } from "../../components/ChannelPasswordDialog";
 import type { DispatchWs } from "../connection/dispatchContext";
 import { joinBackoffText } from "./joinBackoffText";
