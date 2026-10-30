@@ -30,6 +30,7 @@ const a = accountText;
 export type SearchableTab =
   | "Account"
   | "Safety"
+  | "My uploads"
   | "Appearance"
   | "Accessibility"
   | "Voice & Video"
@@ -66,6 +67,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     a("delete.description"),
   ],
   Safety: () => [],
+  "My uploads": () => [s("uploads.intro"), s("uploads.sort.newest"), s("uploads.sort.largest")],
   Appearance: () => [
     s("appearance.theme"),
     s("appearance.fontSize"),

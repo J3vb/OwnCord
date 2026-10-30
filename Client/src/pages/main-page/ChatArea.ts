@@ -15,7 +15,10 @@ import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
 import { createMediaGalleryController } from "./MediaGalleryController";
-import type { MessageDeleteSubscriber } from "./MediaGalleryController";
+import type {
+  MessageAttachmentsSubscriber,
+  MessageDeleteSubscriber,
+} from "./MediaGalleryController";
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "./MessageJump";
 import { setMessageJumpHandler } from "@lib/nav/messageNavigation";
@@ -45,6 +48,8 @@ export interface ChatAreaOptions {
   readonly onRenameGroup?: () => void;
   /** Deleted-message events, so an open media gallery drops their items. */
   readonly subscribeDeletes: MessageDeleteSubscriber;
+  /** Edits that removed files from a message, for the same gallery. */
+  readonly subscribeAttachments?: MessageAttachmentsSubscriber;
 }
 
 export interface ChatAreaResult {
@@ -137,6 +142,9 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     getRoot,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
     subscribeDeletes: opts.subscribeDeletes,
+    ...(opts.subscribeAttachments === undefined
+      ? {}
+      : { subscribeAttachments: opts.subscribeAttachments }),
     onJumpToMessage: (channelId: number, msgId: number) => {
       void jumper.jumpTo(channelId, msgId);
     },

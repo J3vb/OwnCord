@@ -52,7 +52,7 @@ export interface UiState {
 }
 
 /** Settings tabs another surface may open directly. */
-export type SettingsTabRequest = "Account" | "Safety" | "About" | "Notifications";
+export type SettingsTabRequest = "Account" | "Safety" | "My uploads" | "About" | "Notifications";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind:
