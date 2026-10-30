@@ -285,3 +285,13 @@
 .server-rail-join-actions .btn {
   flex: 1;
 }
+
+/* Switch question */
+.server-switch-dont-ask {
+  margin-top: 12px;
+}
+@media (pointer: coarse) {
+  .server-switch-dont-ask {
+    min-height: 44px;
+  }
+}

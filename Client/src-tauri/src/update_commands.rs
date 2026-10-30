@@ -6,10 +6,15 @@ use std::sync::{
 };
 use std::time::Duration;
 use tauri::utils::{config::BundleType, platform::bundle_type};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
+#[cfg(desktop)]
+use tauri::Emitter;
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::tofu::{cert_store_key, load_stored_fingerprint, HostScopedVerifier};
+
+#[cfg(target_os = "android")]
+pub(crate) mod android;
 
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const UPDATE_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -24,6 +29,7 @@ static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 // `ShellExecuteW` waits for the installer, so the single-instance callback must
 // stop restoring the old window for any forwarded launch (shortcut click,
 // owncord:// link, autostart): doing so puts the old UI back for the whole gap.
+#[cfg(desktop)]
 static INSTALLER_LAUNCHING: AtomicBool = AtomicBool::new(false);
 
 /// True while `install()` runs (on Windows, until the process exits). Read by the
@@ -56,6 +62,7 @@ impl<'a> InstallGuard<'a> {
         })
     }
 
+    #[cfg(desktop)]
     pub(crate) fn installed(mut self) {
         // Linux returns after replacing the AppImage, before the frontend
         // relaunches. Its running version is still old in that interval, so
@@ -145,6 +152,20 @@ fn build_tls_config(
     }
 }
 
+/// The release suffix of the Android APK, and the updater target that names it
+/// (`Server/updater/assets.go` clientAssetSuffixByTarget). Android has no
+/// target or bundle type the updater plugin knows, so the app sets the whole
+/// target itself and the endpoint carries it as one segment.
+#[cfg(any(test, target_os = "android"))]
+const ANDROID_APK_SUFFIX: &str = "_arm64.apk";
+#[cfg(target_os = "android")]
+const ANDROID_UPDATE_TARGET: &str = "android-aarch64-apk";
+
+#[cfg(not(target_os = "android"))]
+const ENDPOINT_TARGET: &str = "{{target}}-{{arch}}-{{bundle_type}}";
+#[cfg(target_os = "android")]
+const ENDPOINT_TARGET: &str = "{{target}}";
+
 /// Tauri updater endpoint on the given server. `{{target}}-{{arch}}-{{bundle_type}}`
 /// (expanded by the updater plugin to e.g. "windows-x86_64-nsis") must match
 /// the `{os}-{arch}-{installer}` key the plugin looks up FIRST in the response
@@ -163,8 +184,9 @@ fn build_update_endpoint(server_url: &str, current_version: &str, deb_opt_in: bo
         ""
     };
     format!(
-        "{}/api/v1/client-update/{{{{target}}}}-{{{{arch}}}}-{{{{bundle_type}}}}/{}{}",
+        "{}/api/v1/client-update/{}/{}{}",
         server_url.trim_end_matches('/'),
+        ENDPOINT_TARGET,
         current_version,
         query,
     )
@@ -231,28 +253,29 @@ fn build_updater(app: &AppHandle, server_url: &str) -> Result<BuiltUpdater, Stri
     // for CA-signed servers. Never blindly accept invalid certs.
     let tls_config = build_tls_config(app, server_url)?;
     let answered = Arc::new(AtomicBool::new(false));
-    let updater = track_offers(
-        app.updater_builder()
-            .pubkey(updater_public_key(app)?)
-            .endpoints(vec![url])
-            .map_err(|e| format!("failed to set endpoints: {e}"))?,
-        &answered,
-    )
-    .configure_client(move |client| {
-        // This callback applies to both metadata checks and downloads.
-        // UpdaterBuilder::timeout only bounds checks through updater 2.13;
-        // its returned Update has no timeout. Bound idle reads instead
-        // of total download time so slow, progressing downloads finish.
-        let client = client
-            .connect_timeout(UPDATE_CONNECT_TIMEOUT)
-            .read_timeout(UPDATE_READ_TIMEOUT);
-        match &tls_config {
-            Some(config) => client.use_preconfigured_tls(config.clone()),
-            None => client,
-        }
-    })
-    .build()
-    .map_err(|e| format!("failed to build updater: {e}"))?;
+    let builder = app
+        .updater_builder()
+        .pubkey(updater_public_key(app)?)
+        .endpoints(vec![url])
+        .map_err(|e| format!("failed to set endpoints: {e}"))?;
+    #[cfg(target_os = "android")]
+    let builder = android::configure(app, builder)?;
+    let updater = track_offers(builder, &answered)
+        .configure_client(move |client| {
+            // This callback applies to both metadata checks and downloads.
+            // UpdaterBuilder::timeout only bounds checks through updater 2.13;
+            // its returned Update has no timeout. Bound idle reads instead
+            // of total download time so slow, progressing downloads finish.
+            let client = client
+                .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+                .read_timeout(UPDATE_READ_TIMEOUT);
+            match &tls_config {
+                Some(config) => client.use_preconfigured_tls(config.clone()),
+                None => client,
+            }
+        })
+        .build()
+        .map_err(|e| format!("failed to build updater: {e}"))?;
     Ok(BuiltUpdater {
         updater,
         deb_ready,
@@ -459,16 +482,10 @@ fn is_bare_artifact_name(name: &str) -> bool {
             .any(|c| c.is_control() || matches!(c, '/' | '\\' | '?' | '#'))
 }
 
-/// Authenticate the signed name before interpreting its target. The plugin
-/// exposes the encoded signature, but not its verified trusted comment, so
-/// use its verifier and trust anchor again, including the global signature.
-fn verify_artifact_target(
-    bytes: &[u8],
-    signature: &str,
-    pubkey: &str,
-    target: &str,
-    bundle: &BundleType,
-) -> Result<(), String> {
+/// The artifact name the signature authenticates. The plugin exposes the
+/// encoded signature, but not its verified trusted comment, so use its verifier
+/// and trust anchor again, including the global signature.
+fn signed_artifact_name(bytes: &[u8], signature: &str, pubkey: &str) -> Result<String, String> {
     let decode = |encoded: &str| -> Result<String, String> {
         let decoded = STANDARD.decode(encoded).map_err(|e| e.to_string())?;
         String::from_utf8(decoded).map_err(|e| e.to_string())
@@ -491,6 +508,19 @@ fn verify_artifact_target(
     if files.next().is_some() || !is_bare_artifact_name(filename) {
         return Err("signed update has an invalid artifact name".into());
     }
+    Ok(filename.to_string())
+}
+
+/// Authenticate the signed name before interpreting its target.
+#[cfg(desktop)]
+fn verify_artifact_target(
+    bytes: &[u8],
+    signature: &str,
+    pubkey: &str,
+    target: &str,
+    bundle: &BundleType,
+) -> Result<(), String> {
+    let filename = signed_artifact_name(bytes, signature, pubkey)?;
     let lower = filename.to_ascii_lowercase();
     let matches_bundle = match bundle {
         BundleType::AppImage => lower.ends_with(".appimage.tar.gz"),
@@ -501,7 +531,18 @@ fn verify_artifact_target(
         // OwnCord publishes no updater artifact for any other bundle.
         _ => false,
     };
-    if !matches_bundle || !artifact_matches_target(filename, target) {
+    if !matches_bundle || !artifact_matches_target(&filename, target) {
+        return Err("signed update artifact is not built for this machine".into());
+    }
+    Ok(())
+}
+
+/// The Android twin of `verify_artifact_target`: only the signed arm64 APK may
+/// reach the package installer.
+#[cfg(any(test, target_os = "android"))]
+fn verify_apk_artifact(bytes: &[u8], signature: &str, pubkey: &str) -> Result<(), String> {
+    let filename = signed_artifact_name(bytes, signature, pubkey)?;
+    if !filename.to_ascii_lowercase().ends_with(ANDROID_APK_SUFFIX) {
         return Err("signed update artifact is not built for this machine".into());
     }
     Ok(())
@@ -509,6 +550,7 @@ fn verify_artifact_target(
 
 /// Keep the plugin's signature/version checks before the authenticated target
 /// check, and return bytes to the installer only after both checks succeed.
+#[cfg(desktop)]
 async fn download_for_target<C: FnMut(usize, Option<u64>)>(
     update: &tauri_plugin_updater::Update,
     pubkey: &str,
@@ -527,6 +569,8 @@ async fn download_for_target<C: FnMut(usize, Option<u64>)>(
 
 /// Download and install a pending update. Windows exits through its installer;
 /// on Linux/macOS the frontend must call `relaunch()` after this completes.
+/// Android has its own command (`android::download_and_install_update`).
+#[cfg(desktop)]
 #[tauri::command]
 pub async fn download_and_install_update(app: AppHandle, server_url: String) -> Result<(), String> {
     let install_guard = InstallGuard::acquire(&UPDATE_IN_PROGRESS)?;
@@ -906,6 +950,37 @@ mod tests {
     fn target_fixtures() -> serde_json::Value {
         serde_json::from_str(include_str!("update_commands/target-fixtures.json"))
             .expect("signed target fixtures")
+    }
+
+    // Same kind of fixtures as target-fixtures.json for the Android APK: one
+    // ephemeral key (private half discarded) signing FIXTURE_PAYLOAD as
+    // OwnCord_99.0.0_arm64.apk and as an AppImage archive.
+    fn apk_fixtures() -> serde_json::Value {
+        serde_json::from_str(include_str!("update_commands/apk-fixtures.json"))
+            .expect("signed apk fixtures")
+    }
+
+    #[test]
+    fn only_the_signed_arm64_apk_reaches_the_android_installer() {
+        let fixtures = apk_fixtures();
+        let pubkey = fixtures["pubkey"].as_str().unwrap();
+        let apk = fixtures["apk"].as_str().unwrap();
+        assert_eq!(verify_apk_artifact(FIXTURE_PAYLOAD, apk, pubkey), Ok(()));
+        assert_eq!(
+            verify_apk_artifact(
+                FIXTURE_PAYLOAD,
+                fixtures["appimage"].as_str().unwrap(),
+                pubkey
+            ),
+            Err("signed update artifact is not built for this machine".into())
+        );
+        assert!(verify_apk_artifact(b"changed payload", apk, pubkey).is_err());
+        assert!(verify_apk_artifact(FIXTURE_PAYLOAD, apk, FIXTURE_PUBKEY).is_err());
+
+        let renamed = String::from_utf8(STANDARD.decode(apk).unwrap())
+            .unwrap()
+            .replace("_arm64.apk", "_x64.apk");
+        assert!(verify_apk_artifact(FIXTURE_PAYLOAD, &STANDARD.encode(renamed), pubkey).is_err());
     }
 
     #[tokio::test]

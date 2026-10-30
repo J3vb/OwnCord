@@ -43,4 +43,8 @@ export const serverRailText = defineCatalog("serverRail", {
   joinPlaceholder: "owncord://invite/…",
   joinConfirm: "Continue",
   joinInvalid: "That isn't a valid invite link.",
+  switchTitle: "Switch to {name}?",
+  switchBody: "You'll leave this server, including any voice call you're in.",
+  switchConfirm: "Switch",
+  switchDontAsk: "Don't ask again",
 });

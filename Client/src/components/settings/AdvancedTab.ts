@@ -19,6 +19,10 @@ import { removeStored, storedKeys } from "@lib/prefs/preferences";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
 import { settingsText as t } from "../../i18n/settings";
+import {
+  CONFIRM_SERVER_SWITCH_DEFAULT,
+  CONFIRM_SERVER_SWITCH_PREF,
+} from "../../features/server-rail/switchConfirmPref";
 
 const log = createLogger("AdvancedTab");
 const IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS = 1000;
@@ -39,6 +43,12 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
       label: t("advanced.developerMode.label"),
       desc: t("advanced.developerMode.desc"),
       fallback: false,
+    },
+    {
+      key: CONFIRM_SERVER_SWITCH_PREF,
+      label: t("advanced.confirmServerSwitch.label"),
+      desc: t("advanced.confirmServerSwitch.desc"),
+      fallback: CONFIRM_SERVER_SWITCH_DEFAULT,
     },
   ];
 

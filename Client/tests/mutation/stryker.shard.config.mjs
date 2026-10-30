@@ -299,6 +299,8 @@ export const shards = {
     "src/lib/dmUnread.ts",
     "src/features/server-rail/joinInvite.ts",
     "src/features/server-rail/switchServer.ts",
+    "src/features/server-rail/switchConfirmPref.ts",
+    "src/features/server-rail/switchConfirmDialog.ts",
     "src/lib/ui/imageHeader.ts",
     "src/features/channels/categoryActions.ts",
     "src/features/channels/collapsedMigration.ts",
