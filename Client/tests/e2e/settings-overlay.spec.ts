@@ -285,10 +285,10 @@ test.describe("Settings — Voice & Video Tab", () => {
     expect(failures).toEqual([]);
   });
 
-  test("offers the video codec choice with VP8 as the default", async ({ page }) => {
+  test("offers the video codec choice with Auto as the default", async ({ page }) => {
     const codec = page.getByRole("combobox", { name: "Video Codec" });
     await expect(codec).toBeVisible();
-    await expect(codec).toHaveValue("vp8");
+    await expect(codec).toHaveValue("auto");
     await expect(codec.locator("option")).toHaveText([
       "VP8 (most compatible)",
       "H.264 (uses your graphics card when it can)",
