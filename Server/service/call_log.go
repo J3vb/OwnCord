@@ -23,8 +23,7 @@ const (
 )
 
 // CallLogStore is the data access the call log worker needs beyond the reads
-// the rest of Store already offers (channel, voice states, DM delivery
-// targets, user and role). *db.DB satisfies it; Store embeds it.
+// Store already offers. *db.DB satisfies it; Store embeds it.
 type CallLogStore interface {
 	CreateCallLog(ctx context.Context, p db.CallLogParams) (*db.CallLogRow, error)
 	EndCall(ctx context.Context, messageID int64, endedAt, content string) (bool, error)
@@ -65,10 +64,10 @@ type callLogPending struct {
 	lastLeave time.Time
 }
 
-// CallLogService derives one message row per DM call from voice presence.
-// Voice joins and leaves only post notes; a single worker goroutine
-// owns every write and reconciles the voice_states rows of a channel with its
-// live call row, so a missed note heals on the next pass.
+// CallLogService derives one message row per DM call from voice presence. Joins
+// and leaves only post notes; a single worker goroutine owns every write and
+// reconciles a channel's voice_states rows with its live call row, so a missed
+// note heals on the next pass.
 type CallLogService struct {
 	st   Store
 	dms  *DMService
@@ -91,11 +90,10 @@ type CallLogService struct {
 	dirty      map[int64]*callLogPending
 	emptySince map[int64]time.Time
 	suppressed map[int64]struct{}
-	// retryAt and retryDelay back a channel off after a failed reconcile, so a
-	// store that keeps failing is retried on a growing delay instead of in a
-	// tight loop. recorded holds the participants already written for a live
-	// call (by message id), so an unchanged room costs no write, and audiences
-	// the audience a call's start went to, so its end reaches the same people.
+	// retryAt and retryDelay back a channel off after a failed reconcile (growing
+	// delay, no tight loop). recorded holds the participants already written for a
+	// live call (by message id) so an unchanged room costs no write; audiences holds
+	// the audience a call's start went to so its end reaches the same people.
 	retryAt    map[int64]time.Time
 	retryDelay map[int64]time.Duration
 	recorded   map[int64]map[int64]struct{}
@@ -140,9 +138,8 @@ func (s *CallLogService) loadSink() CallLogSink {
 	return nil
 }
 
-// NoteJoin records that userID completed a voice join into channelID at the
-// given time. It never blocks and does no I/O. The channel type is decided by
-// the worker, which drops anything that is not a DM.
+// NoteJoin records that userID completed a voice join into channelID at the given
+// time. It never blocks and does no I/O; the worker drops anything not a DM.
 func (s *CallLogService) NoteJoin(channelID, userID int64, at time.Time) {
 	if s == nil {
 		return

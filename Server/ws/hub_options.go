@@ -17,133 +17,105 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// HubOptions carries everything a Hub needs before Run starts.
-// The four pre-Run setters this struct replaced (SetLiveKit,
-// SetLiveKitProcess, SetPluginRegistry, ConfigureReplay) were all guarded by
-// rejectIfRunning — construction-phase wiring pretending to be mutable state.
-// What genuinely IS mutable after Run stays a setter: the event persister,
-// event store and plugin event sink are atomic hot-swaps that the app wires
-// after the dispatch loop starts (internal/app/persistence.go), and
-// SetPendingVoiceModFlags is per-user runtime state.
+// HubOptions carries everything a Hub needs before Run starts. What is mutable
+// after Run stays a setter: the event persister, event store and plugin event sink
+// are atomic hot-swaps wired after the dispatch loop starts
+// (internal/app/persistence.go), and SetPendingVoiceModFlags is per-user runtime state.
 type HubOptions struct {
-	// DB and Limiter are required: every dispatch path reads the database,
-	// and the handler deps capture the limiter at registration. NewHub
-	// refuses to build a Hub without them.
+	// DB and Limiter are required: every dispatch path reads the database and the
+	// handler deps capture the limiter at registration. NewHub refuses to build without them.
 	DB      *db.DB
 	Limiter *auth.RateLimiter
 
-	// Services is the domain layer V2 handlers delegate to. Production
-	// always passes it; nil is the degraded fixture many ws tests build,
-	// where handlers keep their direct-DB fallback paths.
+	// Services is the domain layer V2 handlers delegate to. Production always passes
+	// it; nil is the degraded test fixture whose handlers keep their direct-DB fallbacks.
 	Services *service.Services
 
-	// Settings is required: the hub's settings cache (server name and MOTD
-	// on every auth_ok) reads through it instead of the raw handle — the
-	// settings family owns those reads. Production passes
-	// Services.Settings; test helpers default it over the test database.
+	// Settings is required: the settings cache (server name and MOTD on every auth_ok)
+	// reads through it. Production passes Services.Settings; test helpers default it
+	// over the test database.
 	Settings SettingsReader
 
-	// Readers is required: the hub's snapshot, visibility, member-payload
-	// and dispatch reads go through these seams (readers.go) instead of the
-	// raw handle. Production wires DBReaders; test helpers default it over
-	// the test database.
+	// Readers is required: snapshot, visibility, member-payload and dispatch reads go
+	// through these seams (readers.go). Production wires DBReaders; test helpers
+	// default it.
 	Readers HubReaders
 
-	// Voice is required: every voice_states read and write the hub makes —
-	// join, moderation, self controls, the stale sweep and channel teardown
-	// — goes through it. Production passes Services.Voice; test helpers
-	// default it to a service over the test database.
+	// Voice is required: every voice_states read and write the hub makes goes through
+	// it. Production passes Services.Voice; test helpers default it.
 	Voice VoiceStore
 
-	// Presence is required: the connection lifecycle's two status writes.
-	// Production passes Services.Users; test helpers default it to a service
-	// over the test database.
+	// Presence is required: the connection lifecycle's two status writes. Production
+	// passes Services.Users.
 	Presence PresenceStamper
 
-	// Auth is required: the handshake resolves its bearer token through it,
-	// and the periodic sweep asks it whether each live session is still good.
-	// Production passes Services.Sessions; test helpers default it over the
-	// test database.
+	// Auth is required: the handshake resolves its bearer token through it and the
+	// sweep asks whether each live session is still good. Production passes
+	// Services.Sessions.
 	Auth SocketAuthenticator
 
-	// ChannelPrivacy backs the channel-level private flag on channel frames.
-	// Optional: nil means nothing is private. Production passes
-	// Services.ChannelPrivacy; test helpers default it over the test database.
+	// ChannelPrivacy backs the channel-level private flag on channel frames. Optional:
+	// nil means nothing is private. Production passes Services.ChannelPrivacy.
 	ChannelPrivacy ChannelPrivacy
 
-	// LiveKit is the voice token signer; nil means voice is not configured
-	// and every voice join is refused. LiveKitProcess is the supervised
-	// companion SFU — it requires LiveKit, because a process no client can
-	// sign tokens for is unusable, and the voice_join guard reads a non-nil
-	// process's IsRunning to fail closed while it is down.
+	// LiveKit is the voice token signer; nil means voice is not configured and every
+	// voice join is refused. LiveKitProcess is the supervised companion SFU; it
+	// requires LiveKit (a process no client can sign tokens for is unusable), and the
+	// voice_join guard reads a non-nil process's IsRunning to fail closed while down.
 	LiveKit        *LiveKitClient
 	LiveKitProcess *LiveKitProcess
 
-	// PluginRegistry enables plugin slash-command dispatch; nil disables it.
-	// The plugin event sink is NOT here: it consumes the built hub's
-	// broadcaster, so it stays the two-phase SetPluginEventSink.
+	// PluginRegistry enables plugin slash-command dispatch; nil disables it. The
+	// plugin event sink consumes the built hub's broadcaster, so it stays the
+	// two-phase SetPluginEventSink.
 	PluginRegistry *plugin.Registry
 
-	// Replay budget (event_persistence.replay_ring_size / replay_cold_limit).
-	// Zero keeps the compiled-in defaults; negative is refused rather than
-	// silently ignored.
+	// Replay budget (event_persistence.replay_ring_size / replay_cold_limit). Zero
+	// keeps the defaults; negative is refused.
 	ReplayRingSize  int
 	ReplayColdLimit int
 
-	// VoiceQuality is the operator-configured voice.quality (cfg.Voice.Quality)
-	// — voice_join's only source of a channel's quality. Startup-only, like
-	// the rest of this struct: the setup wizard already treats voice.quality
-	// as restart-required. Empty or not one of voiceQualities' keys falls back
-	// to "medium".
+	// VoiceQuality is the operator-configured voice.quality, voice_join's only source of
+	// a channel's quality. Startup-only (the setup wizard treats it as
+	// restart-required). Empty or not one of voiceQualities' keys falls back to "medium".
 	VoiceQuality string
 
-	// UploadPolicy is advertised on every auth_ok as upload_policy.
-	// Startup-only, like voice.quality.
+	// UploadPolicy is advertised on every auth_ok as upload_policy. Startup-only.
 	UploadPolicy UploadPolicy
 
-	// UploadFileTypes supplies upload_policy's two extension lists, read with
-	// the server_name/motd cache. Nil leaves them out.
+	// UploadFileTypes supplies upload_policy's two extension lists, read with the
+	// server_name/motd cache. Nil leaves them out.
 	UploadFileTypes UploadFileTypes
 
 	// TrustedProxies is server.trusted_proxies: the proxy hop(s) whose
-	// X-Forwarded-For/X-Real-IP may be trusted when resolving the client
-	// address for the handshake log and the ws_connect audit row.
-	// Parsed once at construction; nil/empty means RemoteAddr is used and a
-	// client-supplied header is ignored.
+	// X-Forwarded-For/X-Real-IP may be trusted when resolving the client address for the
+	// handshake log and ws_connect audit row. Parsed once; nil/empty means RemoteAddr
+	// is used and a client-supplied header is ignored.
 	TrustedProxies []string
 }
 
-// UploadPolicy is what a client needs to refuse a doomed upload before
-// sending it. The upload route stays authoritative; this is only the
-// client's pre-check.
+// UploadPolicy is what a client needs to refuse a doomed upload before sending it.
+// The upload route stays authoritative; this is only a pre-check.
 type UploadPolicy struct {
-	// MaxUploadBytes is upload.max_size_mb in bytes. 0 means uploads are
-	// disabled: the upload route refuses every non-empty file.
+	// MaxUploadBytes is upload.max_size_mb in bytes; 0 means uploads are disabled.
 	MaxUploadBytes int64 `json:"max_upload_bytes"`
-	// BlockedExtensions and AllowedExtensions are the file-type policy in
-	// force (storage.FileTypePolicy): a blocked final extension is refused,
-	// and a non-empty allowed list is allow-only mode.
+	// BlockedExtensions and AllowedExtensions are the file-type policy in force
+	// (storage.FileTypePolicy): a blocked final extension is refused; a non-empty
+	// allowed list is allow-only mode.
 	BlockedExtensions []string `json:"blocked_extensions,omitempty"`
 	AllowedExtensions []string `json:"allowed_extensions,omitempty"`
-	// Thumbnails reports that GET /api/v1/files/{id}/thumb exists, so a
-	// client asks for an inline image's thumbnail instead of the original.
+	// Thumbnails reports that GET /api/v1/files/{id}/thumb exists, so a client asks for an
+	// inline image's thumbnail instead of the original.
 	Thumbnails bool `json:"thumbnails,omitempty"`
 }
 
-// UploadFileTypes reads the upload file-type policy in force;
-// service.UploadService satisfies it.
+// UploadFileTypes reads the upload file-type policy in force; service.UploadService satisfies it.
 type UploadFileTypes interface {
 	FileTypePolicy(ctx context.Context) (storage.FileTypePolicy, error)
 }
 
-// NewHub creates a Hub ready to be started with Run, validating that the
-// required collaborators are present — construction used to always
-// succeeded and a missing collaborator surfaced as a later panic or a
-// silently refused setter call. It also initializes the settings cache from
-// the database. If opts.Services is non-nil, V2 handlers receive service
-// references for business logic delegation.
-// validateHubOptions is NewHub's required-collaborator gate, split out so
-// the constructor body stays within the function-length lint bound.
+// validateHubOptions is NewHub's required-collaborator gate, split out to keep the
+// constructor within the function-length lint bound.
 func validateHubOptions(opts HubOptions) error {
 	if opts.DB == nil {
 		return errors.New("ws: HubOptions.DB is required (every dispatch path reads it)")
@@ -175,6 +147,10 @@ func validateHubOptions(opts HubOptions) error {
 	return nil
 }
 
+// NewHub creates a Hub ready to be started with Run, validating that the
+// required collaborators are present, and initializes the settings cache from
+// the database. If opts.Services is non-nil, V2 handlers receive service
+// references for business logic delegation.
 func NewHub(opts HubOptions) (*Hub, error) {
 	if err := validateHubOptions(opts); err != nil {
 		return nil, err
@@ -185,8 +161,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 
 	reg := NewHandlerRegistry()
 
-	// Normalize once here rather than propagating an unset or invalid
-	// configured value into every voice_config this hub sends.
+	// Normalize once rather than propagating an unset or invalid value into every voice_config.
 	defaultVoiceQuality := "medium"
 	if validVoiceQuality(opts.VoiceQuality) {
 		defaultVoiceQuality = opts.VoiceQuality
@@ -228,7 +203,6 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		h.coldReplayLimit = opts.ReplayColdLimit
 	}
 	h.initLife() // the hub's own lifecycle, ended by closeStop
-	// V2 handler registrations (need Hub fields for deps).
 	registerPingHandler(reg, PingDeps{Limiter: h.limiter})
 
 	chatDeps := ChatDeps{
@@ -246,24 +220,19 @@ func NewHub(opts HubOptions) (*Hub, error) {
 		callDeps.DMSvc = svc.DMs
 		h.messageSvc = svc.Messages
 		h.perms = svc.Permissions
-		// So @here's offline narrowing can tell a disconnected idle/dnd reader
-		// (users.status keeps their last *chosen* value across a disconnect)
-		// from one who is actually still connected — the same live-connection
-		// rule presentableMembers applies to the members array.
+		// So @here's offline narrowing can tell a disconnected idle/dnd reader (users.status
+		// keeps their last chosen value) from one still connected, the live-connection rule
+		// presentableMembers applies.
 		svc.Messages.SetLiveStatusLookup(h.LiveStatus)
-		// So every DM payload DMService builds (GET/POST /dms, POST
-		// /dms/group, PATCH /dms/{id}, and every broadcastDMOpen refresh)
-		// applies the same live-connection rule instead of only the ready
-		// payload's presentableDMChannels doing so.
+		// So every DM payload DMService builds applies the same live-connection rule, not
+		// only the ready payload's presentableDMChannels.
 		svc.DMs.SetLiveStatusLookup(h.LiveStatus)
-		// a mention that raises a reader's badge in a channel they are
-		// not viewing never reaches them through the channel topic, so the
-		// mention worker pushes them a per-user mention_count frame instead.
-		// Installed here, before the composition root starts the worker, so
+		// A mention raising a badge in a channel the reader is not viewing never reaches
+		// them via the channel topic, so the mention worker pushes a per-user
+		// mention_count frame. Installed before the composition root starts the worker so
 		// StartMentionWorker captures it.
 		svc.Messages.SetMentionNotifier(h)
-		// the read_state frame MoveReadPointer sends under the same
-		// lock the mention frames use.
+		// The read_state frame MoveReadPointer sends under the same lock the mention frames use.
 		svc.Messages.SetReadStateNotifier(h)
 		svc.CallLog.SetSink(h) // before the worker starts
 	}
@@ -274,14 +243,11 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	registerPresenceHandlers(reg, presenceDeps)
 	registerReactionHandlers(reg, reactionDeps)
 	registerCallHandlers(reg, callDeps)
-	// Phase C Step 9 — plugin slash commands. The registry closure predates
-	// HubOptions (the registry used to arrive via a post-construction setter); it
-	// stays a closure for the nil-interface reason below. MessageSvc gates
-	// broadcasts.
+	// Plugin slash commands. The registry stays a closure (it predates HubOptions) for
+	// the nil-interface reason below. MessageSvc gates broadcasts.
 	reg.RegisterV2(MsgTypeChatCommand, handleChatCommandV2, PluginDeps{
-		// A nil registry must yield a nil interface, not a typed-nil
-		// *plugin.Registry — the handler's "no plugins loaded" check is an
-		// interface comparison.
+		// A nil registry must yield a nil interface, not a typed-nil *plugin.Registry: the
+		// handler's "no plugins loaded" check is an interface comparison.
 		Registry: func() CommandDispatcher {
 			if h.pluginRegistry == nil {
 				return nil
@@ -298,8 +264,7 @@ func NewHub(opts HubOptions) (*Hub, error) {
 	return h, nil
 }
 
-// voiceDeps is the dependency set the voice command handlers are registered
-// with.
+// voiceDeps is the dependency set the voice command handlers are registered with.
 func (h *Hub) voiceDeps() VoiceDeps {
 	return VoiceDeps{
 		Voice:       h.voice,
@@ -315,9 +280,9 @@ func (h *Hub) voiceDeps() VoiceDeps {
 	}
 }
 
-// maxColdReplayLimit returns the effective persisted-replay cap. The budget
-// arrives via HubOptions: the dispatch loop reads replayBuf unlocked,
-// so the ring is sized exactly once, at construction.
+// maxColdReplayLimit returns the effective persisted-replay cap. The budget arrives
+// via HubOptions; the dispatch loop reads replayBuf unlocked, so the ring is sized
+// once, at construction.
 func (h *Hub) maxColdReplayLimit() int {
 	if h.coldReplayLimit > 0 {
 		return h.coldReplayLimit

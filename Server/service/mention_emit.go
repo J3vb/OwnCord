@@ -31,14 +31,13 @@ func (s *MessageService) notifyMentionBumped(channelID int64, bumped map[int64]i
 	emitMentionBumped(s.mentionNotifier.NotifyMentionCount, channelID, bumped)
 }
 
-// reverseMentionCounts lowers the mention_count bumps msgIDs made and pushes
-// each admitted reader their new total, holding the shared mentionEmitMu lock
-// across both the write and the frame. That lock is what makes the badge frames
-// ordered: the mention worker's coalesced increment holds the
-// same lock across its write and frame, so a reader's last frame always carries
-// the latest committed total, and a delete inside the coalesce window can never
-// be overtaken by an older increment total. A failed reversal emits nothing, so
-// a reader keeps the total it already has.
+// reverseMentionCounts lowers the mention_count bumps msgIDs made and pushes each
+// admitted reader their new total, holding the shared mentionEmitMu across both the
+// write and the frame. That lock orders the badge frames: the mention worker's
+// coalesced increment holds it across its write and frame, so a reader's last frame
+// carries the latest committed total and a delete inside the coalesce window is
+// never overtaken by an older increment total. A failed reversal emits nothing, so
+// a reader keeps the total they have.
 func (s *MessageService) reverseMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error {
 	s.mentionEmitMu.Lock()
 	defer s.mentionEmitMu.Unlock()
@@ -52,8 +51,8 @@ func (s *MessageService) reverseMentionCounts(ctx context.Context, channelID int
 
 // emitIncrement writes one channel's coalesced mention increment and pushes its
 // frames, holding mentionEmitMu across both so an increment frame is never
-// overtaken by a later decrement (and vice versa). It is the no-worker fallback
-// path; the bounded worker's flush holds the same lock (mentionWorker.emitMu).
+// overtaken by a later decrement. It is the no-worker fallback; the bounded
+// worker's flush holds the same lock (mentionWorker.emitMu).
 func (s *MessageService) emitIncrement(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) {
 	s.mentionEmitMu.Lock()
 	defer s.mentionEmitMu.Unlock()

@@ -14,13 +14,10 @@ import (
 )
 
 // requireChannelRead resolves a channel and asserts the user may read its
-// CONTENT: DM membership for a DM, READ_MESSAGES and — for a labelled
-// channel — the caller's own acknowledgement row otherwise (see
-// permissions.CanReadContent). A DM the user is not in is reported as
-// ErrNotFound rather than ErrForbidden — its existence is not something an
-// outsider gets to learn. Backs GetMessages, GetMessagesAround,
-// GetPinnedMessages and GetReactionUsers — every REST read of a channel's
-// content shares this one gate.
+// CONTENT: DM membership for a DM, otherwise READ_MESSAGES plus, for a labelled
+// channel, the caller's own acknowledgement (permissions.CanReadContent). A DM
+// the user is not in is ErrNotFound, not ErrForbidden: its existence is not for an
+// outsider to learn. Every REST read of channel content shares this gate.
 func (s *MessageService) requireChannelRead(ctx context.Context, userID, channelID int64) error {
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -61,11 +58,9 @@ func (s *MessageService) GetMessages(ctx context.Context, userID, channelID, bef
 	return msgs, hasMore, nil
 }
 
-// GetMessagesAfter retrieves the page of messages newer than `after`, ordered
-// oldest-first, with the same read gate as GetMessages. It is the downward
-// continuation of a window the client reached through GetMessagesAround:
-// hasMore is false once the page runs into the newest message, which is the
-// client's cue to re-attach to the live tail.
+// GetMessagesAfter retrieves the page of messages newer than `after`, oldest
+// first, with GetMessages' read gate. hasMore is false once the page reaches the
+// newest message, the client's cue to re-attach to the live tail.
 func (s *MessageService) GetMessagesAfter(ctx context.Context, userID, channelID, after int64, limit int) ([]db.MessageAPIResponse, bool, error) {
 	if after <= 0 {
 		return nil, false, fmt.Errorf("%w: after must be positive", ErrBadRequest)
@@ -95,12 +90,10 @@ func (s *MessageService) GetMessagesAfter(ctx context.Context, userID, channelID
 	return msgs, hasMore, nil
 }
 
-// requireSearchChannelAccess is SearchMessages' single-channel branch gate.
-// Inlined rather than routed through requireChannelRead — search has always
-// had its own bespoke access checks and error codes (a DM non-participant is
-// ErrForbidden here, ErrNotFound there) — but the NSFW check has to be
-// repeated too, or search stays the leak path the plan calls out as "would
-// ship silently".
+// requireSearchChannelAccess is SearchMessages' single-channel gate. Search keeps
+// its own access checks and error codes (a DM non-participant is ErrForbidden
+// here, ErrNotFound elsewhere), so the NSFW check is repeated here or search
+// becomes a leak path.
 func (s *MessageService) requireSearchChannelAccess(ctx context.Context, userID, channelID int64) error {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
@@ -122,10 +115,8 @@ func (s *MessageService) requireSearchChannelAccess(ctx context.Context, userID,
 	return nil
 }
 
-// MessageWindow is a slice of channel history centred on one message, as
-// returned by GetMessagesAround. Messages are ordered oldest-first; the
-// HasMore flags report whether the channel holds further history on each side
-// of the window.
+// MessageWindow is a slice of channel history centred on one message, oldest
+// first; the HasMore flags report further history on each side.
 type MessageWindow struct {
 	Messages      []db.MessageAPIResponse `json:"messages"`
 	HasMoreBefore bool                    `json:"has_more_before"`
@@ -133,11 +124,9 @@ type MessageWindow struct {
 }
 
 // GetMessagesAround retrieves the window of `limit` messages centred on
-// messageID, ordered oldest-first, with the same read gate as GetMessages.
-//
-// The centre message must be a live message in this channel: a message from
-// another channel, one that never existed, or a soft-deleted one (which
-// history omits, so there is no row to centre on) is ErrNotFound.
+// messageID, oldest first, with GetMessages' read gate. The centre must be a live
+// message in this channel; one from another channel, nonexistent, or soft-deleted
+// (history omits it, so there is no row to centre on) is ErrNotFound.
 func (s *MessageService) GetMessagesAround(ctx context.Context, userID, channelID, messageID int64, limit int) (*MessageWindow, error) {
 	if messageID <= 0 {
 		return nil, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
@@ -162,9 +151,8 @@ func (s *MessageService) GetMessagesAround(ctx context.Context, userID, channelI
 		return nil, fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 	}
 
-	// Half the window sits before the centre, the rest after it; the centre
-	// occupies one slot. Ask for one extra on each side so the has-more flags
-	// come out of the same query instead of two follow-up counts.
+	// The centre takes one slot, half the rest sits before it. One extra on each side
+	// yields the has-more flags from the same query.
 	beforeCount := limit / 2
 	afterCount := limit - beforeCount - 1
 
@@ -205,9 +193,9 @@ func (s *MessageService) GetPinnedMessages(ctx context.Context, userID, channelI
 	return msgs, nil
 }
 
-// PinEventResult is the pin row a pin wrote, with its author
-// resolved and, for a DM, the participants who receive it. It is nil when the
-// pin wrote no row: an unpin, a re-pin, or a pin inside the 10 minute window.
+// PinEventResult is the pin row a pin wrote, with its author resolved and, for a
+// DM, the recipients. Nil when the pin wrote no row: an unpin, a re-pin, or a pin
+// inside the 10 minute window.
 type PinEventResult struct {
 	Row            *db.PinEventRow
 	Author         *db.User
@@ -230,10 +218,8 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
-	// Archived channels are read-only. SetMessagePinned bypasses
-	// checkSendPermission (it runs its own DM/permission branch below), so it
-	// needs the shared gate directly — see requireChannelWritable in
-	// message_perms.go.
+	// Archived channels are read-only. This path skips checkSendPermission, so it
+	// needs the gate directly (requireChannelWritable in message_perms.go).
 	if err := requireChannelWritable(ch); err != nil {
 		return nil, err
 	}
@@ -259,12 +245,9 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 		MessageID: msgID, Pinned: pinned, UserID: userID, Username: author.Username,
 	})
 	if err != nil {
-		// The pin SQL excludes soft-deleted rows, so a message deleted between
-		// the GetMessage check above and this UPDATE (or one whose Deleted flag
-		// we didn't re-check) surfaces here as db.ErrNotFound. Map it to the
-		// service taxonomy so writeServiceError answers 404, not a 500 — same
-		// class of guard as EditMessage's ErrDeletedMessage and handleReaction's
-		// ErrBadRequest on their own deleted-message paths.
+		// The pin SQL excludes soft-deleted rows, so a message deleted after the
+		// GetMessage check surfaces here as db.ErrNotFound; map it so the API answers 404,
+		// not 500.
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, fmt.Errorf("%w: message not found in this channel", ErrNotFound)
 		}
@@ -278,11 +261,10 @@ func (s *MessageService) SetMessagePinned(ctx context.Context, userID, channelID
 	return s.pinEventResult(context.WithoutCancel(ctx), ch, row, author), nil
 }
 
-// pinEventResult resolves the audience of a committed pin row: its author's
-// role name and, in a DM, its delivery audience (DMAudience, as edit, delete and
-// reactions use, so a DM whose message request is pending reaches only the
-// sender and a group DM reaches every member). A failed audience lookup sends
-// the row to the pinner only; the row is committed either way.
+// pinEventResult resolves the audience of a committed pin row: the author's role
+// name and, in a DM, DMAudience (as edit, delete and reactions use), so a pending
+// message request reaches only the sender and a group DM every member. A failed
+// lookup sends the row to the pinner only; the row is committed either way.
 func (s *MessageService) pinEventResult(ctx context.Context, ch *db.Channel, row *db.PinEventRow, author *db.User) *PinEventResult {
 	res := &PinEventResult{Row: row, Author: author}
 	if role, err := s.st.GetRoleByID(ctx, author.RoleID); err == nil && role != nil {
@@ -303,14 +285,12 @@ func (s *MessageService) pinEventResult(ctx context.Context, ch *db.Channel, row
 	return res
 }
 
-// pinAuthz decides whether userID may pin or unpin in ch. The rule is
-// permissions.CanPinMessage; this only maps its verdict onto the service's
-// error kinds, which are unchanged. A DM non-participant or a failed
-// participation lookup is an opaque ErrNotFound; a confirmed participant's
-// failed block lookup stays an internal error, as before; any other failure
-// to resolve a DM subject is ErrNotFound (fail closed). A block or timeout
-// keeps its own kind, and every other refusal, or a failure to resolve a
-// channel subject, is ErrForbidden (fails closed to 403, never 500).
+// pinAuthz decides whether userID may pin or unpin in ch, mapping
+// permissions.CanPinMessage's verdict onto service errors. A DM non-participant or
+// failed participation lookup is an opaque ErrNotFound; a participant's failed
+// block lookup stays internal; any other failure to resolve a DM subject is
+// ErrNotFound (fail closed). A block or timeout keeps its own kind; every other
+// refusal, or a failure to resolve a channel subject, is ErrForbidden (never 500).
 func (s *MessageService) pinAuthz(ctx context.Context, userID int64, ch *db.Channel) error {
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
 	if err != nil {

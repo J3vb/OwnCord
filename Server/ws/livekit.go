@@ -1,8 +1,5 @@
-// Package ws provides the LiveKit integration client.
-//
-// LiveKitClient wraps the LiveKit server SDK for token generation and
-// room management. It is the primary interface between OwnCord's WS
-// handlers and the LiveKit server.
+// Package ws provides the LiveKit integration client: LiveKitClient wraps the
+// LiveKit server SDK for token generation and room management.
 package ws
 
 import (
@@ -20,19 +17,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 )
 
-// tokenTTL is the validity duration for generated LiveKit access tokens.
-// Short-lived (5 min) to limit replay window. The client requests
-// a refresh via voice_token_refresh before expiry. Security mitigations:
+// tokenTTL is the validity of generated LiveKit access tokens: short (5 min) to
+// limit the replay window; the client requests a refresh via voice_token_refresh.
+// Mitigations:
 //   - Tokens are scoped to a single room
 //   - Server can revoke room access via LiveKit API on ban/kick
 //   - The polling reconciler (voice_reconcile.go) removes any SFU participant
 //     with no matching voice_states row once a tick; the participant_joined
-//     webhook does the same at join time where the operator configured one
+//     webhook does the same at join time where configured
 //   - CanPublishSources restricts track types per permission
 const tokenTTL = 5 * time.Minute
 
-// LiveKitClient provides token generation and room management via
-// the LiveKit server SDK.
+// LiveKitClient provides token generation and room management via the LiveKit
+// server SDK.
 type LiveKitClient struct {
 	apiKey    string
 	apiSecret string
@@ -44,9 +41,8 @@ type LiveKitClient struct {
 	removed removedIdentities
 }
 
-// NewLiveKitClient creates a new LiveKit client from the voice config.
-// Returns an error if the credentials are missing or still set to the
-// well-known default dev values (which are public in the source code).
+// NewLiveKitClient creates a client from the voice config. It errors if credentials
+// are missing or still the well-known default dev values (public in the source).
 func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 	if cfg.LiveKitAPIKey == "" || cfg.LiveKitAPISecret == "" {
 		return nil, fmt.Errorf("livekit: api_key and api_secret are required")
@@ -58,8 +54,7 @@ func NewLiveKitClient(cfg *config.VoiceConfig) (*LiveKitClient, error) {
 		return nil, fmt.Errorf("livekit: refusing to start with default dev credentials — set voice.livekit_api_key and voice.livekit_api_secret in config.yaml")
 	}
 
-	// LiveKit room service client uses the HTTP URL (not WS).
-	// Convert ws:// to http:// and wss:// to https:// for the REST API.
+	// The room service client uses the HTTP URL: ws:// becomes http://, wss:// https://.
 	httpURL := wsToHTTP(cfg.LiveKitURL)
 
 	roomSvc := lksdk.NewRoomServiceClient(httpURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
@@ -88,13 +83,9 @@ func participantIdentity(userID int64, voiceJoinToken string) string {
 	return fmt.Sprintf("user-%d:%s", userID, voiceJoinToken)
 }
 
-// GenerateToken creates a LiveKit access token for the given user
-// to join the specified channel's voice room.
-//
-// canPublish controls audio publishing (SpeakVoice permission).
-// canVideo and canScreenShare control which additional track sources are
-// allowed at the SFU level via CanPublishSources, preventing users from
-// bypassing OwnCord's USE_VIDEO/SHARE_SCREEN checks via raw LiveKit.
+// GenerateToken creates a LiveKit access token for userID to join channelID's voice
+// room. canPublish is the SpeakVoice permission; canVideo and canScreenShare set
+// the extra CanPublishSources, so raw LiveKit cannot bypass USE_VIDEO/SHARE_SCREEN.
 func (c *LiveKitClient) GenerateToken(
 	userID int64,
 	username string,
@@ -107,9 +98,8 @@ func (c *LiveKitClient) GenerateToken(
 	roomName := RoomName(channelID)
 	identity := participantIdentity(userID, voiceJoinToken)
 
-	// Every OwnCord voice token grants CanSubscribe: a server-deafened or
-	// non-speaking participant must still receive other people's audio and
-	// streams, so subscription is never derived from the publish permissions.
+	// Every voice token grants CanSubscribe: a server-deafened or non-speaking
+	// participant must still receive other people's audio and streams.
 	canSubscribeAlways := true
 
 	at := auth.NewAccessToken(c.apiKey, c.apiSecret)
@@ -119,16 +109,12 @@ func (c *LiveKitClient) GenerateToken(
 		CanSubscribe: &canSubscribeAlways,
 	}
 
-	// Use CanPublishSources to restrict which track types the user may
-	// publish. This supersedes CanPublish and prevents SFU-level bypass.
-	//
-	// SPEAK_VOICE (microphone), USE_VIDEO (camera) and SHARE_SCREEN (screen
-	// share) are independent permission bits — a channel override can deny
-	// SPEAK_VOICE while still granting USE_VIDEO/SHARE_SCREEN. The
-	// source list is therefore built from all three independently; CanPublish
-	// is only used as a hard deny when none of them grant anything, since
-	// LiveKit's GetCanPublishSource treats CanPublish=false as an override
-	// that blocks every source regardless of CanPublishSources.
+	// CanPublishSources restricts the publishable track types and supersedes
+	// CanPublish. SPEAK_VOICE, USE_VIDEO and SHARE_SCREEN are independent bits (a
+	// channel override can deny SPEAK_VOICE yet grant USE_VIDEO), so the source list is
+	// built from all three. CanPublish is a hard deny only when none grant anything,
+	// because LiveKit's GetCanPublishSource treats CanPublish=false as an override that
+	// blocks every source.
 	sources := liveKitPublishSources(canPublish, canVideo, canScreenShare)
 	if len(sources) > 0 {
 		grant.SetCanPublishSources(sources)
@@ -158,8 +144,8 @@ func (c *LiveKitClient) GenerateToken(
 	return token, nil
 }
 
-// liveKitPublishSources is shared by fresh tokens and active permissions.
-// Audio, camera and screenshare are independent grants.
+// liveKitPublishSources is shared by fresh tokens and active permissions; the
+// three grants are independent.
 func liveKitPublishSources(microphone, camera, screenshare bool) []livekit.TrackSource {
 	var sources []livekit.TrackSource
 	if microphone {
@@ -201,13 +187,12 @@ func (c *LiveKitClient) URL() string {
 	return c.url
 }
 
-// lkTimeout is the maximum duration for LiveKit SDK calls (remove, list, etc.).
+// lkTimeout bounds LiveKit SDK calls.
 const lkTimeout = 5 * time.Second
 
-// ListParticipants returns the identities currently in a channel's room, for
-// the polling reconciler (voice_reconcile.go). A failure is returned, never
-// collapsed to an empty set: the reconciler must not read "the SFU did not
-// answer" as "the room is empty".
+// ListParticipants returns the identities in a channel's room, for the polling
+// reconciler. A failure is returned, never collapsed to an empty set: the reconciler
+// must not read "the SFU did not answer" as "the room is empty".
 func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
 	defer cancel()
@@ -224,9 +209,9 @@ func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) (
 	return ids, nil
 }
 
-// ListRoomChannelIDs returns the channel IDs of the OwnCord rooms the SFU has
-// open, for the polling reconciler: a room can hold participants after its last
-// voice_states row is gone. Rooms that are not OwnCord channels are skipped.
+// ListRoomChannelIDs returns the channel IDs of the OwnCord rooms the SFU has open,
+// for the reconciler: a room can hold participants after its last voice_states row
+// is gone. Non-OwnCord rooms are skipped.
 func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error) {
 	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
 	defer cancel()
@@ -271,8 +256,7 @@ func (c *LiveKitClient) removeIdentity(ctx context.Context, channelID int64, ide
 	return nil
 }
 
-// HealthCheck verifies connectivity to the LiveKit server by listing rooms.
-// Returns true if the server responds successfully.
+// HealthCheck reports whether the LiveKit server answers a room listing.
 func (c *LiveKitClient) HealthCheck(ctx context.Context) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()

@@ -2,20 +2,19 @@ package ws
 
 import "slices"
 
-// hub_connected.go — live-connection status snapshots, split out of
-// serve_ready.go (at its line ceiling), and the graceful-stop user snapshot
-// kept out of hub.go (at its line ceiling). See livePresences, StoppedUserIDs.
+// hub_connected.go: live-connection status snapshots and the graceful-stop user
+// snapshot, split out of serve_ready.go and hub.go (both at their line ceilings).
+// See livePresences, StoppedUserIDs.
 
-// mergeLivePresence is the user's live presence across all of their
-// connections (oldest first). The shown status is a non-idle one when any
-// connection has one (an idle device never outranks an active one); among
-// those, and for the custom status and idle stamp that travel with it, the most
-// recent setter wins (livePresence.setAt, ties to the newer connection). A
-// connection that has stamped nothing yet is skipped. The game activity is the
-// status source's own when it has one, else the newest connection reporting
-// one, so an activity set on one device is the user's, and it ends when that
-// device's connection goes (or the user clears it there) rather than when an
-// unrelated device sets a status.
+// mergeLivePresence is the user's live presence across all their connections
+// (oldest first). The shown status is a non-idle one when any connection has one (an
+// idle device never outranks an active one); among those, and for the custom status
+// and idle stamp that travel with it, the most recent setter wins (livePresence.setAt,
+// ties to the newer connection). A connection that has stamped nothing is skipped.
+// The game activity is the status source's own when it has one, else the newest
+// connection reporting one, so an activity set on one device ends when that device's
+// connection goes (or the user clears it there), not when an unrelated device sets a
+// status.
 func mergeLivePresence(conns []*Client) livePresence {
 	var out livePresence
 	var src *livePresence
@@ -107,10 +106,10 @@ func (h *Hub) LiveStatus(userID int64) string {
 	return mergeLivePresence(h.clientsOf(userID)).status
 }
 
-// StoppedUserIDs returns every user the hub held when GracefulStopContext
-// began, plus any it closed; nil before. The conn-writes close step stamps
-// each one disconnected, since a stopped hub's readPump defers, which
-// unregister before they stamp, run too late for the final flush (P5-S07).
+// StoppedUserIDs returns every user the hub held when GracefulStopContext began,
+// plus any it closed; nil before. The conn-writes close step stamps each one
+// disconnected, since a stopped hub's readPump defers (which unregister) run too
+// late for the final flush.
 func (h *Hub) StoppedUserIDs() []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -141,14 +140,14 @@ func (h *Hub) closeClientsForStop() {
 	}
 }
 
-// rebroadcastAfterDeviceLeft re-sends the user's presence when c, one of
-// several connections, has gone and its leaving changed what the user shows:
-// the game or song c reported, or a status (or custom status) only c held up.
-// No command from a live connection follows a closed or kicked device, so
-// without this the other members keep the departed device's game, song or
-// status until the user changes something else. A user with no connection
-// left gets the offline broadcast instead (shouldMarkOffline), and a
-// same-session replacement sends its own presence, so callers skip both.
+// rebroadcastAfterDeviceLeft re-sends the user's presence when c, one of several
+// connections, has gone and its leaving changed what the user shows: the game or
+// song c reported, or a status (or custom status) only c held up. No command from a
+// live connection follows a closed or kicked device, so without this the other
+// members keep the departed device's state until the user changes something else.
+// A user with no connection left gets the offline broadcast instead
+// (shouldMarkOffline), and a same-session replacement sends its own presence, so
+// callers skip both.
 func (h *Hub) rebroadcastAfterDeviceLeft(c *Client) {
 	h.presenceMu.Lock()
 	defer h.presenceMu.Unlock()

@@ -100,13 +100,10 @@ func (h *Hub) revokeConnTopicsNotIn(ctx context.Context, snap *Client, allowed m
 		if revokeUnreadableChannelsPreActRaceHook != nil {
 			revokeUnreadableChannelsPreActRaceHook(userID)
 		}
-		// Re-resolve the live client immediately before acting: the DB round
-		// trips above (and computeAllowedChannels before the loop) give a
-		// reconnect room to replace this device's *Client in h.clients. Acting
-		// on a snapshot would target the dead socket, and Unsubscribe would
-		// no-op on unsubscribeLocked's identity guard — stranding the
-		// replacement with the revoked topic (mirrors
-		// RefreshChannelVisibility's live re-resolve). A nil result means
+		// Re-resolve the live client immediately before acting: the DB round trips above give
+		// a reconnect room to replace this device's *Client in h.clients. Acting on a snapshot
+		// would target the dead socket, and Unsubscribe would no-op on unsubscribeLocked's
+		// identity guard, stranding the replacement with the revoked topic. A nil result means
 		// that device disconnected entirely; nothing left to revoke on it.
 		live := h.sessionClient(userID, snap.tokenHash)
 		if live == nil {

@@ -9,39 +9,28 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// envelope is the common wrapper for all WebSocket messages.
 type envelope struct {
 	Type    string          `json:"type"`
 	ID      string          `json:"id,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
-// wsMsg is the generic envelope for outbound WebSocket messages.
 type wsMsg struct {
 	Type    string `json:"type"`
 	ID      string `json:"id,omitempty"`
 	Payload any    `json:"payload,omitempty"`
 }
 
-// ---------------------------------------------------------------------------
-// Payload structs — one per outbound message type.
-// ---------------------------------------------------------------------------
-
 type presencePayload struct {
 	UserID int64  `json:"user_id"`
 	Status string `json:"status"`
-	// CustomStatus is the user's free-text status line. Always present (null
-	// when unset) rather than omitempty: a client has to be able to tell
-	// "cleared it" from "this event does not mention it", and every presence
-	// broadcast carries the current value.
+	// CustomStatus is the free-text status line. Always present (null when unset),
+	// not omitempty: a client must tell "cleared" from "not mentioned".
 	CustomStatus *string `json:"custom_status"`
-	// Activity is the game the user is playing. Always present,
-	// null when none, like CustomStatus: every presence frame carries the
-	// current value. Blanked for everyone but the owner while invisible.
+	// Activity is the game being played. Always present (null when none) like
+	// CustomStatus; blanked for everyone but the owner while invisible.
 	Activity *gameActivity `json:"activity"`
-	// Listening is the song the user is listening to. Same rules
-	// as Activity: always present, null when none, blanked for everyone but
-	// the owner while invisible.
+	// Listening is the song being listened to; same rules as Activity.
 	Listening *listeningActivity `json:"listening"`
 }
 
@@ -50,31 +39,26 @@ type memberUserPayload struct {
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
 	Role     string  `json:"role"`
-	// DisplayName is the nickname to render instead of Username. Omitted when
-	// unset; clients fall back to Username. Username stays on the wire because
-	// it is still the unique handle mentions resolve against.
+	// DisplayName is the nickname to render instead of Username (omitted when unset).
+	// Username stays on the wire as the unique handle mentions resolve against.
 	DisplayName *string `json:"display_name,omitempty"`
-	// IdentityPublicKey is the user's long-term E2EE identity public key
-	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
-	// user has not published one (legacy client) and in payloads that do not
-	// carry it (e.g. chat_message).
+	// IdentityPublicKey is the user's long-term E2EE identity public key (base64),
+	// pinned by peers on first sight. Omitted when unpublished and in payloads that
+	// do not carry it (e.g. chat_message).
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
 }
 
 // memberJoinUser is the member_join user object: memberUserPayload plus the
-// profile fields the member list shows. It is its own struct because
-// memberUserPayload is also chat_message.user, which must not carry them.
+// profile fields the member list shows. Separate because memberUserPayload is also
+// chat_message.user, which must not carry them.
 type memberJoinUser struct {
 	memberUserPayload
-	// About is the profile bio (About Me). Null when unset.
-	About *string `json:"about"`
-	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
-	CreatedAt string `json:"created_at"`
-	// RoleIDs is every role the member holds, top role first; Role
-	// stays the top role's name. Omitted when the holder list was not read.
+	About     *string `json:"about"`
+	CreatedAt string  `json:"created_at"`
+	// RoleIDs is every held role, top first; Role stays the top role's name. Omitted
+	// when the holder list was not read.
 	RoleIDs []int64 `json:"role_ids,omitempty"`
-	// Banner (the /api/v1/files/<id> path) and BannerColor are omitted when
-	// unset, like members[] in ready: absent means no banner.
+	// Banner (a /api/v1/files/<id> path) and BannerColor are omitted when unset.
 	Banner      *string `json:"banner,omitempty"`
 	BannerColor *string `json:"banner_color,omitempty"`
 }
@@ -82,21 +66,19 @@ type memberJoinUser struct {
 type memberJoinPayload struct {
 	User memberJoinUser `json:"user"`
 	// Status is the viewer-safe presence the connecting user comes online as
-	// (db.BroadcastStatus of the ConnectStatus-mapped value): an invisible
-	// connector reports "offline" here, never their true chosen status. This
-	// is BroadcastToAll, not the channel-scoped presence path, so every
-	// connected client — invisible or not — receives it; the client MUST
-	// render members from this field rather than assuming "online" just
-	// because a member_join arrived, or an invisible user renders online
-	// until the (droppable, low-priority) presence correction catches up.
+	// (db.BroadcastStatus of the ConnectStatus-mapped value): an invisible connector
+	// reports "offline", never their true status. This is BroadcastToAll, so every
+	// client receives it, and the client must render members from this field rather
+	// than assume online, or an invisible user shows online until the droppable
+	// low-priority presence correction arrives.
 	Status string `json:"status"`
 }
 
 type memberUpdatePayload struct {
 	UserID int64  `json:"user_id"`
 	Role   string `json:"role"`
-	// RoleIDs is every role the member holds, top role first; Role
-	// is the top role's name. Omitted when the holder list was not read.
+	// RoleIDs is every held role, top first; Role is the top role's name. Omitted
+	// when the holder list was not read.
 	RoleIDs []int64 `json:"role_ids,omitempty"`
 }
 
@@ -104,16 +86,13 @@ type userUpdatePayload struct {
 	UserID   int64   `json:"user_id"`
 	Username string  `json:"username"`
 	Avatar   *string `json:"avatar"`
-	// DisplayName and About are always present (null = cleared) so a profile
-	// edit that removes either one is distinguishable from one that leaves it
-	// alone — user_update replaces the client's copy wholesale.
+	// DisplayName and About are always present (null = cleared) so removing one is
+	// distinguishable from leaving it alone; user_update replaces the client's copy.
 	DisplayName *string `json:"display_name"`
 	About       *string `json:"about"`
-	// IdentityPublicKey mirrors memberUserPayload — carried so peers can
-	// detect an identity-key change (TOFU mismatch) as it happens.
+	// IdentityPublicKey mirrors memberUserPayload so peers can detect an identity-key change.
 	IdentityPublicKey *string `json:"identity_public_key,omitempty"`
-	// Banner and BannerColor are always present (null = cleared) for the same
-	// reason as DisplayName and About: user_update replaces the client's copy.
+	// Banner and BannerColor are always present (null = cleared), like DisplayName and About.
 	Banner      *string `json:"banner"`
 	BannerColor *string `json:"banner_color"`
 }
@@ -122,35 +101,29 @@ type memberBanPayload struct {
 	UserID int64 `json:"user_id"`
 }
 
-// rolesUpdatePayload carries the whole role list rather than a delta. The
-// client's role state is a flat list keyed by id that drives name colors and
-// permission gating; replacing it wholesale is both smaller to reason about
-// than a patch protocol and immune to a dropped intermediate event leaving a
-// deleted role on screen.
+// rolesUpdatePayload carries the whole role list, not a delta: replacing the
+// client's flat role list wholesale is simpler than a patch protocol and immune to
+// a dropped intermediate event leaving a deleted role on screen.
 type rolesUpdatePayload struct {
 	Roles []db.Role `json:"roles"`
 }
 
-// emojiInfo is the client-facing shape of one custom emoji: enough to render
-// it and to spell it. The storage id and mime type stay server-side -- the
-// image route is the only thing that needs them.
+// emojiInfo is the client-facing shape of one custom emoji. The storage id and
+// mime type stay server-side.
 type emojiInfo struct {
 	ID        int64  `json:"id"`
 	Shortcode string `json:"shortcode"`
 	URL       string `json:"url"`
 }
 
-// emojiUpdatePayload carries the whole emoji set, for the same reason
-// rolesUpdatePayload carries the whole role list: the client's emoji state is a
-// flat map keyed by shortcode that message rendering, the picker and reaction
-// pills all read, and a wholesale replace cannot leave a deleted emoji on
-// screen after a dropped event.
+// emojiUpdatePayload carries the whole emoji set, for the same reason as
+// rolesUpdatePayload: a wholesale replace cannot leave a deleted emoji on screen
+// after a dropped event.
 type emojiUpdatePayload struct {
 	Emoji []emojiInfo `json:"emoji"`
 }
 
-// gameActivityPolicyPayload is game_activity_policy's payload and the shape of
-// auth_ok's game_activity_policy key.
+// gameActivityPolicyPayload is game_activity_policy's payload and auth_ok's game_activity_policy key.
 type gameActivityPolicyPayload struct {
 	Enabled bool `json:"enabled"`
 }
@@ -163,8 +136,7 @@ func buildGameActivityPolicy(enabled bool) []byte {
 	})
 }
 
-// uploadPolicyPayload is upload_policy's payload: the file-type lists in
-// force, as auth_ok's upload_policy carries them.
+// uploadPolicyPayload is upload_policy's payload: the file-type lists in force, as in auth_ok.
 type uploadPolicyPayload struct {
 	BlockedExtensions []string `json:"blocked_extensions"`
 	AllowedExtensions []string `json:"allowed_extensions"`
@@ -175,8 +147,7 @@ type chatSendOKPayload struct {
 	Deduplicated    bool   `json:"deduplicated,omitempty"`
 	MessageID       int64  `json:"message_id"`
 	Timestamp       string `json:"timestamp"`
-	// SkippedAttachmentIDs are requested uploads the send did not attach (no
-	// reason per id); absent when every one was attached.
+	// SkippedAttachmentIDs are requested uploads the send did not attach; absent when all were attached.
 	SkippedAttachmentIDs []string `json:"skipped_attachment_ids,omitempty"`
 }
 
@@ -185,8 +156,7 @@ type chatEditedPayload struct {
 	ChannelID int64  `json:"channel_id"`
 	Content   string `json:"content"`
 	EditedAt  string `json:"edited_at"`
-	// Mentions/MentionsEveryone are re-resolved from the edited content, so an
-	// edit that adds or drops a mention updates the highlight too.
+	// Mentions/MentionsEveryone are re-resolved from the edited content.
 	Mentions         []int64 `json:"mentions"`
 	MentionsEveryone bool    `json:"mentions_everyone"`
 	// MentionRoles: see chatMessagePayload.MentionRoles.
@@ -225,32 +195,27 @@ type voiceStatePayload struct {
 	Username  string `json:"username"`
 	Muted     bool   `json:"muted"`
 	Deafened  bool   `json:"deafened"`
-	// Speaking is always false on the wire: the column is reset to 0 on
-	// insert and never updated, and LiveKit's ActiveSpeakersChanged
-	// (voice_speakers) is the speaking authority. Kept for
-	// protocol-compatibility (voice report #15).
+	// Speaking is always false on the wire: the column is reset on insert and never
+	// updated; LiveKit's ActiveSpeakersChanged is the speaking authority. Kept for
+	// protocol compatibility.
 	Speaking    bool `json:"speaking"`
 	Camera      bool `json:"camera"`
 	Screenshare bool `json:"screenshare"`
-	// ServerMuted/ServerDeafened are moderator-imposed. Muted/Deafened are
-	// always set alongside them, so a client that ignores these two still
-	// renders the user as silenced; they exist so the UI can distinguish a
-	// self-mute from one the user may not lift.
+	// ServerMuted/ServerDeafened are moderator-imposed. Muted/Deafened are always set
+	// alongside, so a client ignoring these still renders the user silenced; these
+	// let the UI tell a self-mute from one the user may not lift.
 	ServerMuted    bool `json:"server_muted"`
 	ServerDeafened bool `json:"server_deafened"`
 }
 
 // voiceMovedPayload tells one client its moderator moved it to another voice
-// channel. The client tears down its LiveKit session and re-joins to_channel_id
-// through the normal voice_join path.
+// channel; it tears down its LiveKit session and re-joins via voice_join.
 type voiceMovedPayload struct {
 	ToChannelID int64 `json:"to_channel_id"`
-	// Reason says why the server moved the client; "afk" for the idle sweep.
-	// Omitted for a moderator move, so those bytes are unchanged.
+	// Reason says why the server moved the client ("afk" for the idle sweep); omitted
+	// for a moderator move.
 	Reason string `json:"reason,omitempty"`
-	// ByUserID is the moderator who made the move, so the moved
-	// client can say who moved it. Omitted for the AFK sweep, which has no
-	// actor.
+	// ByUserID is the moderator who made the move; omitted for the AFK sweep (no actor).
 	ByUserID int64 `json:"by_user_id,omitempty"`
 }
 
@@ -268,11 +233,9 @@ type voiceConfigPayload struct {
 	Quality   string `json:"quality"`
 	Bitrate   int    `json:"bitrate"`
 	MaxUsers  int    `json:"max_users"`
-	// ThresholdMode, MixingThreshold and TopSpeakers are reserved: they ship
-	// on every frame but the client stores and never reads them (voice report
-	// #15). LiveKit's ActiveSpeakersChanged is authoritative for speaking, so
-	// there is no mixing configuration to drive. Kept on the wire for
-	// protocol-compatibility; do not build on them without a reader.
+	// ThresholdMode, MixingThreshold and TopSpeakers are reserved: shipped on every
+	// frame but never read by the client, since LiveKit's ActiveSpeakersChanged is
+	// authoritative. Kept for protocol compatibility; do not build on them without a reader.
 	ThresholdMode   string `json:"threshold_mode"`
 	MixingThreshold int    `json:"mixing_threshold"`
 	TopSpeakers     int    `json:"top_speakers"`
@@ -286,26 +249,22 @@ type voiceTokenPayload struct {
 	IsKeyHolder bool   `json:"is_key_holder"`
 }
 
-// ── Voice E2EE (client-side ECDH key exchange) ─────────────────────────────
-
-// voiceE2EEAnnounceBroadcast is the server→client relay with user_id added.
-// Signature is the sender's identity-key signature over the ephemeral key
-// (F3 TOFU) — relayed verbatim, omitted for legacy announces without one.
+// voiceE2EEAnnounceBroadcast is the server-to-client relay with user_id added.
+// Signature is the sender's identity-key signature over the ephemeral key, relayed
+// verbatim and omitted for legacy announces.
 type voiceE2EEAnnounceBroadcast struct {
 	UserID    int64  `json:"user_id"`
 	PublicKey string `json:"public_key"`
 	Signature string `json:"signature,omitempty"`
-	// VideoDecode is the sender's sanitized decodable video codec list,
-	// omitted when absent so legacy announces serialize unchanged.
+	// VideoDecode is the sender's sanitized decodable video codec list.
 	VideoDecode []string `json:"video_decode,omitempty"`
-	// IdentityPublicKey is the announcing connection's device identity key
-	// (key per device), omitted when that connection sent none so an announce
-	// from an older client serializes unchanged. Peers verify Signature
-	// against it when present, else against the member's published key.
+	// IdentityPublicKey is the announcing connection's device identity key, omitted
+	// when none was sent. Peers verify Signature against it when present, else the
+	// member's published key.
 	IdentityPublicKey string `json:"identity_public_key,omitempty"`
 }
 
-// voiceE2EEOfferRelay is the server→client relay with from_user_id.
+// voiceE2EEOfferRelay is the server-to-client relay with from_user_id.
 type voiceE2EEOfferRelay struct {
 	FromUserID   int64  `json:"from_user_id"`
 	EncryptedKey string `json:"encrypted_key"`
@@ -324,42 +283,36 @@ type channelDeletePayload struct {
 type serverRestartPayload struct {
 	Reason       RestartReason `json:"reason"`
 	DelaySeconds int           `json:"delay_seconds"`
-	// ReconnectSpreadMS is the window after delay_seconds over which clients
-	// spread their redial (P5-S04), scaled to the connected count.
+	// ReconnectSpreadMS is the window after delay_seconds over which clients spread their redial.
 	ReconnectSpreadMS int64 `json:"reconnect_spread_ms"`
 }
 
-// restartSpreadMS spreads a restart's redials over 10 ms per connected
-// client, capped at 30 s: 2,000 clients redial over 20 s, not at once.
+// restartSpreadMS spreads a restart's redials over 10 ms per connected client,
+// capped at 30 s.
 func restartSpreadMS(connected int) int64 {
 	return min(int64(connected)*10, 30_000)
 }
 
 // callSignalPayload carries an ephemeral DM call signal (call_incoming /
-// call_declined). There is no call id: the "call" is presence in the DM's
-// voice channel, so channel_id plus who is signalling is the whole state.
+// call_declined). There is no call id: the call is presence in the DM's voice
+// channel.
 type callSignalPayload struct {
 	ChannelID int64  `json:"channel_id"`
 	FromUser  int64  `json:"from_user"`
 	Username  string `json:"username"`
 }
 
-// ---------------------------------------------------------------------------
-// Builder helpers (kept as maps per task spec).
-// ---------------------------------------------------------------------------
-
-// buildJSON marshals v into a JSON byte slice, logging on failure.
+// buildJSON marshals v, logging on failure.
 func buildJSON(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
 		slog.Error("buildJSON marshal failed", "error", err, "type", fmt.Sprintf("%T", v))
-		// Fallback: send a generic error rather than panicking.
+		// Fall back to a generic error rather than panic.
 		b, _ = json.Marshal(map[string]string{"type": "error", "message": "internal marshal error"})
 	}
 	return b
 }
 
-// buildErrorMsg produces an error envelope with the given code and message.
 func buildErrorMsg(code, message string) []byte {
 	return buildJSON(map[string]any{
 		"type": MsgTypeError,
@@ -370,10 +323,9 @@ func buildErrorMsg(code, message string) []byte {
 	})
 }
 
-// buildErrorMsgWithID produces an error envelope that echoes the originating
-// command's request id, so the client can correlate the failure with the
-// specific command it sent (e.g. mark an optimistic chat_send row as failed).
-// When reqID is empty it falls back to the id-less envelope.
+// buildErrorMsgWithID is buildErrorMsg echoing the originating command's request
+// id so the client can correlate the failure (e.g. mark an optimistic send failed).
+// Empty reqID gives the id-less envelope.
 func buildErrorMsgWithID(code, message, reqID string) []byte {
 	if reqID == "" {
 		return buildErrorMsg(code, message)
@@ -388,8 +340,8 @@ func buildErrorMsgWithID(code, message, reqID string) []byte {
 	})
 }
 
-// buildAuthError produces an auth_error envelope per PROTOCOL.md.
-// The client treats this type as non-recoverable and stops reconnecting.
+// buildAuthError produces an auth_error; the client treats it as non-recoverable
+// and stops reconnecting.
 func buildAuthError(message string) []byte {
 	return buildJSON(map[string]any{
 		"type": MsgTypeAuthError,
@@ -399,17 +351,15 @@ func buildAuthError(message string) []byte {
 	})
 }
 
-// minClientEpoch is the oldest wire epoch the auth handshake still accepts.
-// It is 0 for epoch 1 only, because clients up to v1.2.0-alpha.4 send no
-// epoch at all and must keep connecting.
-// ponytail: one accepted epoch by policy — set this to ProtocolEpoch on the
-// next bump; widen to ProtocolEpoch-1 only if a compatibility window is ever
-// actually wanted.
+// minClientEpoch is the oldest wire epoch the auth handshake accepts. 0 for epoch
+// 1 only, because clients up to v1.2.0-alpha.4 send no epoch and must keep
+// connecting. One accepted epoch by policy: set this to ProtocolEpoch on the next
+// bump; widen to ProtocolEpoch-1 only if a compatibility window is wanted.
 const minClientEpoch = 0
 
 // buildProtocolEpochError is the auth_error for an epoch outside
-// [minClientEpoch, ProtocolEpoch]. The message names which side to update;
-// the numbers let a client decide for itself.
+// [minClientEpoch, ProtocolEpoch]. The message names which side to update; the
+// numbers let a client decide.
 func buildProtocolEpochError(clientEpoch int) []byte {
 	message := fmt.Sprintf("this client speaks protocol epoch %d but the server needs %d; update the client",
 		clientEpoch, ProtocolEpoch)
@@ -429,16 +379,9 @@ func buildProtocolEpochError(clientEpoch int) []byte {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// Typed message builders.
-// ---------------------------------------------------------------------------
-
-// buildPresenceMsg constructs a presence broadcast payload.
-//
-// status is taken verbatim: callers decide whose eyes the payload is for and
-// pass db.BroadcastStatus(status) for everyone but the owner. Keeping the
-// mapping out of the builder is deliberate — a builder that always collapsed
-// invisible could never produce the owner's own true-state message.
+// buildPresenceMsg constructs a presence broadcast. status is taken verbatim:
+// callers pass db.BroadcastStatus(status) for everyone but the owner. A builder
+// that always collapsed invisible could never produce the owner's own message.
 func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypePresence,
@@ -446,12 +389,9 @@ func buildPresenceMsg(userID int64, status string, customStatus *string, activit
 	})
 }
 
-// buildMemberJoin constructs a member_join broadcast for when a user comes
-// online. user.Status is expected to already carry the ConnectStatus-mapped
-// value the caller settled the session on (see serve.go's applyConnectStatus,
-// which runs before this); Status here applies the BroadcastStatus collapse
-// so an invisible connector's member_join reports "offline" like every other
-// payload another user can see, instead of the raw chosen status.
+// buildMemberJoin constructs a member_join broadcast. user.Status should already
+// carry the ConnectStatus-mapped value (serve.go's applyConnectStatus); the
+// BroadcastStatus collapse here makes an invisible connector report "offline".
 func buildMemberJoin(user *db.User, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeMemberJoin,
@@ -462,7 +402,6 @@ func buildMemberJoin(user *db.User, roleName string, roleIDs []int64) []byte {
 	})
 }
 
-// buildMemberUpdate constructs a member_update broadcast per PROTOCOL.md.
 func buildMemberUpdate(userID int64, roleName string, roleIDs []int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMemberUpdate,
@@ -470,9 +409,8 @@ func buildMemberUpdate(userID int64, roleName string, roleIDs []int64) []byte {
 	})
 }
 
-// UserUpdate is the profile snapshot a user_update broadcast carries. It is a
-// struct rather than five positional arguments because every field is a
-// nullable string and a swapped pair would compile.
+// UserUpdate is the profile snapshot a user_update carries; a struct because every
+// field is a nullable string and a swapped pair would compile.
 type UserUpdate struct {
 	UserID            int64
 	Username          string
@@ -484,7 +422,6 @@ type UserUpdate struct {
 	BannerColor       *string
 }
 
-// buildUserUpdate constructs a user_update broadcast for profile changes.
 func buildUserUpdate(u UserUpdate) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeUserUpdate,
@@ -492,7 +429,6 @@ func buildUserUpdate(u UserUpdate) []byte {
 	})
 }
 
-// buildMemberBan constructs a member_ban broadcast per PROTOCOL.md.
 func buildMemberBan(userID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeMemberBan,
@@ -500,8 +436,7 @@ func buildMemberBan(userID int64) []byte {
 	})
 }
 
-// buildRolesUpdate constructs a roles_update broadcast carrying the full role
-// list, ordered highest position first exactly like the ready payload's.
+// buildRolesUpdate carries the full role list, highest position first like ready.
 func buildRolesUpdate(roles []*db.Role) []byte {
 	flat := make([]db.Role, 0, len(roles))
 	for _, r := range roles {
@@ -515,8 +450,7 @@ func buildRolesUpdate(roles []*db.Role) []byte {
 	})
 }
 
-// buildEmojiUpdate constructs an emoji_update broadcast carrying the full
-// custom-emoji set, ordered the way the server listed it.
+// buildEmojiUpdate carries the full custom-emoji set in server list order.
 func buildEmojiUpdate(list []*db.Emoji) []byte {
 	flat := make([]emojiInfo, 0, len(list))
 	for _, e := range list {
@@ -535,9 +469,8 @@ func buildEmojiUpdate(list []*db.Emoji) []byte {
 	})
 }
 
-// buildUploadPolicy constructs an upload_policy broadcast carrying both
-// file-type lists, each always an array so an emptied list is [] and never
-// absent: the client replaces both lists wholesale.
+// buildUploadPolicy carries both file-type lists, always arrays so an emptied
+// list is [] not absent: the client replaces both wholesale.
 func buildUploadPolicy(blocked, allowed []string) []byte {
 	if blocked == nil {
 		blocked = []string{}
@@ -551,7 +484,6 @@ func buildUploadPolicy(blocked, allowed []string) []byte {
 	})
 }
 
-// buildChatSendOK correlates the current request with the original commit.
 func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID string, duplicate bool, skippedAttachmentIDs []string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChatSendOK,
@@ -560,7 +492,6 @@ func buildChatSendOK(requestID string, msgID int64, timestamp, clientMessageID s
 	})
 }
 
-// buildChatEdited constructs a chat_edited broadcast.
 func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions, mentionRoles []int64, mentionsEveryone, mentionsHere bool) []byte {
 	if mentions == nil {
 		mentions = []int64{}
@@ -583,7 +514,6 @@ func buildChatEdited(msgID, channelID int64, content, editedAt string, mentions,
 	})
 }
 
-// buildChatDeleted constructs a chat_deleted broadcast.
 func buildChatDeleted(msgID, channelID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChatDeleted,
@@ -591,9 +521,7 @@ func buildChatDeleted(msgID, channelID int64) []byte {
 	})
 }
 
-// buildChatBulkDeleted constructs a chat_bulk_deleted broadcast. ids is
-// emitted as an empty array rather than null when nothing was purged, so
-// clients can iterate it unconditionally.
+// buildChatBulkDeleted emits ids as [] not null when nothing was purged.
 func buildChatBulkDeleted(channelID int64, ids []int64) []byte {
 	if ids == nil {
 		ids = []int64{}
@@ -604,7 +532,6 @@ func buildChatBulkDeleted(channelID int64, ids []int64) []byte {
 	})
 }
 
-// buildReactionUpdate constructs a reaction_update broadcast.
 func buildReactionUpdate(msgID, channelID, userID int64, emoji, action string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeReactionUpdate,
@@ -618,7 +545,6 @@ func buildReactionUpdate(msgID, channelID, userID int64, emoji, action string) [
 	})
 }
 
-// buildTypingMsg constructs a typing broadcast.
 func buildTypingMsg(channelID, userID int64, username string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeTyping,
@@ -630,7 +556,6 @@ func buildTypingMsg(channelID, userID int64, username string) []byte {
 	})
 }
 
-// buildVoiceState constructs a voice_state server->client broadcast.
 func buildVoiceState(state db.VoiceState) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceState,
@@ -650,10 +575,8 @@ func buildVoiceState(state db.VoiceState) []byte {
 	})
 }
 
-// buildVoiceMoved constructs a voice_moved message for the moved client.
-//
-// reason is "" for a moderator move and "afk" for the AFK sweep's. byUserID is
-// the moderator's id, 0 (omitted) for the sweep.
+// buildVoiceMoved constructs voice_moved. reason is "" for a moderator move and
+// "afk" for the sweep; byUserID is the moderator, 0 (omitted) for the sweep.
 func buildVoiceMoved(toChannelID int64, reason string, byUserID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceMoved,
@@ -661,8 +584,7 @@ func buildVoiceMoved(toChannelID int64, reason string, byUserID int64) []byte {
 	})
 }
 
-// buildVoiceDisconnected constructs a voice_disconnected message for the
-// client a moderator removed from voice.
+// buildVoiceDisconnected is for the client a moderator removed from voice.
 func buildVoiceDisconnected(channelID int64, reason string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceDisconnected,
@@ -670,7 +592,6 @@ func buildVoiceDisconnected(channelID int64, reason string) []byte {
 	})
 }
 
-// buildVoiceConfig constructs a voice_config message sent after voice_join acceptance.
 func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceConfig,
@@ -686,12 +607,11 @@ func buildVoiceConfig(channelID int64, quality string, bitrate int, maxUsers int
 	})
 }
 
-// buildVoiceToken constructs a voice_token message with a LiveKit token and URL.
-// url is the proxy path ("/livekit") for remote clients; direct_url is the raw
-// LiveKit URL (e.g. "ws://localhost:7880") for localhost clients. directURL is
-// the server's own dial address, so it is sent only when its host is loopback:
-// anything else (a docker-compose service name like ws://livekit:7880, LiveKit
-// Cloud, another host) may not resolve on the client, which then tunnels.
+// buildVoiceToken constructs voice_token. url is the proxy path ("/livekit");
+// direct_url is the raw LiveKit URL for localhost clients. directURL is the
+// server's own dial address, so it is sent only when its host is loopback:
+// anything else (a docker service name, LiveKit Cloud) may not resolve on the
+// client, which then tunnels.
 func buildVoiceToken(channelID int64, token string, proxyPath string, directURL string, isKeyHolder bool) []byte { //nolint:unparam // kept configurable for proxy path flexibility
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceToken,
@@ -705,8 +625,8 @@ func buildVoiceToken(channelID int64, token string, proxyPath string, directURL 
 	})
 }
 
-// buildVoiceE2EEAnnounce constructs a voice_e2ee_announce server→client relay.
-// An empty signature (legacy announce) or video decode list is omitted.
+// buildVoiceE2EEAnnounce constructs a voice_e2ee_announce relay; an empty
+// signature or video decode list is omitted.
 func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEAnnounceBC,
@@ -720,7 +640,6 @@ func buildVoiceE2EEAnnounce(userID int64, a e2eeAnnounce) []byte {
 	})
 }
 
-// buildVoiceE2EEOffer constructs a voice_e2ee_offer server→client relay.
 func buildVoiceE2EEOffer(fromUserID int64, encryptedKey, iv string) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeVoiceE2EEOfferRelay,
@@ -732,7 +651,6 @@ func buildVoiceE2EEOffer(fromUserID int64, encryptedKey, iv string) []byte {
 	})
 }
 
-// buildVoiceLeave constructs a voice_leave server->client broadcast.
 func buildVoiceLeave(channelID, userID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceLeaveBC,
@@ -740,8 +658,8 @@ func buildVoiceLeave(channelID, userID int64) []byte {
 	})
 }
 
-// buildChannelCreateFor constructs a channel_create addressed to ONE client,
-// carrying that client's own affordance verdicts (see channelAffordances).
+// buildChannelCreateFor constructs a channel_create for one client, carrying its
+// own affordance verdicts.
 func buildChannelCreateFor(ch *db.Channel, private bool, a channelAffordances) []byte {
 	p := channelPayloadFrom(ch, private)
 	p.CanSend = &a.CanSend
@@ -756,7 +674,6 @@ func buildChannelCreateFor(ch *db.Channel, private bool, a channelAffordances) [
 	})
 }
 
-// buildChannelUpdate constructs a channel_update broadcast.
 func buildChannelUpdate(ch *db.Channel, private bool) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelUpdate,
@@ -764,7 +681,6 @@ func buildChannelUpdate(ch *db.Channel, private bool) []byte {
 	})
 }
 
-// buildChannelDelete constructs a channel_delete broadcast.
 func buildChannelDelete(channelID int64) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeChannelDelete,
@@ -772,14 +688,10 @@ func buildChannelDelete(channelID int64) []byte {
 	})
 }
 
-// buildDMChannelOpen constructs a dm_channel_open event for one viewer.
-//
-// The payload is a db.DMChannelInfo, the same shape the REST list and the
-// ready payload carry, so a client has exactly one DM shape to parse. It is
-// built per viewer rather than once per channel because `recipient` and
-// `recipients` are both defined relative to who is reading them, and each
-// participant's status is the live one (presentDMStatuses), not the
-// users.status row.
+// buildDMChannelOpen constructs a dm_channel_open for one viewer. The payload is
+// db.DMChannelInfo, the shape REST and ready carry. It is built per viewer
+// because recipient/recipients are relative to the reader and each participant's
+// status is the live one (presentDMStatuses), not the users.status row.
 func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeDMChannelOpen,
@@ -787,9 +699,8 @@ func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(u
 	})
 }
 
-// buildDMChannelOpenFor constructs a dm_channel_open event announcing a 1:1 DM
-// to the user on the other end of it. Returns nil if recipient is nil to avoid
-// a panic on dereferencing.
+// buildDMChannelOpenFor announces a 1:1 DM to the user on the other end. Returns
+// nil if recipient is nil.
 func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, liveStatus func(userID int64) string) []byte {
 	if recipient == nil {
 		slog.Warn("buildDMChannelOpenFor called with nil recipient", "channel_id", channelID)
@@ -816,10 +727,8 @@ func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, 
 	}, viewerID, liveStatus)
 }
 
-// dmRequestSenderPayload is the sender profile a dm_request frame carries —
-// enough for the recipient's inbox to render a name and avatar without a
-// second fetch. Mirrors what GET /api/v1/dm-requests returns for the same
-// field (docs/protocol.md's dm_request section).
+// dmRequestSenderPayload is the sender profile a dm_request carries, so the inbox
+// renders without a second fetch; mirrors GET /api/v1/dm-requests.
 type dmRequestSenderPayload struct {
 	ID          int64  `json:"id"`
 	Username    string `json:"username"`
@@ -827,15 +736,13 @@ type dmRequestSenderPayload struct {
 	Avatar      string `json:"avatar"`
 }
 
-// dmRequestPreviewPayload is the held message's preview, present only on
-// creation (nil on a transition frame, since the message never changes).
+// dmRequestPreviewPayload is the held message's preview, present only on creation.
 type dmRequestPreviewPayload struct {
 	MessageID int64  `json:"message_id"`
 	Content   string `json:"content"`
 	Timestamp string `json:"timestamp"`
 }
 
-// dmRequestPayload is the dm_request wire payload (docs/protocol.md).
 type dmRequestPayload struct {
 	ID        int64                    `json:"id"`
 	State     string                   `json:"state"`
@@ -846,10 +753,8 @@ type dmRequestPayload struct {
 	DecidedAt *string                  `json:"decided_at"`
 }
 
-// buildDMRequest constructs a dm_request event: sent to the
-// recipient once on creation (Preview set) and again, with a new State, on
-// every transition (Preview nil) — see DMRequestEvent's doc comment for
-// where each caller builds this.
+// buildDMRequest constructs a dm_request: sent once on creation (Preview set) and
+// again with a new State on every transition (Preview nil); see DMRequestEvent.
 func buildDMRequest(p dmRequestPayload) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypeDMRequest,
@@ -857,11 +762,9 @@ func buildDMRequest(p dmRequestPayload) []byte {
 	})
 }
 
-// buildDMRequestForCreation builds the creation-time dm_request frame for a
-// freshly-staged request: req is one entry of
-// service.SendMessageResult.RequestCreatedFor, sender the message's author
-// (service.SendMessageResult.SenderUser), and preview the held message
-// (service.SendMessageResult.RequestPreview).
+// buildDMRequestForCreation builds the creation-time dm_request for a staged
+// request: req from service.SendMessageResult.RequestCreatedFor, sender from
+// SenderUser, preview from RequestPreview.
 func buildDMRequestForCreation(req *db.MessageRequest, sender *db.User, preview *service.DMRequestPreview) []byte {
 	avatar := ""
 	if sender.Avatar != nil {
@@ -893,7 +796,6 @@ func buildDMRequestForCreation(req *db.MessageRequest, sender *db.User, preview 
 	})
 }
 
-// buildCallSignal constructs a call_incoming or call_declined frame.
 func buildCallSignal(msgType string, channelID, fromUserID int64, username string) []byte {
 	return buildJSON(wsMsg{
 		Type: msgType,
@@ -905,7 +807,6 @@ func buildCallSignal(msgType string, channelID, fromUserID int64, username strin
 	})
 }
 
-// buildServerRestartMsg constructs a server_restart broadcast.
 func buildServerRestartMsg(reason RestartReason, delaySeconds int, spreadMS int64) []byte {
 	return buildJSON(wsMsg{
 		Type: MsgTypeServerRestart,

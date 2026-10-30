@@ -105,14 +105,13 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, in Se
 	return results, nextBefore, nil
 }
 
-// searchScope returns the channel ids a search may touch. An explicit
-// channelID keeps the single-channel 403/404 contract; otherwise the scope is
-// the caller's READABLE set (the visible set minus any labelled channel
-// the caller has not acknowledged, so a hit inside one is silently absent —
-// the leak path a gate on the single-channel branch alone leaves open). in:
-// names narrow that scope by name; they are only ever compared against
-// channels already in the scope, so an unreadable or nonexistent target is
-// indistinguishable from any other name that matches nothing.
+// searchScope returns the channel ids a search may touch. An explicit channelID
+// keeps the single-channel 403/404 contract; otherwise the scope is the caller's
+// READABLE set (visible minus labelled channels the caller has not acknowledged, so
+// a hit inside one is silently absent; a gate on the single-channel branch alone
+// leaves that leak open). in: names narrow the scope and are compared only against
+// channels already in it, so an unreadable or nonexistent target looks like any
+// name that matches nothing.
 func (s *MessageService) searchScope(ctx context.Context, userID int64, channelID *int64, inNames []string) ([]int64, error) {
 	var scope []int64
 	if channelID != nil && *channelID > 0 {

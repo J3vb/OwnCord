@@ -11,50 +11,46 @@ import (
 )
 
 const (
-	// StampFlushInterval bounds how long a connect or disconnect status stamp
-	// waits for the writer. Short, because direct readers of users.status
-	// (REST and admin user reads) see the row lag by that long; @here and DM
-	// statuses read the hub's live status instead. A 2,000-client reconnect
-	// herd over 15 s still collapses into a handful of statements instead of
-	// 2,000.
+	// StampFlushInterval bounds how long a connect or disconnect status stamp waits
+	// for the writer. Short, because direct readers of users.status (REST and admin
+	// reads) lag by that long; @here and DM statuses read the hub's live status. A
+	// 2,000-client reconnect herd over 15 s still collapses into a handful of
+	// statements.
 	StampFlushInterval = 2 * time.Second
-	// TouchFlushInterval bounds how long a session touch waits. The idle
-	// expiry slides by 30 days, so a minute of lag on last_used and
-	// expires_at is invisible, and 2,000 idle sockets cost one write a minute
-	// instead of about 33 a second.
+	// TouchFlushInterval bounds how long a session touch waits. The idle expiry slides
+	// by 30 days, so a minute of lag is invisible, and 2,000 idle sockets cost one
+	// write a minute instead of about 33 a second.
 	TouchFlushInterval = 60 * time.Second
 )
 
-// ConnWrites batches the writes a live connection makes about itself — the
-// session touch on connect and ping, and the connect and disconnect status
-// stamps — so they share one writer transaction per interval instead of
-// queueing one each behind message sends (P5-S07, B6).
-//
-// It holds nothing a security decision reads: revocation deletes the session
-// row and is checked on a separate read path, and a touch never revives a
-// lapsed row (TouchSessions' WHERE). That rule is judged at the flush, so a
-// use in the last TouchFlushInterval before a session's idle expiry can let
-// it lapse before the queued touch lands, signing the user out; the edge is
-// accepted rather than reviving a lapsed row. A crash loses at most one interval of
-// pending writes; the boot-time ResetAllUserStatuses clears the "online" a
-// lost disconnect stamp leaves behind.
+// ConnWrites batches the writes a live connection makes about itself (the session
+// touch on connect and ping, and the connect and disconnect status stamps) so they
+// share one writer transaction per interval instead of queueing behind message
+// sends.
+// It holds nothing a security decision reads: revocation deletes the session row
+// and is checked on a separate read path, and a touch never revives a lapsed row
+// (TouchSessions' WHERE). That rule is judged at the flush, so a use in the last
+// TouchFlushInterval before idle expiry can let the session lapse before the
+// queued touch lands, signing the user out; the edge is accepted rather than
+// reviving a lapsed row. A crash loses at most one interval of pending writes; the
+// boot-time ResetAllUserStatuses clears the "online" a lost disconnect stamp
+// leaves behind.
 type ConnWrites struct {
 	st      Store
 	mu      syncutil.Mutex
 	touches map[string]struct{} // session token hashes touched since the last flush
 	stamps  map[int64]bool      // user ID -> connected; the latest stamp wins
-	// apiTouches are API-token hashes used since the last touch flush, and
-	// discards are expired-session hashes whose row the REST middleware wants
-	// deleted. Both are queued from request goroutines, so no
-	// request spawns a goroutine or issues a write of its own; a hash queued
-	// a thousand times is written once per flush.
+	// apiTouches are API-token hashes used since the last flush, and discards are
+	// expired-session hashes the REST middleware wants deleted. Both are queued from
+	// request goroutines so no request issues a write; a hash queued a thousand times
+	// is written once per flush.
 	apiTouches map[string]struct{}
 	discards   map[string]struct{}
 }
 
 // BatchConnWrites installs one ConnWrites over the services' store into Users,
-// Sessions and Channels and returns it for the owner to Run and Flush. Without it both
-// services write each stamp and touch at once.
+// Sessions and Channels and returns it for the owner to Run and Flush. Without it
+// each service writes every stamp and touch at once.
 func (s *Services) BatchConnWrites() *ConnWrites {
 	w := NewConnWrites(s.Users.st)
 	s.Users.SetConnWrites(w)
@@ -96,9 +92,9 @@ func (w *ConnWrites) queueStamp(userID int64, connected bool) {
 	w.mu.Unlock()
 }
 
-// dropConnectStamp discards userID's pending connect stamp, once a
-// presence_update has committed a newer status for them. Its own write
-// refreshed last_seen, so nothing is lost; a pending disconnect stays.
+// dropConnectStamp discards userID's pending connect stamp once a presence_update
+// has committed a newer status; its own write refreshed last_seen, so nothing is
+// lost, and a pending disconnect stays.
 func (w *ConnWrites) dropConnectStamp(userID int64) {
 	w.mu.Lock()
 	if w.stamps[userID] {
@@ -107,12 +103,10 @@ func (w *ConnWrites) dropConnectStamp(userID int64) {
 	w.mu.Unlock()
 }
 
-// Run flushes stamps every StampFlushInterval and touches every
-// TouchFlushInterval until ctx ends. The owner calls Flush once more after
-// Run returns and the hub has stopped, which writes the last touches and the
-// stamps queued by then; the owner first queues a disconnect stamp for every
-// user the hub held when its stop began, whose own readPump stamp would come
-// too late.
+// Run flushes stamps every StampFlushInterval and touches every TouchFlushInterval
+// until ctx ends. After Run returns and the hub has stopped, the owner calls Flush
+// once more; first it queues a disconnect stamp for every user the hub held when
+// its stop began, whose own readPump stamp would come too late.
 func (w *ConnWrites) Run(ctx context.Context) {
 	stamps := time.NewTicker(StampFlushInterval)
 	defer stamps.Stop()
@@ -140,9 +134,9 @@ func (w *ConnWrites) Run(ctx context.Context) {
 	}
 }
 
-// Flush writes everything pending now. A failed write keeps its entries for
-// the next flush. Not for use concurrently with Run: two flushes in flight
-// could land one user's stamps out of order.
+// Flush writes everything pending now. A failed write keeps its entries for the
+// next flush. Not for use concurrently with Run: two flushes in flight could land
+// one user's stamps out of order.
 func (w *ConnWrites) Flush(ctx context.Context) error {
 	return errors.Join(w.flushStamps(ctx), w.flushDiscards(ctx), w.flushTouches(ctx), w.flushAPITouches(ctx))
 }
@@ -203,11 +197,10 @@ func (w *ConnWrites) flushTouches(ctx context.Context) error {
 	return nil
 }
 
-// flushAPITouches writes last_used for each distinct API-token hash queued
-// since the last flush, one store call per hash (there is no batched query,
-// and the minute throttle keeps the count at one per active token). A hash
-// whose write fails, or that the loop did not reach because ctx ended, is
-// queued again for the next flush.
+// flushAPITouches writes last_used for each distinct queued API-token hash, one
+// store call per hash (no batched query; the minute throttle keeps the count at
+// one per active token). A hash whose write fails, or that the loop did not reach
+// because ctx ended, is queued again.
 func (w *ConnWrites) flushAPITouches(ctx context.Context) error {
 	return w.flushHashes(ctx, &w.apiTouches, w.st.TouchAPIToken, "flushing api token touches")
 }
