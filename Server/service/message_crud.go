@@ -489,17 +489,7 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	s.FlushPendingMentionCounts(context.WithoutCancel(ctx), []int64{msgID})
 
 	if err := s.softDeleteRow(ctx, msgID, userID, isMod, msg.UserID, reportID, reason, onlyIfEmpty); err != nil {
-		if errors.Is(err, errNoLongerEmpty) {
-			return nil, err
-		}
-		// A message that raced this request to the writer after the msg.Deleted check
-		// surfaces as db.ErrNotFound. Map it to ErrDeletedMessage, the same taxonomy as
-		// the sequential-repeat guard, and so this request never reaches
-		// DecrementMentionCounts for a delete that did not happen.
-		if errors.Is(err, db.ErrNotFound) {
-			return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
-		}
-		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+		return nil, err
 	}
 
 	slog.Debug("message deleted", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID, "is_mod", isMod)
@@ -541,15 +531,27 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 // softDeleteRow writes the delete: the guarded own-empty variant when onlyIfEmpty,
 // else the normal one.
 func (s *MessageService) softDeleteRow(ctx context.Context, msgID, userID int64, isMod bool, authorID int64, reportID *int64, reason string, onlyIfEmpty bool) error {
-	if !onlyIfEmpty {
-		return s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, authorID, reportID, reason)
-	}
-	if s.emptyDeleter == nil {
+	var err error
+	switch {
+	case !onlyIfEmpty:
+		err = s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, authorID, reportID, reason)
+	case s.emptyDeleter == nil:
 		return errNoLongerEmpty
+	default:
+		err = s.emptyDeleter.DeleteEmptyOwnMessage(ctx, msgID, userID)
 	}
-	err := s.emptyDeleter.DeleteEmptyOwnMessage(ctx, msgID, userID)
-	if errors.Is(err, db.ErrMessageNotEmpty) {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, db.ErrMessageNotEmpty):
 		return errNoLongerEmpty
+	case errors.Is(err, db.ErrNotFound):
+		// A message that raced this request to the writer after the msg.Deleted check
+		// surfaces as db.ErrNotFound. Map it to ErrDeletedMessage, the same taxonomy as
+		// the sequential-repeat guard, and so this request never reaches
+		// DecrementMentionCounts for a delete that did not happen.
+		return fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
+	default:
+		return fmt.Errorf("%w: cannot delete this message", ErrForbidden)
 	}
-	return err
 }
