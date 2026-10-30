@@ -182,6 +182,9 @@ export function shouldGroup(prev: Message, curr: Message): boolean {
   // A server row (call log, group event) is its own block: it never joins a run, and nothing joins it.
   if (isServerRowKind(prev.kind) || isServerRowKind(curr.kind)) return false;
   if (prev.user.id !== curr.user.id) return false;
+  // Every imported message shares the hidden account's id, so the Discord name
+  // is what tells two authors apart.
+  if (prev.importedAuthor?.name !== curr.importedAuthor?.name) return false;
   if (prev.deleted || curr.deleted) return false;
   // A reply carries its quoted-parent header, so it starts a new block.
   if (curr.replyTo !== null) return false;

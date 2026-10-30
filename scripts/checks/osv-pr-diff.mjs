@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Pull-request half of ci.yml's Supply-chain Scan: fail only on advisories the
-// PR's own lockfile changes bring in.
+// Diff half of ci.yml's Supply-chain Scan: fail a PR, or a push to dev, only on
+// advisories its own lockfile changes bring in. The base is the PR's base commit
+// or, on a push, the commit before it.
 //
 //   node scripts/checks/osv-pr-diff.mjs <base-sha>
 //   node --test scripts/checks/osv-pr-diff.test.mjs
@@ -8,7 +9,8 @@
 // The plain osv-scanner step fails on every known advisory, so a new advisory
 // published against a package already on dev turns every PR that touches a
 // lockfile red until someone bumps or baselines it on dev. That is dev's
-// problem, not the PR's: the daily dev scan and dev's own push run catch it.
+// problem, not the PR's: the daily dev scan reports it. dev's push run uses the
+// same diff, so a late advisory does not turn every merge red either.
 // On a PR the plain step therefore only warns, and this script decides: it
 // scans the PR's lockfiles and the base commit's lockfiles with the same
 // config (the PR's osv-scanner.toml, so a baseline the PR adds counts) and

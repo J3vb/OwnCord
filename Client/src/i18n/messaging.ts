@@ -141,6 +141,9 @@ export const messagingText = defineCatalog("messaging", {
   "pins.close": "Close pinned messages",
 
   "divider.new": "NEW",
+  "imported.tag": "Imported",
+  "imported.tagTitle": "Imported from Discord",
+  "imported.unknownName": "Unknown author",
   "reply.jumpTitle": "Jump to the replied-to message",
   "reply.unknown": "Reply to unknown message",
   "group.add": "{author} added {target} to the group",

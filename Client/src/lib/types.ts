@@ -687,6 +687,16 @@ export interface ModQueuePayload {
   readonly state: string;
 }
 
+/**
+ * Who wrote a message imported from a Discord export. Imported messages share
+ * one hidden account, so this replaces `user` wherever a name is shown. `color`
+ * is the export's role colour, untrusted: use it only as a `#rrggbb` hex.
+ */
+export interface ImportedAuthor {
+  readonly name: string;
+  readonly color?: string;
+}
+
 /** Reply parent snippet. A deleted parent is redacted to `{id, deleted: true}`. */
 export interface ReferencedMessage {
   readonly id: number;
@@ -694,6 +704,8 @@ export interface ReferencedMessage {
   readonly content: string;
   readonly deleted: boolean;
   readonly has_attachments: boolean;
+  /** Present when the parent is an imported message. */
+  readonly imported_author?: ImportedAuthor;
 }
 
 /**
@@ -1963,6 +1975,8 @@ export interface MessageResponse {
   readonly edited_at: string | null;
   readonly deleted: boolean;
   readonly timestamp: string;
+  /** Present on an imported message; `user` is then the hidden import account. */
+  readonly imported_author?: ImportedAuthor;
   /** Server-resolved mentioned user IDs. Absent from older servers. */
   readonly mentions?: readonly number[];
   /** See ChatMessagePayload.mention_roles. */
@@ -2076,6 +2090,8 @@ export interface SearchResultItem {
   readonly user: MessageUser;
   readonly content: string;
   readonly timestamp: string;
+  /** Present on an imported message; `user` is then the hidden import account. */
+  readonly imported_author?: ImportedAuthor;
 }
 
 /** GET /api/search response. */

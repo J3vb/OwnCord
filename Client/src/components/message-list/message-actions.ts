@@ -114,7 +114,10 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
     ),
     pin: gate(on && canPin),
     delete: gate(canDelete, canDelete ? deleteLockReason() : null),
-    report: gate(on && opts.onReportClick !== undefined && !own),
+    // An imported message has no account behind it to report.
+    report: gate(
+      on && opts.onReportClick !== undefined && !own && msg.importedAuthor === undefined,
+    ),
     copyId: gate(sent && isDeveloperMode()),
   };
 }

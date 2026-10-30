@@ -90,3 +90,9 @@ WHERE id <> sqlc.arg(self_id) AND import_pending = 0 AND type = 'text'
 
 -- name: RenameImportChannel :exec
 UPDATE channels SET name = ? WHERE id = ?;
+
+-- name: GetImportAuthorsByMessageIDs :many
+-- The name and colour a client shows for imported messages. The Discord user
+-- id stays server-side.
+SELECT message_id, name, color
+FROM message_import_authors WHERE message_id IN (sqlc.slice('ids'));

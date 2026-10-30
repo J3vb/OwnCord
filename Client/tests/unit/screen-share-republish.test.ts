@@ -188,6 +188,7 @@ describe("republishVideo", () => {
       source: Track.Source.ScreenShare,
       videoCodec: "vp8",
       simulcast: true,
+      degradationPreference: "maintain-framerate",
     });
     expect(audio.stop).not.toHaveBeenCalled();
     expect(state.published).toBe("vp8");

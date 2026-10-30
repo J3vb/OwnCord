@@ -49,6 +49,10 @@ const (
 	// quota.
 	gifRateLimitPerMinute = 30
 
+	// externalRateLimitPerMinute is per IP: a GIF picker page asks for 20
+	// images and a busy channel a few dozen, each an outbound fetch.
+	externalRateLimitPerMinute = 300
+
 	// gifFavoritesRateLimitPerMinute is looser than the proxy's because there is
 	// no upstream call.
 	gifFavoritesRateLimitPerMinute = 300

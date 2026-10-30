@@ -212,6 +212,7 @@ type MessageSearchResult struct {
 	Mentions         []int64             `json:"mentions"`
 	MentionsEveryone bool                `json:"mentions_everyone"`
 	Sticker          *MessageStickerInfo `json:"sticker,omitempty"`
+	ImportedBy
 }
 
 // SearchPage selects one page of full-text search results; the zero value is
@@ -272,6 +273,8 @@ type MessageAPIResponse struct {
 	Thread *ThreadInfo `json:"thread,omitempty"`
 	// Sticker is set only on a sticker message. See MessageStickerInfo.
 	Sticker *MessageStickerInfo `json:"sticker,omitempty"`
+	// ImportedBy names the Discord author of an imported message.
+	ImportedBy
 }
 
 // GroupEventInfo is the group_event block of a group DM row. Which fields are
@@ -300,6 +303,7 @@ type ReferencedMessage struct {
 	Content        string      `json:"content"`
 	Deleted        bool        `json:"deleted"`
 	HasAttachments bool        `json:"has_attachments"`
+	ImportedBy
 	// IsSystem marks a server-written row (a call log or group event row, any
 	// kind other than MessageKindUser and the welcome row a member waves at).
 	// It is server-side only: a reply to one is refused, so it never reaches

@@ -173,6 +173,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/emoji/`                                                     |
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
+| GET     | `/api/v1/external/image`                                             |
+| GET     | `/api/v1/external/preview`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
 | POST    | `/api/v1/files/{id}/link`                                            |
 | GET     | `/api/v1/files/{id}/thumb`                                           |
@@ -1288,6 +1290,11 @@ edit; an `@word` that matches no username, a `<@&id>` the author may not ping,
 or an `@everyone` from a user without the bit, carries no mention semantics and
 stays plain text. The same fields appear on pinned-message responses and on the
 WebSocket `chat_message`/`chat_edited` payloads.
+
+A message imported from a Discord export also carries
+`"imported_author": {"name", "color"}` (`color` omitted when the export had none)
+on history, pins, `around`, search results and `referenced_message`, and is
+omitted for an ordinary message. See [protocol.md](protocol.md).
 
 A DM can also hold a call log row: a message the server writes for a call in
 the DM's voice channel. It carries two more fields, both omitted for an ordinary

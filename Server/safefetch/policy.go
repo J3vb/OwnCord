@@ -75,6 +75,16 @@ type Policy struct {
 	// the cap waits for a slot until its context expires.
 	MaxConcurrent int
 
+	// Truncate keeps the first MaxDecompressedBytes of a longer body and
+	// returns them, instead of refusing the response. It is for a caller
+	// that only ever parses a prefix (the link-preview broker reads a page's
+	// <head>). The read stops at that prefix, so an endless stream costs no
+	// more than it; MaxBytes still bounds the wire bytes a gzip prefix takes,
+	// and the content type is judged on the prefix that is kept. A truncated
+	// JSON document no longer parses, so its caller sees a type failure, not
+	// a size one.
+	Truncate bool
+
 	// Classify decides whether one resolved address may be dialled. nil
 	// selects ClassifyAddr, which is the policy in docs/trust-model.md.
 	//

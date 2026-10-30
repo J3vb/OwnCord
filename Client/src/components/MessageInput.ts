@@ -151,7 +151,8 @@ export interface QueuedAttachment {
 
 /** The message a draft replies to. `username` is the name the bar shows (the
  *  display name when there is one); `ping` is the bar's @ON/@OFF toggle,
- *  absent meaning ON; `self` hides the toggle on a reply to your own message. */
+ *  absent meaning ON; `self` hides the toggle on a reply to your own message or to
+ *  an imported one (nobody to ping). */
 export interface ReplyTarget {
   readonly messageId: number;
   readonly username: string;

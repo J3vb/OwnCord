@@ -64,6 +64,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Server (operators)**
 
+- With "Host a browser client" (`server.browser_client_enabled`) on, the server now fetches the link previews, GIFs and outside images web users open (new login-only routes `/api/v1/external/preview` and `/api/v1/external/image`). Those sites see the server's address instead of the viewer's. Off by default, like the browser client; desktop users are unchanged.
 - Every error the server answers is now in the standard JSON shape (`{"error": "...", "message": "..."}`); the plugin admin API, the client update check, the admin log stream, plugin asset files, the LiveKit webhook and the WebSocket "server full" refusal used plain text. The "server full" refusal is `503 SERVER_BUSY`. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
 - The bundled LiveKit voice server moves from 1.13.10 to 1.13.11 (a patch release, no configuration change). Its new options for retransmit caps and upstream FlexFEC stay off unless you turn them on in your own `livekit.yaml`.
   **Desktop UI**
@@ -89,6 +90,7 @@ and only when it changes something a contributor or fork holder must do
 - Clicking Join on another server's invite signed you out and failed; it now opens that server's page in a new tab and keeps you signed in.
 - Settings > About showed no version, and "What's new" never appeared; both now use the version the web client was built from.
 - Settings > Logs showed an "Open Log Folder" button that always failed; the web client keeps logs in memory, so the button is gone there.
+- GIFs in the picker and in chat, link previews, YouTube thumbnails and pictures from other sites never showed on the web client; they now load through the server, so the viewer's browser never contacts the linked site.
 
 ### Under the hood
 

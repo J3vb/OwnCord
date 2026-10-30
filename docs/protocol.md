@@ -1357,6 +1357,17 @@ parent bar. A client that holds a snippet redacts it (`deleted: true`, no
 `user`, no `content`) on `chat_deleted` and `chat_bulk_deleted` when the
 deleted message is the parent.
 
+A message imported from a Discord export is owned by one hidden account, so its
+`user` is not the author. It carries `imported_author: {name, color?}` instead:
+the Discord display name and, when the export had one, a `#rrggbb` role colour
+(treat any other value as absent). The field is omitted for an ordinary message.
+It appears on every shape that names an author: history, `around` and pins
+messages, search results, and the `referenced_message` snippet of a reply to an
+imported message (the reply's `chat_message` frame included). The Discord user id
+is never sent. An imported author has no profile, cannot be mentioned or direct
+messaged, and a client shows the `name` with an "imported" tag in place of the
+`user`. Older servers omit the field.
+
 Mentions are resolved server-side at send time against existing usernames
 (case-insensitive, whole-word, capped at 20 per message, plus the replied-to
 author when the reply pinged, who never counts against the cap). The content may

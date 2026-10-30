@@ -52,7 +52,8 @@ import { resolveDisplayName } from "@lib/avatar";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
-import type { MessageUser } from "@lib/types";
+import type { ImportedAuthor, MessageUser } from "@lib/types";
+import { importedName } from "../../features/messaging/importedAuthor";
 import type { MessageController } from "./MessageController";
 import type { ReactionController } from "./ReactionController";
 import {
@@ -554,11 +555,16 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       readonly username: string;
       readonly display_name?: string | null;
     };
+    readonly importedAuthor?: ImportedAuthor;
   }): ReplyTarget {
     return {
       messageId: msg.id,
-      username: msg.user.display_name || msg.user.username,
-      self: msg.user.id === getCurrentUserId(),
+      username:
+        msg.importedAuthor !== undefined
+          ? importedName(msg.importedAuthor)
+          : msg.user.display_name || msg.user.username,
+      // An imported author has no one to ping, so the toggle is hidden as for your own message.
+      self: msg.importedAuthor !== undefined || msg.user.id === getCurrentUserId(),
     };
   }
 

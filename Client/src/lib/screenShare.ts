@@ -169,14 +169,14 @@ export const SCREENSHARE_PRESETS: Record<StreamQuality, ScreenShareCaptureOption
   medium: {
     audio: SCREENSHARE_AUDIO,
     resolution: ScreenSharePresets.h720fps30.resolution,
-    contentHint: "detail",
+    contentHint: "motion",
   },
   high: {
     audio: SCREENSHARE_AUDIO,
     resolution: ScreenSharePresets.h1080fps30.resolution,
-    contentHint: "detail",
+    contentHint: "motion",
   },
-  source: { audio: SCREENSHARE_AUDIO, contentHint: "detail" }, // no resolution cap — use native source resolution
+  source: { audio: SCREENSHARE_AUDIO, contentHint: "motion" }, // no resolution cap — use native source resolution
 };
 
 export const SCREENSHARE_PUBLISH_BITRATES: Record<StreamQuality, number> = {
@@ -243,12 +243,12 @@ export function getEffectiveScreenShareFps(quality: StreamQuality, fps: number):
   return fps;
 }
 
-/** How WebRTC gives way when the encoder or link cannot keep up. At 120 fps
- *  it lowers the resolution a little before it halves the frame rate (a
- *  120 fps share is chosen for motion); otherwise text stays sharp and the
- *  frame rate gives. Always explicit, so an SDK default cannot move 30/60. */
-export function screenShareDegradation(effectiveFps: number): RTCDegradationPreference {
-  return effectiveFps >= 120 ? "balanced" : "maintain-resolution";
+/** How WebRTC gives way when the encoder or link cannot keep up: the picture
+ *  gets smaller or softer and the motion stays smooth, at every frame rate.
+ *  Holding the resolution instead turned a fast video on a slow uplink into a
+ *  5-10 fps slideshow. Always explicit, so an SDK default cannot move it. */
+export function screenShareDegradation(): RTCDegradationPreference {
+  return "maintain-framerate";
 }
 
 /** High frame rates need proportionally more bitrate to stay sharp. */
@@ -278,7 +278,7 @@ export function screenVideoPublishOptions(
     },
     videoCodec: codec,
     degradationPreference:
-      shareMotionArm(getShareMotionPolicy()).degradation ?? screenShareDegradation(effectiveFps),
+      shareMotionArm(getShareMotionPolicy()).degradation ?? screenShareDegradation(),
   };
 }
 
