@@ -468,6 +468,12 @@ for (const profile of PROFILES) {
       await page.locator("button[aria-label='Settings']").tap();
       const overlay = page.locator("[data-testid='settings-overlay']");
       await expect(overlay).toHaveClass(/open/);
+      // An open section goes back to the list first, as Escape does.
+      await page.locator("#settings-tab-appearance").tap();
+      await expect(overlay.locator(".settings-panel")).toHaveClass(/settings-panel--section/);
+      await page.goBack();
+      await expect(overlay).toHaveClass(/open/);
+      await expect(overlay.locator(".settings-panel")).not.toHaveClass(/settings-panel--section/);
       await page.goBack();
       await expect(overlay).not.toHaveClass(/open/);
       await expect(drawer(page)).not.toHaveClass(/drawer-open/);

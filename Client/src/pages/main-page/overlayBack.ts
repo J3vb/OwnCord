@@ -7,14 +7,18 @@
  *
  * Settings and views are read from the stores. Dialogs are plain nodes added
  * to the page, so a childList observer on the body and the page root asks
- * again whenever one comes or goes. Sheets and the Settings panel claim for
- * themselves and are skipped here.
+ * again whenever one comes or goes. Sheets claim for themselves and are
+ * skipped here.
+ *
+ * Back on Settings presses Escape in it, so it takes the same path as the
+ * keyboard: a prompt in the panel closes first, an open section goes back to
+ * the list, and Settings stays open while a one-time secret is on its way.
  */
 
 import { Disposable } from "@lib/disposable";
 import { claimBack, type BackClaim } from "@lib/ui/backHistory";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
-import { dismissTopDialog, displayedDialogs } from "@lib/ui/dialogOpen";
+import { dismissTopDialog, displayedDialogs, pressEscapeIn } from "@lib/ui/dialogOpen";
 import { closeSettings, uiStore } from "@stores/ui.store";
 
 /** Dialogs that have their own Back claim, or are tracked by the stores. */
@@ -61,7 +65,12 @@ export function installOverlayBack(opts: OverlayBackOptions): void {
     const { settingsOpen, activeView } = uiStore.getState();
     settings = ensure(settings, isPhoneLayout() && settingsOpen, () => {
       settings = null;
-      closeSettings();
+      const panel = document.querySelector<HTMLElement>(".settings-overlay");
+      if (panel === null) closeSettings();
+      else pressEscapeIn(panel);
+      // Settings that stayed open (a section or prompt closed instead, or a
+      // secret is on its way) still owns Back.
+      syncStores();
     });
     view = ensure(view, isPhoneLayout() && activeView !== null, () => {
       view = null;

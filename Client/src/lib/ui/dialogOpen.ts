@@ -22,9 +22,13 @@ export function displayedDialogs(outside?: string): HTMLElement[] {
  */
 export function dismissTopDialog(outside?: string): void {
   const top = displayedDialogs(outside).at(-1);
-  if (top === undefined) return;
+  if (top !== undefined) pressEscapeIn(top);
+}
+
+/** Press Escape inside `surface`: from the focused control when focus is in it, else from the surface. */
+export function pressEscapeIn(surface: HTMLElement): void {
   const focused = document.activeElement;
-  const target = focused instanceof Element && top.contains(focused) ? focused : top;
+  const target = focused instanceof Element && surface.contains(focused) ? focused : surface;
   target.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
   );

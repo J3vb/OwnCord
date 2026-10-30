@@ -63,6 +63,32 @@ describe("Back closes Settings", () => {
     expect(guarded()).toBe(false);
   });
 
+  it("presses Escape in the panel, so a panel that refuses to close keeps Back", async () => {
+    install();
+    const panel = document.createElement("div");
+    panel.className = "settings-overlay";
+    document.body.appendChild(panel);
+    let allowClose = false;
+    const escapes = vi.fn();
+    panel.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      escapes();
+      if (allowClose) closeSettings();
+    });
+    openSettings();
+    uiStore.flush();
+    await settle();
+    await pressBack();
+    expect(escapes).toHaveBeenCalledTimes(1);
+    expect(uiStore.getState().settingsOpen).toBe(true);
+    expect(guarded()).toBe(true);
+    allowClose = true;
+    await pressBack();
+    expect(escapes).toHaveBeenCalledTimes(2);
+    expect(uiStore.getState().settingsOpen).toBe(false);
+    expect(guarded()).toBe(false);
+  });
+
   it("gives Back up when Settings closes another way, with one pop", async () => {
     install();
     openSettings();
