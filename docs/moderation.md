@@ -175,6 +175,43 @@ Channels):
 - Channel and category **permissions** let you allow or deny any permission
   for one role or one member, for example to make a channel read-only.
 
+### Importing a Discord channel
+
+Admin panel › Channels › **Import from Discord** brings one Discord channel's
+history in as a new text channel. It needs Manage Channels.
+
+1. In [DiscordChatExporter](https://github.com/Tyrrrz/DiscordChatExporter)
+   export the channel in **JSON** format with **Download media** on. That gives
+   `channel.json` and a `channel.json_Files` folder.
+2. Zip the `.json` file together with its `_Files` folder. A `.json` file on
+   its own works too, without pictures or files.
+3. Pick the file and a category, then press **Import**. A progress bar shows
+   how many messages are in so far; **Cancel** stops it and keeps nothing.
+
+The channel appears for everyone at once when the import finishes, with every
+message already read, so nobody is pinged or sees an unread badge. Messages
+keep their Discord time, edit time, replies (when the replied-to message is in
+the same export) and pins. Each shows the Discord display name with an
+**Imported** tag; no member account is created or linked. `@mentions` stay
+plain text and notify nobody. Reactions, embeds, stickers, polls, threads and
+system messages (joins, boosts, calls) are skipped and counted in the result
+line, as are attachments whose file is not in the zip, is a blocked type or is
+over the upload limit. Links to `cdn.discordapp.com` are never fetched.
+
+Things to know:
+
+- One import runs at a time. If the server restarts mid-import the half-built
+  channel is removed and you start again.
+- The file is held under `data/import-tmp` while it imports and is deleted
+  afterwards. The largest file accepted is `upload.import_max_mb` (500 MB by
+  default).
+- [Message retention](#records-and-how-long-they-are-kept) treats imported
+  messages like any other: with a retention window on, history older than the
+  window is deleted by the next sweep, so the panel warns you. Pinned messages
+  are kept.
+- Starting and publishing an import are in the audit log
+  (`discord_import_start`, `discord_import_publish`).
+
 ## Appeals
 
 A member appeals from **Settings › Privacy & Safety**, where they see every
