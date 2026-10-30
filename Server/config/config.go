@@ -183,8 +183,8 @@ type VoiceConfig struct {
 	// config.yaml; the compiled-in default stays false so existing configs keep
 	// their behaviour.
 	AutoDownloadLiveKit bool `yaml:"auto_download_livekit"`
-	// LiveKitVersion overrides the pinned auto-download version (e.g.
-	// "1.13.11"); empty uses the built-in pin.
+	// LiveKitVersion overrides the pinned livekit-server release version used
+	// by auto-download (e.g. "1.13.11"). Empty = the built-in pin.
 	LiveKitVersion string `yaml:"livekit_version"`
 	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
 	// AdvertiseInternalIP also advertises internal (LAN) host candidates so
