@@ -62,7 +62,15 @@ and only when it changes something a contributor or fork holder must do
 - Picking another server in the server rail or the switch list asks "Switch to (server name)?" first, so a stray click no longer drops you out of a call. Tick "Don't ask again" to skip it; turn it back on in Settings > Advanced > Ask before switching servers.
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
 
+**Admin panel**
+
+- Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
+
 ### Fixed
+
+**Admin panel**
+
+- Server logs opened slowly once many lines were collected. A full log now opens in a fraction of a second, and the page keeps the last 10,000 lines instead of 2,000.
 
 **Login & connection**
 

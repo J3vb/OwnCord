@@ -88,7 +88,7 @@ including destructive admin routes.
 
 **`server_logs`** reads the server's recent logs.
 
-- The server keeps its last 2000 log records in an in-memory ring buffer. It
+- The server keeps its last 10000 log records in an in-memory ring buffer. It
   serves them as **Server-Sent Events (SSE)**, a one-way stream over HTTP.
 - An `EventSource`-style stream cannot send an auth header, so the stream is
   guarded by a single-use ticket. The tool runs that flow:
