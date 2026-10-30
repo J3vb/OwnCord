@@ -286,16 +286,27 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     placeholder: messagingText("header.search"),
     "data-testid": "search-input",
   });
+  // On a phone the box gives way to an icon; CSS shows one or the other.
+  const searchBtn = createElement("button", {
+    type: "button",
+    class: "search-btn",
+    title: messagingText("header.search"),
+    "aria-label": messagingText("header.search"),
+    "data-testid": "search-btn",
+  });
+  searchBtn.appendChild(createIcon("search", 18));
   if (opts.onSearchFocus !== undefined) {
     const onFocus = opts.onSearchFocus;
     searchInput.addEventListener("focus", () => {
       onFocus();
       searchInput.blur();
     });
+    searchBtn.addEventListener("click", () => onFocus());
   }
   appendChildren(
     tools,
     searchInput,
+    searchBtn,
     callBtn,
     videoCallBtn,
     callChatBtn,

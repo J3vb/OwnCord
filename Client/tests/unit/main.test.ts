@@ -4,8 +4,8 @@
  * main.ts is excluded from unit coverage (vitest.config.ts) — "no seam to
  * test below the e2e level; covered by tests/e2e." This file creates one:
  * every direct dependency of main.ts that is not needed to observe the two
- * behaviors below is stubbed out (mirroring the pattern main-page.test.ts
- * uses for MainPage.ts), while ws.ts, authStore, safe-render.ts,
+ * behaviors below is stubbed out (mirroring the pattern the mainPage/ tests
+ * use for MainPage.ts), while ws.ts, authStore, safe-render.ts,
  * and ConnectedOverlay.ts run for real — so the actual
  * event-ordering bug (OC-0063) is exercised, not simulated, and the tray
  * listener (OC-0037) is driven through the same Tauri event mock ws.ts's own
@@ -235,7 +235,7 @@ vi.mock("@pages/ConnectPage", () => ({
 // "main" -> "connect" round trip through the router (main.ts only navigates
 // away from "connect" via the connected overlay's onReady -> router.navigate
 // ("main") callback), but doesn't care what MainPage renders, so stand in
-// with the same lightweight shape main-page.test.ts's own mocks return.
+// with the same lightweight shape the mainPage/ tests' own mocks return.
 vi.mock("@pages/MainPage", () => ({
   createMainPage: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
@@ -1707,7 +1707,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
     await vi.advanceTimersByTimeAsync(800);
 
     // The real dispatcher's auth_error handler records the host when the
-    // server says this client's epoch is too old (dispatcher.test.ts covers
+    // server says this client's epoch is too old (dispatcher/core.test.ts covers
     // that); the dispatcher is stubbed here, so set what it would have set,
     // then end the session the way auth_error does.
     mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });

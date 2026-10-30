@@ -63,6 +63,7 @@ pub enum GameSource {
     Steam,
     Epic,
     Gog,
+    #[cfg_attr(mobile, allow(dead_code))]
     Battlenet,
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Lutris,
@@ -279,6 +280,7 @@ struct Proc {
 }
 
 impl Proc {
+    #[cfg(desktop)]
     fn new(raw_paths: &[&str], raw_cmdline: &str, started_at_ms: u64) -> Self {
         let mut paths: Vec<String> = Vec::new();
         for raw in raw_paths {
@@ -323,6 +325,7 @@ fn normalize_path(raw: &str) -> String {
 }
 
 /// Whether a raw path starts at a root: `/x`, `C:\x`, `\\server\x`.
+#[cfg(desktop)]
 fn is_absolute(raw: &str) -> bool {
     let raw = raw.trim().trim_matches('"');
     matches!(raw.as_bytes(), [b'/' | b'\\', ..] | [_, b':', ..])
@@ -330,12 +333,14 @@ fn is_absolute(raw: &str) -> bool {
 
 /// A raw path as the picker shows it: without quotes, a `\\?\` prefix or
 /// Linux's ` (deleted)` suffix.
+#[cfg(desktop)]
 fn clean_display(raw: &str) -> String {
     let s = raw.trim().trim_matches('"');
     let s = s.strip_suffix(" (deleted)").unwrap_or(s);
     s.strip_prefix("\\\\?\\").unwrap_or(s).to_string()
 }
 
+#[cfg(desktop)]
 fn normalize_cmdline(raw: &str) -> String {
     raw.to_lowercase().replace('\\', "/")
 }

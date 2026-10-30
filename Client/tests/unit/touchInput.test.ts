@@ -5,7 +5,6 @@ type VV = EventTarget & { height: number; scale: number };
 
 let ctrl: AbortController;
 let vv: VV;
-let hoverNone: boolean;
 let scrollTo: ReturnType<typeof vi.fn>;
 let menus: MouseEvent[];
 
@@ -32,11 +31,6 @@ function el(html: string): HTMLElement {
 beforeEach(() => {
   vi.useFakeTimers();
   ctrl = new AbortController();
-  hoverNone = true;
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((q: string) => ({ matches: q === "(hover: none)" && hoverNone })),
-  );
   vv = Object.assign(new EventTarget(), { height: 500, scale: 1 });
   Object.defineProperty(window, "visualViewport", { value: vv, configurable: true });
   scrollTo = vi.fn();
@@ -207,7 +201,7 @@ describe("click after a long-press", () => {
   });
 });
 
-describe("tap shows message actions", () => {
+describe("a tap on a message", () => {
   function tap(target: Element): void {
     touch("pointerdown", target);
     touch("pointerup", target);
@@ -216,48 +210,34 @@ describe("tap shows message actions", () => {
     '<div class="message" id="a"><span class="body">a</span><button class="b">b</button></div>' +
     '<div class="message" id="b2"><span class="body">b</span></div><div id="outside">o</div>';
 
-  it("marks at most one message and moves the mark", () => {
+  it("marks nothing and opens no menu: the hold is the only way to the actions", () => {
     const host = el(rows);
     tap(host.querySelector("#a .body")!);
-    expect(host.querySelector("#a")!.classList.contains("msg-touch-active")).toBe(true);
     tap(host.querySelector("#b2 .body")!);
-    expect(host.querySelectorAll(".msg-touch-active")).toHaveLength(1);
-    expect(host.querySelector("#b2")!.classList.contains("msg-touch-active")).toBe(true);
-  });
-
-  it("leaves interactive targets alone", () => {
-    const host = el(rows);
-    tap(host.querySelector("#a .b")!);
+    vi.advanceTimersByTime(600);
     expect(host.querySelectorAll(".msg-touch-active")).toHaveLength(0);
+    expect(host.querySelectorAll("[class*='active']")).toHaveLength(0);
+    expect(menus).toHaveLength(0);
   });
 
-  it("still marks a message row that is itself focusable", () => {
-    const host = el('<div class="message" tabindex="0"><span class="body">a</span></div>');
-    tap(host.querySelector(".body")!);
-    expect(host.querySelectorAll(".msg-touch-active")).toHaveLength(1);
-  });
-
-  it("clears on a tap outside any message", () => {
+  it("lets the tap's click through untouched", () => {
     const host = el(rows);
-    tap(host.querySelector("#a .body")!);
-    tap(host.querySelector("#outside")!);
-    expect(host.querySelectorAll(".msg-touch-active")).toHaveLength(0);
+    const onClick = vi.fn();
+    const t = host.querySelector("#a .body")!;
+    t.addEventListener("click", onClick);
+    tap(t);
+    (t as HTMLElement).click();
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it("does nothing when the device can hover", () => {
-    hoverNone = false;
-    const host = el(rows);
-    tap(host.querySelector("#a .body")!);
-    expect(host.querySelectorAll(".msg-touch-active")).toHaveLength(0);
-  });
-
-  it("does not mark after a long-press", () => {
+  it("a press under the hold time on a message opens no menu", () => {
     const host = el(rows);
     const t = host.querySelector("#a .body")!;
     touch("pointerdown", t);
-    vi.advanceTimersByTime(500);
+    vi.advanceTimersByTime(499);
     touch("pointerup", t);
-    expect(host.querySelectorAll(".msg-touch-active")).toHaveLength(0);
+    vi.advanceTimersByTime(200);
+    expect(menus).toHaveLength(0);
   });
 });
 
@@ -302,13 +282,16 @@ describe("review fixes", () => {
     expect(menus).toHaveLength(0);
   });
 
-  it("does not mark the message when the webview's own menu opened during the hold", () => {
+  it("swallows the lift's click when the webview's own menu opened during the hold", () => {
     const host = el('<div class="message" id="a"><span class="body">a</span></div>');
     const t = host.querySelector(".body")!;
+    const onClick = vi.fn();
+    t.addEventListener("click", onClick);
     touch("pointerdown", t);
     t.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     touch("pointerup", t);
-    expect(host.querySelector(".msg-touch-active")).toBeNull();
+    (t as HTMLElement).click();
+    expect(onClick).not.toHaveBeenCalled();
   });
 
   it("leaves #app its own height while pinch-zoomed", () => {
@@ -336,24 +319,20 @@ describe("keyboard height", () => {
 });
 
 describe("abort", () => {
-  it("removes the property, the mark, the pending timer and every listener", () => {
+  it("removes the property, the pending timer and every listener", () => {
     const host = el('<div class="message" id="a"><span class="body">a</span></div>');
     const t = host.querySelector(".body")!;
     vv.dispatchEvent(new Event("resize"));
     touch("pointerdown", t);
-    touch("pointerup", t);
-    expect(host.querySelector("#a")!.classList.contains("msg-touch-active")).toBe(true);
-    touch("pointerdown", t);
     ctrl.abort();
     expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("");
-    expect(host.querySelector(".msg-touch-active")).toBeNull();
     vi.advanceTimersByTime(600);
     expect(menus).toHaveLength(0);
     vv.height = 99;
     vv.dispatchEvent(new Event("resize"));
     expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("");
     touch("pointerdown", t);
-    touch("pointerup", t);
-    expect(host.querySelector(".msg-touch-active")).toBeNull();
+    vi.advanceTimersByTime(600);
+    expect(menus).toHaveLength(0);
   });
 });

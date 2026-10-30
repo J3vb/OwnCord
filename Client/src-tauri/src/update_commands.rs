@@ -28,12 +28,14 @@ static INSTALLER_LAUNCHING: AtomicBool = AtomicBool::new(false);
 
 /// True while `install()` runs (on Windows, until the process exits). Read by the
 /// single-instance callback (`lib.rs`) to ignore forwarded launches.
+#[cfg(desktop)]
 pub(crate) fn installer_launching() -> bool {
     INSTALLER_LAUNCHING.load(Ordering::SeqCst)
 }
 
 /// True for the whole download+install operation; logged by the single-instance
 /// callback so a report shows whether a forwarded launch landed mid-update.
+#[cfg(desktop)]
 pub(crate) fn update_in_progress() -> bool {
     UPDATE_IN_PROGRESS.load(Ordering::SeqCst)
 }

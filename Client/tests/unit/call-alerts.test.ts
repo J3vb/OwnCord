@@ -2,7 +2,7 @@
  * DP-24: an incoming call gets noticed, and a missed call is reported. The
  * OS-level half (the call notification, the urgent attention request and the
  * missed-call notice) and the ringtone, driven the way the main page drives
- * them. The banner itself is the main page's (main-page.test.ts).
+ * them. The banner itself is the main page's (the mainPage/ tests).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RingState } from "../../src/lib/voice/callRing";
