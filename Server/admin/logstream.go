@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -234,7 +235,7 @@ func (rb *RingBuffer) subscribeLocked() (<-chan LogEntry, func()) {
 // entry written in between reaches neither the backfill nor the live feed,
 // because Write's fan-out only reaches registered subscribers. The window is
 // not instantaneous: handleLogStream runs a token-resolution DB round-trip per
-// backfilled entry.
+// backfill chunk.
 func (rb *RingBuffer) SnapshotAndSubscribe() ([]LogEntry, <-chan LogEntry, func()) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -469,6 +470,35 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 	return principalStillAuthorized, true
 }
 
+// backfillChunk is how many backfill entries go out per write. The principal is
+// re-checked before each chunk rather than each entry: a check is a few DB
+// queries, and per entry that cost a full ring's worth of round-trips before
+// the first line reached the browser. A credential revoked mid-backfill still
+// cuts the stream within one chunk.
+const backfillChunk = 500
+
+// writeBackfill sends the backfill in chunks, flushing after each, and reports
+// false when the principal lost access and the stream must end.
+func writeBackfill(w http.ResponseWriter, flusher http.Flusher, backfill []LogEntry, stillAuthorized func() bool) bool {
+	var buf bytes.Buffer
+	for start := 0; start < len(backfill); start += backfillChunk {
+		if !stillAuthorized() {
+			return false
+		}
+		buf.Reset()
+		for _, entry := range backfill[start:min(start+backfillChunk, len(backfill))] {
+			if data, err := json.Marshal(entry); err == nil {
+				buf.WriteString("data: ")
+				buf.Write(data)
+				buf.WriteString("\n\n")
+			}
+		}
+		_, _ = w.Write(buf.Bytes())
+		flusher.Flush()
+	}
+	return true
+}
+
 // handleLogStream serves an SSE endpoint that streams log entries in real-time.
 // Auth is via query param ?ticket= — a short-lived single-use ticket obtained
 // from POST /admin/api/logs/ticket (which requires normal admin auth).
@@ -508,23 +538,15 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 			slog.Warn("log stream: failed to clear write deadline; stream may be cut by WriteTimeout", "err", err)
 		}
 
-		// Snapshot the backfill and subscribe atomically: the per-entry
-		// principalStillAuthorized() check below is a DB round-trip, so a
-		// Snapshot()-then-Subscribe() gap would silently drop entries written
-		// in between.
+		// Snapshot the backfill and subscribe atomically: the principal
+		// re-check below is a DB round-trip, so a Snapshot()-then-Subscribe()
+		// gap would silently drop entries written in between.
 		backfill, ch, unsub := ringBuf.SnapshotAndSubscribe()
 		defer unsub()
 
-		// Send backfill.
-		for _, entry := range backfill {
-			if !principalStillAuthorized() {
-				return
-			}
-			if data, err := json.Marshal(entry); err == nil {
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-			}
+		if !writeBackfill(w, flusher, backfill, principalStillAuthorized) {
+			return
 		}
-		flusher.Flush()
 
 		// Keepalive ticker against intermediary/proxy idle timeouts (the
 		// connection's own WriteTimeout was already neutralized above).

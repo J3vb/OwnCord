@@ -547,7 +547,14 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .log-actions{display:flex;gap:6px;flex-wrap:wrap}
 .log-actions .btn[aria-pressed="true"]{background:var(--accent-glow);color:var(--accent-text)}
 .log-output{background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:12px;line-height:1.6;padding:8px 12px;overflow-y:auto;height:calc(100vh - 300px);min-height:240px;white-space:pre-wrap;word-break:break-all}
-.log-line{padding:1px 0}
+.log-wrap{position:relative}
+/* Off-screen lines skip layout and paint, so a full ring scrolls as lightly
+   as a short one; the size hint keeps the scrollbar honest until a line has
+   been laid out once. */
+.log-line{padding:1px 0;content-visibility:auto;contain-intrinsic-size:auto 20px}
+.log-jump{position:absolute;right:16px;bottom:12px;border-radius:var(--radius-pill);box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.log-jump[hidden]{display:none}
+.level-toggle .lvl-n{font-family:var(--font-mono);font-size:11px;opacity:.8;font-variant-numeric:tabular-nums}
 .log-line .log-ts{color:var(--text-muted);margin-right:8px}
 .log-line .log-lvl{display:inline-block;width:44px;font-weight:700;margin-right:6px}
 .log-line .log-src{color:var(--text-muted);margin-right:8px;font-size:11px}
