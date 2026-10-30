@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { syncOsMotionListener } from "../../src/lib/os-motion";
+import { syncOsMotionListener } from "../../src/lib/ui/osMotion";
 
 describe("syncOsMotionListener", () => {
   let matchMediaListeners: Map<string, Function>;

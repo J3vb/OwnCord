@@ -6,7 +6,7 @@ const { mockEnsureHttpProxy, mockFetch } = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
-vi.mock("../../src/lib/httpProxy", () => ({
+vi.mock("../../src/lib/net/httpProxy", () => ({
   ensureHttpProxy: mockEnsureHttpProxy,
   stopHttpProxy: () => Promise.resolve(),
 }));

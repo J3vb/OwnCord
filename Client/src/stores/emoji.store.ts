@@ -14,7 +14,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 /** One custom emoji as the server describes it. */
 export interface CustomEmoji {

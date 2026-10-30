@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("../../lib/e2eeCrypto", () => ({
+vi.mock("../../lib/net/e2eeCrypto", () => ({
   wrapRoomKey: vi.fn(async (_priv: unknown, _peer: unknown, key: Uint8Array, epoch: number) => ({
     encryptedKey: `enc:${key[0]}@${epoch}`,
     iv: "iv",
@@ -21,7 +21,7 @@ vi.mock("../../lib/logger", () => ({
   },
 }));
 
-import { wrapRoomKey, unwrapRoomKey } from "../../lib/e2eeCrypto";
+import { wrapRoomKey, unwrapRoomKey } from "../../lib/net/e2eeCrypto";
 import { E2EEOffer } from "./e2eeOffer";
 
 const HOLDER = 1;

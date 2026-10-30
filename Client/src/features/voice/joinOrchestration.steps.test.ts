@@ -23,17 +23,17 @@ vi.mock("../../stores/voice.store", async (importOriginal) => {
     leaveVoiceChannel: vi.fn(actual.leaveVoiceChannel),
   };
 });
-vi.mock("../../lib/livekitDiagnostics", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/livekitDiagnostics")>()),
+vi.mock("../../lib/voice/livekitDiagnostics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/voice/livekitDiagnostics")>()),
   logIceConnectionInfo: vi.fn(),
 }));
 
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
-import { voiceJoinSnapshot } from "../../lib/voiceJoinTrace";
+import { voiceJoinSnapshot } from "../../lib/voice/voiceJoinTrace";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { leaveVoiceChannel, setVoiceStatus, voiceStore } from "../../stores/voice.store";
-import { logIceConnectionInfo } from "../../lib/livekitDiagnostics";
+import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
 import { voiceText } from "../../i18n/voice";
 
 type FakeRoom = Room & {

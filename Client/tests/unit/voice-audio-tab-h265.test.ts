@@ -68,7 +68,7 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
     updateKey: async () => {},
   },
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
   switchVideoDevice: vi.fn(),

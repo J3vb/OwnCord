@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
-import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
+import { MAX_CUSTOM_STATUS_LEN } from "@lib/presence/userStatus";
 
 /**
  * Phase 6 gave the picker two new jobs: offer "invisible" as a real status

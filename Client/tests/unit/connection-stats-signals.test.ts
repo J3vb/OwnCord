@@ -20,7 +20,7 @@ import {
   type ConnectionStats,
   type ConnectionStatsPoller,
   type QualityLevel,
-} from "../../src/lib/connectionStats";
+} from "../../src/lib/voice/connectionStats";
 
 // Logger names are taken when the module loads, before the per-test mock clear.
 const loggerCallsAtLoad = [...createLoggerMock.mock.calls];

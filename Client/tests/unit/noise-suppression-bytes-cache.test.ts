@@ -54,7 +54,7 @@ describe("createRNNoiseNode bytes cache", () => {
   });
 
   it("fetches the wasm once across joins and gives each node its own transferred copy", async () => {
-    const { createRNNoiseNode } = await import("@lib/noise-suppression");
+    const { createRNNoiseNode } = await import("@lib/voice/noiseSuppression");
     const first = makeContext();
     const second = makeContext();
 
@@ -77,7 +77,7 @@ describe("createRNNoiseNode bytes cache", () => {
 
   it("does not cache a non-OK response", async () => {
     fetchMock.mockResolvedValueOnce(new Response("nope", { status: 503 }));
-    const { createRNNoiseNode } = await import("@lib/noise-suppression");
+    const { createRNNoiseNode } = await import("@lib/voice/noiseSuppression");
 
     await expect(createRNNoiseNode(makeContext())).rejects.toThrow("503");
     await createRNNoiseNode(makeContext());
@@ -89,7 +89,7 @@ describe("createRNNoiseNode bytes cache", () => {
 
   it("does not cache a failed fetch", async () => {
     fetchMock.mockRejectedValueOnce(new Error("network down"));
-    const { createRNNoiseNode } = await import("@lib/noise-suppression");
+    const { createRNNoiseNode } = await import("@lib/voice/noiseSuppression");
 
     await expect(createRNNoiseNode(makeContext())).rejects.toThrow("network down");
     await createRNNoiseNode(makeContext());
@@ -100,7 +100,7 @@ describe("createRNNoiseNode bytes cache", () => {
 
   it("drops the cached bytes when the worklet rejects them, so the next join refetches", async () => {
     workletReplies.push({ type: "error", message: "compile failed" });
-    const { createRNNoiseNode } = await import("@lib/noise-suppression");
+    const { createRNNoiseNode } = await import("@lib/voice/noiseSuppression");
 
     await expect(createRNNoiseNode(makeContext())).rejects.toThrow("compile failed");
     await createRNNoiseNode(makeContext());

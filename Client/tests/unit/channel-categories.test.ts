@@ -1,8 +1,8 @@
 /** Real categories, client half (WP 6.5b): grouping and order, collapse by id, the header menu, reorder. */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
+vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
 }));

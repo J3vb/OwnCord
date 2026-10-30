@@ -5,19 +5,19 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
   getShareDiagnostics: vi.fn().mockReturnValue(null),
 }));
 
 const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }));
-vi.mock("@lib/toast", () => ({ showToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast }));
 
 const { desktop } = await import("../../src/platform/desktop");
 const { renderMessageContent } = await import("../../src/components/message-list/content-parser");
 const { setChannelMutesHost } = await import("../../src/lib/prefs/channelMutes");
-const { setInviteJoinHandler } = await import("../../src/lib/invite-navigation");
+const { setInviteJoinHandler } = await import("../../src/lib/nav/inviteNavigation");
 const { createLogsTab } = await import("../../src/components/settings/LogsTab");
 
 describe("app version (web build)", () => {

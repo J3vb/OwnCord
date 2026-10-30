@@ -31,7 +31,7 @@ vi.mock("../../lib/read-state", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/read-state")>();
   return { ...actual, markChannelRead: vi.fn() };
 });
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../../lib/notifications", () => ({
   notifyMention: vi.fn(),
   notifyChannelActivity: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock("../../lib/prefs/lastChannel", () => ({
   setLastChannelHost: vi.fn(),
 }));
 import { markChannelRead } from "../../lib/read-state";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
 
 vi.spyOn(console, "info").mockImplementation(() => {});

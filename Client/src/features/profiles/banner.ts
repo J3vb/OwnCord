@@ -17,7 +17,7 @@
  * fetch that resolves after the surface closed is simply not applied.
  */
 
-import { bindAnimatedImage } from "@lib/animatedStill";
+import { bindAnimatedImage } from "@lib/ui/animatedStill";
 import { createElement } from "@lib/dom";
 
 /**

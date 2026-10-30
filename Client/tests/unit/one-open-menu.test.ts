@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 100),
   setUserLocalMute: vi.fn(),
@@ -17,7 +17,7 @@ vi.mock("@lib/livekitSession", () => ({
   setScreenshareAudioVolume: vi.fn(),
 }));
 
-const { showContextMenu, openMenuShell } = await import("@lib/context-menu");
+const { showContextMenu, openMenuShell } = await import("@lib/ui/contextMenu");
 const { attachThreadContextMenu } = await import("@components/channel-sidebar/thread-menu");
 const { showUserVolumeMenu } = await import("@components/channel-sidebar/volume-menu");
 const { showSelfTileMenu } = await import("@components/video-grid/tile-menu");

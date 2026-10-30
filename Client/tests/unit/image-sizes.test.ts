@@ -11,7 +11,7 @@ import {
   setImageBox,
 } from "../../src/components/message-list/image-sizes";
 import { expectConsole } from "../helpers/console";
-import { runSessionResets } from "../../src/lib/sessionRegistry";
+import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 
 const KEY = "owncord:settings:imageBoxes";
 

@@ -9,7 +9,7 @@ const { mockSyncOsMotionListener } = vi.hoisted(() => ({
   mockSyncOsMotionListener: vi.fn(),
 }));
 
-vi.mock("@lib/os-motion", () => ({
+vi.mock("@lib/ui/osMotion", () => ({
   SYNC_OS_MOTION_DEFAULT: true,
   syncOsMotionListener: mockSyncOsMotionListener,
 }));

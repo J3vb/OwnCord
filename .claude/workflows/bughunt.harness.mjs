@@ -487,7 +487,7 @@ scenarios.s7_adaptive_lenses = async () => {
     title: "beta subscription leak two",
   });
   const C = finding(3, {
-    file: "Client/src/lib/livekitE2EE.ts",
+    file: "Client/src/lib/voice/livekitE2EE.ts",
     line: 200,
     title: "gamma epoch desync three",
   });

@@ -4,7 +4,7 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, type Channel } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
-import { parseChannelLink } from "@lib/deep-link";
+import { parseChannelLink } from "@lib/nav/deepLink";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 
 const channel: Channel = {

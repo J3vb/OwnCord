@@ -51,7 +51,7 @@ vi.mock("@lib/read-state", () => ({
   leaveChannel: vi.fn(),
   markChannelReadSeen: vi.fn(),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 // The chunk can fail to load: the real loader, with a switch to make it reject.
 vi.mock("../../src/features/messaging/sendQueue-loader", async () => {
   const actual = await vi.importActual<

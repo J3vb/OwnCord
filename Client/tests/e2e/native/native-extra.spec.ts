@@ -281,7 +281,7 @@ test("tray Status picks set the saved and server-side presence", async ({
   await expect(shown).toHaveText("Online");
 });
 
-// OC-0451: with the rate limit closed, PresenceSender (lib/presence.ts) queues
+// OC-0451: with the rate limit closed, PresenceSender (lib/presence/presence.ts) queues
 // the later change past the server's receipt-measured 10s window and re-arms
 // the retry when the server still answers RATE_LIMITED, so the last requested
 // status reaches the server. Reverting that fix must fail this test.

@@ -11,7 +11,7 @@ import { channelsStore, resetChannelsStore, setChannels } from "../../src/stores
 import { isFollowed, resetThreadsStore, threadsStore } from "../../src/stores/threads.store";
 import { followedThreadsStore } from "../../src/stores/followedThreads.store";
 import { resetChannelActivity } from "../../src/features/channels/wsHandlers";
-import { resetServerCapabilities } from "../../src/lib/serverCapabilities";
+import { resetServerCapabilities } from "../../src/lib/net/serverCapabilities";
 import type { WsClient } from "../../src/lib/ws";
 import type { ReadyChannel, ReadyPayload, ReadyThread } from "../../src/lib/types";
 
@@ -23,7 +23,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity,
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 const PARENT = 4;
 const THREAD = 91;

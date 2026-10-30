@@ -27,7 +27,7 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   each native session serves them on a token-authenticated `127.0.0.1`
   WebSocket (`src-tauri/src/native_voice/video.rs`); remote tracks render
   through `native/videoRenderer.ts` (WebGL; the canvas itself is shown
-  beside the tile's `<video>` via `lib/videoSurface.ts`, while a frameless
+  beside the tile's `<video>` via `lib/voice/videoSurface.ts`, while a frameless
   canvas `MediaStreamTrack` keeps the grid MediaStream-based) and camera capture
   runs in the backend (`src-tauri/src/native_voice/camera.rs`, GStreamer:
   `GstDeviceMonitor`/`v4l2src`/`pipewiresrc` → `decodebin` → I420 `appsink`),
@@ -36,12 +36,12 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   back over the frame socket. Screen share captures in the backend
   (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
-  on Wayland, and `lib/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
+  on Wayland, and `lib/voice/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
   `createLocalScreenTracks` for `NativeRoom`'s `createScreenTracks`; the
   picker's Share audio switch (on when a PulseAudio-protocol sound server
   answers) adds a `NativeScreenAudioTrack` that follows the share. Change source there is the
   track's own (`NativeScreenTrack.changeSource`, the host's
-  `native_voice_change_screen`), reached through `lib/screenShare.ts`'s
+  `native_voice_change_screen`), reached through `lib/voice/screenShare.ts`'s
   capability check `inPlaceSourceChange`, never an `isLinuxDesktop()` branch.
   A camera switch is the track's own too (`NativeCameraTrack.setDeviceId`, the
   host's `native_voice_change_camera`); `mediaControl` restarts the camera only

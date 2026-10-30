@@ -16,7 +16,7 @@ import {
   setOlderLoadFailed,
 } from "@stores/messages.store";
 import { threadsStore, resetThreadsStore } from "@stores/threads.store";
-import { listSessionResets } from "@lib/sessionRegistry";
+import { listSessionResets } from "@lib/net/sessionRegistry";
 import type { MessageResponse, ThreadInfo } from "@lib/types";
 
 const CHANNEL = 4;

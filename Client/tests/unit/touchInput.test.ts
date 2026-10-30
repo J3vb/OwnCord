@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { installTouchInput } from "../../src/lib/touchInput";
+import { installTouchInput } from "../../src/lib/ui/touchInput";
 
 type VV = EventTarget & { height: number; scale: number };
 

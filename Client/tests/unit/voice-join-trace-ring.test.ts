@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beginJoinAttempt, finishJoinAttempt, voiceJoinSnapshot } from "@lib/voiceJoinTrace";
+import { beginJoinAttempt, finishJoinAttempt, voiceJoinSnapshot } from "@lib/voice/voiceJoinTrace";
 
 // A file of its own: the record starts empty here, so the first attempts show
 // how it grows before it reaches its cap.

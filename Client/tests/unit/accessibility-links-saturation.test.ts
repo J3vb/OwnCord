@@ -6,7 +6,7 @@ import {
   effectiveSaturation,
   DEFAULT_SATURATION_PCT,
 } from "@lib/prefs/appearance";
-import { syncOsMotionListener } from "@lib/os-motion";
+import { syncOsMotionListener } from "@lib/ui/osMotion";
 
 const PREFIX = "owncord:settings:";
 const root = document.documentElement;

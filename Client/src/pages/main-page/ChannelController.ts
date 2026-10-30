@@ -48,9 +48,9 @@ import {
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { resolveAuthor } from "@lib/text/formatting";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { markdownToPlainText } from "@lib/text/markdown";
-import { jumpToMessage } from "@lib/message-navigation";
+import { jumpToMessage } from "@lib/nav/messageNavigation";
 import { authStore } from "@stores/auth.store";
 import type { ImportedAuthor, MessageUser } from "@lib/types";
 import { importedName } from "../../features/messaging/importedAuthor";
@@ -91,7 +91,7 @@ import { requestsText } from "../../i18n/requests";
 import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
-import { readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
+import { readPointerEnabled, threadsEnabled } from "@lib/net/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,

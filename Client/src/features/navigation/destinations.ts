@@ -23,7 +23,7 @@
  */
 
 import type { ApiClient } from "@lib/api";
-import type { AvatarSubject } from "@lib/avatar";
+import type { AvatarSubject } from "@lib/ui/avatar";
 import type { WsClient } from "@lib/ws";
 import { buildForumView } from "../forums/view";
 import { pendingRequestCount } from "../message-requests/store";

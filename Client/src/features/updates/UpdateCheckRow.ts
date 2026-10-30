@@ -10,8 +10,8 @@ import { createElement, appendChildren, setText } from "../../lib/dom";
 import { createLogger } from "../../lib/logger";
 import { getActiveUpdateChecker } from "./updateChecker";
 import type { UpdateOutcome } from "./updateChecker";
-import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "../../lib/updater";
-import type { UpdateInstallState } from "../../lib/updater";
+import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "../../lib/net/updater";
+import type { UpdateInstallState } from "../../lib/net/updater";
 import { connectText } from "../../i18n/connect";
 import { settingsText as t } from "../../i18n/settings";
 

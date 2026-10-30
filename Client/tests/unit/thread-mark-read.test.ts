@@ -6,7 +6,10 @@ import {
   resetReadPointerState,
   setMarkReadSender,
 } from "../../src/lib/read-state";
-import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../src/lib/net/serverCapabilities";
 import { resetChannelsStore } from "../../src/stores/channels.store";
 import {
   adoptReadyThreads,

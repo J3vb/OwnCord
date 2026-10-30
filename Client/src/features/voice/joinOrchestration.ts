@@ -8,14 +8,14 @@ import type { Room } from "livekit-client";
 import { voiceStore, leaveVoiceChannel, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "../../lib/logger";
-import { logIceConnectionInfo } from "../../lib/livekitDiagnostics";
-import type { AudioPipeline } from "../../lib/audioPipeline";
-import type { AudioElements } from "../../lib/audioElements";
-import type { DeviceManager } from "../../lib/deviceManager";
-import type { E2EEManager } from "../../lib/livekitE2EE";
+import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
+import type { AudioPipeline } from "../../lib/voice/audioPipeline";
+import type { AudioElements } from "../../lib/voice/audioElements";
+import type { DeviceManager } from "../../lib/voice/deviceManager";
+import type { E2EEManager } from "../../lib/voice/livekitE2EE";
 import { ROOM_CONNECT_OPTIONS, type SessionState } from "./sessionState";
 import { detachRoom, releaseRoom } from "./releaseRoom";
-import { setJoinedVoiceStatus } from "../../lib/roomEventHandlers";
+import { setJoinedVoiceStatus } from "../../lib/voice/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
 import {
   abandonJoinAttempt,
@@ -27,7 +27,7 @@ import {
   failJoinAttempt,
   finishJoinAttempt,
   setJoinUrlKind,
-} from "../../lib/voiceJoinTrace";
+} from "../../lib/voice/voiceJoinTrace";
 import { noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
 
 // Same logger tag as before the extraction, so the join log lines are unchanged.

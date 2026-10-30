@@ -9,7 +9,7 @@
 import type { ApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { openMessageTarget } from "@lib/notifications";
-import { setInviteJoinHandler } from "@lib/invite-navigation";
+import { setInviteJoinHandler } from "@lib/nav/inviteNavigation";
 import { createLogger } from "@lib/logger";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { voiceStore } from "@stores/voice.store";

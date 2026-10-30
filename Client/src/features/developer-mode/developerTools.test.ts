@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { copyWithToast, isDeveloperMode } from "./developerTools";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 function setDeveloperMode(on: boolean): void {
   localStorage.setItem("owncord:settings:developerMode", on ? "true" : "false");

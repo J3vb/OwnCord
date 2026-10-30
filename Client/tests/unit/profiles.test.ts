@@ -15,7 +15,7 @@ import {
   type FetchFn,
   type HealthStatus,
   type ProfilesState,
-} from "@lib/profiles";
+} from "@lib/presence/profiles";
 
 // ---------------------------------------------------------------------------
 // Deterministic UUID stub

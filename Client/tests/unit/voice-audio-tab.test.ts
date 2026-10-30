@@ -27,7 +27,7 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
   switchOutputDevice: (...args: unknown[]) => mockSwitchOutputDevice(...args),
   switchVideoDevice: (...args: unknown[]) => mockSwitchVideoDevice(...args),
@@ -46,9 +46,9 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
-import { vadThreshold } from "@lib/audioPipeline";
+import { vadThreshold } from "@lib/voice/audioPipeline";
 import type { NativeMicTestEnvelope } from "../../src/platform/contracts/nativeVoice";
-import { GATE_LOOKAHEAD_S } from "@lib/micProcessor";
+import { GATE_LOOKAHEAD_S } from "@lib/voice/micProcessor";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
 // reset. Those tests re-import against this already-loaded instance instead,

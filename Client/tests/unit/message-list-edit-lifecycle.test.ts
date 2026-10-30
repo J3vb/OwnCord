@@ -31,7 +31,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { setChannels, setActiveChannel, setRoles, channelsStore } from "@stores/channels.store";
 
 const CHANNEL_ID = 1;

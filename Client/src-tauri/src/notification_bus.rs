@@ -323,7 +323,7 @@ fn take_token(slot: &mut Option<(u32, String)>, id: u32) -> Option<String> {
         .and_then(|(token_id, token)| (token_id == id).then_some(token))
 }
 
-/// `suppress-sound`: the app plays its own chime (`lib/notificationSound.ts`),
+/// `suppress-sound`: the app plays its own chime (`lib/media/notificationSound.ts`),
 /// so the server must not add a second. `desktop-entry` lets it group the
 /// popups under the app.
 fn popup_hints(desktop_entry: &str) -> PropMap {

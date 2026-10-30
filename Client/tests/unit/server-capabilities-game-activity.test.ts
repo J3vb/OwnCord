@@ -5,7 +5,7 @@ import {
   onGameActivityPolicy,
   resetServerCapabilities,
   serverSupportsGameActivity,
-} from "@lib/serverCapabilities";
+} from "@lib/net/serverCapabilities";
 
 /**
  * WP 8.3e-2: the runtime game activity switch. `auth_ok.game_activity_policy`

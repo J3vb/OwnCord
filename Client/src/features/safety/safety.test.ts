@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@stores/ui.store", () => ({ openSettings: vi.fn() }));
 
 import { expectConsole } from "../../../tests/helpers/console";
 import { ApiClientError, type OwnModerationAction } from "../../lib/api";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { openSettings } from "@stores/ui.store";
 import type { Payload } from "../connection/dispatchContext";
 import { buildSafetyTab, createNoticesBanner } from "./Notices";

@@ -9,13 +9,13 @@
  * of the chunks that carry attachments.ts.
  */
 
-import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
+import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { desktop } from "../../platform/desktop";
 import { imageMenuText } from "../../i18n/imageMenu";
-import { copyThenToast } from "@lib/clipboard";
+import { copyThenToast } from "@lib/ui/clipboard";
 
 const log = createLogger("image-menu");
 

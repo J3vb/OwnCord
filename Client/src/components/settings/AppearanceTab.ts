@@ -16,7 +16,7 @@ import {
   restoreTheme,
   type ThemeName,
 } from "@lib/prefs/themes";
-import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
 import {
   applyFontSize,
   effectiveFontSize,

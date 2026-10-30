@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMessageInput } from "@components/MessageInput";
 import { wantsNativeMenu } from "@lib/dom";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 const gifApi: GifApi & GifFavoritesApi = {
   gifSearch: vi.fn(async () => ({ results: [] })),

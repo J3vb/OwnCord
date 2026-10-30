@@ -1,5 +1,5 @@
 // Legacy binding for the NativeProxies (ensureHttpProxy) suite: today's
-// `lib/httpProxy.ts` export, wrapped with no cast against the seam subset of
+// `lib/net/httpProxy.ts` export, wrapped with no cast against the seam subset of
 // the contract. B7-5 moved the tunnel behind `platform/desktop` and kept this
 // export as its callers' name, so the suite runs here and in
 // `nativeProxies.desktop.test.ts`.
@@ -19,7 +19,7 @@ vi.mock("@lib/logger", () => ({
 describeNativeProxiesSuite(async () => {
   vi.resetModules();
   invoke.mockReset();
-  const mod = await import("../../../src/lib/httpProxy");
+  const mod = await import("../../../src/lib/net/httpProxy");
   const legacy: NativeProxiesSeam = { ensureHttpProxy: mod.ensureHttpProxy };
   return {
     subject: legacy,

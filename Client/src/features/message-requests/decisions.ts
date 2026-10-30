@@ -20,7 +20,7 @@
 
 import type { ApiClient, ApiClientError, DmRequestDecision } from "@lib/api";
 import { createConfirmModal } from "../dialogs/confirmModal";
-import type { ModalInstance } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";
 import { setActiveChannel } from "@stores/channels.store";
 import {

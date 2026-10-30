@@ -36,7 +36,7 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { errorText, TransportError, type BanMemberResponse } from "@lib/api";
 import { createElement, setOwnedTimeout, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import type { ToastType } from "@components/Toast";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";

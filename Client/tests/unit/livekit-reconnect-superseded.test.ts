@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { attemptAutoReconnect, type ReconnectDeps } from "../../src/lib/livekitReconnect";
+import { attemptAutoReconnect, type ReconnectDeps } from "../../src/lib/voice/livekitReconnect";
 import { expectConsole } from "../helpers/console";
 
 /** Each failed attempt logs one warning the console guard wants claimed. */

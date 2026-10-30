@@ -12,7 +12,7 @@ vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => mockIsLinuxDesktop(),
   isWindowsDesktop: () => false,
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getLocalScreenshareStream: () => ({
     getVideoTracks: () => [
       { label: "window:42:0", getSettings: () => ({ displaySurface: "window" }) },
@@ -31,7 +31,7 @@ vi.mock("@lib/livekitSession", () => ({
   toggleDeafen: vi.fn(),
 }));
 
-vi.mock("@lib/connectionStats", () => ({
+vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),
@@ -54,7 +54,7 @@ vi.mock("@lib/connectionStats", () => ({
 }));
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
-import { createConnectionStatsPoller } from "@lib/connectionStats";
+import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";

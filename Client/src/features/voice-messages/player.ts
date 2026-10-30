@@ -10,7 +10,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setOwnedTimeout } from "@lib/dom";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { createIcon } from "@lib/icons";
 import type { Attachment } from "@lib/types";
 import { voiceMessagesText } from "../../i18n/voiceMessages";

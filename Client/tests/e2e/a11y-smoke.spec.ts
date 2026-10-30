@@ -12,7 +12,7 @@ import {
 //
 // Axe-style structural checks in the real app — dialog roles, focus
 // containment and restore, live regions — asserting the contract the DC-13
-// pass established (lib/a11y.ts + modalFactory + the hand-rolled overlays).
+// pass established (lib/ui/a11y.ts + modalFactory + the hand-rolled overlays).
 // Unit tests cover each component's semantics exhaustively; this smoke proves
 // the wiring holds end-to-end in the running app.
 // ---------------------------------------------------------------------------

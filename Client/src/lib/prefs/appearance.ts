@@ -8,7 +8,7 @@
 
 import { loadPref } from "@lib/prefs/preferences";
 import { applyThemeChoice, getActiveThemeName, restoreAccent } from "@lib/prefs/themes";
-import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
+import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/ui/osMotion";
 
 /** The Appearance slider's range, and the clamp applied to a stored value. */
 export const MIN_FONT_SIZE_PX = 12;

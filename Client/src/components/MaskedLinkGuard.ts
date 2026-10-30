@@ -8,7 +8,7 @@
 
 import { appendChildren, createElement } from "@lib/dom";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
-import { isDomainTrusted, linkDomain, trustDomain } from "@lib/trustedDomains";
+import { isDomainTrusted, linkDomain, trustDomain } from "@lib/net/trustedDomains";
 import { messagingText } from "../i18n/messaging";
 import { shellText } from "../i18n/shell";
 

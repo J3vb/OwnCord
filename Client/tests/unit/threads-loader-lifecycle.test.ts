@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { listSessionResets, runSessionResets } from "../../src/lib/sessionRegistry";
+import { listSessionResets, runSessionResets } from "../../src/lib/net/sessionRegistry";
 import { makeThread } from "../helpers/thread-fixtures";
 
 // Everything here is one story told in order, on a loader module that is

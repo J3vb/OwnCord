@@ -17,7 +17,7 @@ import {
   startRingback,
   stopRingback,
   stopRingChime,
-} from "@lib/notificationSound";
+} from "@lib/media/notificationSound";
 import { loadAppSoundsGain, soundSwitchOn } from "@lib/prefs/soundPrefs";
 import { savePref } from "@lib/prefs/preferences";
 

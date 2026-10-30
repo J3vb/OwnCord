@@ -16,7 +16,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { newClientMessageId } from "@lib/pendingMessages";
 import { listCustomEmoji } from "@stores/emoji.store";
 import {

@@ -5,12 +5,12 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
+import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/net/updater";
 import { createUpdateChecker } from "../features/updates/updateChecker";
 import type { UpdateCheckReason, UpdateOutcome } from "../features/updates/updateChecker";
 import { setAvailableUpdate } from "../features/updates/availableUpdate";
 import { openSettings, uiStore } from "@stores/ui.store";
-import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
+import type { DownloadProgress, UpdateInstallState } from "@lib/net/updater";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { connectText } from "../i18n/connect";
 
@@ -147,7 +147,7 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
   }
 
   /**
-   * A package install (see `manual_upgrade` in `@lib/updater`): the server
+   * A package install (see `manual_upgrade` in `@lib/net/updater`): the server
    * serves no updater artifact for it, so the check can never report an
    * available update however far behind the client is. Answering that with
    * silence would be a claim — "you are up to date" — the user cannot check.

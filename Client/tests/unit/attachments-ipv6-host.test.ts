@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
   fetch: fetchMock,
 }));
 
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: ensureHttpProxyMock,
 }));
 

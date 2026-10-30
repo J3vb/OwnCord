@@ -24,7 +24,7 @@ vi.mock("livekit-client", async (importOriginal) => {
 });
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
   h264GpuPublish: (codec: string) => codec === "h264",
@@ -35,7 +35,7 @@ vi.mock("@lib/prefs/preferences", () => ({
   savePref: (...args: unknown[]) => savePref(...args) as unknown,
 }));
 
-const { watchScreenEnded } = await import("@lib/screenShare");
+const { watchScreenEnded } = await import("@lib/voice/screenShare");
 const { changeScreenshareSource, setScreenshareQuality } =
   await import("../../src/features/voice/screenshareChange");
 const { voiceStore } = await import("@stores/voice.store");
@@ -231,7 +231,7 @@ describe("changeScreenshareSource", () => {
       }),
     );
     const changing = changeScreenshareSource(rig.state, rig.deps);
-    const { disableScreenshare } = await import("@lib/screenShare");
+    const { disableScreenshare } = await import("@lib/voice/screenShare");
     await disableScreenshare(rig.state, rig.deps);
     const fresh = track(Track.Kind.Video, "window-b");
     resolvePick([fresh]);

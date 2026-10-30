@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** The module is loaded inside the tests so its load-time constants are
  *  exercised by them. */
-function lib(): Promise<typeof import("../../src/lib/context-menu")> {
-  return import("../../src/lib/context-menu");
+function lib(): Promise<typeof import("../../src/lib/ui/contextMenu")> {
+  return import("../../src/lib/ui/contextMenu");
 }
 
 function press(el: Element, key: string, init: KeyboardEventInit = {}): KeyboardEvent {

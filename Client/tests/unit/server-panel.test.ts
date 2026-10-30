@@ -10,7 +10,7 @@ import {
 // ---------------------------------------------------------------------------
 
 // loadCredential returns null by default (non-Tauri environment)
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 
@@ -23,7 +23,7 @@ vi.mock("@lib/icons", () => ({
   }),
 }));
 
-import { loadCredential } from "@lib/credentials";
+import { loadCredential } from "@lib/net/credentials";
 
 // ---------------------------------------------------------------------------
 // Helpers

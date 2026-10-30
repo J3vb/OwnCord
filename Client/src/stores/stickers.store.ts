@@ -11,7 +11,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 /** One custom sticker as the server describes it. */
 export interface Sticker {

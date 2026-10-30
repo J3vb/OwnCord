@@ -19,7 +19,7 @@ const { fetchMock, createObjectURLMock, playMock, logMock } = vi.hoisted(() => (
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999/proxytoken"),
   stopHttpProxy: () => Promise.resolve(),
 }));

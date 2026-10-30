@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({ deleteCredential: vi.fn(async () => true) }));
-vi.mock("../../src/lib/credentials", () => ({ deleteCredential: hoisted.deleteCredential }));
+vi.mock("../../src/lib/net/credentials", () => ({ deleteCredential: hoisted.deleteCredential }));
 vi.mock("../../src/lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));

@@ -13,7 +13,7 @@ import {
   joinVoiceChannel,
   setVoiceStatus,
 } from "../../src/stores/voice.store";
-import { leaveVoice } from "@lib/livekitSession";
+import { leaveVoice } from "@lib/voice/livekitSession";
 import { setMessages, isChannelLoaded, getChannelMessages } from "../../src/stores/messages.store";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
@@ -25,7 +25,7 @@ import { expectConsole } from "../helpers/console";
 
 // Mock the lazily-imported voice SDK module so we can assert clearAuth() only
 // pulls it in (loading the ~1.3 MB LiveKit chunk) when a voice session exists.
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
 }));
 

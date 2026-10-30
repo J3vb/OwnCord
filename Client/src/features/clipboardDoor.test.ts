@@ -1,4 +1,4 @@
-// lib/clipboard.ts is the only door to the clipboard for text. Its copy never
+// lib/ui/clipboard.ts is the only door to the clipboard for text. Its copy never
 // rejects, works out a missing clipboard (a page that is not a secure context)
 // as a failure, and every copy tells the user how it went. This test pins that
 // no other module writes text to the clipboard itself, and pins the helpers.
@@ -7,9 +7,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const showToast = vi.hoisted(() => vi.fn());
-vi.mock("../lib/toast", () => ({ showToast }));
+vi.mock("../lib/ui/toast", () => ({ showToast }));
 
-import { copyText, copyThenRelabel, copyThenToast } from "../lib/clipboard";
+import { copyText, copyThenRelabel, copyThenToast } from "../lib/ui/clipboard";
 
 const srcDir = path.resolve(__dirname, "..");
 
@@ -42,8 +42,8 @@ describe("the clipboard door", () => {
     vi.useRealTimers();
   });
 
-  it("only lib/clipboard.ts writes text to the clipboard", () => {
-    expect(writing).toEqual(["lib/clipboard.ts"]);
+  it("only lib/ui/clipboard.ts writes text to the clipboard", () => {
+    expect(writing).toEqual(["lib/ui/clipboard.ts"]);
   });
 
   it("copyText resolves false, not a rejection, when the write is refused", async () => {
