@@ -10,18 +10,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// Windowed metrics: a 10 s sampler over a 15 minute horizon. The two
-// windows the endpoint reports (1m, 15m) are cut from this one ring. The ring
-// holds horizon/tick + 2 = 92 samples, about 120 KB allocated once.
+// Windowed metrics: a 10 s sampler over a 15 minute horizon. The two windows
+// the endpoint reports (1m, 15m) are cut from one ring of horizon/tick + 2 = 92
+// samples, about 120 KB allocated once.
 const (
 	metricsWindowTick    = 10 * time.Second
 	metricsWindowHorizon = 15 * time.Minute
 )
 
 // newMetricsWindows builds the ring over the hub's sources and the two database
-// pools' wait figures. It starts nothing: startHub runs the sampler with the
-// app's lifecycle context and stops it before the hub, because StartRuntime is
-// also called directly by tests that own no goroutine to stop.
+// pools' wait figures. It starts nothing: startHub runs the sampler under the
+// app's lifecycle context and stops it before the hub, since tests also call
+// StartRuntime directly and own no goroutine to stop.
 func newMetricsWindows(hub *ws.Hub, writerStats, readerStats func() sql.DBStats) (*metrics.Windows, error) {
 	hists, gauges, counters := hub.WindowSources()
 	counters = append(counters, dbWaitCounters(writerStats, readerStats)...)
@@ -47,9 +47,8 @@ func dbWaitCounters(writerStats, readerStats func() sql.DBStats) []metrics.Named
 }
 
 // poolWait returns the cumulative wait count and wait time (nanoseconds) of one
-// connection pool as two counters. sql.DBStats carries them as int64 and
-// time.Duration; a negative value is clamped to zero. The two reads are
-// separate Stats() calls, each atomic on its own.
+// connection pool as two counters, clamping negative values to zero. The two
+// reads are separate Stats() calls, each atomic on its own.
 func poolWait(countName, nanosName string, stats func() sql.DBStats) []metrics.NamedCounter {
 	return []metrics.NamedCounter{
 		{Name: countName, Read: func() uint64 { return nonNegative(stats().WaitCount) }},

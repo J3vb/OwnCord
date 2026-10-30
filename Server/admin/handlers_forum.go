@@ -6,7 +6,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Forum settings handler ─────────────────────────────────────
 //
 // PUT /{id}/forum under mountChannelActionRoutes, so it is served under both
 // /admin/api/channels and /api/v1/moderation/channels behind MANAGE_CHANNELS.

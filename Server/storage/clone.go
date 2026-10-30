@@ -20,14 +20,13 @@ var linkFile = os.Link
 var ErrCloneExists = errors.New("storage clone destination exists")
 
 // Clone makes the stored file named dst a second name for the bytes of src,
-// for a forwarded attachment: the forward owns its own file, so
-// deleting either message later never takes the other's bytes with it.
+// for a forwarded attachment: the forward owns its own file, so deleting either
+// message never takes the other's bytes with it.
 //
-// It hard-links first, which costs no extra disk, and falls back to a
-// ctx-aware stream copy where the filesystem refuses a link (another volume,
-// a filesystem without links). The bytes were validated when src was saved, so
-// no magic-byte check runs again. A missing src is fs.ErrNotExist. Any failure
-// leaves no dst behind.
+// It hard-links first (no extra disk) and falls back to a ctx-aware stream
+// copy where the filesystem refuses a link. The bytes were validated when src
+// was saved, so no magic-byte check runs again. A missing src is
+// fs.ErrNotExist. Any failure leaves no dst behind.
 func (s *Storage) Clone(ctx context.Context, src, dst string) error {
 	if err := sanitizeFilename(src); err != nil {
 		return err

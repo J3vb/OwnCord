@@ -9,7 +9,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── API Token Handlers ──────────────────────────────────────────────────────
 //
 // These are the HTTP-panel equivalent of `server token create|list|revoke`
 // (token_cli.go). Both are thin adapters over service.TokenService, which is

@@ -13,8 +13,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
-
 // RequireAdminAuth is the exported admin gate for surfaces outside this
 // package (api/router.go's plugin admin handler). Those routes stay
 // ADMINISTRATOR-only, so it chains the perimeter check with an explicit

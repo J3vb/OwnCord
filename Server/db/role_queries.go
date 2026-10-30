@@ -12,9 +12,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// roleFromGen maps the sqlc-generated Role row to the domain Role model,
-// narrowing the int64 position and converting the int64 is_default flag to a
-// bool. Shared by all role reads that delegate to dbgen.
+// roleFromGen maps the sqlc Role row to the domain Role, narrowing position
+// and converting is_default to a bool.
 func roleFromGen(r dbgen.Role) *Role {
 	return &Role{
 		ID:          r.ID,
@@ -35,14 +34,13 @@ type MemberRoles struct {
 	Top   Role
 	Perms int64
 	IDs   []int64
-	// Masks holds each held role's own permission mask, in the same order as
-	// IDs, for the callers that must resolve a role's channel override against
-	// that role's mask (Held).
+	// Masks holds each held role's own permission mask, in IDs order, for callers
+	// that resolve a role's channel override against that role's mask (Held).
 	Masks []int64
 }
 
-// Held returns the held roles as permission grants carrying only the role id
-// and mask (no override), top role first: the shape permissions.Checker.Subject
+// Held returns the held roles as permission grants carrying only role id and
+// mask (no override), top role first, the shape permissions.Checker.Subject
 // takes.
 func (m *MemberRoles) Held() []permissions.RoleGrant {
 	out := make([]permissions.RoleGrant, len(m.IDs))
@@ -52,11 +50,11 @@ func (m *MemberRoles) Held() []permissions.RoleGrant {
 	return out
 }
 
-// Effective collapses the held roles to one Role for the callers that carry a
-// single *Role for an authority decision: the identity (ID, Name, Position) is
-// the TOP role, which is what rank and ownership checks read, and Permissions
-// is the OR of every held mask, which is what server-level permission checks
-// read. It is not a real role row and must never be written back.
+// Effective collapses the held roles to one Role for callers that carry a
+// single *Role for an authority decision: identity (ID, Name, Position) is the
+// top role, which rank and ownership checks read, and Permissions is the OR of
+// every held mask, which server-level checks read. It is not a real role row
+// and must never be written back.
 func (m *MemberRoles) Effective() *Role {
 	r := m.Top
 	if m.Top.Color != nil {
@@ -70,9 +68,9 @@ func (m *MemberRoles) Effective() *Role {
 // ErrLastRole is returned when removing a role would leave a member with none.
 var ErrLastRole = errors.New("member must keep at least one role")
 
-// syncTopRoleTx mirrors the member's top held role into users.role_id inside
-// the caller's transaction. It is the only writer of users.role_id that
-// follows a user_roles change.
+// syncTopRoleTx mirrors the member's top held role into users.role_id in the
+// caller's transaction; the only writer of users.role_id after a user_roles
+// change.
 func syncTopRoleTx(ctx context.Context, q *dbgen.Queries, userID int64) error {
 	if err := q.SyncTopRole(ctx, userID); err != nil {
 		return fmt.Errorf("syncTopRole: %w", err)
@@ -140,9 +138,9 @@ func (d *DB) RemoveUserRole(ctx context.Context, userID, roleID int64) error {
 	return err
 }
 
-// RevokeUserRole is RemoveUserRole that also reports whether a row was
-// deleted: false means the member did not hold the role (for example a
-// concurrent duplicate request already removed it) and nothing changed.
+// RevokeUserRole is RemoveUserRole that also reports whether a row was deleted;
+// false means the member did not hold the role (e.g. a concurrent duplicate
+// request removed it).
 func (d *DB) RevokeUserRole(ctx context.Context, userID, roleID int64) (bool, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -206,10 +204,9 @@ func (d *DB) ListRoles(ctx context.Context) ([]*Role, error) {
 	return roles, nil
 }
 
-// GetRoleForUser returns only the member's TOP role (the one users.role_id
-// mirrors): fine for a name, colour or position, never for a permission mask,
-// which is the OR over every held role (GetMemberRoles.Perms). Returns
-// (nil, nil) when the user holds no role.
+// GetRoleForUser returns only the member's top role (the one users.role_id
+// mirrors): fine for a name, colour or position, never a permission mask, which
+// is the OR over every held role (GetMemberRoles.Perms). (nil, nil) when none.
 func (d *DB) GetRoleForUser(ctx context.Context, userID int64) (*Role, error) {
 	r, err := d.q.GetRoleForUser(ctx, userID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -221,11 +218,10 @@ func (d *DB) GetRoleForUser(ctx context.Context, userID int64) (*Role, error) {
 	return roleFromGen(r), nil
 }
 
-// GetRoleByName returns the role whose name matches name case-insensitively,
-// or nil if there is none. Case-insensitive because migration 023 enforces
-// uniqueness under the same collation — the lookup and the constraint must
-// agree, or "Moderator" and "moderator" become two roles the client (which
-// matches names case-insensitively) cannot tell apart.
+// GetRoleByName returns the role whose name matches case-insensitively, or nil.
+// Migration 023 enforces uniqueness under the same collation; the lookup must
+// agree, or "Moderator" and "moderator" become two roles the client cannot
+// tell apart.
 func (d *DB) GetRoleByName(ctx context.Context, name string) (*Role, error) {
 	r, err := d.q.GetRoleByName(ctx, name)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -237,10 +233,9 @@ func (d *DB) GetRoleByName(ctx context.Context, name string) (*Role, error) {
 	return roleFromGen(r), nil
 }
 
-// GetDefaultRole returns the role new members are created with and deleted
-// roles' members fall back to. Returns (nil, nil) when no role is flagged
-// default — callers must treat that as a configuration error, not a licence to
-// leave members pointing at a deleted role.
+// GetDefaultRole returns the role new members get and deleted roles' members
+// fall back to. (nil, nil) when none is flagged default, which callers must
+// treat as a configuration error.
 func (d *DB) GetDefaultRole(ctx context.Context) (*Role, error) {
 	r, err := d.q.GetDefaultRole(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -252,8 +247,8 @@ func (d *DB) GetDefaultRole(ctx context.Context) (*Role, error) {
 	return roleFromGen(r), nil
 }
 
-// CreateRole inserts a role and returns it. is_default is always 0: exactly one
-// role is the default and it is seeded, never created through the API.
+// CreateRole inserts a role and returns it. is_default is always 0: the one
+// default role is seeded, never created through the API.
 func (d *DB) CreateRole(ctx context.Context, name string, color *string, perms int64, position int, hoist, mentionable bool) (*Role, error) {
 	r, err := d.q.CreateRole(ctx, dbgen.CreateRoleParams{
 		Name:        name,
@@ -276,13 +271,11 @@ func boolToInt64(b bool) int64 {
 	return 0
 }
 
-// UpdateRole overwrites a role's mutable columns. is_default is deliberately
-// not writable: which role is the fallback is a schema decision.
-//
-// A position change moves the top role of every member who holds this role
-// next to another one, so the same transaction re-mirrors users.role_id for
-// them (syncTopRoleTx). The returned ids are those multi-role holders, whose
-// role order may have changed; nil when the position did not move.
+// UpdateRole overwrites a role's mutable columns; is_default is deliberately
+// not writable. A position change can move the top role of members who hold
+// this role next to another one, so the same transaction re-mirrors
+// users.role_id for them (syncTopRoleTx). The returned ids are those
+// multi-role holders; nil when the position did not move.
 func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int, hoist, mentionable bool) ([]int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -319,10 +312,9 @@ func (d *DB) UpdateRole(ctx context.Context, id int64, name string, color *strin
 	return resynced, nil
 }
 
-// resyncMultiRoleHoldersTx re-mirrors users.role_id for every member who holds
-// one of roleIDs and at least one other role, in the caller's transaction, and
-// returns those members' ids in ascending order. A member with a single role
-// has nothing to re-rank.
+// resyncMultiRoleHoldersTx re-mirrors users.role_id, in the caller's
+// transaction, for every member who holds one of roleIDs plus at least one
+// other role, and returns their ids ascending.
 func resyncMultiRoleHoldersTx(ctx context.Context, q *dbgen.Queries, roleIDs []int64) ([]int64, error) {
 	seen := make(map[int64]struct{})
 	for _, rid := range roleIDs {
@@ -343,9 +335,8 @@ func resyncMultiRoleHoldersTx(ctx context.Context, q *dbgen.Queries, roleIDs []i
 	return ids, nil
 }
 
-// ListUserIDsByRole returns the ids of every user currently holding roleID.
-// Used to invalidate exactly the permission-cache entries a role change
-// affects instead of dropping the whole cache.
+// ListUserIDsByRole returns the ids of every user holding roleID, to
+// invalidate exactly the affected permission-cache entries.
 func (d *DB) ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error) {
 	ids, err := d.q.ListUserIDsByRole(ctx, roleID)
 	if err != nil {
@@ -354,8 +345,8 @@ func (d *DB) ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, erro
 	return ids, nil
 }
 
-// CountRoleMembers returns member counts keyed by role id. Roles with no
-// members are absent from the map rather than present with a zero.
+// CountRoleMembers returns member counts keyed by role id; roles with no
+// members are absent.
 func (d *DB) CountRoleMembers(ctx context.Context) (map[int64]int, error) {
 	rows, err := d.q.CountRoleMembers(ctx)
 	if err != nil {
@@ -369,10 +360,9 @@ func (d *DB) CountRoleMembers(ctx context.Context) (map[int64]int, error) {
 }
 
 // SetRolePositions writes new positions for several roles in one writer
-// transaction, so a reader can never observe a half-applied reorder (which
-// would briefly duplicate or invert the hierarchy the permission checks read).
-// The same transaction re-mirrors users.role_id for every member who holds a
-// moved role next to another one, and returns those members' ids.
+// transaction, so a reader never sees a half-applied reorder that would
+// duplicate or invert the hierarchy. It also re-mirrors users.role_id for
+// members who hold a moved role next to another one, and returns their ids.
 func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) ([]int64, error) {
 	if len(positions) == 0 {
 		return nil, nil
@@ -403,16 +393,13 @@ func (d *DB) SetRolePositions(ctx context.Context, positions map[int64]int) ([]i
 	return resynced, nil
 }
 
-// DeleteRoleReassigning deletes roleID, drops its channel_overrides rows and
-// its user_roles rows, gives fallbackRoleID to every member left with no role,
-// and re-mirrors users.role_id (syncTopRoleTx) for every member who held
-// roleID, all in one writer transaction: a member must never be observable
-// pointing at a role row that no longer exists or holding no role, and a stale
-// override would silently apply to whichever role reused the id. A member who
-// holds another role keeps it and is NOT given the fallback.
-//
-// Returns the ids of every member who held roleID so the caller can invalidate
-// their cached permissions and re-sync their clients.
+// DeleteRoleReassigning deletes roleID, its channel_overrides and user_roles
+// rows, gives fallbackRoleID to every member left with no role, and
+// re-mirrors users.role_id (syncTopRoleTx) for every holder, in one writer
+// transaction: no member may point at a vanished role or hold none, and a
+// stale override would apply to whichever role reused the id. A member with
+// another role keeps it and gets no fallback. It returns the ids of every
+// member who held roleID, for cache invalidation and client re-sync.
 func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -425,8 +412,8 @@ func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID i
 	if err != nil {
 		return nil, fmt.Errorf("DeleteRoleReassigning list members: %w", err)
 	}
-	// A member whose mirror still names the role but who has no user_roles row
-	// for it (an inconsistent pre-067 write) is reassigned too.
+	// A member whose mirror names the role but has no user_roles row for it (an
+	// inconsistent pre-067 write) is reassigned too.
 	stale, err := d.usersMirroringRoleTx(ctx, tx, roleID)
 	if err != nil {
 		return nil, err
@@ -436,9 +423,8 @@ func (d *DB) DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID i
 			moved = append(moved, id)
 		}
 	}
-	// channel_overrides and user_roles cascade on delete in the production
-	// schema, but both deletes are explicit so the behaviour does not depend on
-	// the foreign-key pragma being on for this connection.
+	// channel_overrides and user_roles cascade in the production schema, but both
+	// deletes are explicit so they do not depend on the foreign-key pragma.
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM channel_overrides WHERE role_id = ?`, roleID,
 	); err != nil {

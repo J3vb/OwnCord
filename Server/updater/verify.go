@@ -30,8 +30,8 @@ var defaultServerSignaturePublicKey = strings.TrimSpace(serverUpdatePublicKeyTex
 type releaseManifest struct {
 	Version string `json:"version"`
 	// Asset/SHA256 bind a single artifact. Releases before the multi-OS
-	// manifest bound only this pair; newer releases keep it pointing at the
-	// Windows binary so already-deployed servers can still verify and update.
+	// manifest bound only this pair; newer ones keep it pointing at the Windows
+	// binary so already-deployed servers can still verify and update.
 	Asset  string `json:"asset"`
 	SHA256 string `json:"sha256"`
 	// Assets binds every server artifact the release ships (one per OS).
@@ -49,13 +49,12 @@ type releaseManifestAsset struct {
 }
 
 // checksumEntryNamesForGOOS returns sha256sum line suffixes to look up in
-// checksums.sha256 (matches GitHub Actions release layout) for one target.
-// The pairs are matched whole — never by architecture or OS alone — so adding
-// an asset can never widen an unrelated one. The first entry of a pair is the
-// "dir/name" form older releases used; the second is the bare filename the
-// release workflow's in-directory `sha256sum -- *` emits, and must therefore
-// stay equal to serverDownloadAssetName's result for the same target: the
-// hash looked up has to be the hash of the file actually downloaded.
+// checksums.sha256 for one target. Pairs are matched whole, never by
+// architecture or OS alone, so adding an asset cannot widen an unrelated one.
+// The first entry is the "dir/name" form older releases used; the second is
+// the bare filename the release workflow's `sha256sum -- *` emits, and must
+// equal serverDownloadAssetName's result for the same target: the hash looked
+// up has to be the hash of the file actually downloaded.
 func checksumEntryNamesForGOOS(goos, goarch string) []string {
 	switch {
 	case goos == "windows" && goarch == "amd64":
@@ -162,9 +161,8 @@ func (u *Updater) verifySignatureReader(reader io.Reader, signatureText []byte, 
 }
 
 // normalizeSignatureText returns the raw minisign signature document from
-// signatureText. `tauri signer sign` emits .sig files that are base64-wrapped
-// minisign documents (the same wrapping used for the pinned public key file);
-// raw minisign documents pass through unchanged.
+// signatureText. `tauri signer sign` emits base64-wrapped minisign documents
+// (as for the pinned public key file); raw documents pass through unchanged.
 func normalizeSignatureText(signatureText []byte) []byte {
 	trimmed := []byte(strings.TrimSpace(string(signatureText)))
 	if bytes.HasPrefix(trimmed, []byte("untrusted comment:")) {
@@ -221,11 +219,10 @@ func (u *Updater) VerifyChecksum(filePath, expectedHash string) error {
 	return nil
 }
 
-// StagedBinary is an open handle to a staged update binary whose contents
-// were verified through that same handle. Because the hash check and Commit's
+// StagedBinary is an open handle to a staged update binary whose contents were
+// verified through that same handle. Because the hash check and Commit's
 // same-file check use one open file, a swap of the on-disk path between
-// verification and rename is detected instead of silently executed (the
-// update TOCTOU window).
+// verification and rename is detected instead of executed (TOCTOU).
 type StagedBinary struct {
 	f      *os.File
 	closed bool
@@ -253,22 +250,20 @@ func OpenVerifiedBinary(stagedPath, expectedHash string) (*StagedBinary, error) 
 }
 
 // Commit renames the staged file to destPath and confirms the file now at
-// destPath is the very file the hash was verified through (os.SameFile
-// against the verification handle's identity). If the staged path was swapped
-// after verification, the rename moves the impostor, the same-file check
-// fails, and Commit returns an error; the caller must then treat destPath as
-// unverified and restore or remove it.
+// destPath is the very file the hash was verified through (os.SameFile against
+// the verification handle's identity). If the staged path was swapped after
+// verification, the same-file check fails and Commit returns an error; the
+// caller must then treat destPath as unverified and restore or remove it.
 func (s *StagedBinary) Commit(destPath string) error {
 	verified, err := s.f.Stat()
 	if err != nil {
 		return fmt.Errorf("stat of verified handle: %w", err)
 	}
 	if runtime.GOOS == "windows" {
-		// Windows cannot rename a file Go holds open (os.Open does not share
-		// delete) — until here that lock itself blocks swaps of the staged
-		// path. The stat captured above carries the NTFS file ID, which
-		// travels with the file across the rename, so the same-file check
-		// below still detects a swap in the close→rename window.
+		// Windows cannot rename a file Go holds open, so until here that lock
+		// blocks swaps of the staged path. The stat captured above carries the
+		// NTFS file ID, which travels with the file across the rename, so the
+		// same-file check below still detects a swap in the close-to-rename window.
 		if err := s.Close(); err != nil {
 			return fmt.Errorf("closing verified handle: %w", err)
 		}

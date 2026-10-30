@@ -8,7 +8,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Channel Permission Override Handlers ────────────────────────────────────
 //
 // These endpoints manage per-role and per-user allow/deny permission
 // overrides on a channel. Denying ReadMessages hides the channel from a role
@@ -151,7 +150,6 @@ func handleDeleteChannelPermission(channels *service.ChannelService) http.Handle
 	}
 }
 
-// ─── Per-user channel overrides ──────────────────────────────────────────────
 //
 // channel_user_overrides is the last layer of the resolution order (base role
 // perms -> role override -> user override), so these two endpoints can grant a

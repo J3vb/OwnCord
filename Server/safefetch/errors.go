@@ -2,10 +2,9 @@ package safefetch
 
 import "errors"
 
-// The refusal vocabulary. Every one of these is a policy decision, not a
-// transport failure: a caller that wants to tell "the destination is not
-// allowed" from "the destination did not answer" tests with errors.Is against
-// these and treats anything else as an upstream problem.
+// The refusal vocabulary. Every one is a policy decision, not a transport
+// failure: callers test with errors.Is and treat anything else as an upstream
+// problem.
 var (
 	// ErrInvalidURL — the URL did not parse, or carried no host.
 	ErrInvalidURL = errors.New("safefetch: invalid URL")
@@ -36,12 +35,10 @@ var (
 	// ErrBodyTooLarge — the response exceeded Policy.MaxBytes on the wire.
 	ErrBodyTooLarge = errors.New("safefetch: response body exceeds the byte ceiling")
 	// ErrDecompressedTooLarge — the response inflated past
-	// Policy.MaxDecompressedBytes. A body that is small on the wire and huge
-	// after inflation is the whole point of this being a separate ceiling.
+	// Policy.MaxDecompressedBytes (small on the wire, huge after inflation).
 	ErrDecompressedTooLarge = errors.New("safefetch: decompressed body exceeds the byte ceiling")
 	// ErrContentEncoding — the body arrived in an encoding we neither asked
-	// for nor decode. Returning those bytes as content, with or without the
-	// header, describes a body that does not exist.
+	// for nor decode.
 	ErrContentEncoding = errors.New("safefetch: unsupported content encoding")
 	// ErrContentType — the declared or the sniffed media type is not allowed.
 	ErrContentType = errors.New("safefetch: content type not allowed")

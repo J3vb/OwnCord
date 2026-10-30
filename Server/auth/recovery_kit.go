@@ -27,10 +27,10 @@ const (
 	recoveryAssistSecretBytes = 15
 	recoveryAssistSecretLen   = 24
 
-	// argon2id parameters: OWASP's minimum for the memory-constrained
-	// profile, chosen because verification takes an admission slot
-	// and a burst of recoveries must not exhaust memory. The verifier
-	// records them, so they can change without invalidating stored kits.
+	// argon2id parameters: OWASP's minimum for the memory-constrained profile,
+	// since verification takes an admission slot and a burst of recoveries must
+	// not exhaust memory. The verifier records them, so they can change without
+	// invalidating stored kits.
 	recoveryKitArgonTime    = 2
 	recoveryKitArgonMemory  = 19 * 1024 // KiB
 	recoveryKitArgonThreads = 1

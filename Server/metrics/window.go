@@ -10,13 +10,11 @@ import (
 )
 
 // Windows turns the cumulative figures above into "the last minute" and "the
-// last fifteen minutes". A sampler ticks every WindowSpec.Tick and
-// copies each source into a preallocated ring: a histogram's raw bucket
-// counts, the largest value seen since the previous sample, and each counter's
-// cumulative value. A window is then the newest sample minus an older one.
-//
-// Nothing here is on the hot path. Observe pays only the two extra atomics in
-// metrics.go; the sampler and Snapshot run on their own goroutines.
+// last fifteen minutes". A sampler ticks every WindowSpec.Tick and copies each
+// source into a preallocated ring: a histogram's raw bucket counts, the
+// largest value seen since the previous sample, and each counter's cumulative
+// value. A window is the newest sample minus an older one. Nothing here is on
+// the hot path; Observe pays only the two extra atomics in metrics.go.
 
 // ErrBadWindowSpec is wrapped by every NewWindows validation failure.
 var ErrBadWindowSpec = errors.New("metrics: invalid window spec")
@@ -79,9 +77,8 @@ type Windows struct {
 
 	// mu guards ring, head and length. It is a LEAF lock: the sampler reads
 	// every source (atomics, and sql.DB.Stats which takes database/sql's own
-	// mutex) before taking it, copies into the slot and unlocks; Snapshot does
-	// arithmetic only, no I/O, and is never called with another lock held (only
-	// HTTP handlers call it).
+	// mutex) before taking it; Snapshot does arithmetic only and is never
+	// called with another lock held (only HTTP handlers call it).
 	mu     syncutil.Mutex
 	ring   []slot
 	head   int // next slot to write
@@ -175,8 +172,8 @@ func NewWindows(spec WindowSpec, now func() time.Time) (*Windows, error) {
 
 // Run takes one sample at once (the baseline a window is measured from), then
 // one per tick until ctx is cancelled. The returned channel closes once the
-// goroutine has exited, so shutdown can order it before the hub and the
-// database close (the db.StartOptimizer shape).
+// goroutine has exited, so shutdown can order it before the hub and database
+// close.
 func (w *Windows) Run(ctx context.Context) <-chan struct{} {
 	w.sample(w.now())
 	done := make(chan struct{})
@@ -197,14 +194,14 @@ func (w *Windows) Run(ctx context.Context) <-chan struct{} {
 }
 
 // sample records one sample stamped now. It is the only path that takes
-// samples. It allocates nothing.
+// samples and allocates nothing.
 //
-// Order matters: the buckets are read first and the interval maxima swapped
+// Order matters: buckets are read first and the interval maxima swapped
 // afterwards. Observe stores its max before its bucket count, so any
 // observation counted here already has its max in this interval or an earlier
 // one. An observation landing between the two steps has its max taken now and
-// its count in the next sample, so it is counted exactly once; at a window
-// edge it can show its count in one window and its max in the one before.
+// its count in the next sample, so it is counted once; at a window edge its
+// count and max can show in adjacent windows.
 func (w *Windows) sample(now time.Time) {
 	sc := &w.scratch
 	for i, nh := range w.spec.Histograms {
@@ -235,10 +232,9 @@ func (w *Windows) sample(now time.Time) {
 
 // Snapshot reports the window of length d ending at the newest sample. The base
 // sample is the newest one at least d older than it, chosen by timestamp, not
-// by slot count, so a gap in sampling widens Seconds instead of
-// attributing a long stretch to a short window. When no sample is that old the
-// oldest held is used and Seconds says how much is really covered. It reports
-// false until two samples exist, and for a non-positive d.
+// slot count, so a sampling gap widens Seconds instead of attributing a long
+// stretch to a short window. When no sample is that old the oldest held is
+// used. It reports false until two samples exist, and for a non-positive d.
 func (w *Windows) Snapshot(d time.Duration) (WindowSnapshot, bool) {
 	if d <= 0 {
 		return WindowSnapshot{}, false
@@ -250,12 +246,11 @@ func (w *Windows) Snapshot(d time.Duration) (WindowSnapshot, bool) {
 	}
 	at := func(age int) *slot { return &w.ring[(w.head-1-age+2*len(w.ring))%len(w.ring)] }
 	newest := at(0)
-	// Half a tick of tolerance: a real ticker stamps samples a few microseconds
-	// to milliseconds off the grid, so an exact "t <= newest-d" test misses the
-	// sample one tick back about half the time and the window would cover d plus
-	// a whole tick (70 s for "1m"). With the tolerance the base is the sample
-	// nearest d back, so Seconds stays within half a tick of d. The ring's two
-	// spare slots still hold the base for the longest window.
+	// Half a tick of tolerance: a real ticker stamps samples slightly off the
+	// grid, so an exact "t <= newest-d" test would often miss the sample one
+	// tick back and cover d plus a whole tick (70 s for "1m"). With it the base
+	// is the sample nearest d back. The ring's two spare slots still hold the
+	// base for the longest window.
 	cutoff := newest.t.Add(-d + w.spec.Tick/2)
 	baseAge := w.length - 1 // the oldest held, unless a newer one is old enough
 	for age := 1; age < w.length; age++ {

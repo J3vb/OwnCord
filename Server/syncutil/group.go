@@ -9,21 +9,19 @@ import (
 // spawned them, so a lifecycle owner can join them (or abandon them with a
 // count) before the resources they use are closed.
 //
-// It is the hub's "life plus WaitGroup" pattern with an admission gate: a
-// bare sync.WaitGroup fed from handler goroutines would race Add against
-// Wait, so Go refuses new work once Stop has begun, under the same mutex
-// that counts running jobs.
+// It is the hub's "life plus WaitGroup" pattern with an admission gate: a bare
+// sync.WaitGroup fed from handler goroutines would race Add against Wait, so Go
+// refuses new work once Stop has begun, under the same mutex that counts
+// running jobs.
 //
-// A nil *Group is usable: Go runs the job on a fresh, unowned group. Tests
-// and the token CLI keep their old fire-and-forget behaviour that way, and
-// no call site needs a bare go statement.
+// A nil *Group is usable: Go runs the job on a fresh, unowned group, so tests
+// and the token CLI get fire-and-forget behaviour without a bare go statement.
 type Group struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// mu guards the fields below. It is a LEAF lock: it is never held across
-	// fn, I/O, a channel operation or another lock, so it can be taken from
-	// any call site whatever else that site holds.
+	// mu guards the fields below. It is a LEAF lock: never held across fn, I/O,
+	// a channel operation or another lock, so any call site can take it.
 	mu         Mutex
 	draining   bool
 	running    int
@@ -50,10 +48,10 @@ func NewGroup(parent context.Context) *Group {
 // returns false, without running fn, once a drain has begun.
 //
 // fn receives ctx's values but not its cancellation: the job outlives its
-// caller (a request context is cancelled the moment the response is
-// written), and ends when the group is cancelled instead. A job that needs a
-// deadline applies its own inside fn. The pattern is ws/hub_sweep.go's
-// sweepTailCtx, and it keeps logctx values and contextcheck intact.
+// caller (a request context is cancelled when the response is written) and
+// ends when the group is cancelled. A job that needs a deadline applies its
+// own inside fn. The pattern is ws/hub_sweep.go's sweepTailCtx; it keeps
+// logctx values and contextcheck intact.
 func (g *Group) Go(ctx context.Context, fn func(context.Context)) bool {
 	if g == nil {
 		g = NewGroup(context.WithoutCancel(ctx))
@@ -120,8 +118,7 @@ func (g *Group) Stop(ctx context.Context, grace time.Duration) (stragglers int) 
 	}
 	g.closeIdleLocked()
 	g.mu.Unlock()
-	// Whatever is left is abandoned, so cancelling on the way out is right
-	// for the stragglers too, and releases the group's context.
+	// Whatever is left is abandoned; cancelling releases the group's context.
 	defer g.cancel()
 
 	timer := time.NewTimer(grace)

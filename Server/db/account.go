@@ -11,9 +11,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// The account-erasure transaction lives in erasure.go (EraseAccount).
-// This file keeps the pieces it shares with the anonymising deletion it
-// replaced: the last-admin guard and the DM-channel snapshot/close steps.
+// The account-erasure transaction lives in erasure.go (EraseAccount). This
+// file keeps the last-admin guard and the DM-channel snapshot/close steps.
 
 // underErasureClause excludes accounts whose erasure is queued from a count
 // of administrators: their sessions are gone and they are on their way out.
@@ -22,9 +21,9 @@ const underErasureClause = ` AND id NOT IN (SELECT user_id FROM erasure_jobs WHE
 // deleteAccountAdminGuard blocks the erasure when userID is the last
 // remaining admin-class account, returning ErrLastAdmin.
 func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) error {
-	// An erasure already queued for the subject passed this guard when it
-	// was queued, and every other account under erasure no longer
-	// counts as an administrator below, so two erasures cannot both pass.
+	// An erasure already queued for the subject passed this guard then, and every
+	// other account under erasure no longer counts as an administrator, so two
+	// erasures cannot both pass.
 	var queued int
 	switch err := tx.QueryRowContext(ctx,
 		`SELECT 1 FROM erasure_jobs WHERE user_id = ? AND state = 'queued'`, userID).Scan(&queued); {
@@ -33,11 +32,10 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 	case !errors.Is(err, sql.ErrNoRows):
 		return fmt.Errorf("DeleteAccount queued erasure: %w", err)
 	}
-	// ── Guard: last admin/owner check ────────────────────────────────────
-	// Resolve admin-class roles by the canonical criteria — the seeded
-	// Owner/Admin role IDs plus any custom role holding the Administrator
-	// bypass bit. Names are user-editable (the Owner can rename the seeded
-	// Admin role), so a name lookup would silently disable the guard.
+	// Last admin/owner check. Admin-class roles are resolved by the canonical
+	// criteria (the seeded Owner/Admin role IDs plus any custom role with the
+	// Administrator bypass bit), because names are user-editable and a name lookup
+	// would silently disable the guard.
 	adminRows, err := tx.QueryContext(ctx,
 		`SELECT id FROM roles WHERE id IN (?, ?) OR (permissions & ?) != 0`,
 		permissions.OwnerRoleID, permissions.AdminRoleID, permissions.Administrator,
@@ -62,8 +60,8 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 	if len(adminRoleIDs) == 0 {
 		// No admin-class roles defined; skip the guard.
 	} else {
-		// Admin-class when ANY held role is: an Administrator role below the
-		// top role still makes the account one of the last admins.
+		// Admin-class when any held role is: an Administrator role below the top
+		// role still makes the account one of the last admins.
 		isAdminClass, err := holdsAnyRole(ctx, tx, userID, adminRoleIDs)
 		if err != nil {
 			return err
@@ -80,10 +78,8 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 			args = append(args, userID)
 
 			var adminCount int
-			// notBannedClause is appended outside the Sprintf format string
-			// (rather than joined into it) because it contains strftime
-			// verbs like %Y and %H that fmt.Sprintf would otherwise try to
-			// parse as its own format directives.
+			// notBannedClause is appended outside the Sprintf format string because its
+			// strftime verbs (%Y, %H) would be parsed as format directives.
 			query := fmt.Sprintf(`SELECT COUNT(*) FROM users WHERE EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role_id IN (%s)) AND id != ? AND `,
 				strings.Join(placeholders, ",")) + notBannedClause + underErasureClause
 			if err := tx.QueryRowContext(ctx, query,
@@ -102,10 +98,9 @@ func deleteAccountAdminGuard(ctx context.Context, tx *sql.Tx, userID int64) erro
 // deleteAccountDMChannels snapshots the DM channels the user takes part in,
 // before the dm_participants purge removes the rows that name them.
 func deleteAccountDMChannels(ctx context.Context, tx *sql.Tx, userID int64) ([]int64, error) {
-	// Snapshot the user's DM channels before the participant rows go away,
-	// so channels left with zero participants can be removed below —
-	// LeaveGroupDM's invariant: a participant-less DM channel is an
-	// unreachable, undeletable row.
+	// Snapshot before the participant rows go, so channels left with zero
+	// participants can be removed (LeaveGroupDM's invariant: a participant-less DM
+	// channel is unreachable and undeletable).
 	var dmChannelIDs []int64
 	dmRows, err := tx.QueryContext(ctx,
 		`SELECT channel_id FROM dm_participants WHERE user_id = ?`, userID)
@@ -130,7 +125,6 @@ func deleteAccountDMChannels(ctx context.Context, tx *sql.Tx, userID int64) ([]i
 // deleteAccountCloseDMChannels closes, and where the purge emptied them,
 // removes the DM channels snapshotted by deleteAccountDMChannels.
 func deleteAccountCloseDMChannels(ctx context.Context, tx *sql.Tx, userID int64, dmChannelIDs []int64) error {
-	// Close and, where emptied, remove the deleted user's DM channels.
 	for _, chID := range dmChannelIDs {
 		var isGroup bool
 		if err := tx.QueryRowContext(ctx,
@@ -143,15 +137,11 @@ func deleteAccountCloseDMChannels(ctx context.Context, tx *sql.Tx, userID int64,
 		}
 
 		if !isGroup {
-			// The purge above removed only this user's dm_participants row, so
-			// a 1:1 DM with a live other side is untouched: its dm_participants
-			// row (and the channel) survive, but the survivor's own
-			// dm_open_state row does too. Left alone that renders as a
-			// sidebar entry with a blank, unnamed recipient (GetDMParticipantsForUser
-			// skips the viewer's own row and this user has none left to
-			// return) that the survivor can still open and send into. Closing
-			// it for them removes it from their sidebar, same as if they had
-			// closed it themselves.
+			// The purge removed only this user's dm_participants row, so a 1:1 DM with a
+			// live other side survives along with the survivor's dm_open_state row. Left
+			// alone it renders as a sidebar entry with a blank recipient
+			// (GetDMParticipantsForUser skips the viewer's own row) that the survivor can
+			// still open and send into. Close it for them, as if they had.
 			if _, err := tx.ExecContext(ctx,
 				`DELETE FROM dm_open_state WHERE channel_id = ? AND user_id != ?`,
 				chID, userID,
@@ -160,18 +150,15 @@ func deleteAccountCloseDMChannels(ctx context.Context, tx *sql.Tx, userID int64,
 			}
 		}
 
-		// Hard-delete DM channels the deletion left with zero participants
-		// (always true for the last member of a group DM; true for a 1:1 DM
-		// only when the other side had already deleted their own account).
+		// Hard-delete DM channels left with zero participants (always for the last
+		// member of a group DM; for a 1:1 only when the other side had already
+		// deleted their account).
 		//
-		// Unlink attachments first: messages.channel_id and
-		// attachments.message_id both cascade ON DELETE (migrations/001), so
-		// deleting the channel row destroys the attachment rows too. Those
-		// rows are the only handle DeleteOrphanedAttachments (the periodic
-		// sweep in main.go) has on the uploaded files — once the cascade
-		// removes them the files are stranded on disk forever. Setting
-		// message_id to NULL first turns them into ordinary orphaned
-		// attachments the sweep already knows how to reclaim.
+		// Unlink attachments first: messages.channel_id and attachments.message_id
+		// cascade on delete, so deleting the channel would destroy the attachment rows,
+		// the only handle DeleteOrphanedAttachments has on the files, stranding them
+		// on disk. Setting message_id to NULL makes them ordinary orphans the sweep
+		// reclaims.
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE attachments SET message_id = NULL
 			   WHERE message_id IN (SELECT id FROM messages WHERE channel_id = ?)
@@ -196,9 +183,8 @@ func deleteAccountCloseDMChannels(ctx context.Context, tx *sql.Tx, userID int64,
 }
 
 // holdsAnyRole reports whether the user holds at least one of roleIDs. The
-// mirror role counts too, so a member with no user_roles row at all is judged
-// by users.role_id instead of slipping past the guard. A missing user is an
-// error.
+// mirror role counts too, so a member with no user_roles row is judged by
+// users.role_id instead of slipping past the guard. A missing user is an error.
 func holdsAnyRole(ctx context.Context, tx *sql.Tx, userID int64, roleIDs []int64) (bool, error) {
 	var mirror int64
 	if err := tx.QueryRowContext(ctx,

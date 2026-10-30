@@ -1,17 +1,12 @@
 package db
 
-// ─── Presence status vocabulary ─────────────────────────────────────────────
-//
-// `users.status` stores the status the user actually chose. "invisible" is one
-// of those choices and is stored as itself — it is deliberately NOT collapsed
-// to "offline" at the write, because the server has to be able to tell "chose
-// to appear offline" from "is not connected" on the next connect (the first
-// must survive a reconnect, the second must not).
-//
-// The collapse happens at every read that another user can see:
-// BroadcastStatus maps invisible -> offline, and the owner's own payloads keep
-// the true value. That split is the whole "real invisible" model — one place
-// decides what others see, so a new payload cannot accidentally leak it.
+// users.status stores the status the user actually chose. "invisible" is
+// stored as itself, not collapsed to "offline" at the write, because the server
+// must tell "chose to appear offline" (survives a reconnect) from "is not
+// connected" (does not). The collapse happens at every read another user can
+// see: BroadcastStatus maps invisible to offline while the owner's own payloads
+// keep the true value, so one place decides what others see and no new payload
+// can leak it.
 
 const (
 	// StatusOnline is the default presence for a connected session.
@@ -22,16 +17,15 @@ const (
 	StatusDND = "dnd"
 	// StatusInvisible means "connected, but shown to everyone else as offline".
 	StatusInvisible = "invisible"
-	// StatusOffline means "not connected". It is no longer a status a user can
-	// pick — StatusInvisible replaced that — but it is still what disconnect
-	// writes and what BroadcastStatus maps invisible to.
+	// StatusOffline means "not connected". Users can no longer pick it
+	// (StatusInvisible replaced that) but it is what disconnect writes and what
+	// BroadcastStatus maps invisible to.
 	StatusOffline = "offline"
 )
 
 // ValidStatuses is the set a client may set via presence_update. "offline" is
-// still accepted so an older client that sends it (the pre-invisible spelling
-// of "appear offline") is not answered with an error; it is treated as the
-// plain offline it says.
+// still accepted so an older client sending the pre-invisible spelling of
+// "appear offline" gets no error; it is treated as plain offline.
 var ValidStatuses = map[string]bool{
 	StatusOnline:    true,
 	StatusIdle:      true,
@@ -49,11 +43,10 @@ func BroadcastStatus(status string) string {
 	return status
 }
 
-// StatusForViewer returns the status `subjectID` should appear as to
-// `viewerID`. The owner of a status always sees its true value — a client that
-// was told it was offline would render its own picker wrong and re-send
-// "online" on the next reconnect, which is exactly the flash-online bug real
-// invisible exists to kill.
+// StatusForViewer returns the status subjectID should appear as to viewerID.
+// The owner always sees their true value: a client told it was offline would
+// render its own picker wrong and re-send "online" on reconnect (the
+// flash-online bug real invisible exists to kill).
 func StatusForViewer(status string, subjectID, viewerID int64) string {
 	if subjectID == viewerID {
 		return status
@@ -62,13 +55,10 @@ func StatusForViewer(status string, subjectID, viewerID int64) string {
 }
 
 // ConnectStatus returns the status a session should come online as, given the
-// status saved from the user's last session.
-//
-// idle, dnd and invisible are deliberate choices and survive a reconnect;
-// anything else (online, offline, or an unknown legacy value) becomes online.
-// "offline" cannot be honoured here because it is also what a disconnect
-// writes, so it carries no intent — that ambiguity is why invisible is its own
-// value rather than a flag on offline.
+// status saved from the last session. idle, dnd and invisible are deliberate
+// choices and survive a reconnect; anything else (online, offline, unknown
+// legacy value) becomes online. "offline" carries no intent because a
+// disconnect also writes it, which is why invisible is its own value.
 func ConnectStatus(saved string) string {
 	switch saved {
 	case StatusIdle, StatusDND, StatusInvisible:
