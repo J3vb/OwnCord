@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ESLint, Linter } from "eslint";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 // @ts-expect-error -- no type declarations for the plain-JS rules module
 import localRules from "../../eslint-rules.js";
 
@@ -281,6 +281,13 @@ describe("view-file store ban", () => {
       .filter((id) => id === "no-restricted-imports" || id === "no-restricted-syntax")
       .map(String);
   }
+
+  // The first lint through the real config builds the type-aware program for
+  // the whole client. Under coverage on a busy CI runner that alone can pass a
+  // minute, so it is set-up here rather than part of the first case's budget.
+  beforeAll(async () => {
+    await eslint.lintText("", { filePath: path.join(clientRoot, VIEW) });
+  }, 240_000);
 
   it("flags a static store import in a view file", async () => {
     expect(
