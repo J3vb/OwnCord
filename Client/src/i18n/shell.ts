@@ -363,6 +363,7 @@ export const shellText = defineCatalog("shell", {
 
   "pins.unpinFailed": "Failed to unpin message",
   "pins.loadFailed": "Failed to load pinned messages",
+  "media.openFailed": "Couldn't open the media gallery",
   "search.failed": "Search failed",
 
   "typing.someone": "Someone",

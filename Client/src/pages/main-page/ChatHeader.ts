@@ -40,6 +40,9 @@ export interface ChatHeaderRefs {
   /** The channel's Threads list. Shown only for a text channel on a
    *  server with threads; `setChatHeaderThreads` is its only writer. */
   readonly threadsBtn?: HTMLButtonElement;
+  /** The channel's media gallery. Shown only for a text channel on a server
+   *  with `channel_media`; `setChatHeaderMedia` is its only writer. */
+  readonly mediaBtn?: HTMLButtonElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */
   readonly avatarEl: HTMLSpanElement;
   /**
@@ -56,6 +59,8 @@ export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
   /** Open or close the channel's thread list, anchored to the button. */
   readonly onToggleThreads?: (anchor: HTMLButtonElement) => void;
+  /** Open or close the channel's media gallery. */
+  readonly onToggleMedia?: () => void;
   readonly onSearchFocus?: () => void;
   readonly onToggleDmProfile?: () => void;
   /** Show or hide the group DM member panel. */
@@ -251,6 +256,19 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     const toggle = opts.onToggleThreads;
     threadsBtn.addEventListener("click", () => toggle(threadsBtn));
   }
+  const mediaBtn = createElement("button", {
+    type: "button",
+    class: "pin-btn media-btn",
+    title: messagingText("header.media"),
+    "aria-label": messagingText("header.media"),
+    "data-testid": "media-btn",
+  });
+  mediaBtn.appendChild(createIcon("image", 18));
+  mediaBtn.hidden = true;
+  if (opts.onToggleMedia !== undefined) {
+    const toggle = opts.onToggleMedia;
+    mediaBtn.addEventListener("click", () => toggle());
+  }
   const pinBtn = createElement("button", {
     type: "button",
     class: "pin-btn",
@@ -286,6 +304,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     memberListBtn,
     pinBtn,
     threadsBtn,
+    mediaBtn,
   );
 
   appendChildren(header, sidebarToggle, nameGroup, divider, topicEl, tools);
@@ -302,6 +321,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
       memberListBtn,
       callChatBtn,
       threadsBtn,
+      mediaBtn,
       avatarEl,
       sidebarToggle,
       nameGroupEl: nameGroup,
@@ -341,6 +361,12 @@ export function setChatHeaderThreads(refs: ChatHeaderRefs, visible: boolean): vo
   if (refs.threadsBtn === undefined) return;
   refs.threadsBtn.hidden = !visible;
   if (!visible) refs.threadsBtn.setAttribute("aria-expanded", "false");
+}
+
+/** Show the Media button for a text channel on a server with the gallery. */
+export function setChatHeaderMedia(refs: ChatHeaderRefs, visible: boolean): void {
+  if (refs.mediaBtn === undefined) return;
+  refs.mediaBtn.hidden = !visible;
 }
 
 /**

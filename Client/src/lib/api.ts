@@ -21,6 +21,9 @@ import type {
   ServerInfoResponse,
   MessagesResponse,
   ThreadListResponse,
+  ChannelMediaPage,
+  ChannelMediaMonthsResponse,
+  ChannelMediaQuery,
   MessagesAroundResponse,
   ReactionUsersResponse,
   PurgeResponse,
@@ -595,6 +598,19 @@ function refusal(): ApiClientError {
  * in flight — so nothing from a labelled channel is fetched or delivered
  * pre-consent, whichever feature asked.
  */
+/** The gallery query as URL parameters; empty and unset filters are left out. */
+export function channelMediaParams(query: ChannelMediaQuery): URLSearchParams {
+  const params = new URLSearchParams({ kind: query.kind });
+  if (query.order !== undefined) params.set("order", query.order);
+  if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
+  if (query.from !== undefined) params.set("from", String(query.from));
+  if (query.month !== undefined) params.set("month", query.month);
+  if (query.tz !== undefined && query.tz !== "") params.set("tz", query.tz);
+  if (query.cursor !== undefined && query.cursor !== "") params.set("cursor", query.cursor);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  return params;
+}
+
 async function channelContent<T>(channelId: number, load: () => Promise<T>): Promise<T> {
   if (nsfwContentBlocked(channelId)) throw refusal();
   let result: T;
@@ -1390,6 +1406,44 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
         request<ThreadListResponse>(
           "GET",
           `/channels/${channelId}/threads?${query}`,
+          undefined,
+          signal,
+        ),
+      );
+    },
+
+    /** One page of a channel's media gallery (`channel_media` capability). */
+    listChannelMedia(
+      channelId: number,
+      query: ChannelMediaQuery,
+      signal?: AbortSignal,
+    ): Promise<ChannelMediaPage> {
+      return channelContent(channelId, () =>
+        request<ChannelMediaPage>(
+          "GET",
+          `/channels/${channelId}/media?${channelMediaParams(query).toString()}`,
+          undefined,
+          signal,
+        ),
+      );
+    },
+
+    /** How many gallery items each month holds, for the month list. */
+    getChannelMediaMonths(
+      channelId: number,
+      query: ChannelMediaQuery,
+      signal?: AbortSignal,
+    ): Promise<ChannelMediaMonthsResponse> {
+      const params = channelMediaParams({
+        kind: query.kind,
+        ...(query.q !== undefined ? { q: query.q } : {}),
+        ...(query.from !== undefined ? { from: query.from } : {}),
+        ...(query.tz !== undefined ? { tz: query.tz } : {}),
+      });
+      return channelContent(channelId, () =>
+        request<ChannelMediaMonthsResponse>(
+          "GET",
+          `/channels/${channelId}/media/months?${params.toString()}`,
           undefined,
           signal,
         ),

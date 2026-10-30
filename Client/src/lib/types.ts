@@ -899,6 +899,41 @@ export interface ThreadUpdatePayload {
   readonly auto_archive_minutes?: ThreadAutoArchiveMinutes;
 }
 
+/** One file in a channel's media gallery and the message it was posted in. */
+export interface ChannelMediaItem {
+  readonly attachment: Attachment;
+  readonly message_id: number;
+  readonly user: { readonly id: number; readonly username: string; readonly avatar?: string };
+  /** The message's send time, "YYYY-MM-DD HH:MM:SS" UTC. */
+  readonly timestamp: string;
+}
+
+/** GET /channels/{id}/media. `next_cursor` is opaque and "" on the last page. */
+export interface ChannelMediaPage {
+  readonly items: readonly ChannelMediaItem[];
+  readonly next_cursor: string;
+}
+
+/** GET /channels/{id}/media/months: newest month first, in the caller's zone. */
+export interface ChannelMediaMonthsResponse {
+  readonly months: readonly { readonly month: string; readonly count: number }[];
+}
+
+/** The gallery's filters; `kind` media is images and videos, files the rest. */
+export interface ChannelMediaQuery {
+  readonly kind: "media" | "files";
+  readonly order?: "newest" | "oldest";
+  /** File name contains. */
+  readonly q?: string;
+  /** Uploader user id. */
+  readonly from?: number;
+  /** "YYYY-MM": start the walk at that month. Ignored with `cursor`. */
+  readonly month?: string;
+  readonly tz?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
 /** GET /channels/{id}/threads. `next_before` is opaque and "" on the last page. */
 export interface ThreadListResponse {
   readonly threads: readonly ThreadInfo[];
