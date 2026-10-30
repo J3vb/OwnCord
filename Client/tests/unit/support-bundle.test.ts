@@ -370,3 +370,48 @@ describe("exportSupportBundle", () => {
     ).toEqual(timeline);
   });
 });
+
+describe("support bundle JSON entries", () => {
+  it("ends every JSON entry with a newline", () => {
+    const entries = readZip(buildSupportBundle(sources({ shareDiagnostics: { samples: [] } })));
+    for (const name of [
+      "app.json",
+      "settings.json",
+      "voice-diagnostics.json",
+      "share-diagnostics.json",
+    ]) {
+      expect(text(entries.find((e) => e.name === name)!.data).endsWith("}\n")).toBe(true);
+    }
+  });
+
+  it("keeps a numeric profile field and drops a structured one", () => {
+    const entries = readZip(
+      buildSupportBundle(
+        sources({
+          profiles: [{ name: "Home", host: "h", lastConnected: 1_700_000_000, username: { a: 1 } }],
+        }),
+      ),
+    );
+    const settings = JSON.parse(text(entries.find((e) => e.name === "settings.json")!.data));
+    expect(settings.profiles).toEqual([{ name: "Home", host: "h", lastConnected: 1_700_000_000 }]);
+  });
+});
+
+describe("exportSupportBundle without an app version", () => {
+  it("records the version as unknown", async () => {
+    desktop.fileSaver.pickSaveLocation.mockResolvedValue("bundle.zip");
+    desktop.appMetadata.getVersion.mockRejectedValue(new Error("unavailable"));
+    desktop.logFiles.readAll.mockResolvedValue([]);
+    desktop.logFiles.readNative.mockResolvedValue([]);
+    desktop.settings.load.mockResolvedValue(null);
+    desktop.fileSaver.writeFile.mockResolvedValue(undefined);
+
+    await exportSupportBundle(desktop as never, {});
+
+    const [, bytes] = desktop.fileSaver.writeFile.mock.calls.at(-1)! as [string, Uint8Array];
+    const app = JSON.parse(text(readZip(bytes).find((e) => e.name === "app.json")!.data)) as {
+      version: string;
+    };
+    expect(app.version).toBe("unknown");
+  });
+});

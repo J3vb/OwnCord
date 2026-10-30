@@ -7,6 +7,7 @@ import {
   REBINDABLE_ACTIONS,
   comboFromEvent,
   comboKey,
+  globalShortcutTakenVks,
   inAppCtrlShiftVks,
   keybindConflict,
   loadEffectiveKeybinds,
@@ -14,7 +15,7 @@ import {
   saveKeybind,
   type KeyCombo,
 } from "../../src/lib/prefs/keybinds";
-import { saveGlobalShortcutVk } from "../../src/lib/voiceShortcuts";
+import { isBindableVk, saveGlobalShortcutVk } from "../../src/lib/voiceShortcuts";
 import { STORAGE_PREFIX } from "../../src/lib/prefs/preferences";
 
 const GLOBALS = { mute: 0x4d, deafen: 0x44 };
@@ -419,5 +420,174 @@ describe("inAppCtrlShiftVks", () => {
       GLOBALS,
     );
     expect(inAppCtrlShiftVks(eff)).toEqual(new Set([0x58]));
+  });
+});
+
+/** Checks `combo` for the default-less disconnect action against the shipped defaults. */
+const conflictOf = (combo: KeyCombo, ptt = 0) =>
+  keybindConflict(combo, "disconnect", defaults, ptt);
+
+describe("keybindConflict around each reserved key", () => {
+  it.each([
+    ["F1 on its own", c(0x70)],
+    ["F9 on its own", c(0x78)],
+    ["F10 on its own", c(0x79)],
+    ["Ctrl+F10", c(0x79, { ctrl: true })],
+    ["Ctrl+Shift+F10", c(0x79, { ctrl: true, shift: true })],
+    ["Alt+Shift+F10", c(0x79, { alt: true, shift: true })],
+    ["Ctrl+Shift+F9", c(0x78, { ctrl: true, shift: true })],
+    ["Alt+F5", c(0x74, { alt: true })],
+    ["Alt+X", c(0x58, { alt: true })],
+    ["Alt+P", c(0x50, { alt: true })],
+    ["Alt+R", c(0x52, { alt: true })],
+    ["Alt+Shift+Z", c(0x5a, { alt: true, shift: true })],
+    ["Alt+Left", c(0x25, { alt: true })],
+    ["Ctrl+Shift+P", c(0x50, { ctrl: true, shift: true })],
+    ["Ctrl+Shift+A", c(0x41, { ctrl: true, shift: true })],
+    ["Ctrl+Shift+Y", c(0x59, { ctrl: true, shift: true })],
+    ["Ctrl+J", c(0x4a, { ctrl: true })],
+  ])("leaves %s free", (_name, combo) => {
+    expect(conflictOf(combo)).toBeNull();
+  });
+
+  it.each([
+    ["Shift+F5", c(0x74, { shift: true })],
+    ["Ctrl+F11", c(0x7a, { ctrl: true })],
+    ["Ctrl+Shift+F12", c(0x7b, { ctrl: true, shift: true })],
+    ["Ctrl+Up", c(0x26, { ctrl: true })],
+    ["Ctrl+Right", c(0x27, { ctrl: true })],
+    ["Ctrl+Down", c(0x28, { ctrl: true })],
+    ["Ctrl+Home", c(0x24, { ctrl: true })],
+    ["Ctrl+Shift+Delete", c(0x2e, { ctrl: true, shift: true })],
+  ])("reserves %s", (_name, combo) => {
+    expect(conflictOf(combo)).toEqual({ kind: "reserved" });
+  });
+
+  it("asks for a modifier on keys above F12", () => {
+    expect(conflictOf(c(0x7c))).toEqual({ kind: "needsModifier" });
+    expect(conflictOf(c(0x7c, { shift: true }))).toEqual({ kind: "needsModifier" });
+  });
+
+  it("does not let an unset push-to-talk key claim virtual key 0", () => {
+    expect(conflictOf(c(0, { ctrl: true }), 0)).toBeNull();
+    expect(conflictOf(c(0, { ctrl: true }), 0x58)).toBeNull();
+  });
+});
+
+describe("globalShortcutTakenVks", () => {
+  it("never names a key that cannot be bound", () => {
+    const taken = globalShortcutTakenVks(defaults);
+    for (let vk = 0; vk <= 0xff; vk++) {
+      if (!isBindableVk(vk)) expect(taken.has(vk)).toBe(false);
+    }
+    expect(taken.has(0x4b)).toBe(true); // Ctrl+Shift+K, the quick switcher
+    expect(taken.has(0x56)).toBe(true); // Ctrl+Shift+V, camera
+  });
+});
+
+/** A bare keydown-shaped object, the way a synthetic or test-bridge event looks. */
+function plain(init: Record<string, unknown>): KeyboardEvent {
+  return {
+    code: "KeyA",
+    key: "a",
+    ctrlKey: true,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...init,
+  } as unknown as KeyboardEvent;
+}
+
+describe("comboFromEvent with events from other sources", () => {
+  it("reads an event that cannot report modifier state", () => {
+    expect(comboFromEvent(plain({}), "inApp")).toEqual(c(0x41, { ctrl: true }));
+  });
+
+  it("takes the physical key when the event's key is not text at all", () => {
+    expect(comboFromEvent(plain({ key: 5 }), "inApp")).toEqual(c(0x41, { ctrl: true }));
+    expect(comboFromEvent(plain({ key: { toString: () => "q" } }), "inApp")).toEqual(
+      c(0x41, { ctrl: true }),
+    );
+    expect(comboFromEvent(plain({ key: undefined }), "inApp")).toEqual(c(0x41, { ctrl: true }));
+  });
+
+  it("takes the physical key for a named key such as Enter", () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
+    expect(comboFromEvent(ev("Space", { key: "Enter", ctrlKey: true }), "inApp")?.vk).toBe(0x20);
+    vi.restoreAllMocks();
+  });
+});
+
+describe("stored keybind shapes", () => {
+  it.each([
+    ["ctrl", { vk: 0x51, ctrl: "yes", shift: false, alt: false }],
+    ["shift", { vk: 0x51, ctrl: true, shift: 1, alt: false }],
+    ["alt", { vk: 0x51, ctrl: false, shift: false, alt: "yes" }],
+  ])("drops a combo whose %s flag is not a boolean", (_flag, combo) => {
+    const eff = parseKeybinds(stored({ toggleScreenshare: combo }), GLOBALS);
+    expect(eff.toggleScreenshare).toBeNull();
+  });
+
+  it("ignores a stored list written by another version", () => {
+    const raw = { v: 2, bindings: { search: c(0x51, { ctrl: true }) } };
+    expect(parseKeybinds(raw, GLOBALS).search).toEqual(defaults.search);
+  });
+
+  it("does not carry unknown actions or non-combo values forward when another binding is saved", () => {
+    localStorage.setItem(
+      STORAGE_PREFIX + KEYBINDS_PREF,
+      JSON.stringify(
+        stored({
+          bogus: c(0x51, { ctrl: true }),
+          toggleMute: c(0x51, { ctrl: true }),
+          search: "junk",
+          gifPicker: 7,
+          disconnect: c(0x52, { alt: true }),
+        }),
+      ),
+    );
+    saveKeybind("uploadFile", null);
+    expect(JSON.parse(localStorage.getItem(STORAGE_PREFIX + KEYBINDS_PREF) ?? "")).toEqual({
+      v: 1,
+      bindings: { disconnect: c(0x52, { alt: true }), uploadFile: null },
+    });
+  });
+});
+
+describe("keybinds reverting to defaults", () => {
+  afterEach(() => localStorage.clear());
+
+  it("reads the push-to-talk key from its preference when none is passed", () => {
+    localStorage.setItem(STORAGE_PREFIX + "pttVk", String(0x4a)); // J
+    const raw = stored({ emojiPicker: c(0x4a, { ctrl: true }) });
+    expect(parseKeybinds(raw, GLOBALS).emojiPicker).toEqual(defaults.emojiPicker);
+    localStorage.setItem(STORAGE_PREFIX + "pttVk", "0");
+    expect(parseKeybinds(raw, GLOBALS).emojiPicker).toEqual(c(0x4a, { ctrl: true }));
+  });
+
+  it("leaves a shipped default alone even when push-to-talk shares its key", () => {
+    const eff = parseKeybinds(undefined, GLOBALS, 0x46); // F, Ctrl+F is search
+    expect(eff.search).toEqual(defaults.search);
+    expect(eff.toggleCamera).toEqual(defaults.toggleCamera);
+  });
+
+  it("unbinds an action whose override and whose default both clash", () => {
+    // Deafen sits on Ctrl+Shift+V, camera's default; the override clashes with mute.
+    const globals = { mute: 0x4d, deafen: 0x56 };
+    const raw = stored({ toggleCamera: c(0x4d, { ctrl: true, shift: true }) });
+    const eff = parseKeybinds(raw, globals);
+    expect(eff.toggleCamera).toBeNull();
+    expect(eff.toggleMute).toEqual(c(0x4d, { ctrl: true, shift: true }));
+    expect(eff.search).toEqual(defaults.search);
+  });
+
+  it("settles a chain of reverts: a default freed by one revert is taken by the next", () => {
+    const raw = stored({
+      toggleCamera: c(0x4d, { ctrl: true, shift: true }), // clashes with mute
+      gifPicker: c(0x56, { ctrl: true, shift: true }), // camera's default
+    });
+    const eff = parseKeybinds(raw, GLOBALS);
+    expect(eff.toggleCamera).toEqual(defaults.toggleCamera);
+    expect(eff.gifPicker).toEqual(defaults.gifPicker);
   });
 });

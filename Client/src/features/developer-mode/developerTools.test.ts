@@ -43,3 +43,19 @@ describe("developerTools", () => {
     );
   });
 });
+
+describe("developerTools default", () => {
+  afterEach(() => {
+    setDeveloperMode(false);
+  });
+
+  it("turns off again when the preference is removed", () => {
+    setDeveloperMode(true);
+    expect(isDeveloperMode()).toBe(true);
+    localStorage.removeItem("owncord:settings:developerMode");
+    window.dispatchEvent(
+      new CustomEvent("owncord:pref-change", { detail: { key: "developerMode" } }),
+    );
+    expect(isDeveloperMode()).toBe(false);
+  });
+});
