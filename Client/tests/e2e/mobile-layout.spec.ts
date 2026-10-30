@@ -1,6 +1,6 @@
 /**
- * Touch input (WP 6.13f2): long-press opens the message and channel menus and a
- * tap shows a message's action bar.
+ * Touch input: long-press opens the message and channel menus, and a tap on a
+ * message shows nothing (the hold is the only way to its actions, as in Discord).
  *
  * Phone layout (WP 6.13f1): no horizontal scroll, a reachable drawer, a
  * full-width member overlay and 44 px touch targets in the user bar. Both
@@ -210,6 +210,7 @@ for (const profile of PROFILES) {
       await holdFinger(page, row, 800);
       await expect(page.locator(".message-context-menu")).toHaveCount(1);
       await expect(page.locator(".message-context-menu")).toBeVisible();
+      await expect(page.locator("[data-testid='msg-menu-add-reaction']")).toBeVisible();
     });
 
     test("a short press on a message opens no menu", async ({ page }) => {
@@ -227,18 +228,15 @@ for (const profile of PROFILES) {
       await expect(page.locator("[data-testid='channel-context-menu']")).toBeVisible();
     });
 
-    test("a tap on a message shows its action bar and a tap elsewhere hides it", async ({
-      page,
-    }) => {
+    test("a tap on a message shows no action bar and opens no menu", async ({ page }) => {
       await signIn(page);
       const message = page.locator("[data-testid='message-101']");
       const bar = message.locator(".msg-actions-bar");
       await expect(bar).toHaveCSS("opacity", "0");
       await message.locator(".msg-text").first().tap();
-      await expect(message).toHaveClass(/msg-touch-active/);
-      await expect(bar).toHaveCSS("opacity", "1");
-      await page.locator("[data-testid='chat-header-name']").tap();
-      await expect(message).not.toHaveClass(/msg-touch-active/);
+      await page.waitForTimeout(700);
+      await expect(bar).toHaveCSS("opacity", "0");
+      await expect(page.locator(".message-context-menu")).toHaveCount(0);
     });
   });
 }

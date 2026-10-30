@@ -2233,9 +2233,16 @@ ul.md-list-nested {
   box-shadow: var(--shadow-sm);
   z-index: 5;
 }
-.message:hover .msg-actions-bar,
-.message:focus-within .msg-actions-bar,
-.message.msg-touch-active .msg-actions-bar {
+/* Only a real pointer hovers: a touch screen's tap leaves a sticky :hover
+   behind, and there a message's actions live in the long-press menu. */
+@media (hover: hover) {
+  .message:hover .msg-actions-bar {
+    opacity: 1;
+    pointer-events: auto;
+    animation: actionBarPop 0.1s ease;
+  }
+}
+.message:focus-within .msg-actions-bar {
   opacity: 1;
   pointer-events: auto;
   animation: actionBarPop 0.1s ease;
