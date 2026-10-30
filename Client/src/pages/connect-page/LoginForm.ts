@@ -5,6 +5,7 @@ import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOur
 import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, TLS_CERT_CODE, TransportError, errorText } from "@lib/api";
+import { isValidHost } from "@lib/net/hostValidation";
 import {
   canonicalServerHost,
   normalizeHostForCertCompare,
@@ -415,7 +416,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "host",
       connectText("login.hostLabel"),
       "text",
-      "localhost:8443",
+      connectText("login.hostPlaceholder"),
     );
     hostInput = qs("input", hostGroup)!;
     if (__OWNCORD_WEB__ && fixedHost !== undefined) {
@@ -640,6 +641,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     }
     if (id === "username" || id === "password") {
       input.setAttribute("required", "");
+    }
+    // Phone keyboards would capitalise or correct a name or code.
+    if (id === "username" || id === "invite") {
+      input.setAttribute("autocapitalize", "none");
+      input.setAttribute("autocorrect", "off");
+      input.setAttribute("spellcheck", "false");
     }
 
     if (inputType === "password") {
@@ -1136,6 +1143,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       connectText(formMode === "login" ? "login.toRegister" : "login.toLogin"),
     );
 
+    // Password managers offer a generated password for a new account.
+    passwordInput.setAttribute(
+      "autocomplete",
+      formMode === "login" ? "current-password" : "new-password",
+    );
+
     updateRegistrationUi();
     scheduleHostSettled(0);
 
@@ -1157,6 +1170,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     if (!host) {
       return { message: connectText("validation.hostRequired"), field: "host" };
+    }
+    if (!isValidHost(host)) {
+      return { message: connectText("validation.hostInvalid"), field: "host" };
     }
     if (!username) {
       return { message: connectText("validation.usernameRequired"), field: "username" };
@@ -1577,6 +1593,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     focusHost(): void {
+      // A touch screen opens its keyboard on focus, covering the saved servers.
+      if (typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches)
+        return;
       if (__OWNCORD_WEB__ && fixedHost !== undefined) usernameInput.focus();
       else hostInput.focus();
     },

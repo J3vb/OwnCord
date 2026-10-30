@@ -82,6 +82,11 @@ and only when it changes something a contributor or fork holder must do
 
 - The server address was case-sensitive, so `Chat.Example.com` missed the saved `chat.example.com` server and its saved sign-in — the address is now lowercased, and a saved server typed in another case is matched.
 - Phone keyboards capitalised and auto-corrected the server address — the address boxes now turn that off.
+- Pasting a server link such as `https://chat.example.com/` failed with "Invalid host format" — the link's host is used.
+- A mistyped server address was sent anyway and came back as a bare "Invalid host format" — the form now says what a server address looks like before it sends anything.
+- The example in the empty server address box looked like a filled-in address — it now reads "e.g. chat.example.com:8443".
+- On phones the keyboard popped up over the saved servers as soon as the login page opened — the page no longer focuses the address box on a touch screen.
+- Password managers offered the saved password when creating an account — Register now asks for a new one, and phone keyboards no longer capitalise the username or invite code.
 
 **Phones and touch screens**
 
