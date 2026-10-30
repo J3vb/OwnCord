@@ -67,6 +67,7 @@ and only when it changes something a contributor or fork holder must do
 **Phones and touch screens**
 
 - The Android app hides desktop-only settings and buttons (pop-out, Keybinds, tray, taskbar and screen share options), and Enter adds a new line in the message box there; the send button sends.
+
 **Admin panel**
 
 - Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
