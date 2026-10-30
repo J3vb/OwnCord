@@ -13,8 +13,7 @@
   flex: none;
   width: 58px;
   box-sizing: border-box;
-  padding: 10px 0;
-  gap: 6px;
+  padding: 4px 0 10px;
   background: var(--bg-tertiary);
   min-height: 0;
 }
@@ -25,6 +24,9 @@
   gap: 6px;
   flex: 1;
   min-height: 0;
+  /* The scroll box clips, so this padding is the room the active ring and
+     the hover lift need at the first and last icon. */
+  padding: 6px 0;
   overflow-y: auto;
   scrollbar-width: none;
 }
