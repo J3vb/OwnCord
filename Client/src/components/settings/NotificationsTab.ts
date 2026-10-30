@@ -10,7 +10,7 @@ import {
   SOUND_SWITCH_KEYS,
   loadAppSoundsGain,
   type SoundSwitch,
-} from "@lib/soundPrefs";
+} from "@lib/prefs/soundPrefs";
 import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
 import {
   CHANNEL_MUTE_CHANGED,
@@ -18,7 +18,7 @@ import {
   getChannelMutesHost,
   listMutedChannels,
   unmuteChannel,
-} from "@lib/channel-mutes";
+} from "@lib/prefs/channelMutes";
 import { Disposable } from "@lib/disposable";
 import { clockAndDate } from "../muteMenu";
 import {
@@ -31,13 +31,13 @@ import {
   listChannelNotificationOverrides,
   setChannelNotificationLevel,
   type NotificationLevel,
-} from "@lib/notificationLevel";
+} from "@lib/prefs/notificationLevel";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 const LEVEL_LABELS: Readonly<Record<NotificationLevel, () => string>> = {
   all: () => t("notifications.level.all"),
@@ -112,7 +112,7 @@ function buildLevelRow(signal: AbortSignal): HTMLDivElement {
  * The connected server's override of the global level, shown only while
  * connected. "Follow global setting" clears the override; the three levels set
  * an explicit value, so one noisy community can be quieted without muting every
- * other server. Stored against the host (see @lib/notificationLevel), so the
+ * other server. Stored against the host (see @lib/prefs/notificationLevel), so the
  * choice returns when you switch back.
  */
 function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {

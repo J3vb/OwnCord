@@ -4,7 +4,7 @@
  *
  * Everything here reads the running page, so it works the same against the
  * Vite dev server and the production bundle (`tests/e2e/config/playwright.config.prod.ts`).
- * The contrast math is the app's own (`src/lib/color-contrast.ts`), so a test
+ * The contrast math is the app's own (`src/lib/text/colorContrast.ts`), so a test
  * and the Q8 accent fallback can never disagree about a ratio.
  *
  * - `setAppearance` stores appearance preferences and reloads, so the app's
@@ -19,7 +19,7 @@
  */
 
 import type { Locator, Page } from "@playwright/test";
-import { contrastRatio, parseColor, type Rgb } from "../../../src/lib/color-contrast";
+import { contrastRatio, parseColor, type Rgb } from "../../../src/lib/text/colorContrast";
 
 export const Q1 = { text: 4.5, nonText: 3, focus: 3 } as const;
 

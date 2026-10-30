@@ -2,7 +2,7 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";

@@ -11,12 +11,12 @@
  * focus first focusable on open.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { avatarInitial, resolveDisplayName } from "@lib/avatar";
 import { isRenderableAvatar, setAvatarSource } from "./message-list/avatar";

@@ -11,7 +11,7 @@ import {
 } from "../helpers/fakeAudioContext";
 
 const prefs = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) => (prefs.has(key) ? prefs.get(key) : fallback),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));

@@ -14,7 +14,7 @@
  * uses, `isChannelMuted`.
  */
 
-import { isChannelMuted } from "./channel-mutes";
+import { isChannelMuted } from "./channelMutes";
 import { loadPref, savePref } from "./preferences";
 import type { Channel } from "@stores/channels.store";
 

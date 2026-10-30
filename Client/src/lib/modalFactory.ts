@@ -13,11 +13,11 @@
  */
 
 import { Disposable } from "./disposable";
-import { isImeCommit } from "./ime";
+import { isImeCommit } from "./text/ime";
 import { createElement } from "./dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 import { connectText } from "../i18n/connect";
-import { attachLimitHint } from "./nameLimits";
+import { attachLimitHint } from "./text/nameLimits";
 import { showToast } from "./toast";
 
 export interface ModalOptions {

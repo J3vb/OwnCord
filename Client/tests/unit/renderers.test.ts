@@ -21,13 +21,13 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { shellText } from "../../src/i18n/shell";
-import { formatClockTime, userRoleColorVar } from "../../src/lib/formatting";
+import { formatClockTime, userRoleColorVar } from "../../src/lib/text/formatting";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { expectConsole } from "../helpers/console";
 import {

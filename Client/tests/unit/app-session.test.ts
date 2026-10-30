@@ -47,7 +47,7 @@ vi.mock("@lib/logger", () => ({
     error: vi.fn(),
   }),
 }));
-vi.mock("@lib/last-channel", () => ({ setLastChannelHost: vi.fn() }));
+vi.mock("@lib/prefs/lastChannel", () => ({ setLastChannelHost: vi.fn() }));
 vi.mock("@components/ConnectedOverlay", () => ({
   createConnectedOverlay: vi.fn((opts: { onReady: () => void }) => {
     const entry = {

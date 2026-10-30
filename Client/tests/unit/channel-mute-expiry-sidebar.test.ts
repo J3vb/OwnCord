@@ -13,8 +13,8 @@ import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
-import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/channel-mutes";
-import { startMuteExpiryWatch } from "@lib/channel-mute-expiry";
+import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/prefs/channelMutes";
+import { startMuteExpiryWatch } from "@lib/prefs/channelMuteExpiry";
 
 describe("timed mute expiry redraws the sidebar", () => {
   let container: HTMLDivElement;

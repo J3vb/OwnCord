@@ -42,7 +42,7 @@ import {
   rememberRowHeight,
   rememberedRowHeight,
 } from "../../src/components/message-list/row-heights";
-import { discardMedia, observeMedia } from "../../src/lib/media-visibility";
+import { discardMedia, observeMedia } from "../../src/lib/prefs/mediaVisibility";
 import {
   EXTERNAL_CONSENT_PREF,
   admitDerived,
@@ -51,7 +51,7 @@ import {
 } from "../../src/features/content-consent/external";
 import { handleMentionCount } from "../../src/features/channels/wsHandlers";
 import type { Channel } from "../../src/stores/channels.store";
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 import { expectConsole } from "../helpers/console";
 import { voiceStore } from "../../src/stores/voice.store";
 import { messagesStore } from "../../src/stores/messages.store";
@@ -81,7 +81,7 @@ import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers
 import { createAvatarElement } from "../../src/components/message-list/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/watchRequest";
-import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   bindGifFavoritesApi,
   gifFavoritesAvailable,

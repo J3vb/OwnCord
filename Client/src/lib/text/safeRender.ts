@@ -1,7 +1,7 @@
 // Step 1.13 — Error boundary / safe render utility
 
-import { createLogger } from "./logger";
-import { connectText } from "../i18n/connect";
+import { createLogger } from "../logger";
+import { connectText } from "../../i18n/connect";
 
 const log = createLogger("safe-render");
 

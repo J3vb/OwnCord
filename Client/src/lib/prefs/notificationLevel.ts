@@ -34,7 +34,7 @@
  */
 
 import { loadPref, savePref, storedKeys } from "./preferences";
-import { getChannelMutesHost } from "./channel-mutes";
+import { getChannelMutesHost } from "./channelMutes";
 
 export const DEFAULT_NOTIFICATION_LEVEL = "mentions" as const;
 

@@ -3,14 +3,14 @@
  * Also owns the server host state and URL resolution used by other modules.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { observeMedia } from "@lib/media-visibility";
+import { observeMedia } from "@lib/prefs/mediaVisibility";
 import { createZoomPan, PAN_MIN_SCALE } from "@lib/zoomPan";
-import { loadPref, onPrefChange } from "@lib/preferences";
+import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { formatByteSize } from "@lib/connectionStats";

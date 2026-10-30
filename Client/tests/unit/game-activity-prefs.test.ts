@@ -18,8 +18,8 @@ import {
   withManual,
   withRename,
   withoutManual,
-} from "@lib/gameActivityPrefs";
-import { STORAGE_PREFIX, savePref } from "@lib/preferences";
+} from "@lib/prefs/gameActivityPrefs";
+import { STORAGE_PREFIX, savePref } from "@lib/prefs/preferences";
 
 /** Device-local game choices: valid parts are kept field by field, nothing throws. */
 

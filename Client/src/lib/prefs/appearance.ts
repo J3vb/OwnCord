@@ -6,8 +6,8 @@
  * settings overlay (whose tabs statically import the LiveKit stack).
  */
 
-import { loadPref } from "@lib/preferences";
-import { applyThemeChoice, getActiveThemeName, restoreAccent } from "@lib/themes";
+import { loadPref } from "@lib/prefs/preferences";
+import { applyThemeChoice, getActiveThemeName, restoreAccent } from "@lib/prefs/themes";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/os-motion";
 
 /** The Appearance slider's range, and the clamp applied to a stored value. */

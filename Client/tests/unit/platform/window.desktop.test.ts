@@ -1,6 +1,6 @@
 // Desktop binding for the WindowControl suite: `platform/desktop`'s window
 // operations. B7-5 ran the same suite file against the in-place seam in
-// `lib/window-state.ts` first (proving it could fail and pinning today's
+// `lib/prefs/windowState.ts` first (proving it could fail and pinning today's
 // behaviour), then re-bound it here. The legacy binding is deleted with this
 // commit: its export is gone.
 import { vi } from "vitest";

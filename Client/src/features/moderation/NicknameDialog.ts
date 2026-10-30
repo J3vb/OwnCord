@@ -18,7 +18,7 @@
  */
 
 import { errorText } from "@lib/api";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
 import {
@@ -27,7 +27,7 @@ import {
   lineHintText,
   MAX_DISPLAY_NAME_LEN,
   runeCount,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 import type { ToastType } from "@components/Toast";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";

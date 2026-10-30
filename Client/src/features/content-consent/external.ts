@@ -14,7 +14,7 @@
  * reads it, and it satisfies neither.
  */
 
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import { registerSessionReset } from "@lib/sessionRegistry";
 
 export type ExternalConsentChoice = "auto" | "ask";

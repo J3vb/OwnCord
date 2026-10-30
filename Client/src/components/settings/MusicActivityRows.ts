@@ -23,13 +23,13 @@ import {
   toMediaPrefs,
   withPlayerHidden,
   type SeenPlayer,
-} from "@lib/musicActivityPrefs";
+} from "@lib/prefs/musicActivityPrefs";
 import {
   hasReceivedReady,
   onGameActivityPolicy,
   serverSupportsListeningActivity,
 } from "@lib/serverCapabilities";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import { desktop } from "../../platform/desktop";
 import { listeningDetailsText as t } from "../../i18n/listeningDetails";
 import { createToggle } from "./helpers";

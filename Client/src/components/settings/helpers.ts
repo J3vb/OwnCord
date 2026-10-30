@@ -3,9 +3,9 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
+import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/prefs/preferences";
 
-// Preference persistence lives in `@lib/preferences` so `lib/` and `features/`
+// Preference persistence lives in `@lib/prefs/preferences` so `lib/` and `features/`
 // modules can use it without importing the component layer.
 // Re-exported here so the settings tabs keep a single import site — and,
 // critically, so both layers share one implementation (they used to be

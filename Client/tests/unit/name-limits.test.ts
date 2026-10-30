@@ -11,7 +11,7 @@ import {
   collapseSpaces,
   runeCount,
   visibleLength,
-} from "../../src/lib/nameLimits";
+} from "../../src/lib/text/nameLimits";
 import { createPromptModal } from "../../src/lib/modalFactory";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { createConnectPage } from "../../src/pages/ConnectPage";

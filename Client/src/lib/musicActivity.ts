@@ -52,9 +52,9 @@ import {
   loadMusicPrefs,
   recordSeenPlayer,
   toMediaPrefs,
-} from "./musicActivityPrefs";
+} from "./prefs/musicActivityPrefs";
 import type { MediaPrefs, MediaReading } from "../platform/contracts/mediaDetector";
-import { onPrefChange } from "./preferences";
+import { onPrefChange } from "./prefs/preferences";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("musicActivity");

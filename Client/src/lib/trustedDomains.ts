@@ -6,7 +6,7 @@
  * value reads as "no trusted domains".
  */
 
-import { loadStoredJson, saveStoredJson } from "./preferences";
+import { loadStoredJson, saveStoredJson } from "./prefs/preferences";
 
 // i18n-exempt: localStorage key, not display text
 const KEY = "owncord:trustedLinkDomains";

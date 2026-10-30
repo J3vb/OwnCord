@@ -5,9 +5,9 @@
  * The active theme name is persisted to localStorage.
  */
 
-import { Disposable } from "./disposable";
+import { Disposable } from "../disposable";
 import { readStored, removeStored, writeStored } from "./preferences";
-import { deriveAccentTokens, parseColor, type Rgb } from "./color-contrast";
+import { deriveAccentTokens, parseColor, type Rgb } from "../text/colorContrast";
 
 /** Built-in theme palettes. Moved here from `@components/settings/helpers` so
  *  `lib/` and `features/` modules can apply a theme without importing the

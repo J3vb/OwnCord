@@ -130,7 +130,7 @@ export const channelsStore = createStore<ChannelsState>(INITIAL_STATE);
 
 // A server that sends no `role_ids` names the user's one role only; mention
 // matching finds its id through the roster (registered here because
-// lib/mentions sits below the stores).
+// lib/text/mentions sits below the stores).
 registerRoleIdLookup((name) => {
   const lower = name.toLowerCase();
   return channelsStore.getState().roles.find((r) => r.name.toLowerCase() === lower)?.id;

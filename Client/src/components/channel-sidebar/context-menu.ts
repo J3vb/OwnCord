@@ -28,7 +28,7 @@ import {
   muteChannel,
   unmuteChannel,
   getChannelMutesHost,
-} from "@lib/channel-mutes";
+} from "@lib/prefs/channelMutes";
 import {
   createMenuItem,
   createSubmenuTrigger,
@@ -41,7 +41,7 @@ import {
   getChannelNotificationLevel,
   setChannelNotificationLevel,
   type NotificationLevel,
-} from "@lib/notificationLevel";
+} from "@lib/prefs/notificationLevel";
 import { appendPurgeSection } from "@components/purge-prompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
@@ -56,7 +56,7 @@ const LEVEL_KEYS = {
 
 /** Bubbles from a channel row when its mute is toggled. Re-exported from the
  *  mute store, which dispatches it on every write (F16). */
-export { CHANNEL_MUTE_CHANGED } from "@lib/channel-mutes";
+export { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 
 /**
  * Attach a context menu to a channel element for mark-read/move/edit/delete/

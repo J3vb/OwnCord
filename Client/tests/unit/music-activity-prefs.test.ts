@@ -13,7 +13,7 @@ import {
   saveMusicPrefs,
   toMediaPrefs,
   withPlayerHidden,
-} from "@lib/musicActivityPrefs";
+} from "@lib/prefs/musicActivityPrefs";
 import supportBundleSource from "../../src/lib/supportBundle.ts?raw";
 
 describe("music activity prefs", () => {

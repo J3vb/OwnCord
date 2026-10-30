@@ -13,7 +13,7 @@
 // This module must not import ./deepLinks: the deep-link handlers import it,
 // and the cycle lint forbids the loop.
 
-import { renderFallback, safeMount, type RenderRecovery } from "@lib/safe-render";
+import { renderFallback, safeMount, type RenderRecovery } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import type { ProfileManager } from "@lib/profiles";

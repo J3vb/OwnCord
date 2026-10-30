@@ -18,8 +18,8 @@ import {
   removeStored,
   saveStoredJson,
   writeStored,
-} from "../../lib/preferences";
-import { reclampRoleColors, restoreAccent } from "../../lib/themes";
+} from "../../lib/prefs/preferences";
+import { reclampRoleColors, restoreAccent } from "../../lib/prefs/themes";
 
 export interface CustomTheme {
   readonly id: string;

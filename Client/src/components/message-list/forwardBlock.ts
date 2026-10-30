@@ -14,7 +14,7 @@
 
 import { findChannelById } from "@lib/channel-navigation";
 import { createElement, setText } from "@lib/dom";
-import { formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import { formatFullDate, formatMessageTimestamp } from "@lib/text/formatting";
 import { createIcon } from "@lib/icons";
 import { jumpToMessage } from "@lib/message-navigation";
 import type { ForwardInfo } from "@lib/types";

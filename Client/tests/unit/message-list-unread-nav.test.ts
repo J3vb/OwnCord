@@ -39,7 +39,7 @@ import { setMarkReadSender } from "@lib/read-state";
 import { closeSettings, openSettings } from "@stores/ui.store";
 import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
 import { createReconnectClock } from "../../src/features/connection/dispatchContext";
-import { formatMessageTimestamp } from "@lib/formatting";
+import { formatMessageTimestamp } from "@lib/text/formatting";
 
 const CHANNEL_ID = 1;
 const ME = 1;

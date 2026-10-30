@@ -6,10 +6,10 @@
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
-import { loadPref, onPrefChange } from "@lib/preferences";
-import { getTimeFormat, refreshTimeFormat } from "@lib/timeFormat";
+import { loadPref, onPrefChange } from "@lib/prefs/preferences";
+import { getTimeFormat, refreshTimeFormat } from "@lib/text/timeFormat";
 import { setOwnedTimeout } from "@lib/dom";
-import { messageStatusText } from "../i18n/messageStatus";
+import { messageStatusText } from "../../i18n/messageStatus";
 import { isServerRowKind } from "./messageKind";
 
 // -- Constants ----------------------------------------------------------------

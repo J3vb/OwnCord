@@ -9,7 +9,7 @@
  * as a peer that decodes everything.
  */
 
-import { readStored } from "@lib/preferences";
+import { readStored } from "@lib/prefs/preferences";
 import { isLinuxDesktop } from "./native/platform";
 import { nativeVideoCodecs } from "./native/videoCodecs";
 

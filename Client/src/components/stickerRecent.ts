@@ -8,7 +8,7 @@
 
 import { authStore } from "@stores/auth.store";
 import { resolveServerUrl } from "@components/message-list/attachments";
-import { loadStoredJson, saveStoredJson } from "@lib/preferences";
+import { loadStoredJson, saveStoredJson } from "@lib/prefs/preferences";
 
 const MAX_RECENT = 8;
 const RECENT_PREFIX = "owncord:recent-stickers";

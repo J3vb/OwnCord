@@ -9,7 +9,7 @@ import type {
   ChatBulkDeletedPayload,
 } from "../../lib/types";
 import type { ReferencedMessage } from "../../lib/types";
-import { isPinRowKind } from "../../lib/messageKind";
+import { isPinRowKind } from "../../lib/text/messageKind";
 import type { Message, MessagesState } from "./messageModel";
 
 /** A parent that is deleted, purged or erased: no author, no text. */

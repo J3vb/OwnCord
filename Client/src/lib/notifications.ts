@@ -3,9 +3,9 @@
  * and plays sounds for incoming messages based on user preferences.
  */
 
-import { loadPref } from "./preferences";
-import { getChannelMutesHost, notificationAllowed } from "./channel-mutes";
-import { channelNotificationLevel, shouldNotifyForLevel } from "./notificationLevel";
+import { loadPref } from "./prefs/preferences";
+import { getChannelMutesHost, notificationAllowed } from "./prefs/channelMutes";
+import { channelNotificationLevel, shouldNotifyForLevel } from "./prefs/notificationLevel";
 import { loadUserStatus } from "./userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
@@ -14,14 +14,14 @@ import { isWindowDetached } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
 import type { ChannelActivityEntry, ChatMessagePayload } from "./types";
-import { isServerRowKind } from "./messageKind";
-import { mentionsCurrentUser } from "./mentions";
+import { isServerRowKind } from "./text/messageKind";
+import { mentionsCurrentUser } from "./text/mentions";
 import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
 import { registerSessionReset } from "./sessionRegistry";
 import { cleanupNotificationAudio, playNotificationSound } from "./notificationSound";
-import { soundSwitchOn } from "./soundPrefs";
-import { resolveAuthor } from "@lib/formatting";
+import { soundSwitchOn } from "./prefs/soundPrefs";
+import { resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { desktop } from "../platform/desktop";
 import type { NotificationTarget } from "../platform/contracts/notifications";
@@ -201,7 +201,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // flash, because a flashing taskbar is exactly the interruption the mute was
   // asked for. The unread badge is untouched (it is drawn from the store, not
   // from here) and just renders dimmed. A message that names the reader is
-  // never silenced: see @lib/channel-mutes.
+  // never silenced: see @lib/prefs/channelMutes.
   if (!notificationAllowed(payload.channel_id, mentioned)) return;
 
   // Do Not Disturb — the settings panel promises "You will not receive desktop
@@ -418,7 +418,7 @@ function sanitizeNotif(s: string, maxLen: number): string {
  * attachments") rather than an empty body.
  */
 async function plainBody(rawContent: string, attachmentCount: number): Promise<string> {
-  const { markdownToPlainText } = await import("./markdown");
+  const { markdownToPlainText } = await import("./text/markdown");
   const text = markdownToPlainText(rawContent, connectText("notifications.spoiler"));
   if (text === "" && attachmentCount > 0) {
     return connectText("notifications.attachment", { count: attachmentCount });

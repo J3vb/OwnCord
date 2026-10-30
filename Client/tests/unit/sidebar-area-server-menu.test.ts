@@ -49,7 +49,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
 import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/read-state";
-import { isHideMutedChannels, setHideMutedChannels } from "@lib/hide-muted-channels";
+import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 
 const UNREAD: ReadyChannel[] = [

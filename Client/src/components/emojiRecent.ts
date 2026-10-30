@@ -3,7 +3,7 @@
 // loads on first use, into the main-page chunk.
 
 import { resolveEmoji } from "@stores/emoji.store";
-import { loadStoredJson, saveStoredJson } from "@lib/preferences";
+import { loadStoredJson, saveStoredJson } from "@lib/prefs/preferences";
 
 const MAX_RECENT = 20;
 const RECENT_KEY = "owncord:recent-emoji";

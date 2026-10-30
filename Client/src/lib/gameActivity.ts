@@ -51,9 +51,9 @@ import {
   loadGamePrefs,
   recordSeen,
   toDetectPrefs,
-} from "./gameActivityPrefs";
+} from "./prefs/gameActivityPrefs";
 import type { DetectedGame, DetectPrefs } from "../platform/contracts/gameDetector";
-import { onPrefChange } from "./preferences";
+import { onPrefChange } from "./prefs/preferences";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("gameActivity");

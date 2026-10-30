@@ -6,8 +6,8 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
-import { isServerRowKind } from "@lib/messageKind";
-import type { MountableComponent } from "@lib/safe-render";
+import { isServerRowKind } from "@lib/text/messageKind";
+import type { MountableComponent } from "@lib/text/safeRender";
 import {
   messagesStore,
   getChannelMessages,
@@ -25,7 +25,7 @@ import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { uiStore } from "@stores/ui.store";
-import { discardMedia } from "@lib/media-visibility";
+import { discardMedia } from "@lib/prefs/mediaVisibility";
 
 /** How often rendered `<t:…:R>` timestamps are rewritten. */
 const RELATIVE_TIMESTAMP_REFRESH_MS = 60_000;
@@ -55,10 +55,10 @@ import {
   relabelInlineTimestamps,
   resyncMentions,
 } from "./message-list/content-parser";
-import { highlightsCurrentUser } from "@lib/mentions";
-import { applyPickedMentions, tokensToPickedText } from "@lib/pickedMentions";
+import { highlightsCurrentUser } from "@lib/text/mentions";
+import { applyPickedMentions, tokensToPickedText } from "@lib/text/pickedMentions";
 import { canManageMessages } from "@lib/permissions";
-import { readableRoleColor } from "@lib/themes";
+import { readableRoleColor } from "@lib/prefs/themes";
 import { resolveDisplayName } from "@lib/avatar";
 import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
 import {
@@ -69,7 +69,7 @@ import {
   formatMessageTimestamp,
   resolveAuthor,
   userRoleColorVar,
-} from "@lib/formatting";
+} from "@lib/text/formatting";
 import {
   isAudioMime,
   isGalleryImage,
@@ -104,7 +104,7 @@ import {
 } from "@lib/read-state";
 import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
 import { markMessageUnread } from "./message-list/mark-unread";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 // -- Options ------------------------------------------------------------------
 

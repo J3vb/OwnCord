@@ -11,7 +11,7 @@ import {
 } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";
-import { muteChannel, invalidateMuteCache } from "../../src/lib/channel-mutes";
+import { muteChannel, invalidateMuteCache } from "../../src/lib/prefs/channelMutes";
 import { resetVoiceStore, setVoiceStates } from "../../src/stores/voice.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 

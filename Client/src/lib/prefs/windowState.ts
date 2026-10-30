@@ -9,8 +9,8 @@
  * re-center it so it can't become unreachable.
  */
 
-import { createLogger } from "./logger";
-import { desktop } from "../platform/desktop";
+import { createLogger } from "../logger";
+import { desktop } from "../../platform/desktop";
 
 const log = createLogger("window-state");
 

@@ -15,8 +15,8 @@
  * DND, the switches) and the ring timers stay here, ahead of `playSpec`.
  */
 
-import { loadPref, onPrefChange } from "./preferences";
-import { loadAppSoundsGain, soundSwitchOn } from "./soundPrefs";
+import { loadPref, onPrefChange } from "./prefs/preferences";
+import { loadAppSoundsGain, soundSwitchOn } from "./prefs/soundPrefs";
 import { USER_STATUS_PREF_KEY, loadUserStatus } from "./userStatus";
 import { isVoiceDeafened } from "./voiceDeafened";
 import { createLogger } from "./logger";

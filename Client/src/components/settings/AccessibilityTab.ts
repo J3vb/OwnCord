@@ -11,7 +11,7 @@ import {
   applySaturation,
   effectiveFontSize,
   effectiveSaturation,
-} from "@lib/appearance";
+} from "@lib/prefs/appearance";
 import { settingsText as t } from "../../i18n/settings";
 
 // Built per render, not at module load, so every label reads the catalog.

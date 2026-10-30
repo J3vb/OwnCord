@@ -6,7 +6,7 @@
  * custom emoji (that is how they render) and a shortcode escaped with a
  * backslash. Before the emoji set has loaded, the text is sent as typed.
  */
-import { codeSpanEnd } from "../../lib/markdown";
+import { codeSpanEnd } from "../../lib/text/markdown";
 import { customEmojiLoaded, resolveEmoji } from "../../stores/emoji.store";
 import { emojiCatalog, emojiForShortcode, skinTone, withSkinTone } from "./emojiCatalog";
 
@@ -40,7 +40,7 @@ function balanced(s: string, start: number, open: string, close: string): number
 
 /** End of the protected part starting at `i`, or -1. A masked link's target
  * may hold balanced parentheses and must be non-empty with no whitespace, as
- * the markdown renderer reads it (lib/markdown parseLink). */
+ * the markdown renderer reads it (lib/text/markdown parseLink). */
 function protectedEnd(s: string, i: number): number {
   if (s[i] === "`" && !s.startsWith("```", i)) return codeSpanEnd(s, i);
   if (s[i] === "[") {

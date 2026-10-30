@@ -16,7 +16,7 @@ vi.mock("@lib/roomEventHandlers", () => ({ setJoinedVoiceStatus: mocks.setJoined
 vi.mock("@lib/livekitDiagnostics", () => ({ logIceConnectionInfo: mocks.logIceConnectionInfo }));
 
 import { attemptAutoReconnect, type ReconnectDeps } from "../../src/lib/livekitReconnect";
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 
 const CHANNEL = 7;
 const URL = "wss://sfu.example/livekit";

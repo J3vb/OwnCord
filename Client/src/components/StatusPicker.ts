@@ -5,13 +5,13 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
-import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/nameLimits";
+import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/text/nameLimits";
 import { shellText } from "../i18n/shell";
 import { connectText } from "../i18n/connect";
 import { STATUS_DEFS, colorForStatus, type StatusDef } from "@components/statusDefs";

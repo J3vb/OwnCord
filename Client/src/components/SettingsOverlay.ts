@@ -5,7 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { isDisplayed } from "@lib/dialogOpen";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
@@ -13,7 +13,7 @@ import { closeOnBackdropClick } from "@lib/modalFactory";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import type { IconName } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { PartialSuccessResponse, UserStatus } from "@lib/types";
 import type {
   RecoveryKitIssue,

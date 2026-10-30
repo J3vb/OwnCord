@@ -23,7 +23,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: () => configuredVk,
   savePref: (_key: string, vk: number) => {
     configuredVk = vk;

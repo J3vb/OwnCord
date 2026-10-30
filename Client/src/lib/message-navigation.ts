@@ -14,7 +14,7 @@
  */
 
 import { createLogger } from "./logger";
-import { getChannelMutesHost } from "./channel-mutes";
+import { getChannelMutesHost } from "./prefs/channelMutes";
 
 const log = createLogger("message-nav");
 

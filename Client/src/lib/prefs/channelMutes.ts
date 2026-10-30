@@ -26,7 +26,7 @@ import {
   savePref,
   STORAGE_PREFIX,
 } from "./preferences";
-import { registerSessionReset } from "./sessionRegistry";
+import { registerSessionReset } from "../sessionRegistry";
 
 /**
  * The timed-mute choices, shortest first. "Until I turn it back on" is the

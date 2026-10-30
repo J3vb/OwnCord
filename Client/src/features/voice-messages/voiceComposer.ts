@@ -10,7 +10,7 @@
  * one button that is disabled while an upload runs, so a clip is never sent twice.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";

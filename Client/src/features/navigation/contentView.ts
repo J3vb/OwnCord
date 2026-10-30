@@ -15,7 +15,7 @@
  * The view state lives in `uiStore.activeView`; this is its only writer.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
