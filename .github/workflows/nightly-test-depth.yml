@@ -5,7 +5,7 @@
 # nightly-test-depth.yml --ref dev` runs dev's copy. Either way every job
 # checks out dev. Until a release carries the 31-shard matrix to main, the
 # schedule still asks for the six old shard names, which
-# Client/stryker.shard.config.mjs keeps accepting.
+# Client/tests/mutation/stryker.shard.config.mjs keeps accepting.
 # Do NOT add a substitute trigger (e.g. a schedule on ci.yml): see
 # nightly-docker-smoke.yml:1-15 for why a scheduled run on the default
 # branch's tip would poison release gate-evidence.
@@ -134,7 +134,7 @@ jobs:
         working-directory: Client
         env:
           STRYKER_SHARD: ${{ matrix.shard }}
-        run: npx stryker run stryker.shard.config.mjs
+        run: npx stryker run tests/mutation/stryker.shard.config.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -199,7 +199,7 @@ jobs:
           cache-dependency-path: Client/package-lock.json
       - run: npm ci
         working-directory: Client
-      - run: npx stryker run stryker.ci.config.mjs
+      - run: npx stryker run tests/mutation/stryker.ci.config.mjs
         working-directory: Client
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
@@ -234,7 +234,7 @@ jobs:
       # reproducer is committed only with its fix (Server/Makefile policy).
 
   long-session-soak:
-    # B7-11: the long run of the long-session soak (Client/playwright.config.soak.ts:
+    # B7-11: the long run of the long-session soak (Client/tests/e2e/config/playwright.config.soak.ts:
     # 200 cycles, then 30 idle-connected minutes). The PR soak (20 cycles) gates
     # every client-fullstack run; this is the same spec at length. Setup mirrors
     # ci.yml's client-fullstack job.

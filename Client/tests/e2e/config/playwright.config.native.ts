@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
-import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
+import { fromClientRoot } from "./clientRoot";
+import { quarantineGrepInvert } from "../../../scripts/check-quarantine.mjs";
 
 /** Built Windows WebView2 app, isolated credentials/profile and local Go server.
  * Five projects share one built binary: `native-core` is the required CI
@@ -10,7 +11,7 @@ import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
  * CI job. Binaries are built in CI only.
  */
 export default defineConfig({
-  outputDir: "test-results/native",
+  outputDir: fromClientRoot("test-results/native"),
   // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
@@ -33,8 +34,8 @@ export default defineConfig({
   reporter: process.env.CI
     ? [
         ["list"],
-        ["html", { open: "never", outputFolder: "playwright-report/native" }],
-        ["junit", { outputFile: "test-results/native-junit.xml" }],
+        ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/native") }],
+        ["junit", { outputFile: fromClientRoot("test-results/native-junit.xml") }],
       ]
     : "html",
 
@@ -50,12 +51,12 @@ export default defineConfig({
   projects: [
     {
       name: "native-updater",
-      testDir: "./tests/e2e/native",
+      testDir: fromClientRoot("tests/e2e/native"),
       testMatch: ["packaged-update.spec.ts"],
     },
     {
       name: "native-core",
-      testDir: "./tests/e2e/native",
+      testDir: fromClientRoot("tests/e2e/native"),
       testMatch: [
         "reconnection.spec.ts",
         "voice-controls.spec.ts",
@@ -69,12 +70,12 @@ export default defineConfig({
     },
     {
       name: "native-no-auth",
-      testDir: "./tests/e2e/native",
+      testDir: fromClientRoot("tests/e2e/native"),
       testMatch: ["smoke.spec.ts", "auth-flow.spec.ts"],
     },
     {
       name: "native-authenticated",
-      testDir: "./tests/e2e/native",
+      testDir: fromClientRoot("tests/e2e/native"),
       testMatch: [
         "app-layout.spec.ts",
         "channel-navigation.spec.ts",
@@ -90,7 +91,7 @@ export default defineConfig({
       // Own project, so its own worker: the window-state test launches its
       // own app instances before the shared persistent app starts.
       name: "native-extra",
-      testDir: "./tests/e2e/native",
+      testDir: fromClientRoot("tests/e2e/native"),
       testMatch: ["native-extra.spec.ts"],
     },
   ],

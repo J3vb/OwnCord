@@ -245,7 +245,7 @@ jobs:
         env:
           OWNCORD_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/current
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server.exe
-        run: npx playwright test --config playwright.config.artifact.ts --project artifact-journey
+        run: npx playwright test --config tests/e2e/config/playwright.config.artifact.ts --project artifact-journey
 
       - name: Install, boot, connect, media and recovery (Linux)
         if: runner.os == 'Linux'
@@ -254,7 +254,7 @@ jobs:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server
         run: |
           dbus-run-session -- bash -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
-            xvfb-run -a npx playwright test --config playwright.config.artifact.ts --project artifact-journey'
+            xvfb-run -a npx playwright test --config tests/e2e/config/playwright.config.artifact.ts --project artifact-journey'
 
       # A native crash of the app leaves nothing in the driver log; the
       # kernel's segfault line names the faulting library.
@@ -272,7 +272,7 @@ jobs:
           OWNCORD_PREVIOUS_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/previous
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/artifact-update
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/artifact-update-junit.xml
-        run: node tests/e2e/scripts/run-native-updater.mjs artifact-update --config playwright.config.artifact.ts --project artifact-update --output test-results/artifact-update
+        run: node tests/e2e/scripts/run-native-updater.mjs artifact-update --config tests/e2e/config/playwright.config.artifact.ts --project artifact-update --output test-results/artifact-update
 
       - name: Update from the previous release, then roll back (Linux)
         if: ${{ inputs.release-artifacts && runner.os == 'Linux' }}
@@ -284,7 +284,7 @@ jobs:
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/artifact-update-junit.xml
         run: |
           dbus-run-session -- bash -c 'printf "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null
-            xvfb-run -a npx playwright test --config playwright.config.artifact.ts --project artifact-update --output test-results/artifact-update'
+            xvfb-run -a npx playwright test --config tests/e2e/config/playwright.config.artifact.ts --project artifact-update --output test-results/artifact-update'
 
       # A WebKit web process that dies takes its reason with it: WebDriver only
       # reports "page crash or hang". The kernel log keeps the signal (segfault,

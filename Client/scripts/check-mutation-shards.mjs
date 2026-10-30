@@ -6,7 +6,9 @@ import { join, matchesGlob } from "node:path";
 
 const clientDir = new URL("..", import.meta.url).pathname;
 process.env.STRYKER_SHARD ||= "livekit-1"; // satisfy the config's own validation on import
-const { shards, default: shardConfig } = await import(join(clientDir, "stryker.shard.config.mjs"));
+const { shards, default: shardConfig } = await import(
+  join(clientDir, "tests/mutation/stryker.shard.config.mjs")
+);
 const base = (await import(join(clientDir, "stryker.config.mjs"))).default;
 
 if (!shardConfig.reporters?.includes("json")) {

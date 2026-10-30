@@ -1,9 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
-import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
+import { clientRoot, fromClientRoot } from "./clientRoot";
+import { quarantineGrepInvert } from "../../../scripts/check-quarantine.mjs";
 
 export default defineConfig({
-  outputDir: "test-results/fullstack",
-  testDir: "./tests/e2e/fullstack",
+  outputDir: fromClientRoot("test-results/fullstack"),
+  testDir: fromClientRoot("tests/e2e/fullstack"),
   // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
@@ -21,8 +22,8 @@ export default defineConfig({
   globalTimeout: 26 * 60 * 1000,
   reporter: [
     ["list"],
-    ["html", { open: "never", outputFolder: "playwright-report/fullstack" }],
-    ["junit", { outputFile: "test-results/fullstack.xml" }],
+    ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/fullstack") }],
+    ["junit", { outputFile: fromClientRoot("test-results/fullstack.xml") }],
   ],
   use: {
     baseURL: "http://localhost:4173",
@@ -46,6 +47,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
+    cwd: clientRoot,
     command: "node node_modules/vite/bin/vite.js preview --port 4173 --strictPort",
     url: "http://localhost:4173",
     reuseExistingServer: false,
