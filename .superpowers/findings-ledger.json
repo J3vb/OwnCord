@@ -880,7 +880,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/lifecycle.test.ts",
         "revertProof": "pass",
         "branchCommit": "c3a20a95"
       },
@@ -1529,7 +1529,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/lifecycle.test.ts",
         "revertProof": "pass",
         "branchCommit": "c3a20a95"
       },
@@ -3845,7 +3845,7 @@
       "confidence": "high",
       "fix": {
         "commit": "b9b86067",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/credentials.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Widen the gate at main.ts:763 so the in-flight-session case is covered, e.g. `if (!isAuthenticated && (router.getCurrentPage() === \"main\" || connectedOverlay !== null))`, and add `connectedOverlay?.destroy(); connectedOverlay = null;` next to the existing `sessionCleanup?.()` teardown (main.ts:776-779) before the `router.navigate(\"connect\")` at 795. That is exactly the teardown handleInviteDeepLink already open-codes at main.ts:836-852, so one guard in the shared subscriber replaces the per-caller copies.",
@@ -4279,7 +4279,7 @@
       "confidence": "high",
       "fix": {
         "commit": "b9b86067",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/lifecycle.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Give main.ts access to the session's single PresenceSender instead of adding a second budget. Smallest shape: add a module-level slot in Client/src/lib/presence.ts (e.g. `let active: PresenceSender | null = null; export function setActivePresenceSender(s: PresenceSender | null) { active = s; } export function getActivePresenceSender() { return active; }`), have MainPage.ts:133 call `setActivePresenceSender(presenceSender)` right after constructing it and `setActivePresenceSender(null)` next to `presenceSender.destroy()` in its teardown (MainPage.ts:804), then replace main.ts:263 with `getActivePresenceSender()?.send(mapped);`. saveUserStatus(mapped) on line 262 stays exactly as is, so OC-0037's assertions still pass, and the tray now shares the one token bucket, the coalescing retry, and the optimistic updatePresence with every other producer. When no session is mounted the optional call is a no-op, matching today's \"ws.send is a safe no-op\" behavior.",

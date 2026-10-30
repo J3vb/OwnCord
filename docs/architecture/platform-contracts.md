@@ -449,7 +449,7 @@ lifted in place first (notifications, window, opener, app metadata, dev tools,
 autostart, the LiveKit half of the proxies), exactly as B7-4 did; `AppProcess`
 was lifted the same way. `TrayStatus` has no legacy binding — the subscription
 was inline in `main.ts`, which cannot be imported on its own — so its oracle
-for the move is `tests/unit/main.test.ts`'s tray tests (OC-0037, OC-0176),
+for the move is `tests/unit/main/lifecycle.test.ts`'s tray tests (OC-0037, OC-0176),
 green before and after.
 
 **One contract was added in B7-16:** `contracts/externalContent.ts`
