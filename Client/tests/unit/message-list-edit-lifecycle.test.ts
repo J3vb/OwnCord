@@ -184,6 +184,38 @@ describe("MessageList — inline editor lifecycle", () => {
     expect(options.onEditSave).toHaveBeenCalledWith(1, "yo <@10> @Mod <@77>");
   });
 
+  it("refuses an edit that is within the limit as shown but over it once mentions expand", async () => {
+    applyReadyCapabilities({ id_mentions: true });
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          123456789012,
+          {
+            id: 123456789012,
+            username: "Zed",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+    setMessages([makeMessage(1, { content: "<@123456789012> <@123456789012> short" })]);
+    mount();
+    expect(list!.startEdit(1)).toBe(true);
+    await vi.waitFor(() => expect(editor(1)).not.toBeNull());
+    expect(editor(1)!.value).toBe("@Zed @Zed short");
+
+    const draft = `@Zed @Zed ${"a".repeat(3989)}`;
+    editor(1)!.value = draft;
+    editor(1)!.dispatchEvent(new Event("input", { bubbles: true }));
+    container.querySelector<HTMLElement>("[data-testid='msg-edit-save-1']")!.click();
+    expect(options.onEditSave).not.toHaveBeenCalled();
+    expect(editor(1)!.value).toBe(draft);
+    expect(container.querySelector(".msg-inline-edit-error")?.textContent).toContain("4000");
+  });
+
   it("saves the shown text as is without the id_mentions capability", async () => {
     membersStore.setState(() => ({
       members: new Map([
