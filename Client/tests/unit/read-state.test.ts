@@ -593,3 +593,118 @@ describe("markActiveChannelReadOnUnload", () => {
     }
   });
 });
+
+describe("DM badges in the lookups", () => {
+  it("counts a DM that has only a mention as unread", () => {
+    setDmChannels([dm(7, 0, 2), dm(8, 0, 0)]);
+    expect(hasUnread(7)).toBe(true);
+    expect(hasUnread(8)).toBe(false);
+  });
+
+  it("shows a badge for a DM with unread messages, mentions, or both, and not for the others", () => {
+    setDmChannels([dm(5, 0, 0), dm(6, 3, 0), dm(7, 0, 2), dm(8, 1, 1)]);
+    expect(showsUnreadBadge(5)).toBe(false);
+    expect(showsUnreadBadge(6)).toBe(true);
+    expect(showsUnreadBadge(7)).toBe(true);
+    expect(showsUnreadBadge(8)).toBe(true);
+    expect(showsUnreadBadge(99)).toBe(false);
+  });
+
+  it("looks a DM up by its own id, not the first one in the list", () => {
+    setDmChannels([dm(5, 4, 0), dm(6, 0, 0)]);
+    expect(showsUnreadBadge(6)).toBe(false);
+    expect(hasUnread(6)).toBe(false);
+    expect(showsUnreadBadge(5)).toBe(true);
+  });
+
+  it("lists a DM that has only a mention, next to a channel and a quiet DM", () => {
+    setChannels([channel(1, 2)]);
+    setDmChannels([dm(7, 0, 1), dm(8, 0, 0)]);
+    expect([...unreadChannelIds()].toSorted((a, b) => a - b)).toEqual([1, 7]);
+  });
+});
+
+describe("markChannelsRead counts", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("sends a channel whose unread and mention counts are both set", () => {
+    setChannels([channel(1, 1, 1)]);
+    expect(markChannelsRead([1])).toBe(1);
+    expect(sent).toEqual([1]);
+  });
+
+  it("sends a DM whose unread and mention counts are both set", () => {
+    setDmChannels([dm(6, 0, 0), dm(7, 1, 1)]);
+    expect(markChannelsRead([7])).toBe(1);
+    expect(sent).toEqual([7]);
+  });
+
+  it("sends a channel id given twice once, and reports how many ids it was given", () => {
+    setChannels([channel(1, 2), channel(2, 1)]);
+    expect(markChannelsRead([1, 1, 2])).toBe(3);
+    expect(sent).toEqual([1, 2]);
+  });
+});
+
+describe("a new connection and live-seen sends", () => {
+  let controller: AbortController;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    controller = new AbortController();
+  });
+  afterEach(() => {
+    controller.abort();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("lets the same channel arm a fresh send on the new connection", () => {
+    setChannels([channel(1, 0)]);
+    noteLiveMessageSeen(1, controller.signal);
+    const next: number[] = [];
+    setMarkReadSender((id) => next.push(id));
+    noteLiveMessageSeen(1, controller.signal);
+    vi.advanceTimersByTime(1000);
+    expect(sent).toEqual([]);
+    expect(next).toEqual([1]);
+  });
+});
+
+describe("an aborted signal after a new connection", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("leaves the send the new connection armed for the same channel in place", () => {
+    setChannels([channel(1, 0)]);
+    const first = new AbortController();
+    const second = new AbortController();
+    noteLiveMessageSeen(1, first.signal);
+    const next: number[] = [];
+    setMarkReadSender((id) => next.push(id));
+    noteLiveMessageSeen(1, second.signal);
+    first.abort();
+    // Still one pending send for the channel: a further arrival rides it.
+    noteLiveMessageSeen(1, second.signal);
+    vi.advanceTimersByTime(1000);
+    expect(next).toEqual([1]);
+    second.abort();
+  });
+});
+
+describe("markChannelRead for a channel among DMs", () => {
+  it("ignores an id that is in neither store while DMs exist", () => {
+    setDmChannels([dm(7, 1)]);
+    markChannelRead(99);
+    expect(sent).toEqual([]);
+    markChannelRead(7);
+    expect(sent).toEqual([7]);
+  });
+});
