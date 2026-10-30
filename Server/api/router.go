@@ -373,6 +373,7 @@ func routerChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.Rate
 	MountChannelRoutes(r, svc, limiter, cfg.Server.TrustedProxies, hub)
 	MountNSFWRoutes(r, svc, hub)
 	MountThreadRoutes(r, svc)
+	MountChannelMediaRoutes(r, svc, limiter, cfg.Server.TrustedProxies)
 }
 
 // routerReportRoutes mounts report intake, the reporter's status view, the

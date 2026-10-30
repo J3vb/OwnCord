@@ -238,6 +238,8 @@ var deadlineBound = []string{
 	"GET /api/v1/auth/me",
 	"GET /api/v1/blocks/",
 	"GET /api/v1/channels/",
+	"GET /api/v1/channels/{id}/media",
+	"GET /api/v1/channels/{id}/media/months",
 	"GET /api/v1/channels/{id}/messages",
 	"GET /api/v1/channels/{id}/messages/around/{messageId}",
 	"GET /api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users",
