@@ -1436,6 +1436,141 @@ details.disclose[open] > summary .icon {
   font-weight: 600;
 }
 
+/* Phone parts of the shell, shown only by the rules below. */
+.settings-list-title,
+.settings-back-btn {
+  display: none;
+}
+
+/* Phone: Settings fills the screen. The section list is one page and an open
+   section is another, with a back arrow between them. */
+@media (max-width: 600px) {
+  .settings-panel {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .settings-sidebar {
+    width: 100%;
+    border-radius: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 0
+      calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 8px);
+  }
+  .settings-list-title {
+    order: -1;
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin: 0 64px 4px 0;
+    padding: 0 16px;
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--header-primary);
+  }
+  .settings-search {
+    margin: 4px 16px 12px;
+  }
+  .settings-search-input {
+    min-height: 40px;
+    font-size: var(--font-size-md);
+  }
+  .settings-sidebar-profile {
+    margin: 0 16px 8px;
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-primary);
+  }
+  .settings-sidebar-avatar {
+    width: 44px;
+    height: 44px;
+  }
+  .settings-sidebar-edit {
+    font-size: var(--font-size-sm);
+  }
+  .settings-cat {
+    padding: 14px 16px 6px;
+  }
+  .settings-nav-item {
+    min-height: 52px;
+    margin: 0;
+    padding: 0 16px;
+    gap: 12px;
+    border-radius: 0;
+    font-size: var(--font-size-md);
+    color: var(--text-normal);
+  }
+  .settings-nav-item.active {
+    background: transparent;
+    color: var(--text-normal);
+  }
+  .settings-nav-item[role="tab"]::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    margin-left: auto;
+    border-right: 2px solid var(--text-faint);
+    border-top: 2px solid var(--text-faint);
+    transform: rotate(45deg);
+    flex-shrink: 0;
+  }
+  .settings-sidebar-logout .settings-nav-item {
+    font-weight: 600;
+  }
+  .settings-sidebar-version {
+    padding: 4px 16px 0;
+  }
+
+  .settings-content {
+    display: none;
+    max-width: none;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px
+      calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 24px);
+  }
+  .settings-content h1 {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin: 0 52px 16px 44px;
+    font-size: var(--font-size-lg);
+  }
+  .settings-panel--section .settings-sidebar {
+    display: none;
+  }
+  .settings-panel--section .settings-content {
+    display: block;
+  }
+
+  .settings-close-wrap {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: 8px;
+  }
+  .settings-close-btn {
+    width: 44px;
+    height: 44px;
+    border: 0;
+  }
+  .settings-esc-label {
+    display: none;
+  }
+  .settings-panel--section .settings-back-btn {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: 4px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-circle);
+    background: transparent;
+    color: var(--text-normal);
+  }
+}
+
 /* ── My uploads tab ── */
 .my-uploads__usage {
   margin: var(--space-4) 0;

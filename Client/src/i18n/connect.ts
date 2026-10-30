@@ -59,6 +59,8 @@ export const connectText = defineCatalog("connect", {
   "settings.notAuthenticated": "Not authenticated",
 
   "servers.heading": "Servers",
+  "servers.showList": "Show saved servers",
+  "servers.hideList": "Hide saved servers",
   "servers.addButton": "+ Add Server",
   "servers.autoLogin.disable": "Disable auto-login",
   "servers.autoLogin.enable": "Enable auto-login",

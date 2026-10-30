@@ -49,42 +49,83 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Desktop UI**
+
+- Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
+
+## v2.6.0
+
+**OwnCord 2.6** (the seventh public beta) adds a Discord-style server rail, a Media panel for every text channel, Discord channel import, passwords on voice channels and your own CSS themes. Screen shares now stay smooth when the connection drops, and the web client catches up with the desktop app.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together, and **update the app on every device you use**. **This release changes the database.** The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.5 without restoring that copy.
+
+### Highlights
+
+- **Server rail**: your saved servers sit in a column on the left, like Discord, with Home for your DMs. Drag servers into folders, rename and colour them.
+- **Media panel**: text channels have a Media panel: browse a channel's photos, videos and files by month, search by name, filter by who posted, and jump to the message.
+- **Import from Discord**: admins can turn a DiscordChatExporter export into a new channel, with the original times, edits, replies, pins and author names.
+- **Voice channel passwords**: lock a voice channel; members enter the password once.
+- **Custom themes**: write, import or share your own CSS theme in Settings > Appearance.
+- **Smoother screen shares**: when the connection can't keep up, a share keeps its motion and gets a bit softer instead of turning into a slideshow.
+- **Web client**: GIFs, link previews and outside images now show, invites and the admin panel open properly, and About shows the version.
+
+### Added
+
+**Desktop UI**
+
+- Server rail: a column left of the sidebar with Home (your DMs), your saved servers as coloured initials, and folders (drag a server onto another, then rename, colour, collapse or ungroup). Add a server or join with an invite link at the bottom. Not shown in the web client or on narrow windows.
+- Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
+- Settings > Text & Images > Chat Bar Buttons: hide the emoji, sticker, GIF, poll or voice-message button in the message box. All on by default; keyboard shortcuts keep working.
+
+**Messages & files**
+
+- Media panel: a Media button in a text or announcement channel's header opens a side panel (full screen on phones) with two tabs: Media, a grid of photos and videos, and Files, a list of documents, audio and voice messages. Items are grouped by month, and you can jump to a month, search by file name, filter by who posted and sort newest or oldest first. Clicking an item jumps to its message. Spoiler images stay covered until you click.
+- A message over the 4000-character limit now offers "Send as message.txt", which turns the draft into a text file attachment. If the upload fails, the draft comes back.
+- The server can now show you your own upload quota and every file you sent, and remove one of your files to free space (new login-only routes under `/api/v1/users/me/storage` and `/api/v1/users/me/uploads`). Removing the last file of a message with no text deletes the message. The desktop page for this comes in a later release.
+
+**Voice**
+
+- A voice channel can have a password. Members enter it once the first time they join, and are asked again only if an admin changes it. Administrators and people who manage channels join without it. Password channels show a lock in the sidebar, and a wrong password or too many tries says so. Admins who manage channels set, change or remove it in Edit Channel; it is never shown back. The desktop app asks for the password; other apps get the prompt in a later release.
+
 **Accounts & admin**
 
 - Import a Discord channel's history: admin panel > Channels > Import from Discord takes a DiscordChatExporter JSON export (a `.json`, or a `.zip` with its media) and builds a new text channel from it, with a progress bar and a Cancel button. The channel appears for everyone at once with every message already read, so nobody is pinged. Messages keep their Discord time, edits, replies and pins, and show the Discord name with an Imported tag. Mentions are plain text and notify nobody. Reactions, embeds, stickers, polls, threads and system messages are skipped and counted in the result. The largest file is `upload.import_max_mb` (500 MB by default); the panel warns when message retention would delete old imported messages.
 
-**Desktop UI**
+**Docs**
 
-- Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
-  **Voice**
-
-- A voice channel can have a password. Members enter it once the first time they join, and are asked again only if an admin changes it. Administrators and people who manage channels join without it. The desktop app asks for the password the first time you join; other apps get the prompt in a later release.
-
-**Desktop UI**
-
-- Voice channels with a password show a lock in the sidebar, and joining one for the first time asks for the password in a small dialog (a wrong password or too many tries says so). Admins who manage channels can set, change or remove the password in Edit Channel; it is never shown back.
-
-**Messages & files**
-
-- The server can now show you your own upload quota and every file you sent, and remove one of your files to free space (new login-only routes under `/api/v1/users/me/storage` and `/api/v1/users/me/uploads`). Removing the last file of a message with no text deletes the message. In the desktop app this is Settings > My uploads: a usage bar, your files across channels and DMs (newest or largest first, searchable), and Remove; the channel Files tab shows how much you have used, with a link there.
+- A moderation guide for admins and an accessibility page.
 
 ### Changed
+
+**Voice**
+
+- Screen shares keep smooth motion when bandwidth drops, on Windows and in the Linux app: the picture gets softer or smaller instead of the frame rate falling to 5-10 fps. The old behaviour (sharp text, keep resolution) stays available as a test mode.
+- Only the Move Members permission lets a role move people between voice channels. Before, Mute Members could also move lower-ranked members, and Administrator counted as Move Members.
+
+**Voice (Linux)**
+
+- Linux voice and video move to LiveKit's Rust SDK 0.10.0 and its newer WebRTC build: a full reconnect brings your published microphone, camera and share back, hardware video encoding no longer leaks memory per frame, and a crash path in sending audio is closed. Stereo screen-share audio keeps working.
+
+**Desktop UI**
+
+- Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
+- The emoji picker's categories (Recent, Smileys, People...) were squashed under a sideways scrollbar in the GIFs/Stickers/Emoji popup. They now sit in an icon column on the left, like Discord, and the current one lights up as you scroll.
 
 **Server (operators)**
 
 - With "Host a browser client" (`server.browser_client_enabled`) on, the server now fetches the link previews, GIFs and outside images web users open (new login-only routes `/api/v1/external/preview` and `/api/v1/external/image`). Those sites see the server's address instead of the viewer's. Off by default, like the browser client; desktop users are unchanged.
 - Every error the server answers is now in the standard JSON shape (`{"error": "...", "message": "..."}`); the plugin admin API, the client update check, the admin log stream, plugin asset files, the LiveKit webhook and the WebSocket "server full" refusal used plain text. The "server full" refusal is `503 SERVER_BUSY`. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
 - The bundled LiveKit voice server moves from 1.13.10 to 1.13.11 (a patch release, no configuration change). Its new options for retransmit caps and upstream FlexFEC stay off unless you turn them on in your own `livekit.yaml`.
-  **Desktop UI**
-
-- Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
-- The emoji picker's category buttons (Recent, Smileys, People...) were squashed under a sideways scrollbar in the GIFs/Stickers/Emoji popup. Categories now sit in an icon column on the left, like Discord, and the current one lights up as you scroll.
-
-**Voice (Linux)**
-
-- Linux voice and video move to LiveKit's Rust SDK 0.10.0 and its newer WebRTC build: a full reconnect brings your published microphone, camera and share back, hardware video encoding no longer leaks memory per frame, and a crash path in sending audio is closed. Stereo screen-share audio keeps working.
 
 ### Fixed
+
+**Voice**
+
+- Joining a full voice channel from another device while your call was parked (waiting to reconnect) ended the parked call and then refused the join; the parked call now stays.
+
+**Linux**
+
+- Voice messages record from the microphone you picked; the screen-share test mode is hidden on Linux; sharing one window sends only that app's sound; the AppImage plays H.264/AAC video and finds PipeWire cameras.
 
 **Messages & files**
 
@@ -96,16 +137,20 @@ and only when it changes something a contributor or fork holder must do
 **Web client**
 
 - Clicking Join on another server's invite signed you out and failed; it now opens that server's page in a new tab and keeps you signed in.
+- The admin panel and links now open in a new tab instead of replacing the web client.
 - Settings > About showed no version, and "What's new" never appeared; both now use the version the web client was built from.
 - Settings > Logs showed an "Open Log Folder" button that always failed; the web client keeps logs in memory, so the button is gone there.
 - GIFs in the picker and in chat, link previews, YouTube thumbnails and pictures from other sites never showed on the web client; they now load through the server, so the viewer's browser never contacts the linked site.
 
 ### Under the hood
 
-- The release's Docker smoke test now also checks that the image serves the web client (`docker-smoke.sh --browser-client`), as the standalone server smoke already did.
+- Database changes 086 and 087 (voice channel passwords, Discord import).
+- Code comments now explain the reason instead of citing plan or ticket ids, Go comments are thinner, and a CI check keeps ids out. The client source tree is reorganised into themed folders with one file-naming style, held by a structural test. A new page, `docs/ai-workflow.md`, explains how the project uses AI and which checks catch what.
+- Nightly benchmarks for search, message history and unread counts, and a sign-in-to-first-message budget, fail CI when they get slower.
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
-- Desktop client moves to Tauri 2.12.5 and the latest patch releases of its plugins (updater, notification, dialog, opener, single-instance, deep-link).
 - The desktop app's Rust code locks shared state through one helper, and clippy rejects a lock taken any other way. On Linux, the native voice session no longer stops when an earlier error left the camera or screen-share slot locked.
+- Desktop client moves to Tauri 2.12.5 and the latest patch releases of its plugins; the server builds with Go 1.27.3; the client tests run on Vitest 5.
+- The release's Docker smoke test now also checks that the image serves the web client (`docker-smoke.sh --browser-client`).
 
 ## v2.5.0
 

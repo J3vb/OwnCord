@@ -31,6 +31,7 @@ import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../i18n/voice";
 import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
 import { shareBlockReason } from "../features/voice/shareGate";
+import { canPublishScreen } from "../features/voice/native/platform";
 import type { StreamCard } from "./voice-widget/streamCard";
 
 export interface VoiceWidgetOptions {
@@ -609,8 +610,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onDisconnect,
       "disconnect",
     );
-    // A browser without getDisplayMedia (phones) offers no screen share.
-    if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
+    // A phone can watch a share but not start one.
+    if (!canPublishScreen()) {
       appendChildren(controls, cameraBtn, disconnectBtn);
     } else {
       appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);

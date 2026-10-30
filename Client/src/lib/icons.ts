@@ -22,6 +22,7 @@ export type IconName =
   | "headphones-off"
   | "camera"
   | "camera-off"
+  | "switch-camera"
   | "monitor"
   | "monitor-off"
   | "phone"
@@ -118,6 +119,7 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Camera with slash
   "camera-off": `<line x1="2" x2="22" y1="2" y2="22"/><path d="M7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16"/><path d="M9.5 4h5L17 7h3a2 2 0 0 1 2 2v7.5"/><path d="M14.121 15.121A3 3 0 1 1 9.88 10.88"/>`,
+  "switch-camera": `<path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/><path d="M13 5h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5"/><circle cx="12" cy="12" r="3"/><path d="m18 22-3-3 3-3"/><path d="m6 2 3 3-3 3"/>`,
 
   // Desktop monitor
   monitor: `<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>`,
