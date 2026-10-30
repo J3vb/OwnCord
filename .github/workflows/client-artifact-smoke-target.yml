@@ -206,6 +206,12 @@ jobs:
           name: ${{ inputs.artifact }}
           path: artifacts/current
 
+      # The installers may not grow past Client/artifact-size-budget.json.
+      - name: Installer size budget
+        env:
+          TARGET: ${{ inputs.platform }}-${{ inputs.arch }}
+        run: node scripts/check-artifact-size.mjs ../artifacts/current "$TARGET" --summary "$GITHUB_STEP_SUMMARY"
+
       # At tag time this runs before `publish`, so the newest published
       # release is the previous one (skipping this tag's own release on a
       # re-pushed tag, as upgrade-rehearsal.yml does). A target the previous

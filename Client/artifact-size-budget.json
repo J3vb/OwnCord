@@ -1,0 +1,10 @@
+{
+  "method": "Bytes of each staged installer (stage-release-assets.sh output), checked by scripts/check-artifact-size.mjs in the desktop artifact smoke for the nightly and the release build.",
+  "ratchet": "Baseline: the v2.5.0 release assets (2026-10-29). Budget = that size + 3 %, rounded up to the next 100 KB. A raise goes up by at most 3 % and says why in its PR; a PR that shrinks an installer lowers its budget. Phase Q4 goal: 20 % below the v2.5.0 size.",
+  "targets": {
+    "windows-x64": { "*_x64-setup.exe": 7900000 },
+    "windows-arm64": { "*_arm64-setup.exe": 7200000 },
+    "linux-x64": { "*_amd64.deb": 25600000, "*_amd64.AppImage": 115800000 },
+    "linux-arm64": { "*_arm64.deb": 25000000, "*_aarch64.AppImage": 112600000 }
+  }
+}
