@@ -36,6 +36,9 @@ type DB struct {
 
 	q *dbgen.Queries
 
+	// readStmts caches prepared statements for hot read queries (queryCached).
+	readStmts readStmtCache
+
 	// auditWriter, when installed via SetAuditWriter (server startup only), makes
 	// WriteAudit non-blocking. Nil keeps audit writes synchronous, which the token
 	// CLI and tests rely on.
@@ -278,11 +281,9 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 
 // newDB assembles a DB whose sqlc query layer routes through dbtx.
 func newDB(writer, reader *sql.DB) *DB {
-	return &DB{
-		writer: writer,
-		reader: reader,
-		q:      dbgen.New(&dbtx{writer: writer, reader: reader}),
-	}
+	d := &DB{writer: writer, reader: reader}
+	d.q = dbgen.New(&dbtx{writer: writer, reader: reader, stmts: &d.readStmts})
+	return d
 }
 
 // dbtx routes statements between the reader and writer pools and satisfies
@@ -295,6 +296,7 @@ func newDB(writer, reader *sql.DB) *DB {
 type dbtx struct {
 	writer *sql.DB
 	reader *sql.DB
+	stmts  *readStmtCache
 }
 
 func (t *dbtx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
@@ -306,7 +308,11 @@ func (t *dbtx) PrepareContext(ctx context.Context, query string) (*sql.Stmt, err
 }
 
 func (t *dbtx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	return t.pool(query).QueryContext(ctx, query, args...)
+	pool := t.pool(query)
+	if pool == t.reader && t.stmts != nil && cachedReads(ctx) {
+		return t.stmts.query(ctx, pool, query, args...)
+	}
+	return pool.QueryContext(ctx, query, args...)
 }
 
 func (t *dbtx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
@@ -392,13 +398,14 @@ func migrateEmbedded(database *DB) error {
 // Close releases the underlying database connections (both pools).
 func (d *DB) Close() error {
 	d.closed.Store(true)
+	stmtErr := d.readStmts.close()
 	// PRAGMA optimize may write statistics, so it runs on the writer.
 	_, _ = d.writer.Exec("PRAGMA optimize;")
 	var readerErr error
 	if d.reader != d.writer {
 		readerErr = d.reader.Close()
 	}
-	err := errors.Join(d.writer.Close(), readerErr)
+	err := errors.Join(stmtErr, d.writer.Close(), readerErr)
 	// Release the process lock only after the pools close, so a successor can
 	// rely on this process being done writing.
 	if d.lockRelease != nil {

@@ -211,19 +211,11 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 		return map[int64][]AttachmentInfo{}, nil
 	}
 
-	placeholders := make([]string, len(msgIDs))
-	args := make([]any, len(msgIDs))
-	for i, id := range msgIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
+	rows, err := d.queryCached(ctx,
 		`SELECT id, message_id, filename, size, mime_type, width, height, duration_ms, waveform
-		 FROM attachments WHERE message_id IN (%s)`,
-		strings.Join(placeholders, ","),
+		 FROM attachments WHERE message_id IN (SELECT value FROM json_each(?))`,
+		idsJSON(msgIDs),
 	)
-	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentsByMessageIDs: %w", err)
 	}

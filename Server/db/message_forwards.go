@@ -138,7 +138,7 @@ func (d *DB) attachForwards(ctx context.Context, msgs []MessageAPIResponse) erro
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := d.q.GetMessageForwardsByMessageIDs(ctx, ids)
+	rows, err := d.q.GetMessageForwardsByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
 		return fmt.Errorf("forwards: %w", err)
 	}
