@@ -56,6 +56,11 @@ vi.mock("@lib/livekitSession", () => ({
   reconcileVideoFlags: vi.fn(),
   resendWatching: vi.fn(),
 }));
+// voice/wsHandlers loads screenShare lazily on some frames. Left real, that
+// load can finish after this file's environment is torn down.
+vi.mock("@lib/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
+}));
 const mockShowToast = vi.fn();
 vi.mock("@lib/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
