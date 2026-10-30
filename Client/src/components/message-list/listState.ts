@@ -211,7 +211,6 @@ export interface ListApi {
   renderVirtualItem(item: VirtualItem): HTMLElement;
   releaseRow(el: HTMLElement): void;
   itemKey(index: number): string;
-  keyOf(item: VirtualItem | undefined, index: number): string;
   getItemHeight(index: number): number;
   rememberKey(index: number): string | null;
   estimateRow(index: number): number;

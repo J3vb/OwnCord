@@ -19,6 +19,7 @@ import {
   buildVirtualItems,
   estimateItemHeight,
   firstUnreadIndex,
+  keyOf,
   visibleMessages,
   type VirtualItem,
 } from "./virtualItems";
@@ -155,29 +156,6 @@ export function createListWindow(st: ListState, api: ListApi) {
 
   function itemKey(index: number): string {
     return keyOf(st.virtualItems[index], index);
-  }
-
-  function keyOf(item: VirtualItem | undefined, index: number): string {
-    if (item === undefined) return `idx-${index}`;
-    if (item.kind === "divider") return `div-${item.timestamp}`;
-    if (item.kind === "new-divider") return "new-divider";
-    if (item.kind === "blocked-run") return `blk-${item.firstId}`;
-    // Every unconfirmed optimistic row (addOptimisticMessage) carries
-    // id: 0 until confirmSend stamps the real id, so keying purely on
-    // message.id would collide two or more pending rows onto the same
-    // "msg-0" cache entry — measureRendered would overwrite one row's
-    // measured height with another's, and the next Fenwick rebuild
-    // (rebuildItems / patchRows) would seed both rows' tree slots
-    // from that single, wrong value. correlationId is unique per pending
-    // send and stable across the row's lifetime, so key on that instead
-    // while id is still the 0 sentinel; fall back to the row's own index
-    // in the vanishingly unlikely case correlationId is also absent.
-    if (item.message.id === 0) {
-      return item.message.correlationId !== null
-        ? `msg-c-${item.message.correlationId}`
-        : `idx-${index}`;
-    }
-    return `msg-${item.message.id}`;
   }
 
   function getItemHeight(index: number): number {
@@ -645,7 +623,6 @@ export function createListWindow(st: ListState, api: ListApi) {
     renderVirtualItem,
     releaseRow,
     itemKey,
-    keyOf,
     getItemHeight,
     rememberKey,
     estimateRow,

@@ -1,8 +1,6 @@
 {
   "src/components/DmCallPanel.ts": 1350,
   "src/components/MessageInput.ts": 2500,
-  "src/components/MessageList.ts": 3350,
-  "src/components/VideoGrid.ts": 2600,
   "src/components/message-list/attachments.ts": 2300,
   "src/components/settings/AccountTab.ts": 1850,
   "src/components/settings/VoiceAudioTab.ts": 1700,

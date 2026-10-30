@@ -23,6 +23,7 @@ import {
   type ScrollMetrics,
   readMetrics,
 } from "./listShared";
+import { keyOf } from "./virtualItems";
 import type { ListState, ListApi } from "./listState";
 
 export function createListScroll(st: ListState, api: ListApi) {
@@ -281,7 +282,7 @@ export function createListScroll(st: ListState, api: ListApi) {
    *  row a click came from may be older than the run), holding its header in place. */
   function toggleBlockedRun(firstId: number): void {
     const key = `blk-${firstId}`;
-    const at = st.virtualItems.findIndex((item, i) => api.keyOf(item, i) === key);
+    const at = st.virtualItems.findIndex((item, i) => keyOf(item, i) === key);
     const run = st.virtualItems[at];
     if (run?.kind !== "blocked-run") return;
     for (const id of runIds(run.firstId, run.lastId)) {

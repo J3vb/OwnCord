@@ -5,6 +5,7 @@
 import { getChannelMessages } from "@stores/messages.store";
 import {
   buildVirtualItems,
+  keyOf,
   visibleMessages,
   type VirtualItem,
   type VirtualItemMessage,
@@ -92,8 +93,8 @@ export function createListRender(st: ListState, api: ListApi) {
       blockedUsers(),
       st.shownBlocked,
     );
-    const prevKeys = prevItems.map(api.keyOf);
-    const nextKeys = nextItems.map(api.keyOf);
+    const prevKeys = prevItems.map(keyOf);
+    const nextKeys = nextItems.map(keyOf);
     const prevIndex = new Map(prevKeys.map((k, i) => [k, i]));
     const nextIndex = new Map(nextKeys.map((k, i) => [k, i]));
     if (prevIndex.size < prevKeys.length || nextIndex.size < nextKeys.length) return false;
@@ -348,7 +349,7 @@ export function createListRender(st: ListState, api: ListApi) {
         if (st.bottomSpacer !== null) st.bottomSpacer.style.height = `${estTotal}px`;
         api.setScrollTop(Math.max(0, estTotal - st.root.clientHeight));
       } else if (hold !== undefined && st.root !== null) {
-        const at = st.virtualItems.findIndex((item, i) => api.keyOf(item, i) === hold.key);
+        const at = st.virtualItems.findIndex((item, i) => keyOf(item, i) === hold.key);
         if (at !== -1) {
           const estTotal = api.totalHeight();
           if (st.topSpacer !== null) st.topSpacer.style.height = "0px";
@@ -383,7 +384,7 @@ export function createListRender(st: ListState, api: ListApi) {
         api.scrollToBottom();
         api.updateScrollToBottomBtn();
       } else if (hold !== undefined) {
-        const at = st.virtualItems.findIndex((item, i) => api.keyOf(item, i) === hold.key);
+        const at = st.virtualItems.findIndex((item, i) => keyOf(item, i) === hold.key);
         if (at !== -1) {
           for (let pass = 0; pass < 3; pass++) {
             if (!api.placeIndex(at, -hold.edge)) break;
