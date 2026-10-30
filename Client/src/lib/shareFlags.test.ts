@@ -47,6 +47,10 @@ describe("shareFlags", () => {
 
   it("legacy resolves to no change; every other arm sets hint and degradation", () => {
     expect(shareMotionArm("legacy")).toEqual({});
+    expect(shareMotionArm("detail-resolution")).toEqual({
+      contentHint: "detail",
+      degradation: "maintain-resolution",
+    });
     expect(shareMotionArm("detail-balanced")).toEqual({
       contentHint: "detail",
       degradation: "balanced",
@@ -67,10 +71,10 @@ describe("shareFlags", () => {
       contentHint: "motion",
       degradation: "maintain-framerate",
     });
-    expect(SHARE_MOTION_POLICIES).toHaveLength(6);
+    expect(SHARE_MOTION_POLICIES).toHaveLength(7);
   });
 
   it("exposes a policy version", () => {
-    expect(SHARE_POLICY_VERSION).toBe("2b-1");
+    expect(SHARE_POLICY_VERSION).toBe("2c-1");
   });
 });

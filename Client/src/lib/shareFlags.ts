@@ -9,7 +9,7 @@
 import { loadPref } from "./prefs/preferences";
 
 /** Bumped whenever the meaning of a recorded policy changes. */
-export const SHARE_POLICY_VERSION = "2b-1";
+export const SHARE_POLICY_VERSION = "2c-1";
 
 export const SHARE_DIAGNOSTICS_KEY = "shareDiagnosticsV2";
 export const SHARE_MOTION_POLICY_KEY = "shareMotionPolicy";
@@ -17,6 +17,7 @@ export const SHARE_MOTION_POLICY_KEY = "shareMotionPolicy";
 /** The plan's E3 arms: content hint (detail/motion) x degradation preference. */
 export const SHARE_MOTION_POLICIES = [
   "legacy",
+  "detail-resolution",
   "detail-balanced",
   "detail-framerate",
   "motion-resolution",
@@ -47,6 +48,7 @@ export interface ShareMotionArm {
 
 const ARMS: Readonly<Record<ShareMotionPolicy, ShareMotionArm>> = {
   legacy: {},
+  "detail-resolution": { contentHint: "detail", degradation: "maintain-resolution" },
   "detail-balanced": { contentHint: "detail", degradation: "balanced" },
   "detail-framerate": { contentHint: "detail", degradation: "maintain-framerate" },
   "motion-resolution": { contentHint: "motion", degradation: "maintain-resolution" },

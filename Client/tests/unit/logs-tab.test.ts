@@ -595,6 +595,7 @@ describe("LogsTab", () => {
       );
       expect([...shareSelect(el).options].map((o) => [o.value, o.textContent])).toEqual([
         ["legacy", "Normal (default)"],
+        ["detail-resolution", "Sharp text, keep resolution (old default)"],
         ["detail-balanced", "Sharp text, smooth fallback"],
         ["detail-framerate", "Sharp text, keep frame rate"],
         ["motion-resolution", "Smooth motion, keep resolution"],

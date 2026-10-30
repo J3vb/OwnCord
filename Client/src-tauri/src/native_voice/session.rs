@@ -590,11 +590,9 @@ fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
             max_framerate: opts.max_framerate,
         }),
         video_codec: opts.codec.video_codec(),
-        degradation_preference: Some(if opts.max_framerate >= 120.0 {
-            DegradationPreference::Balanced
-        } else {
-            DegradationPreference::MaintainResolution
-        }),
+        // Smooth motion first: a slow link softens or shrinks the picture
+        // instead of dropping it to a few frames a second.
+        degradation_preference: Some(DegradationPreference::MaintainFramerate),
         ..Default::default()
     }
 }
@@ -2124,22 +2122,15 @@ mod tests {
     }
 
     #[test]
-    fn a_120_fps_screen_share_degrades_balanced_and_lower_rates_keep_resolution() {
+    fn every_screen_share_rate_keeps_its_frame_rate() {
         let mut opts = screen(false);
-        assert_eq!(
-            screen_publish_options(&opts).degradation_preference,
-            Some(DegradationPreference::MaintainResolution)
-        );
-        opts.max_framerate = 60.0;
-        assert_eq!(
-            screen_publish_options(&opts).degradation_preference,
-            Some(DegradationPreference::MaintainResolution)
-        );
-        opts.max_framerate = 120.0;
-        assert_eq!(
-            screen_publish_options(&opts).degradation_preference,
-            Some(DegradationPreference::Balanced)
-        );
+        for fps in [30.0, 60.0, 120.0] {
+            opts.max_framerate = fps;
+            assert_eq!(
+                screen_publish_options(&opts).degradation_preference,
+                Some(DegradationPreference::MaintainFramerate)
+            );
+        }
     }
 
     fn camera(height: u32, simulcast: bool) -> CameraOptions {
