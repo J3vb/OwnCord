@@ -1,9 +1,19 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { defineConfig, type Plugin } from "vite";
-import { resolve } from "path";
+import { dirname, resolve } from "path";
 
 const CHANGELOG_ID = "virtual:owncord-changelog";
-const CHANGELOG_PATH = resolve(import.meta.dirname, "../CHANGELOG.md");
+// Walk up rather than "../": Stryker runs the suite from a copy of Client/
+// inside Client/.stryker-tmp/sandbox-*, one level deeper than the real package.
+function findChangelog(start: string): string {
+  for (let dir = start; ; dir = dirname(dir)) {
+    const candidate = resolve(dir, "CHANGELOG.md");
+    if (existsSync(candidate)) return candidate;
+    if (dirname(dir) === dir) return resolve(start, "../CHANGELOG.md");
+  }
+}
+
+const CHANGELOG_PATH = findChangelog(resolve(import.meta.dirname, ".."));
 
 /**
  * The repository's CHANGELOG.md as a module exporting its text, for the About
