@@ -14,7 +14,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/message-actions";
+import { messageActionGates } from "@components/message-list/messageActions";
 import { shouldGroup } from "@lib/text/formatting";
 import { messageResponseToMessage } from "../../src/features/messaging/messageModel";
 import {

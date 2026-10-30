@@ -229,7 +229,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	u := rt.Updater
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		adminSetupOptions(cfg, rt))
+		adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt)))
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the

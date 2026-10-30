@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/message-actions";
+import { messageActionGates } from "@components/message-list/messageActions";
 import {
   WAVE_CONTENT,
   canWaveIn,

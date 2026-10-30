@@ -71,6 +71,8 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments and avatars); 0 = unlimited
+  # import_max_mb: 500        # largest Discord export (.json or .zip) the admin
+  #                           # panel accepts for "Import from Discord"
   # blocked_extensions: [bat, cmd, ps1]  # refused by name; a list replaces the
   #                           # default (Windows scripts, installers, disk images)
   # allowed_extensions: []    # non-empty = only these extensions may be uploaded

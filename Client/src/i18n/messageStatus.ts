@@ -7,7 +7,7 @@ import { defineCatalog } from "./format";
  * callers, so its copy lives here rather than in the main-page catalog
  * `messaging.ts`, the same way `mediaControls.ts` is split from `content.ts`.
  *
- * `message-list/attachments.ts` and `message-list/reaction-tooltip.ts` are no
+ * `message-list/attachments.ts` and `message-list/reactionTooltip.ts` are no
  * longer in the entry's static closure. Attachments used to be pulled in
  * through `lib/notifications.ts` → `lib/ui/avatar.ts`, which no longer imports it;
  * it is now reached only from components and pages. The tooltip used to be

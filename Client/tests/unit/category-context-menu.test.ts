@@ -8,7 +8,7 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
 }));
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
-import { attachChannelContextMenu } from "../../src/components/channel-sidebar/context-menu";
+import { attachChannelContextMenu } from "../../src/components/channel-sidebar/contextMenu";
 import {
   channelsStore,
   setChannels,

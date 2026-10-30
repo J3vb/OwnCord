@@ -33,11 +33,11 @@ import {
   MAX_JUMBO_EMOJI,
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
-} from "../../src/components/message-list/custom-emoji";
+} from "../../src/components/message-list/customEmoji";
 import {
   renderMessageContent,
   clearContentParseCache,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 import { renderReactions } from "../../src/components/message-list/reactions";
 import {
   emojiStore,

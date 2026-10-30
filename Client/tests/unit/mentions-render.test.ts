@@ -19,7 +19,7 @@ import {
   renderMentionSegment,
   renderMessageContent,
   resyncMentions,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import { setInviteJoinHandler } from "../../src/lib/nav/inviteNavigation";
 import { renderMessage } from "../../src/components/message-list/renderers";

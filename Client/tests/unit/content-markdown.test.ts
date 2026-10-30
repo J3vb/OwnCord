@@ -19,9 +19,9 @@ vi.mock("@lib/voice/livekitSession", () => ({
 import {
   renderInlineContent,
   renderMessageContent,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 import { parseInline, parseBlocks, splitCodeFences } from "../../src/lib/text/markdown";
-import { highlightCode, resolveLanguage } from "../../src/components/message-list/syntax-highlight";
+import { highlightCode, resolveLanguage } from "../../src/components/message-list/syntaxHighlight";
 import { extractUrls } from "../../src/components/message-list/media";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";

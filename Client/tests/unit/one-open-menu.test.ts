@@ -18,9 +18,9 @@ vi.mock("@lib/voice/livekitSession", () => ({
 }));
 
 const { showContextMenu, openMenuShell } = await import("@lib/ui/contextMenu");
-const { attachThreadContextMenu } = await import("@components/channel-sidebar/thread-menu");
-const { showUserVolumeMenu } = await import("@components/channel-sidebar/volume-menu");
-const { showSelfTileMenu } = await import("@components/video-grid/tile-menu");
+const { attachThreadContextMenu } = await import("@components/channel-sidebar/threadMenu");
+const { showUserVolumeMenu } = await import("@components/channel-sidebar/volumeMenu");
+const { showSelfTileMenu } = await import("@components/video-grid/tileMenu");
 const { createMemberContextMenu } = await import("@components/AdminActions");
 
 const menus = (): Element[] => [...document.querySelectorAll(".context-menu")];

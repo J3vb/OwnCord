@@ -19,7 +19,7 @@ const LAZY = [
   "EmojiPicker",
   "GifPicker",
   "VoiceWidget",
-  "volume-menu",
+  "volumeMenu",
   "VideoGrid",
 ] as const;
 
@@ -31,7 +31,7 @@ const EAGER_SITES = [
   "components/MessageInput.ts",
   "components/SelfProfileCard.ts",
   "components/EditChannelModal.ts",
-  "components/message-list/quick-reactions.ts",
+  "components/message-list/quickReactions.ts",
   "pages/MainPage.ts",
   "components/DmCallPanel.ts",
   "components/ChannelSidebar.ts",

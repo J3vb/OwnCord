@@ -750,3 +750,20 @@ func TestDateBounds_SurviveARunningImport(t *testing.T) {
 		t.Errorf("first id at or after 2025 = %d, %v; want the first native id", id, err)
 	}
 }
+
+func TestGetLatestImportJob_ReturnsNewestAndNotFoundWhenEmpty(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	if _, err := database.GetLatestImportJob(ctx); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("empty err = %v, want ErrNotFound", err)
+	}
+	ch, first := startTestImport(ctx, t, database, "one")
+	if err := database.AbandonImport(ctx, first, ch, db.ImportCancelled, "stopped", db.ImportProgress{}); err != nil {
+		t.Fatal(err)
+	}
+	_, second := startTestImport(ctx, t, database, "two")
+	got, err := database.GetLatestImportJob(ctx)
+	if err != nil || got.ID != second || got.Status != db.ImportRunning {
+		t.Fatalf("latest = %+v, %v; want job %d running", got, err, second)
+	}
+}

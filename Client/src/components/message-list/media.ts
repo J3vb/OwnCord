@@ -40,7 +40,7 @@ import {
   SPOILER_REGEX,
   stripUrlTrailingPunctuation,
   URL_REGEX,
-} from "./content-parser";
+} from "./contentParser";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import {
   blobImageSize,
@@ -50,7 +50,7 @@ import {
   imageSizeGeneration,
   setImageBox,
   type ImageBox,
-} from "./image-sizes";
+} from "./imageSizes";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
 import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 

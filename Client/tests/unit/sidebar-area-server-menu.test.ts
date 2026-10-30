@@ -37,7 +37,7 @@ const { inviteOpen, openAdminPanel, createModal } = vi.hoisted(() => ({
 vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
   createInviteManagerController: vi.fn().mockReturnValue({ open: inviteOpen, cleanup: vi.fn() }),
 }));
-vi.mock("@lib/admin-panel", () => ({ openAdminPanel }));
+vi.mock("@lib/adminPanel", () => ({ openAdminPanel }));
 vi.mock("@components/CreateChannelModal", () => ({
   createCreateChannelModal: createModal,
 }));

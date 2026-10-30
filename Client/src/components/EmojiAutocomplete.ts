@@ -16,13 +16,13 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { buildCustomEmojiImage } from "@components/message-list/custom-emoji";
+import { buildCustomEmojiImage } from "@components/message-list/customEmoji";
 import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
 import { messagingText } from "../i18n/messaging";
 import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
-} from "@components/inline-autocomplete";
+} from "@components/inlineAutocomplete";
 import {
   emojiCatalog,
   emojiMatches,

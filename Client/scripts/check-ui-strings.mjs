@@ -49,7 +49,7 @@ const EXCLUDED = [
   [/^src\/lib\/protocolTypes\.ts$/, "generated from protocol/schema.json: wire identifiers"],
   [/^src\/lib\/icons\.ts$/, "SVG path markup, no text"],
   [
-    /^src\/components\/message-list\/syntax-highlight\.ts$/,
+    /^src\/components\/message-list\/syntaxHighlight\.ts$/,
     "programming-language keyword tables for code highlighting, never copy",
   ],
   [
@@ -65,7 +65,7 @@ const EXCLUDED = [
  */
 const OWNERS = [
   [
-    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|MemberList|AdminActions|InviteManager|ChannelSidebar|CreateChannelModal|EditChannelModal|DeleteChannelModal|purge-prompt)\.ts|components\/channel-sidebar\/context-menu\.ts|lib\/(safe-render|credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
+    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|MemberList|AdminActions|InviteManager|ChannelSidebar|CreateChannelModal|EditChannelModal|DeleteChannelModal|purgePrompt)\.ts|components\/channel-sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
     "B9-18",
   ],
   [

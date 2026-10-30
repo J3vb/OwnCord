@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messageActionGates } from "../../src/components/message-list/message-actions";
+import { messageActionGates } from "../../src/components/message-list/messageActions";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
   refreshThreadChips,

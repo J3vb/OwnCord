@@ -44,6 +44,9 @@ type Store interface {
 	AbandonImport(ctx context.Context, jobID, channelID int64, status, reason string, pr db.ImportProgress) error
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetImportJob(ctx context.Context, id int64) (*db.ImportJob, error)
+	GetLatestImportJob(ctx context.Context) (*db.ImportJob, error)
+	GetChannelCategory(ctx context.Context, id int64) (*db.ChannelCategory, error)
 }
 
 // Files is the storage the media is copied into; api.ReservedStore implements it.
@@ -100,6 +103,10 @@ const abandonAttempts = 4
 type Runner struct {
 	cfg Config
 
+	// jobs holds the jobs this runner is running, so a cancel finds one by id.
+	jobsMu syncutil.Mutex
+	jobs   map[int64]*Job
+
 	// afterChunk, when set by a test, runs after each committed chunk.
 	afterChunk func(ctx context.Context, chunk int)
 	// retryDelay is the first wait between clean-up attempts.
@@ -117,7 +124,7 @@ func NewRunner(cfg Config) *Runner {
 	if cfg.ChunkAge == 0 {
 		cfg.ChunkAge = DefaultChunkAge
 	}
-	return &Runner{cfg: cfg, retryDelay: 500 * time.Millisecond}
+	return &Runner{cfg: cfg, retryDelay: 500 * time.Millisecond, jobs: map[int64]*Job{}}
 }
 
 // Request is one import.
@@ -153,6 +160,9 @@ type Job struct {
 // Cancel asks the import to stop. It deletes the channel and ends the job as
 // cancelled; messages already inserted go with the channel.
 func (j *Job) Cancel() { j.cancel() }
+
+// Done is closed when the job has ended.
+func (j *Job) Done() <-chan struct{} { return j.done }
 
 // Wait blocks until the job has ended and returns how.
 func (j *Job) Wait() Result {
@@ -198,8 +208,10 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	// at shutdown.
 	stopCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	job := &Job{ID: jobID, ChannelID: channelID, cancel: stop, done: make(chan struct{})}
+	r.track(job, true)
 	admitted := r.cfg.Group.Go(ctx, func(groupCtx context.Context) {
 		defer close(job.done)
+		defer r.track(job, false)
 		defer setLive(jobID, false)
 		defer stop()
 		runCtx, cancel := context.WithCancel(groupCtx)
@@ -209,6 +221,7 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	})
 	if !admitted {
 		stop()
+		r.track(job, false)
 		setLive(jobID, false)
 		halted := make(chan struct{})
 		close(halted)
