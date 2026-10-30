@@ -533,6 +533,42 @@ describe("Server/admin/static — log stream (re)connect", () => {
     expect(doc.querySelector('[data-level-count="INFO"]')!.textContent).toBe("10");
   });
 
+  // A background tab gets no frames. Past a full view of waiting lines the
+  // queue stops growing and the next frame repaints from state instead.
+  it("stops queueing lines for painting while no frame comes, then repaints from state", async () => {
+    dom = loadAdminPanel([]);
+    const { window } = dom;
+    const doc = window.document;
+    const { bridge, es } = await openLogsPage(window);
+    bridge.state.logMaxLines = 10;
+    es.onopen?.();
+    for (let i = 0; i < 50; i++) {
+      es.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
+    }
+    expect(bridge.state.logPending.length).toBeLessThanOrEqual(10);
+    expect(bridge.state.logRepaint).toBe(true);
+
+    await nextFrame(window);
+    expect(bridge.state.logRepaint).toBe(false);
+    expect([...doc.querySelectorAll("#logOutput .log-line")].map((l) => l.textContent)).toEqual(
+      Array.from({ length: 10 }, (_, i) => expect.stringContaining("line " + (40 + i))),
+    );
+  });
+
+  it("follows the newest line again when Auto-scroll is switched back on", async () => {
+    dom = loadAdminPanel([]);
+    const { window } = dom;
+    const doc = window.document;
+    const { bridge } = await openLogsPage(window);
+    bridge.state.logAtBottom = false;
+    const auto = doc.getElementById("autoScrollBtn")!;
+    auto.click();
+    expect(bridge.state.logAtBottom).toBe(false);
+    auto.click();
+    expect(bridge.state.logAutoScroll).toBe(true);
+    expect(bridge.state.logAtBottom).toBe(true);
+  });
+
   // A line from the stream a reconnect replaced must not land in the view the
   // replacement just cleared, even when it was already queued for painting.
   it("drops lines from a replaced stream, including ones waiting to be painted", async () => {

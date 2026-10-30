@@ -480,7 +480,7 @@ function renderLogs(){
 
 function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];document.querySelectorAll('.level-toggle[data-level="'+l+'"]').forEach(b=>b.setAttribute('aria-pressed',String(state.logLevels[l])));renderLogLines()}
 
-function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll))}
+function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll));if(state.logAutoScroll)jumpToNewestLog()}
 
 /* The timed server log-level toggle (SRE-07). Raising the level is a PATCH
    the server reverts on its own. The switch mirrors the server's own answer
@@ -621,13 +621,17 @@ function logChipsHtml(entry){
    again per line. */
 const LOG_LEVELS=['DEBUG','INFO','WARN','ERROR'];
 function resetLogCounts(){LOG_LEVELS.forEach(l=>{state.logCounts[l]=0})}
-function countLog(entry,d){if(entry.level in state.logCounts)state.logCounts[entry.level]+=d}
+function countLog(entry,d){if(Object.hasOwn(state.logCounts,entry.level))state.logCounts[entry.level]+=d}
 function addLogEntry(entry){
   state.logEntries.push(entry);countLog(entry,1);
   /* Trimmed once a frame, not with a shift per line; the slack bounds the
      overshoot while a hidden tab gets no frames. */
   if(state.logEntries.length-state.logMaxLines>=LOG_TRIM_SLACK)trimLogEntries();
-  state.logPending.push(entry);
+  /* Past a full view of pending lines the next frame repaints from state, so
+     a background tab (no frames) stops queueing them. */
+  if(state.logRepaint)return;
+  if(state.logPending.length>=state.logMaxLines){state.logPending=[];state.logRepaint=true}
+  else state.logPending.push(entry);
   scheduleLogPaint();
 }
 const LOG_TRIM_SLACK=500;
@@ -640,10 +644,9 @@ function flushLogPaint(){
   state.logPaintFrame=0;
   trimLogEntries();
   const pending=state.logPending;state.logPending=[];
+  if(state.logRepaint){state.logRepaint=false;renderLogLines();return}
   paintLogStatus();
   const out=document.getElementById('logOutput');if(!out||!pending.length)return;
-  /* More arrived than the view holds: repaint from state instead. */
-  if(pending.length>=state.logMaxLines){renderLogLines();return}
   let html='',added=0;
   pending.forEach(e=>{if(matchesLogFilter(e)){html+=logLineHtml(e);added++}});
   if(!added)return;
@@ -690,7 +693,7 @@ function renderLogLines(){
   let html='';
   state.logEntries.forEach(e=>{if(matchesLogFilter(e))html+=logLineHtml(e)});
   out.innerHTML=html;
-  state.logPending=[];state.logUnseen=0;paintLogJump();paintLogStatus();
+  state.logPending=[];state.logRepaint=false;state.logUnseen=0;paintLogJump();paintLogStatus();
   if(state.logAutoScroll)out.scrollTop=out.scrollHeight;
   state.logAtBottom=true;
 }
