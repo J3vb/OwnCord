@@ -36,6 +36,10 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 
 - Import a Discord channel's history: admin panel > Channels > Import from Discord takes a DiscordChatExporter JSON export (a `.json`, or a `.zip` with its media) and builds a new text channel from it, with a progress bar and a Cancel button. The channel appears for everyone at once with every message already read, so nobody is pinged. Messages keep their Discord time, edits, replies and pins, and show the Discord name with an Imported tag. Mentions are plain text and notify nobody. Reactions, embeds, stickers, polls, threads and system messages are skipped and counted in the result. The largest file is `upload.import_max_mb` (500 MB by default); the panel warns when message retention would delete old imported messages.
 
+**Phones**
+
+- Phone screens: sign-in folds the saved servers list, Settings opens as a list with full-screen sections and a back arrow, a Flip camera button in calls, and the Share screen button is hidden where the device can't share its screen. Pinch to zoom in the image viewer, and the Android app no longer zooms the whole page.
+
 **Docs**
 
 - A moderation guide for admins and an accessibility page.
