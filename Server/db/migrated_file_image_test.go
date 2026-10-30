@@ -83,6 +83,9 @@ func writeImage(tb testing.TB, m *migratedFileImage, seed func(dir string) (stri
 	if err != nil {
 		tb.Fatalf("migrated file image: %v", err)
 	}
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		tb.Fatalf("migrated image target %s already exists or cannot be checked: %v", path, err)
+	}
 	if err := os.WriteFile(path, img, 0o600); err != nil {
 		tb.Fatalf("write migrated image to %s: %v", path, err)
 	}

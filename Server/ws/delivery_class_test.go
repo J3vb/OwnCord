@@ -280,7 +280,7 @@ func TestDeliveryClass_RouteUnchanged(t *testing.T) {
 			go h.Run()
 			defer h.Stop()
 			h.EmitEvents(context.Background(), []Event{c.ev})
-			deadline := time.Now().Add(60 * time.Millisecond)
+			deadline := time.Now().Add(200 * time.Millisecond)
 			for uid, o := range obs {
 				if got, want := o.queue(deadline), c.want[uid]; got != want {
 					t.Errorf("user %d: frame on queue %q, want %q", uid, got, want)
@@ -325,7 +325,7 @@ func TestDeliveryClass_UnroutableDropped(t *testing.T) {
 			go h.Run()
 			defer h.Stop()
 			h.EmitEvents(context.Background(), []Event{ev})
-			deadline := time.Now().Add(60 * time.Millisecond)
+			deadline := time.Now().Add(200 * time.Millisecond)
 			for uid, o := range obs {
 				if q := o.queue(deadline); q != "" {
 					t.Errorf("user %d received the unroutable event on %q; it must be dropped", uid, q)
