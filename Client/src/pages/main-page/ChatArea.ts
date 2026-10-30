@@ -14,6 +14,8 @@ import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
+import { createMediaGalleryController } from "./MediaGalleryController";
+import type { MessageDeleteSubscriber } from "./MediaGalleryController";
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "./MessageJump";
 import { setMessageJumpHandler } from "@lib/message-navigation";
@@ -41,6 +43,8 @@ export interface ChatAreaOptions {
   readonly onStartVideoCall?: () => void;
   /** Rename the open group DM (the header's group name click). */
   readonly onRenameGroup?: () => void;
+  /** Deleted-message events, so an open media gallery drops their items. */
+  readonly subscribeDeletes: MessageDeleteSubscriber;
 }
 
 export interface ChatAreaResult {
@@ -65,6 +69,8 @@ export interface ChatAreaResult {
   readonly sidebarToggle: HTMLButtonElement;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
+  /** Close the media gallery if it is open. */
+  readonly closeMediaGallery: () => void;
   /** Close the pinned-messages panel if it is open. */
   readonly closePinnedPanel: () => void;
   /** Open the pinned-messages panel; a no-op when it is already open. */
@@ -126,6 +132,19 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     pinnedCtrl.cleanup();
   });
 
+  const mediaCtrl = createMediaGalleryController({
+    api,
+    getRoot,
+    getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
+    subscribeDeletes: opts.subscribeDeletes,
+    onJumpToMessage: (channelId: number, msgId: number) => {
+      void jumper.jumpTo(channelId, msgId);
+    },
+  });
+  unsubscribers.push(() => {
+    mediaCtrl.cleanup();
+  });
+
   const searchCtrl = createSearchOverlayController({
     api,
     getRoot,
@@ -162,9 +181,14 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   // --- Chat header ---
   const chatHeader = buildChatHeader({
     onTogglePins: () => {
+      mediaCtrl.cleanup();
       void pinnedCtrl.toggle();
     },
     onToggleThreads: (anchor) => getChannelCtrl()?.toggleThreadList(anchor),
+    onToggleMedia: () => {
+      pinnedCtrl.cleanup();
+      void mediaCtrl.toggle();
+    },
     onSearchFocus: () => {
       searchCtrl.open();
     },
@@ -238,6 +262,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     sidebarToggle: chatHeader.refs.sidebarToggle,
     searchCtrl,
     closePinnedPanel: pinnedCtrl.cleanup,
+    closeMediaGallery: mediaCtrl.cleanup,
     openPinnedPanel: pinnedCtrl.open,
     threadSlot,
     dmProfileSlot,

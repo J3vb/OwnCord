@@ -59,6 +59,7 @@ import {
   updateChatHeaderForDm,
   setChatHeaderChannelType,
   setChatHeaderThreads,
+  setChatHeaderMedia,
   setChatHeaderTopic,
 } from "./ChatHeader";
 import { createThreadPanelHost } from "./ThreadPanelHost";
@@ -90,7 +91,7 @@ import { requestsText } from "../../i18n/requests";
 import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
-import { readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
+import { channelMediaEnabled, readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,
@@ -1242,6 +1243,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       const syncHeaderType = (): void => {
         setChatHeaderChannelType(typeRefs, typeOf());
         setChatHeaderThreads(typeRefs, typeOf() === "text" && threadsEnabled());
+        const type = typeOf();
+        setChatHeaderMedia(
+          typeRefs,
+          (type === "text" || type === "announcement") && channelMediaEnabled(),
+        );
       };
       syncHeaderType();
       composerGatingUnsubs.push(

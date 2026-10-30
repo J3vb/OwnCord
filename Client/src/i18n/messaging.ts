@@ -268,6 +268,7 @@ export const messagingText = defineCatalog("messaging", {
   "header.startCall": "Start a call",
   "header.startVideoCall": "Start a video call",
   "header.pins": "Pins",
+  "header.media": "Media and files",
   "header.topicOpen": "Show the full topic",
   "header.topicTitle": "Topic of {channel}",
   "header.search": "Search...",

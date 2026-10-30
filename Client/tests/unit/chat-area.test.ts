@@ -61,6 +61,13 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 }));
 
 // Mock VideoGrid
+vi.mock("../../src/pages/main-page/MediaGalleryController", () => ({
+  createMediaGalleryController: vi.fn(() => ({
+    toggle: vi.fn(() => Promise.resolve()),
+    cleanup: vi.fn(),
+  })),
+}));
+
 vi.mock("@components/VideoGrid", () => ({
   createVideoGrid: vi.fn(() => ({
     mount: mockVideoMount,
@@ -107,6 +114,7 @@ function makeOptions(overrides: Partial<ChatAreaOptions> = {}): ChatAreaOptions 
     getRoot: () => document.createElement("div"),
     getToast: () => null,
     getChannelCtrl: () => null,
+    subscribeDeletes: () => () => {},
     ...overrides,
   };
 }
@@ -320,11 +328,11 @@ describe("createChatArea", () => {
 
   // --- Unsubscribers ---
 
-  it("includes cleanup functions for the jump handler, both controllers and the consent watch", () => {
+  it("includes cleanup functions for the jump handler, the three controllers and the consent watch", () => {
     const result = createChatArea(makeOptions());
 
-    // jump-handler unregister + pinned + search + NSFW consent subscription
-    expect(result.unsubscribers.length).toBe(4);
+    // jump-handler unregister + pinned + media gallery + search + NSFW consent subscription
+    expect(result.unsubscribers.length).toBe(5);
     for (const unsub of result.unsubscribers) {
       expect(typeof unsub).toBe("function");
     }

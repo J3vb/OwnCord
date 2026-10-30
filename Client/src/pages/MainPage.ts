@@ -1091,6 +1091,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getRoot: () => root,
       getToast: () => toast,
       getChannelCtrl: () => channelCtrl,
+      subscribeDeletes: (listener) => {
+        const offOne = ws.on("chat_deleted", (p) => listener(p.channel_id, [p.message_id]));
+        const offMany = ws.on("chat_bulk_deleted", (p) => listener(p.channel_id, p.ids));
+        return () => {
+          offOne();
+          offMany();
+        };
+      },
       onToggleDmProfile: () => {
         toggleDmProfile();
       },
@@ -1242,6 +1250,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         fallbackFocus: focusReachable,
         onOpen: () => {
           chatAreaResult.closePinnedPanel();
+          chatAreaResult.closeMediaGallery();
           memberColumn?.closeOverlay();
         },
       });

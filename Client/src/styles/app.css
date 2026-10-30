@@ -22,6 +22,7 @@
 @import "./app/animations.css";
 @import "./app/compact-mode.css";
 @import "./app/pinned-messages.css";
+@import "./app/media-gallery.css";
 @import "./app/responsive.css";
 @import "./app/video.css";
 @import "./app/invite-manager.css";

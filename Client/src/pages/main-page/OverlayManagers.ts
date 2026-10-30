@@ -339,7 +339,7 @@ function mountLoadError(
  * and `finally opening = false`. A close() during the fetch cancels that
  * open: its result is dropped rather than mounted.
  */
-function createAsyncOverlayController<T>(opts: {
+export function createAsyncOverlayController<T>(opts: {
   readonly getRoot: () => HTMLDivElement | null;
   /** Extra precondition (besides instance/root/opening) checked before the
    *  fetch starts; open() bails silently (no log, no toast) if it returns
