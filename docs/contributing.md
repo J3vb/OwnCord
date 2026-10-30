@@ -287,7 +287,15 @@ there (the manifest, `app/build.gradle.kts`), never regenerate it with
   vite dev server. Debug builds allow plain http so the phone can reach it.
 - **Release builds** are signed in CI only, with a keystore kept in repository
   secrets. Never build a release APK locally for distribution, and never commit
-  a keystore or `keystore.properties` (both are gitignored).
+  a keystore or `keystore.properties` (both are gitignored). `release.yml`'s
+  `release-client-android` job publishes `OwnCord_<v>_arm64.apk` and its
+  updater `.sig` on every release; the keystore must never change, or
+  installed apps can no longer take an update.
+- **Updates:** the app asks its server's client-update endpoint for the
+  `android-aarch64-apk` target, checks the `.sig` with the desktop updater
+  key, and opens Android's package installer
+  (`update_commands/android.rs` and `ApkInstallerPlugin.kt`). Android always
+  shows its own Install prompt for an app installed outside a store.
 - **Rust:** code that only exists on desktop (tray, unread badge, window
   helpers, game detection) is behind `#[cfg(desktop)]`. CI runs
   `cargo clippy --target aarch64-linux-android -- -D warnings`, so an item that

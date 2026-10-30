@@ -43,6 +43,10 @@ export const connectText = defineCatalog("connect", {
   "update.notAuthorized":
     "OwnCord could not get permission to install the update. Install the new .deb by hand.",
   "update.retry": "Retry",
+  "update.androidConfirm":
+    "Tap Install in the Android prompt to finish the update. Closed it? Tap Retry.",
+  "update.androidPermission":
+    "Allow OwnCord to install apps on the settings page that opened, then tap Retry.",
 
   "voice.disconnected": "You were disconnected from voice",
   "voice.afkChannelFallback": "the AFK channel",

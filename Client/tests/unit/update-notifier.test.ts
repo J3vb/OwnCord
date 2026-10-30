@@ -233,6 +233,28 @@ describe("createUpdateNotifier download progress", () => {
     notifier.destroy?.();
   });
 
+  it("an opened Android installer asks for the Install tap and keeps Retry", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    onInstallState({ status: "failed", restartRequired: false, reason: "android-confirm" });
+
+    expect(bannerText()).toBe(
+      "Tap Install in the Android prompt to finish the update. Closed it? Tap Retry.",
+    );
+    expect(host.querySelector(".update-banner-install")?.textContent).toBe("Retry");
+    notifier.destroy?.();
+  });
+
+  it("a missing Android install permission says where to allow it", async () => {
+    const notifier = await mountWithAvailableUpdate();
+    onInstallState({ status: "failed", restartRequired: false, reason: "android-permission" });
+
+    expect(bannerText()).toBe(
+      "Allow OwnCord to install apps on the settings page that opened, then tap Retry.",
+    );
+    expect(host.querySelector(".update-banner-install")?.textContent).toBe("Retry");
+    notifier.destroy?.();
+  });
+
   it("announces an available update when the banner first appears", async () => {
     const notifier = await mountWithAvailableUpdate();
     const live = host.querySelector("[data-testid='update-announce']") as HTMLElement;
