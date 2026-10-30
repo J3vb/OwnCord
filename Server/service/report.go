@@ -15,28 +15,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ReportService is the local report intake and moderator queue.
-// It owns the report row, the immutable
-// evidence snapshot taken at file time, assignment/status/notes, and the
-// reporter's own status view. Every write is audited, with the same actor
-// tokens db/erasure.go's erasureUnlinkReports writes.
-//
-// Report ids returned and accepted by this type's methods are the INTERNAL
-// sequential id — used for foreign keys, audit target_id, and everywhere
-// inside the server. The externally-visible identifier is db.Report.PublicID:
-// every API response, route parameter and mod_queue
-// frame carries that instead, resolved to/from the internal id at the
-// api/ws boundary (ResolveReportID, PublicIDFor) so a sequential id is never
-// exposed for a bit holder to infer a neighbouring report's existence from.
+// ReportService is the local report intake and moderator queue: the report row,
+// the immutable evidence snapshot taken at file time, assignment/status/notes
+// and the reporter's status view. Every write is audited with the actor tokens
+// db/erasure.go's erasureUnlinkReports writes. Ids on its methods are the
+// INTERNAL sequential id; every API response, route parameter and mod_queue frame
+// carries db.Report.PublicID, resolved at the api/ws boundary (ResolveReportID,
+// PublicIDFor) so a sequential id never lets a bit holder infer a neighbouring
+// report.
 type ReportService struct {
 	st       Store
 	perms    *PermissionService
 	messages *MessageService
 	uploads  *UploadService
-	// moderation is reused for its outrank check ONLY (requireOutranksRole,
-	// package-private — same package, not exported): the force-reassign path
-	// needs the identical hierarchy rule ban/kick/timeout use, not a second
-	// copy of it.
+	// moderation is reused for its outrank check only (requireOutranksRole): the
+	// force-reassign path needs the same hierarchy rule as ban/kick/timeout.
 	moderation *ModerationService
 	limiter    *auth.RateLimiter
 }
@@ -61,30 +54,25 @@ var validOutcomes = map[string]bool{
 	"actioned": true, "no_action": true, "duplicate": true,
 }
 
-// outcomeState maps an outcome to the state machine's terminal state: an
-// outcome is the moderator's decision, state is the queue's status column —
-// two enumerations doing different jobs, so a report closed "actioned" is
-// state=resolved (real content, actually addressed) and one closed
-// "no_action" or "duplicate" is state=dismissed (nothing to enforce, or
-// already covered elsewhere).
+// outcomeState maps the moderator's outcome to the queue's terminal state:
+// "actioned" is resolved (real content, addressed); "no_action" and "duplicate"
+// are dismissed (nothing to enforce, or covered elsewhere).
 var outcomeState = map[string]string{
 	"actioned":  "resolved",
 	"no_action": "dismissed",
 	"duplicate": "dismissed",
 }
 
-// maxDetailRunes and maxNoteRunes are the free-text bounds (S5 storage
-// exhaustion).
+// maxDetailRunes and maxNoteRunes bound the free text against storage exhaustion.
 const (
 	maxDetailRunes = 2000
 	maxNoteRunes   = 4000
-	// reportContextWindow is N=5 either
-	// side, plus the reported item itself: 11 rows, fixed in code.
+	// reportContextWindow is 5 rows either side plus the reported item: 11, fixed.
 	reportContextWindow = 11
 )
 
-// hasControlChar reports whether s contains a C0 control character or DEL —
-// the same shape rule validateEmoji applies to reaction emoji.
+// hasControlChar reports whether s contains a C0 control character or DEL, the
+// shape rule validateEmoji applies to reaction emoji.
 func hasControlChar(s string) bool {
 	for _, r := range s {
 		if r <= 0x1F || r == 0x7F {
@@ -94,9 +82,8 @@ func hasControlChar(s string) bool {
 	return false
 }
 
-// newPublicID mints the opaque, unguessable identifier every report is
-// known by outside this package: 16 bytes from crypto/rand, hex-encoded
-// (32 chars). Sequential ids leak order; this does not.
+// newPublicID mints the opaque id reports are known by outside this package: 16
+// crypto/rand bytes, hex (32 chars). Sequential ids leak order.
 func newPublicID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -114,16 +101,13 @@ type FileReportParams struct {
 	Detail     string
 }
 
-// File intakes a report: rate limit, validation, visibility (the reporter
-// must be able to see the target through the same chokepoint any other
-// reader would), duplicate check, then the row, the evidence snapshot and
-// one audit row — the row and its snapshot in one transaction, so an
-// erasure racing the intake cannot land content or an author id that
-// EraseAccount's unlink pass already ran over. The subject is derived by
-// the server from the target — the message's author, the attachment's
-// uploader, or the user — never taken from the body. Returns the internal
-// id (for this package's own use); PublicIDFor resolves the id an API
-// response or a mod_queue frame is allowed to carry.
+// File intakes a report: rate limit, validation, visibility (the reporter must
+// see the target through the same chokepoint any reader would), duplicate check,
+// then the row, evidence snapshot and one audit row. The row and snapshot share a
+// transaction so an erasure racing the intake cannot land content or an author id
+// that EraseAccount's unlink pass already ran over. The subject comes from the
+// target (message author, attachment uploader, or the user), never the body.
+// Returns the internal id; PublicIDFor resolves what an API response may carry.
 func (s *ReportService) File(ctx context.Context, p FileReportParams) (int64, error) {
 	if s.limiter != nil && !s.limiter.Allow(auth.Key("report", p.ReporterID), 5, 10*time.Minute) {
 		return 0, ErrRateLimited
@@ -138,10 +122,8 @@ func (s *ReportService) File(ctx context.Context, p FileReportParams) (int64, er
 		return 0, err
 	}
 
-	// The fast path: saves building the evidence snapshot's already-resolved
-	// window on the common, non-racing duplicate. idx_reports_active_unique
-	// (migration 048) is what actually enforces this under concurrency —
-	// see the FileReport error mapping below.
+	// Fast path for the common duplicate; idx_reports_active_unique (migration 048)
+	// enforces it under concurrency (see the FileReport error mapping below).
 	if existing, err := s.st.FindOpenOrAssignedReport(ctx, p.ReporterID, p.TargetType, targetRef); err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	} else if existing > 0 {
@@ -166,32 +148,25 @@ func (s *ReportService) File(ctx context.Context, p FileReportParams) (int64, er
 			return 0, ErrDuplicateReport
 		}
 		if errors.Is(err, db.ErrNotFound) {
-			// The reporter or subject was erased between resolveTarget's read
-			// and this transaction's commit — the
-			// same refusal a target that never existed gets, no existence
-			// oracle for this vanishingly rare race either.
+			// The reporter or subject was erased after resolveTarget's read: the same
+			// refusal as a target that never existed, no existence oracle.
 			return 0, errTargetNotFound
 		}
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 
-	// The opening report_events row is written inside FileReport's own
-	// transaction (db/report_queries.go), not here — report lifecycle events
-	// stay off the shared audit_log entirely
-	// (see report_events, migration 048 (12)): a VIEW_AUDIT_LOG holder who
-	// lacks MODERATE_MEMBERS could still read a system-actor report_create
-	// row's timestamp and reason there, and one who is ALSO the report's
-	// subject could diff it against the queue they separately cannot see.
-	// report_events is exposed nowhere except inside one report's own queue
-	// detail (Get, gated exactly like the rest of it), so that channel no
-	// longer exists at all.
+	// The opening report_events row is written inside FileReport's transaction
+	// (db/report_queries.go), keeping report lifecycle events off the shared
+	// audit_log: a VIEW_AUDIT_LOG holder lacking MODERATE_MEMBERS could read a
+	// system-actor report_create row's timestamp and reason there, and the report's
+	// own subject could diff it against the queue they cannot see. report_events is
+	// exposed only inside one report's queue detail (Get, gated like the rest).
 	return id, nil
 }
 
-// PublicIDFor resolves id's public identifier. Not permission-gated: the
-// public id is the credential a caller uses to reference one report, and
-// resolving an id the caller already holds (their own File result, or a
-// report they are about to be told to look up) discloses nothing new.
+// PublicIDFor resolves id's public identifier. Not permission-gated: resolving an
+// id the caller already holds (their File result, or one they are told to look
+// up) discloses nothing new.
 func (s *ReportService) PublicIDFor(ctx context.Context, id int64) (string, error) {
 	r, err := s.st.GetReport(ctx, id)
 	if err != nil {
@@ -200,9 +175,8 @@ func (s *ReportService) PublicIDFor(ctx context.Context, id int64) (string, erro
 	return r.PublicID, nil
 }
 
-// ResolveReportID translates a public id — the only identifier a route
-// parameter ever carries — to the internal sequential id every other method
-// on this type takes. 404s on an unknown public id.
+// ResolveReportID translates a public id (the only identifier a route carries) to
+// the internal id; 404 on an unknown one.
 func (s *ReportService) ResolveReportID(ctx context.Context, publicID string) (int64, error) {
 	r, err := s.st.GetReportByPublicID(ctx, publicID)
 	if err != nil {
@@ -232,8 +206,8 @@ func validateFileParams(p FileReportParams) error {
 	return nil
 }
 
-// reportEvidenceRow is one evidence row queued for insertion, seq relative
-// to the reported item (0).
+// reportEvidenceRow is one evidence row queued for insertion; seq is relative to
+// the reported item (0).
 type reportEvidenceRow struct {
 	seq             int64
 	messageID       *int64
@@ -242,9 +216,8 @@ type reportEvidenceRow struct {
 	attachmentsJSON string
 }
 
-// evidenceAttachmentRef is the by-reference shape a snapshot's attachments
-// column carries: {id, filename, mime, size} — never bytes, never
-// stored_as.
+// evidenceAttachmentRef is the by-reference shape of a snapshot's attachments
+// column: {id, filename, mime, size}, never bytes or stored_as.
 type evidenceAttachmentRef struct {
 	ID       string `json:"id"`
 	Filename string `json:"filename"`
@@ -263,15 +236,11 @@ func marshalAttachmentRefs(refs []evidenceAttachmentRef) string {
 	return string(b)
 }
 
-// resolveTarget is the visibility gate and the subject/evidence derivation,
-// in one pass so a message target's context window is read once. Every
-// refusal is ErrNotFound with the SAME message ("target not found"),
-// whether the target does not exist or the reporter cannot see it — a
-// distinguishable message would itself be an existence oracle: an
-// actor without visibility learns nothing that tells "cannot see it" apart
-// from "does not exist" (S5, report confidentiality's reciprocal — the same
-// rule BanUser applies to a missing user id, applied here to a missing or
-// unreadable target).
+// resolveTarget is the visibility gate and subject/evidence derivation in one
+// pass, so a message target's context window is read once. Every refusal is
+// ErrNotFound with the SAME message: a distinguishable one would be an existence
+// oracle telling "cannot see it" from "does not exist" (the rule BanUser applies
+// to a missing user id).
 func (s *ReportService) resolveTarget(ctx context.Context, p FileReportParams) (channelID *int64, subjectID int64, targetRef string, evidence []reportEvidenceRow, err error) {
 	switch p.TargetType {
 	case TargetMessage:
@@ -285,10 +254,8 @@ func (s *ReportService) resolveTarget(ctx context.Context, p FileReportParams) (
 	}
 }
 
-// errTargetNotFound is resolveTarget's one refusal message: every
-// branch of every resolve* function returns exactly this text, wrapping
-// ErrNotFound, so the response body cannot distinguish "does not exist"
-// from "exists but you may not see it".
+// errTargetNotFound is resolveTarget's one refusal: every branch returns exactly
+// this text so the body cannot tell "does not exist" from "may not see it".
 var errTargetNotFound = fmt.Errorf("%w: target not found", ErrNotFound)
 
 func (s *ReportService) resolveMessageTarget(ctx context.Context, p FileReportParams) (*int64, int64, string, []reportEvidenceRow, error) {
@@ -303,9 +270,8 @@ func (s *ReportService) resolveMessageTarget(ctx context.Context, p FileReportPa
 
 	window, err := s.messages.GetMessagesAround(ctx, p.ReporterID, msg.ChannelID, messageID, reportContextWindow)
 	if err != nil {
-		// requireChannelRead answers Forbidden for a role without READ and
-		// NotFound for a non-participant DM; both become the same
-		// errTargetNotFound here so the response carries no existence oracle.
+		// requireChannelRead answers Forbidden (no READ) or NotFound (non-participant
+		// DM); both become errTargetNotFound.
 		return nil, 0, "", nil, errTargetNotFound
 	}
 
@@ -389,8 +355,8 @@ func (s *ReportService) resolveUserTarget(ctx context.Context, p FileReportParam
 	return nil, userID, strconv.FormatInt(userID, 10), nil, nil
 }
 
-// Mine returns the reporter's own reports: id, target type, reason, state,
-// outcome, created_at, closed_at — never the assignee, never the notes.
+// Mine returns the reporter's own reports (id, target type, reason, state,
+// outcome, timestamps), never the assignee or notes.
 func (s *ReportService) Mine(ctx context.Context, reporterID int64) ([]db.ReportSummary, error) {
 	rows, err := s.st.ListReportsMine(ctx, reporterID)
 	if err != nil {
@@ -399,28 +365,20 @@ func (s *ReportService) Mine(ctx context.Context, reporterID int64) ([]db.Report
 	return rows, nil
 }
 
-// RequireModerate is requireModerate exported for a caller that must
-// authorize BEFORE resolving anything else about the request — a route
-// handler that translates a public id to the internal one, in particular:
-// running that resolution first turns "unknown id" vs
-// "real id, no permission" into two different status codes, an existence
-// oracle through the handler's own order of operations. Call this before
-// resolveReportIDParam, not after.
+// RequireModerate is requireModerate exported for a handler that must authorize
+// BEFORE resolving anything else: resolving a public id first would make
+// "unknown id" and "real id, no permission" different status codes, an existence
+// oracle. Call it before resolveReportIDParam.
 func (s *ReportService) RequireModerate(ctx context.Context, actorID int64) error {
 	return requireModerate(ctx, s.perms, actorID)
 }
 
-// requireModerate loads actorID's role and checks the canonical predicate
-// (permissions.CanModerate). Runs before any report or appeal lookup, so an
-// actor without the bit sees Forbidden regardless of whether the id exists.
-// No longer returns the role itself (unparam, golangci-lint review): every
-// force-reassign path now reads the acting principal's position fresh
-// inside its own write transaction (forceReassignGuarded) rather than
-// trusting a role read here, so nothing downstream needs it anymore.
-//
-// Package-level rather than a method (K47): ReportService and AppealService
-// need the identical check, and one predicate per security property beats
-// two copies that can drift.
+// requireModerate loads actorID's role and checks permissions.CanModerate. It
+// runs before any report or appeal lookup, so an actor without the bit sees
+// Forbidden whether or not the id exists. It returns no role: force-reassign reads
+// the actor's position fresh inside its write transaction (forceReassignGuarded).
+// Package-level because ReportService and AppealService need the identical check;
+// one predicate per security property cannot drift.
 func requireModerate(ctx context.Context, perms *PermissionService, actorID int64) error {
 	role, err := perms.GetRoleForUser(ctx, actorID)
 	if err != nil || role == nil {
@@ -432,10 +390,9 @@ func requireModerate(ctx context.Context, perms *PermissionService, actorID int6
 	return nil
 }
 
-// guardConfidentiality is the reciprocal of requireModerate: even a bit
-// holder may not read or act on a report about themselves. Indistinguishable
-// from a missing id (ErrNotFound), never Forbidden — the subject must not
-// learn a report about them exists at all.
+// guardConfidentiality is the reciprocal of requireModerate: even a bit holder
+// may not read or act on a report about themselves. ErrNotFound, never Forbidden,
+// so the subject cannot learn a report about them exists.
 func guardConfidentiality(actorID int64, report *db.Report) error {
 	if report.SubjectID != 0 && report.SubjectID == actorID {
 		return fmt.Errorf("%w: report not found", ErrNotFound)
@@ -443,21 +400,16 @@ func guardConfidentiality(actorID int64, report *db.Report) error {
 	return nil
 }
 
-// ErrSelfReview is a 403: a moderator may not act on, or read the internal
-// notes of, a report they themselves filed. Named for reuse (appeals
-// hit the identical shape: the moderator who acted does not decide the
+// ErrSelfReview is a 403: a moderator may not act on, or read the notes of, a
+// report they filed. Reused by appeals (the acting moderator does not decide the
 // appeal of their own action).
 var ErrSelfReview = fmt.Errorf("%w: cannot act on your own report", ErrForbidden)
 
-// GuardSelfReviewFor refuses a moderator acting on their own filed report —
-// unlike guardConfidentiality, this is Forbidden, not NotFound: a reporter
-// already knows their own report exists (it is in their Mine() view), so
-// there is no existence oracle to protect against here, only the conflict
-// of interest. Exported for a caller outside this package that already holds
-// a *db.Report from another entry point (the queue's act route, from Get)
-// and must apply the same refusal before dispatching an
-// action: Get allows a reporter to read their own filing, but acting on it
-// is the identical conflict of interest Assign/Note/Close already refuse.
+// GuardSelfReviewFor refuses a moderator acting on their own filed report.
+// Unlike guardConfidentiality it is Forbidden: a reporter knows their report
+// exists (it is in Mine()), so only the conflict of interest remains. Exported for
+// the queue's act route, which holds a *db.Report from Get: reading one's own
+// filing is allowed, acting on it is the conflict Assign/Note/Close refuse.
 func GuardSelfReviewFor(actorID int64, report *db.Report) error {
 	if report.ReporterID != 0 && report.ReporterID == actorID {
 		return ErrSelfReview
@@ -465,16 +417,11 @@ func GuardSelfReviewFor(actorID int64, report *db.Report) error {
 	return nil
 }
 
-// VisibleReportPublicID resolves reportID's public id for viewerID, applying
-// the same confidentiality guard Get uses (guardConfidentiality): the
-// viewer's own report as SUBJECT never surfaces its id, even from a surface
-// that already authorized the read on other grounds — a moderator who still
-// holds MODERATE_MEMBERS reading their own moderation-action ledger, in
-// particular (GET .../users/{id}/actions and the queue
-// detail's action list both render a linked report's public id with no
-// per-row check of their own). false also covers a report id that no longer
-// resolves — a lookup failure is not itself a leak, so the caller renders
-// the field absent rather than surfacing an internal error.
+// VisibleReportPublicID resolves reportID's public id for viewerID under the
+// same guard as Get: a report about the viewer never surfaces its id, even from a
+// surface authorized on other grounds (a moderator reading their own action
+// ledger, or the queue detail's action list, which check no per-row guard).
+// false also covers an id that no longer resolves; the caller omits the field.
 func (s *ReportService) VisibleReportPublicID(ctx context.Context, viewerID, reportID int64) (string, bool) {
 	report, err := s.st.GetReport(ctx, reportID)
 	if err != nil {
@@ -487,10 +434,8 @@ func (s *ReportService) VisibleReportPublicID(ctx context.Context, viewerID, rep
 }
 
 // Queue lists reports for the moderator view: state is "open", "assigned",
-// "closed" (every terminal state), or "" for the default open+assigned
-// view. A report about the caller is excluded even when it would otherwise
-// match — the confidentiality rule applies to the listing too, not only to
-// GET by id.
+// "closed" (every terminal state) or "" for open+assigned. A report about the
+// caller is excluded: confidentiality covers the listing too.
 func (s *ReportService) Queue(ctx context.Context, actorID int64, state string) ([]db.ReportQueueRow, error) {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
@@ -515,27 +460,22 @@ func (s *ReportService) Queue(ctx context.Context, actorID int64, state string) 
 	return out, nil
 }
 
-// ReportDetail is GET .../queue/{id}'s payload: the report, its evidence,
-// its notes and its immutable history (report_events).
+// ReportDetail is GET .../queue/{id}'s payload.
 type ReportDetail struct {
 	Report   db.Report
 	Evidence []db.ReportEvidenceRow
 	Notes    []db.ReportNoteRow
 	Events   []db.ReportEvent
-	// EvidenceWithheld is empty when Evidence is readable, or the reason it
-	// is empty: EvidenceNSFWAcknowledgementRequired or
-	// EvidenceSourceChannelUnavailable (see evidenceWithheld).
+	// EvidenceWithheld is empty when Evidence is readable, else why it is empty:
+	// EvidenceNSFWAcknowledgementRequired or EvidenceSourceChannelUnavailable.
 	EvidenceWithheld string
 }
 
-// Get returns one report with its evidence, notes and history. 404s — never
-// 403 — both for a missing id and for the caller's own report as its
-// SUBJECT, so the two are indistinguishable even if the subject holds the
-// bit. A moderator who is the report's REPORTER may read it (it is their own
-// filing, already visible via Mine()) but never its internal notes: Notes
-// is always empty for them, and they may not act on it (GuardSelfReviewFor,
-// Assign/Note/Close). report_events is exposed here and nowhere else — the
-// same bit-plus-confidentiality gate this method already runs, no new one.
+// Get returns one report with evidence, notes and history. 404, never 403, for a
+// missing id and for the caller's own report as SUBJECT, so they are
+// indistinguishable. A moderator who is the REPORTER may read it but never its
+// notes (Notes is empty), and may not act on it (GuardSelfReviewFor).
+// report_events is exposed here and nowhere else.
 func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*ReportDetail, error) {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
@@ -568,17 +508,13 @@ func (s *ReportService) Get(ctx context.Context, actorID, reportID int64) (*Repo
 	return &ReportDetail{Report: *report, Evidence: evidence, Notes: notes, Events: events, EvidenceWithheld: withheld}, nil
 }
 
-// Assign assigns reportID to actorID. 409 if it is already assigned to
-// someone else, unless force is set and the caller outranks the current
-// assignee (the same rule ban/kick/timeout use). The plain write is guarded
-// on the observed assignee: a concurrent reassignment invalidates a
-// stale verdict, so it can never be applied. The force path's outrank
-// comparison runs INSIDE the same transaction as the write (see
-// AssignReportForced): reading the assignee's role and writing the new one
-// as two separate statements left a gap a role change could race; zero rows
-// (or ErrForbidden, force only) covers a state that already left
-// open/assigned, a moderator erased between requirePerm and the write, and
-// (force only) failing to outrank, all as 409 except the last, which is 403.
+// Assign assigns reportID to actorID. 409 if already assigned to someone else,
+// unless force is set and the caller outranks the assignee (as ban/kick/timeout).
+// The plain write is guarded on the observed assignee, so a concurrent
+// reassignment invalidates a stale verdict. The force path's outrank comparison
+// runs INSIDE the write's transaction (AssignReportForced), since separate
+// statements left a gap a role change could race. Zero rows covers a state that
+// left open/assigned or an erased moderator (409); failing to outrank is 403.
 func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, force bool) error {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
@@ -620,9 +556,9 @@ func (s *ReportService) Assign(ctx context.Context, actorID, reportID int64, for
 	return nil
 }
 
-// Note adds an internal note, visible to bit-22 holders only — never to
-// either party (the reporter cannot read it either — GuardSelfReviewFor — and
-// the subject cannot see the report at all), the name is the contract.
+// Note adds an internal note visible to MODERATE_MEMBERS holders only: neither
+// the reporter (GuardSelfReviewFor) nor the subject (cannot see the report) reads
+// it.
 func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body string) error {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
@@ -648,18 +584,16 @@ func (s *ReportService) Note(ctx context.Context, actorID, reportID int64, body 
 		return fmt.Errorf("%w: %w", ErrInternal, err)
 	}
 	if !ok {
-		// Zero rows now covers two causes (the guard also covers
-		// the report's state too): the moderator account was erased, or the
-		// report closed, between requirePerm's read and this write.
+		// Zero rows means the moderator account was erased, or the report closed,
+		// between requirePerm's read and this write.
 		return fmt.Errorf("%w: report is closed, or the moderator account no longer exists", ErrConflict)
 	}
 	return nil
 }
 
-// Close closes reportID with outcome "actioned", "no_action" or "duplicate",
-// returning the resulting state ("resolved" or "dismissed") for the caller's
-// mod_queue frame. Guarded to open/assigned states; a report already closed
-// by a concurrent call answers Conflict, never a second success.
+// Close closes reportID with outcome "actioned", "no_action" or "duplicate" and
+// returns the state ("resolved" or "dismissed") for the mod_queue frame. Guarded
+// to open/assigned; a report closed concurrently answers Conflict.
 func (s *ReportService) Close(ctx context.Context, actorID, reportID int64, outcome string) (string, error) {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return "", err
@@ -688,6 +622,6 @@ func (s *ReportService) Close(ctx context.Context, actorID, reportID int64, outc
 	return state, nil
 }
 
-// ErrDuplicateReport is a 409: the same reporter already has an open or
-// assigned report against this exact target.
+// ErrDuplicateReport is a 409: the reporter already has an open or assigned
+// report against this exact target.
 var ErrDuplicateReport = fmt.Errorf("%w: a report for this target is already open or assigned", ErrConflict)

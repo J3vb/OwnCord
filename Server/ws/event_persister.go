@@ -1,11 +1,8 @@
-// Phase B Step 7 — Event Persistence Layer.
-//
-// EventPersister is an asynchronous batched writer that drains broadcast
-// events from an in-memory channel into the EventStore. It must never block
-// the broadcast hot path: when the queue is full, events are dropped and a
-// counter is incremented. The reconnection handler tolerates gaps because the
-// in-memory ring buffer remains the primary cold-start source for clients
-// whose last_seq is recent.
+// EventPersister is an asynchronous batched writer that drains broadcast events
+// from an in-memory channel into the EventStore. It must never block the broadcast
+// hot path: when the queue is full events are dropped and a counter incremented.
+// Reconnection tolerates gaps because the in-memory ring buffer stays the primary
+// source for clients whose last_seq is recent.
 
 package ws
 
@@ -20,9 +17,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// pendingEvent is a single event waiting to be flushed to the EventStore.
-// seq carries the hub-assigned monotonic sequence so the row written to the
-// store has the same seq as the wrapped payload sent to clients.
+// pendingEvent is an event waiting to flush. seq is the hub-assigned sequence, so
+// the stored row has the same seq as the payload sent to clients.
 type pendingEvent struct {
 	seq       int64
 	eventType string
@@ -42,14 +38,12 @@ type EventPersister struct {
 	stopOnce  sync.Once
 	stop      chan struct{}
 	done      chan struct{}
-	// flushReq carries Flush's barrier requests to run(): each is answered
-	// once everything queued before it has been written to the store.
+	// flushReq carries Flush's barrier requests to run(); each is answered once
+	// everything queued before it has been written.
 	flushReq chan chan struct{}
-	// stopCtxDone is the Done channel of the context passed to Stop. run's
-	// drain-on-stop loop reads it only after observing stop closed — the
-	// close/receive pair provides the happens-before, so there is no data
-	// race and no lock. A nil value (an uncancellable Stop ctx, e.g.
-	// context.Background) means "drain fully".
+	// stopCtxDone is the Done channel of the context passed to Stop. run's drain loop
+	// reads it only after observing stop closed; the close/receive pair gives the
+	// happens-before, so no lock. nil (an uncancellable ctx) means drain fully.
 	stopCtxDone <-chan struct{}
 
 	persisted atomic.Uint64
@@ -58,15 +52,11 @@ type EventPersister struct {
 	errors    atomic.Uint64
 }
 
-// NewEventPersister returns a persister wired to s. s MUST be non-nil —
-// run() dereferences p.store on every flush, so a nil store would panic on
-// the first tick. We fail fast here so the misconfiguration surfaces at
-// construction time (main.go, tests) instead of minutes later in the
-// background goroutine.
-//
-// queueSize sets the channel buffer; once full, Enqueue increments the
-// dropped counter without blocking. batchSize and flushEvery control the
-// flush triggers.
+// NewEventPersister returns a persister wired to s. s MUST be non-nil: run()
+// dereferences p.store on every flush, so fail fast at construction rather than
+// minutes later in the background goroutine. queueSize sets the channel buffer;
+// once full, Enqueue counts a drop without blocking. batchSize and flushEvery
+// control the flush triggers.
 func NewEventPersister(s EventStore, queueSize, batchSize int, flushEvery time.Duration) *EventPersister {
 	if s == nil {
 		panic("ws: NewEventPersister requires a non-nil EventStore")
@@ -91,14 +81,12 @@ func NewEventPersister(s EventStore, queueSize, batchSize int, flushEvery time.D
 	}
 }
 
-// Flush is a barrier: it returns once every event enqueued before the call
-// has been written to the store (or dropped by a failed write, which is
-// logged as usual). Enqueue's send is synchronous into the FIFO queue, so
-// draining that queue before the flush is what makes the guarantee. A
-// persister that is not running, or has stopped, returns immediately: a
-// stopped one has already drained on Stop. Bounded by ctx. The account
-// erasure calls it before deleting an erased user's rows, so a frame
-// queued before the erasure cannot be written back after it.
+// Flush is a barrier: it returns once every event enqueued before the call has
+// been written (or dropped by a failed write, logged as usual). Enqueue's send is
+// synchronous into the FIFO queue, so draining it first gives the guarantee. A
+// persister that is not running or has stopped returns immediately (a stopped one
+// already drained). Bounded by ctx. Account erasure calls it before deleting an
+// erased user's rows so a frame queued before the erasure cannot be written back.
 func (p *EventPersister) Flush(ctx context.Context) error {
 	if p == nil || !p.started.Load() {
 		return nil
@@ -121,9 +109,8 @@ func (p *EventPersister) Flush(ctx context.Context) error {
 	}
 }
 
-// Start launches the background flusher goroutine. Idempotent — calling
-// Start more than once is a no-op so test setups that share a persister
-// across cases don't spawn duplicate runners.
+// Start launches the background flusher. Idempotent, so test setups sharing a
+// persister do not spawn duplicate runners.
 func (p *EventPersister) Start(ctx context.Context) {
 	p.startOnce.Do(func() {
 		p.started.Store(true)
@@ -131,33 +118,28 @@ func (p *EventPersister) Start(ctx context.Context) {
 	})
 }
 
-// Enqueue queues an event for persistence. Non-blocking; drops on full queue.
-// seq is the hub-assigned monotonic sequence for this event — it must be the
-// same value embedded in the wrapped payload so reconnect replay returns rows
+// Enqueue queues an event for persistence. Non-blocking; drops on a full queue.
+// seq must be the value embedded in the wrapped payload so replay returns rows
 // whose row-seq matches the payload-seq the client tracks.
 //
-// CONTRACT: payload must not be mutated by the caller after Enqueue returns.
-// All current call sites pass a fresh slice from wrapWithSeq, so no defensive
-// copy is taken here. This matters because Enqueue is invoked under the hub's
-// seqMu lock and any per-call allocation directly serializes broadcast
-// throughput.
+// CONTRACT: payload must not be mutated by the caller after Enqueue returns. Call
+// sites pass a fresh slice from wrapWithSeq, so no defensive copy is taken:
+// Enqueue runs under the hub's seqMu and any per-call allocation serializes
+// broadcast throughput.
 //
-// Connect and disconnect presence frames are persisted like any other global
-// broadcast (P5-S07 decision). Cold-tier replay requires every seq in its
-// range to be persisted (reconnectVetColdTail's contiguity check), so
-// unpersisted presence would force a full ready on almost every cold resume;
-// the rows ride this persister's existing batches.
+// Connect and disconnect presence frames are persisted like any global broadcast:
+// cold-tier replay requires every seq in its range to be persisted
+// (reconnectVetColdTail's contiguity check), so unpersisted presence would force a
+// full ready on almost every cold resume.
 func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, payload []byte) {
 	if p == nil {
 		return
 	}
-	// run() stops reading p.queue the instant it exits, but the channel keeps
-	// its buffer and keeps accepting sends — without this check a caller that
-	// enqueues after Stop has returned (e.g. hub.GracefulStop still
-	// broadcasting a server_restart notice after main.go's LIFO defers have
-	// already stopped this persister) would land silently in a dead channel:
-	// neither persisted nor counted as dropped. p.done closes only when
-	// run() has actually exited, so this is exact, not a best guess.
+	// run() stops reading p.queue when it exits but the channel keeps accepting
+	// sends; without this check a caller enqueueing after Stop (e.g. GracefulStop
+	// broadcasting server_restart after main.go's LIFO defers stopped this persister)
+	// would land silently in a dead channel, neither persisted nor counted. p.done
+	// closes only when run() has exited, so this is exact.
 	select {
 	case <-p.done:
 		p.dropStopped(seq, eventType, channelID)
@@ -168,48 +150,40 @@ func (p *EventPersister) Enqueue(seq int64, eventType string, channelID int64, p
 	case p.queue <- pendingEvent{seq: seq, eventType: eventType, channelID: channelID, payload: payload}:
 	default:
 		p.dropped.Add(1)
-		// The WSEventsDropped OTel counter is synced from this atomic by
-		// run()'s ticker (which has a real context) — an instrumentation call
-		// here would sit under the caller's seqMu and trip contextcheck.
+		// The WSEventsDropped OTel counter is synced from this atomic by run()'s ticker
+		// (which has a real context); an instrumentation call here would sit under the
+		// caller's seqMu and trip contextcheck.
 	}
 }
 
-// Stop signals the persister to drain remaining events and exit, and returns
-// only after the run goroutine has fully exited (i.e. has stopped touching
-// the store). This is the load-bearing contract: main.go closes the database
-// right after Stop returns (LIFO defers), so Stop must guarantee no flush is
-// still in flight — otherwise a late flush writes into a closed pool and
-// events are lost. ctx does NOT abandon that wait; it only bounds how long
-// run() keeps draining the queue before it stops accepting new entries, does
-// one final flush, and exits (see run). A single stuck flush therefore
-// delays shutdown by at most that flush rather than closing the DB
-// underneath it.
-//
-// Safe to call without a prior Start: in that case there's no goroutine to
-// wait for and Stop returns immediately after closing the stop channel.
+// Stop signals the persister to drain and exit, returning only after run has fully
+// exited (no longer touching the store). Load-bearing: main.go closes the database
+// right after Stop (LIFO defers), so no flush may be in flight or it writes into a
+// closed pool and loses events. ctx does not abandon that wait; it only bounds how
+// long run() keeps draining before one final flush and exit, so a stuck flush
+// delays shutdown by at most that flush. Safe without a prior Start: there is no
+// goroutine to wait for.
 func (p *EventPersister) Stop(ctx context.Context) {
 	if p == nil {
 		return
 	}
 	p.stopOnce.Do(func() {
-		// Published before close(p.stop): run() reads stopCtxDone only after
-		// its receive on p.stop observes the close, and the close/receive
-		// pair makes this write visible without a data race.
+		// Published before close(p.stop): run() reads stopCtxDone only after observing the
+		// close, which makes this write visible without a data race.
 		p.stopCtxDone = ctx.Done()
 		close(p.stop)
 	})
 	if !p.started.Load() {
-		// run() was never launched, so done will never be closed.
+		// run() was never launched, so done will never close.
 		return
 	}
-	// Always wait for the goroutine to exit — never race it against ctx.
+	// Always wait for the goroutine to exit; never race it against ctx.
 	<-p.done
 
-	// A concurrent Enqueue can win the race between run()'s last drain
-	// attempt and the close of p.done above: it observes p.done not yet
-	// closed and sends into p.queue just as run() is exiting, so nothing
-	// ever reads that entry. Sweep whatever the race stranded here so it is
-	// dropped loudly instead of silently (mirrors db.AuditWriter.Stop).
+	// A concurrent Enqueue can win the race between run()'s last drain and the close
+	// of p.done: it sees p.done open and sends as run() exits, so nothing reads that
+	// entry. Sweep what the race stranded so it is dropped loudly, not silently
+	// (mirrors db.AuditWriter.Stop).
 	for {
 		select {
 		case evt := <-p.queue:
@@ -220,8 +194,7 @@ func (p *EventPersister) Stop(ctx context.Context) {
 	}
 }
 
-// dropStopped counts and loudly logs an event that reached the queue after
-// run() had already exited, so it is never lost silently.
+// dropStopped counts and logs an event that reached the queue after run() exited.
 func (p *EventPersister) dropStopped(seq int64, eventType string, channelID int64) {
 	p.dropped.Add(1)
 	slog.Error("event dropped: persister stopped",
@@ -231,9 +204,8 @@ func (p *EventPersister) dropStopped(seq int64, eventType string, channelID int6
 	)
 }
 
-// drainQueued appends every event already sitting in the queue to batch
-// without blocking and returns it; the caller flushes. A barrier drain can
-// exceed batchSize — PersistEvents takes any size in one transaction.
+// drainQueued appends every event already in the queue to batch without blocking.
+// A barrier drain can exceed batchSize; PersistEvents takes any size in one transaction.
 func (p *EventPersister) drainQueued(batch []pendingEvent) []pendingEvent {
 	for {
 		select {
@@ -245,7 +217,6 @@ func (p *EventPersister) drainQueued(batch []pendingEvent) []pendingEvent {
 	}
 }
 
-// Stats returns lifetime counters.
 func (p *EventPersister) Stats() (persisted, dropped, flushes, errs uint64) {
 	return p.persisted.Load(), p.dropped.Load(), p.flushes.Load(), p.errors.Load()
 }
@@ -255,11 +226,11 @@ func (p *EventPersister) run(ctx context.Context) {
 	tick := time.NewTicker(p.flushEvery)
 	defer tick.Stop()
 
-	// Cache the AppMetrics bundle once instead of looking it up per event.
+	// Cache the AppMetrics bundle instead of looking it up per event.
 	metrics := telemetry.NewAppMetrics()
 
-	// Enqueue only bumps the p.dropped atomic (it runs under the hub's seqMu
-	// with no context); this loop owns syncing the OTel counter from it.
+	// Enqueue only bumps the p.dropped atomic (under seqMu, no context); this loop
+	// syncs the OTel counter from it.
 	var droppedReported uint64
 	syncDropped := func() {
 		if d := p.dropped.Load(); d > droppedReported {
@@ -269,7 +240,6 @@ func (p *EventPersister) run(ctx context.Context) {
 	}
 
 	batch := make([]pendingEvent, 0, p.batchSize)
-	// Scratch slice reused across flushes for the store's batch shape.
 	rows := make([]db.PersistedEvent, 0, p.batchSize)
 	flush := func() {
 		if len(batch) == 0 {
@@ -285,9 +255,8 @@ func (p *EventPersister) run(ctx context.Context) {
 				Payload:   evt.payload,
 			})
 		}
-		// One transaction per flush instead of one autocommit write per event.
-		// PersistEvents keeps the best-effort contract: on tx failure it retries
-		// per-row so a single bad event doesn't drop the batch.
+		// One transaction per flush. PersistEvents is best-effort: on tx failure it
+		// retries per-row so one bad event does not drop the batch.
 		persisted, err := p.store.PersistEvents(ctx, rows)
 		if persisted > 0 {
 			p.persisted.Add(uint64(persisted))
@@ -305,13 +274,10 @@ func (p *EventPersister) run(ctx context.Context) {
 	for {
 		select {
 		case <-p.stop:
-			// Drain anything still in the channel before exiting. The drain
-			// is bounded by the Stop context (p.stopCtxDone): once it fires
-			// we do one final flush and exit rather than keep pulling, so a
-			// slow store delays shutdown by at most one flush instead of
-			// unboundedly. Either way the goroutine finishes any in-flight
-			// flush before returning (and closing p.done), so Stop's caller
-			// never closes the store under a live flusher.
+			// Drain what is still in the channel before exiting, bounded by the Stop context
+			// (p.stopCtxDone): once it fires, do one final flush and exit, so a slow store
+			// delays shutdown by at most one flush. The goroutine finishes any in-flight flush
+			// before closing p.done, so Stop's caller never closes the store under a live flusher.
 			for {
 				select {
 				case evt := <-p.queue:
@@ -336,8 +302,7 @@ func (p *EventPersister) run(ctx context.Context) {
 				flush()
 			}
 		case reply := <-p.flushReq:
-			// Everything sent before the request is already in the queue;
-			// take it all, write it, then answer.
+			// Everything sent before the request is already queued; take it all, write it, answer.
 			batch = p.drainQueued(batch)
 			flush()
 			close(reply)

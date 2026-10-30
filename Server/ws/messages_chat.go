@@ -29,11 +29,10 @@ type chatMessagePayload struct {
 	// gate (mentionable, or MENTION_EVERYONE). A client counts a role mention
 	// only when the server lists the role here. Always present, empty for none.
 	MentionRoles []int64 `json:"mention_roles"`
-	// MentionsHere reports that MentionsEveryone came from @here rather than
-	// @everyone (never both). Mention fan-out (service/mentions.go,
-	// mentionEntries) skips the mention-count bump for an @here reader with no
-	// live connection when the badge is written, so a client replaying this frame during a reconnect must not
-	// raise a badge the server never counted.
+	// MentionsHere reports that MentionsEveryone came from @here rather than @everyone
+	// (never both). Mention fan-out (service/mentions.go) skips the mention-count bump
+	// for an @here reader with no live connection, so a client replaying this frame
+	// must not raise a badge the server never counted.
 	MentionsHere bool `json:"mentions_here"`
 	// ReferencedMessage is the reply parent's snippet (null when not a reply,
 	// or the parent is unavailable). A deleted parent is redacted to
@@ -43,26 +42,22 @@ type chatMessagePayload struct {
 	// ordinary message. See callBlock.
 	Kind string     `json:"kind,omitempty"`
 	Call *callBlock `json:"call,omitempty"`
-	// GroupEvent is set only on a group DM row: the same shape as
-	// the history payload's db.GroupEventInfo.
+	// GroupEvent is set only on a group DM row, shaped like db.GroupEventInfo.
 	GroupEvent *groupEventBlock `json:"group_event,omitempty"`
-	// Forward is set only on a forwarded message: the same shape as
-	// the history payload's db.ForwardInfo, static, so it replays as is.
+	// Forward is set only on a forwarded message, shaped like db.ForwardInfo; static, so
+	// it replays as is.
 	Forward *service.ForwardInfo `json:"forward,omitempty"`
-	// Poll is set only on a poll message: the same shape as the
-	// history payload's db.PollInfo. The counts are those at creation, zero, so
-	// a replayed frame must not roll a newer count back (clients keep the higher
-	// results.version).
+	// Poll is set only on a poll message, shaped like db.PollInfo. The counts are those
+	// at creation (zero), so a replayed frame must not roll a newer count back (clients
+	// keep the higher results.version).
 	Poll *service.PollInfo `json:"poll,omitempty"`
-	// Sticker is set only on a sticker message: the same shape as the
-	// history payload's db.MessageStickerInfo. Static, so it replays as is; a
-	// deleted sticker is read back with a null id and url by history.
+	// Sticker is set only on a sticker message, shaped like db.MessageStickerInfo.
+	// Static, so it replays as is; history reads a deleted sticker back with a null id
+	// and url.
 	Sticker *service.MessageStickerInfo `json:"sticker,omitempty"`
-	// Thread is the starter message's thread: the same shape as the
-	// history payload's db.ThreadInfo. A message that has just been sent has no
-	// thread yet, so no live send sets it; thread_changed carries a thread that
-	// appears or changes afterwards. The field exists so a frame built from a
-	// stored row has one shape with history.
+	// Thread is the starter message's thread (db.ThreadInfo). A just-sent message has
+	// none, so no live send sets it; thread_changed carries a thread that appears
+	// later. The field gives a frame built from a stored row the same shape as history.
 	Thread *service.ThreadInfo `json:"thread,omitempty"`
 }
 
@@ -83,8 +78,8 @@ type callBlock struct {
 	Participants []int64 `json:"participants"`
 }
 
-// chatMessageArgs is the input to buildChatMessage. It is a struct rather than
-// a positional list because the payload has outgrown readable call sites.
+// chatMessageArgs is the input to buildChatMessage, a struct because the payload
+// outgrew positional arguments.
 type chatMessageArgs struct {
 	ClientMessageID   string
 	MsgID             int64
@@ -116,8 +111,8 @@ type chatMessageArgs struct {
 	Sticker *service.MessageStickerInfo
 }
 
-// buildChatMessage constructs a chat_message broadcast envelope.
-// Includes role in user object and empty reactions array for consistency with REST API.
+// buildChatMessage constructs a chat_message broadcast envelope, with the role in
+// the user object and an empty reactions array to match the REST API.
 func buildChatMessage(a chatMessageArgs) []byte {
 	attachments := a.Attachments
 	if attachments == nil {

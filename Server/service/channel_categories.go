@@ -9,18 +9,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Channel categories ────────────────────────────────────────────
-//
-// A category is a row with an id, a name and a position (migration 072).
-// Rename, reorder and delete each change the category fields of every channel
-// in the touched categories, so each returns the channels that changed and the
-// caller re-broadcasts channel_update for them before telling managers the new
-// list (channel_categories).
+// Channel categories: a category is a row with an id, a name and a position
+// (migration 072). Rename, reorder and delete change the category fields of every
+// channel in the touched categories, so each returns the changed channels for the
+// caller to re-broadcast as channel_update before telling managers the new list
+// (channel_categories).
 
-// CategoryStore is the persistence slice behind the category operations.
-// *db.DB satisfies it; a Store that does not leaves them answering
-// ErrInternal. It sits beside Store rather than on it because Store's surface
-// is ratcheted (datastore_ratchet_test.go).
+// CategoryStore is the persistence behind the category operations. *db.DB
+// satisfies it; a Store that does not makes them answer ErrInternal. Kept beside
+// Store because Store's surface is ratcheted (datastore_ratchet_test.go).
 type CategoryStore interface {
 	ListChannelCategories(ctx context.Context) ([]db.ChannelCategory, error)
 	GetChannelCategory(ctx context.Context, id int64) (*db.ChannelCategory, error)
@@ -321,11 +318,9 @@ func (s *ChannelService) resolveCategoryTarget(ctx context.Context, categoryID i
 
 // auditCreatedCategory covers a category a channel write created through the
 // legacy category string, which bypassed the category routes: it writes the
-// category_create audit row those routes would have and returns the fresh
-// category list for the caller to broadcast to managers. It returns nil when
-// created is 0 (no category was made). The channel write already committed,
-// so a failure here is logged and the list is dropped rather than failing the
-// request.
+// category_create audit row those routes would have and returns the fresh list for
+// managers, or nil when created is 0. The channel write already committed, so a
+// failure here is logged and the list dropped rather than failing the request.
 func (s *ChannelService) auditCreatedCategory(tail context.Context, actorID, created int64) []db.ChannelCategory {
 	if created == 0 || s.cats == nil {
 		return nil

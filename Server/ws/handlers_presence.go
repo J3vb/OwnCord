@@ -11,22 +11,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// channel_focus and mark_read each get their own 5/s budget under this same
-// limit/window even though both run the identical HandleChannelFocus service
-// call. They used to share one auth.Key("focus", ...) budget, which let a
-// "Mark All as Read" burst (one mark_read per badged channel) exhaust the
-// window and starve the next legitimate channel_focus — leaving the
-// connection subscribed to the previous channel's pub/sub topic with no
-// error surfaced to the client. A channel_focus that does exceed its own
-// budget is deferred, not dropped: the latest one is applied once the window
-// frees (see focus_defer.go).
+// channel_focus and mark_read each get their own 5/s budget under this limit/window
+// though both run the same HandleChannelFocus service call. A shared budget let a
+// "Mark All as Read" burst (one mark_read per badged channel) exhaust the window
+// and starve the next channel_focus, leaving the connection subscribed to the
+// previous channel's topic with no error. A channel_focus over its own budget is
+// deferred, not dropped: the latest is applied once the window frees (focus_defer.go).
 const (
 	focusRateLimit  = 5
 	focusRateWindow = time.Second
 )
 
-// registerPresenceHandlers registers presence, typing, and channel focus handlers.
-// All are V2 handlers.
+// registerPresenceHandlers registers the presence, typing and channel focus handlers.
 func registerPresenceHandlers(r *HandlerRegistry, deps PresenceDeps) {
 	r.RegisterV2(MsgTypeTypingStart, handleTypingV2, deps)
 	r.RegisterV2(MsgTypePresenceUpdate, handlePresenceV2, deps)
@@ -37,9 +33,9 @@ func registerPresenceHandlers(r *HandlerRegistry, deps PresenceDeps) {
 	r.RegisterV2(MsgTypeMarkUnread, handleMarkUnreadV2, deps)
 }
 
-// handleTypingV2 is the V2 handler for typing_start messages.
-// It validates the channel, checks permissions, and returns events to broadcast
-// the typing indicator to channel members (excluding the sender).
+// handleTypingV2 handles typing_start: it validates the channel and permissions
+// and returns events that broadcast the indicator to channel members, excluding the
+// sender.
 func handleTypingV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	typingCmd := cmd.(TypingStartCmd)
@@ -54,11 +50,10 @@ func handleTypingV2(ctx context.Context, cmd Command, info ClientInfo, deps any)
 	payload := buildTypingMsg(channelID, userID, info.Username)
 
 	if ch.Type == "dm" {
-		// the same message-request-aware audience every other DM frame
-		// path uses (MessageService.DMAudience), so an untrusted recipient of
-		// a held first message hears no typing indicator either. Falls back
-		// to the unfiltered participant list when MessageSvc was not wired
-		// (a test built without it), matching DMAudience's own
+		// The same message-request-aware audience every other DM frame path uses
+		// (MessageService.DMAudience), so an untrusted recipient of a held first message
+		// hears no typing indicator either. Falls back to the unfiltered participant list
+		// when MessageSvc is not wired (a test fixture), matching DMAudience's own
 		// nil-messageRequests posture.
 		var (
 			participantIDs []int64
@@ -96,8 +91,8 @@ func handleTypingV2(ctx context.Context, cmd Command, info ClientInfo, deps any)
 	}
 }
 
-// handlePresenceV2 is the V2 handler for presence_update messages.
-// It validates the status, updates the DB, and broadcasts to all clients.
+// handlePresenceV2 handles presence_update: it validates the status, updates the DB
+// and broadcasts to all clients.
 func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	presenceCmd := cmd.(PresenceUpdateCmd)
@@ -109,39 +104,34 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
-	// The text may predate its own clear (a bare flip reads the stored row),
-	// so it is published only while its expiry has not passed. The live
-	// presence is stored before the events are emitted (handleMessageApply),
-	// so CustomStatusExpired either finds this tag and clears it, or finds a
-	// newer one and leaves it.
+	// The text may predate its own clear (a bare flip reads the stored row), so it is
+	// published only while its expiry has not passed. The live presence is stored before
+	// the events are emitted (handleMessageApply), so CustomStatusExpired either finds
+	// this tag and clears it, or finds a newer one and leaves it.
 	customStatus := visibleCustomStatus(res.CustomStatus, res.ExpiresAt, time.Now())
 	live := &livePresence{status: status, customStatus: customStatus}
 	if customStatus != nil {
 		live.customStatusExpiresAt = res.ExpiresAt
 	}
-	// The game and the song follow the connection, not the status: the frame
-	// carries them.
+	// The game and the song follow the connection, not the status: the frame carries them.
 	return Result{Events: presenceEvents(userID, status, customStatus, info.Activity, info.Listening), SetPresence: live}
 }
 
-// handleChannelFocusV2 is the V2 handler for channel_focus messages.
-// It validates permissions, signals the client's focused channel via SetChannelID,
-// and, unless the frame said read:false, marks the channel as read. A read:false
-// focus admits and subscribes only: it writes no read state and tells the
-// activity coalescer nothing.
+// handleChannelFocusV2 handles channel_focus: it validates permissions, signals the
+// focused channel via SetChannelID and, unless the frame said read:false, marks the
+// channel read. A read:false focus admits and subscribes only: it writes no read
+// state and tells the activity coalescer nothing.
 func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	focusCmd := cmd.(ChannelFocusCmd)
 	chID := focusCmd.ChannelID
 
-	// Every frame drives an unmetered SQLite write (UpdateReadState) plus
-	// perm checks and pubsub churn, so focus is metered on its own key —
-	// mark_read runs the identical service call but must not be able to
-	// spend this budget (see handleMarkReadV2). A refused frame is deferred
-	// rather than dropped: dropping it would leave a fast channel switcher on
-	// a channel the server never subscribed them to, so the applier remembers
-	// the latest refused channel, and whether it marks read, and applies it
-	// once the window frees.
+	// Every frame drives an unmetered SQLite write (UpdateReadState) plus perm checks
+	// and pubsub churn, so focus is metered on its own key; mark_read runs the same
+	// service call but must not spend this budget. A refused frame is deferred, not
+	// dropped, which would leave a fast channel switcher on a channel the server never
+	// subscribed them to: the applier remembers the latest refused channel, and whether
+	// it marks read, and applies it once the window frees.
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("focus", info.UserID), focusRateLimit, focusRateWindow) {
 		return Result{DeferChannelFocus: &chID, DeferChannelFocusNoRead: focusCmd.NoRead}
 	}
@@ -168,31 +158,26 @@ func handleChannelFocusV2(ctx context.Context, cmd Command, info ClientInfo, dep
 // markReadNoMessageSvcWarn limits the no-MessageSvc notice to one line.
 var markReadNoMessageSvcWarn sync.Once
 
-// handleMarkReadV2 is the V2 handler for mark_read messages. It runs the same
-// access check as channel_focus and moves the read pointer, but deliberately
-// leaves SetChannelID unset: marking a channel read from its context menu must
-// not move the connection's focus off the channel the user is actually looking
-// at (which would misroute typing/read bookkeeping for the visible channel).
-// Without message_id it reads up to the channel's latest message; with one it
-// moves the pointer forward only. Either way the caller gets a read_state
-// frame (sent by MoveReadPointer under the mention lock), and the coalescer is
-// told the pointer the database returned.
+// handleMarkReadV2 handles mark_read: the same access check as channel_focus, then
+// it moves the read pointer, deliberately leaving SetChannelID unset so marking a
+// channel read from its context menu does not move the connection's focus off the
+// channel the user is looking at. Without message_id it reads up to the latest
+// message; with one it moves the pointer forward only. The caller gets a read_state
+// frame (sent by MoveReadPointer under the mention lock), and the coalescer is told
+// the pointer the database returned.
 func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	markCmd := cmd.(MarkReadCmd)
 
-	// Own budget, separate from channel_focus: a "Mark All as Read" burst
-	// (one mark_read per badged channel) must not starve a legitimate
-	// channel_focus that shares the same 5/s window — that silently leaves
-	// the connection subscribed to the old channel's pub/sub topic.
+	// Own budget, separate from channel_focus: a "Mark All as Read" burst must not
+	// starve a channel_focus sharing the same window.
 	if d.Limiter != nil && !d.Limiter.Allow(auth.Key("markread", info.UserID), focusRateLimit, focusRateWindow) {
 		return Result{}
 	}
 
 	if d.MessageSvc == nil {
-		// No message service wired. Production always wires one; some test
-		// fixtures build PresenceDeps without it, so keep the pre-pointer
-		// path and say so once.
+		// No message service wired: production always wires one, but some test fixtures
+		// build PresenceDeps without it, so keep the pre-pointer path and say so once.
 		markReadNoMessageSvcWarn.Do(func() {
 			slog.Info("mark_read: PresenceDeps has no MessageSvc, using the pre-pointer path (no read_state frame)")
 		})
@@ -220,9 +205,10 @@ func handleMarkReadV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 	return Result{Events: []Event{channelReadEvt(info.UserID, markCmd.ChannelID, rs.LastReadMessageID)}}
 }
 
-// dropUnlessDeadline is the result of a read-state command that ignores its
-// failure: an empty Result, except when the frame deadline ctx cut the work
-// short, which is carried as the error so the client is told REQUEST_TIMEOUT
+// dropUnlessDeadline is the result of a read-state command that ignores its failure:
+// an empty Result, except when the frame deadline cut the work short, which is
+// carried as the error so the client gets REQUEST_TIMEOUT instead of believing the
+// read pointer moved.
 // rather than left to believe the read pointer moved.
 func dropUnlessDeadline(ctx context.Context, err error) Result {
 	if commandDeadlineExceeded(ctx, err) {
@@ -231,12 +217,12 @@ func dropUnlessDeadline(ctx context.Context, err error) Result {
 	return Result{}
 }
 
-// handleMarkUnreadV2 is the V2 handler for mark_unread messages: it moves the
-// caller's read pointer to just before message_id. Unlike mark_read it answers
-// every refusal, because an explicit click must not silently do nothing: over
-// its own 5/s budget it is RATE_LIMITED, a message that is not a live message
-// of the channel is NOT_FOUND, lost access is FORBIDDEN. On success the caller
-// gets a read_state frame and the coalescer's mark drops to the new pointer.
+// handleMarkUnreadV2 handles mark_unread: it moves the caller's read pointer to just
+// before message_id. Unlike mark_read it answers every refusal, because an explicit
+// click must not silently do nothing: over its own 5/s budget it is RATE_LIMITED, a
+// message that is not a live message of the channel is NOT_FOUND, lost access is
+// FORBIDDEN. On success the caller gets a read_state frame and the coalescer's mark
+// drops to the new pointer.
 func handleMarkUnreadV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	unreadCmd := cmd.(MarkUnreadCmd)

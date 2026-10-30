@@ -17,9 +17,8 @@ import (
 type UserService struct {
 	st           Store
 	profileLocks keyedMutex
-	// batch, when set, queues the connection stamps instead of writing them
-	// (P5-S07). nil writes each at once, which is what tests and the admin
-	// panel's own instance get.
+	// batch, when set, queues the connection stamps instead of writing them; nil
+	// writes each at once (tests, the admin panel's instance).
 	batch *ConnWrites
 	// welcome greets an approved applicant; nil greets nobody.
 	welcome *WelcomeService
@@ -30,20 +29,16 @@ func NewUserService(st Store) *UserService {
 	return &UserService{st: st}
 }
 
-// keyedMutex hands out a per-key lock so unrelated keys never contend, while
-// operations on the same key serialize. UpdateProfile uses one keyed by user
-// ID: it is an unsynchronized read-merge-write (GetUserByID, merge the
-// patch, UpdateUserProfile), and PATCH /users/me can race POST
-// /users/me/avatar for the same user — without serialization, the loser's
-// write commits columns merged against a pre-race snapshot, silently
-// reverting whatever the winner just changed. Entries are never removed;
-// the key space is bounded by distinct user IDs, not by request rate.
+// keyedMutex hands out a per-key lock so unrelated keys never contend. Keyed by
+// user ID for UpdateProfile's read-merge-write: PATCH /users/me can race POST
+// /users/me/avatar, and the loser would commit columns merged against a pre-race
+// snapshot, reverting the winner. Entries are never removed; the key space is
+// bounded by distinct user IDs.
 type keyedMutex struct {
 	mu    syncutil.Mutex
 	locks map[int64]*syncutil.Mutex
 }
 
-// lock acquires the per-key lock and returns a func to release it.
 func (k *keyedMutex) lock(key int64) func() {
 	k.mu.Lock()
 	if k.locks == nil {
@@ -60,35 +55,28 @@ func (k *keyedMutex) lock(key int64) func() {
 	return l.Unlock
 }
 
-// AvatarFileURL is the server-relative path an uploaded avatar is served from.
-// It is the ordinary attachment route: the upload handler writes an attachment
-// row and points users.avatar here, and handleServeFile admits an unlinked
-// attachment that some user's avatar names. Defined once because three places
-// have to agree on the spelling — the upload response, the stored column, and
-// the file route's authorization probe, which matches the column *by string*.
+// AvatarFileURL is the server-relative path an uploaded avatar is served from:
+// the ordinary attachment route, where handleServeFile admits an unlinked
+// attachment that some user's avatar names. Defined once because the upload
+// response, the stored column and the file route's authorization probe (which
+// matches the column by string) must agree on the spelling.
 func AvatarFileURL(fileID string) string {
 	return "/api/v1/files/" + fileID
 }
 
-// ─── Profile field bounds ───────────────────────────────────────────────────
-
 const (
-	// MaxDisplayNameLen bounds users.display_name. 32 matches the username
-	// cap: a nickname that could not fit where a username fits would render
-	// clipped in exactly the places the fallback puts the username.
+	// MaxDisplayNameLen bounds users.display_name; 32 matches the username cap so a
+	// nickname fits wherever the fallback puts the username.
 	MaxDisplayNameLen = 32
-	// MaxAboutLen bounds users.about — long enough for a paragraph, short
-	// enough that the popup's two-line section stays a section.
+	// MaxAboutLen bounds users.about.
 	MaxAboutLen = 300
-	// MaxCustomStatusLen bounds users.custom_status: one line under a name.
+	// MaxCustomStatusLen bounds users.custom_status.
 	MaxCustomStatusLen = 128
 )
 
-// ProfilePatch is a partial update to a user's profile. A nil field means
-// "leave unchanged"; a non-nil pointer to the empty string clears the nullable
-// fields (display name, about). The free-text fields are sanitized and
-// length-checked *here* rather than in the handler, so every transport that
-// can reach a profile gets the same rules.
+// ProfilePatch is a partial update. A nil field means "leave unchanged"; a
+// pointer to "" clears the nullable fields. Free text is sanitized and
+// length-checked here so every transport gets the same rules.
 type ProfilePatch struct {
 	Username    string
 	Avatar      *string
@@ -99,8 +87,6 @@ type ProfilePatch struct {
 	BannerColor *string
 }
 
-// nullable turns a sanitized, trimmed patch value into the column value:
-// empty string clears the column, anything else is stored as-is.
 func nullable(v string) *string {
 	if v == "" {
 		return nil
@@ -108,36 +94,22 @@ func nullable(v string) *string {
 	return &v
 }
 
-// cleanText strips HTML and trims a free-text profile field. Both the profile
-// PATCH and the presence path run values through it before any bound check, so
-// a payload cannot buy length with markup that is about to be stripped anyway.
-//
-// Uses sanitizeToFixpoint (message.go), not a bare sanitizer.Sanitize call:
-// display name, about, custom status, and DM group names all render through
-// the client's textContent-only path (same as message content), so a plain
-// sanitizer.Sanitize call would persist and display literal &#39;/&gt;/&amp;
-// entities for ordinary punctuation instead of the characters typed — the
-// exact bug sanitizeToFixpoint fixes for message content.
+// cleanText strips HTML and trims a free-text profile field; callers run it
+// before any bound check so markup cannot buy length. It uses
+// sanitizeToFixpoint (message.go) because these fields render through the
+// client's textContent-only path, where a single sanitizer pass would show
+// literal &#39;/&gt;/&amp; entities for ordinary punctuation.
 func cleanText(v string) string {
 	return strings.TrimSpace(sanitizeToFixpoint(v))
 }
 
-// cleanTextBounded is cleanText plus the raw-byte guard
-// for UpdateProfile's DisplayName/About fields, generalized for every other
-// free-text field that runs through cleanText: SetCustomStatus,
-// HandlePresenceUpdate's custom_status, and group DM names.
-//
-// cleanText's sanitizeToFixpoint pass is quadratic in input length, so a
-// bound applied only to its *output* (a plain rune-count check on the
-// cleaned string) still lets an adversarial nested-entity payload pay the
-// full sanitize cost first — it can even sanitize down to something well
-// under maxRunes and be silently accepted, having spent seconds of CPU to
-// get there. The byte-length pre-check runs before cleanText ever does, on
-// the untouched input, so the cost of rejecting an oversized value is
-// O(len(v)) instead of the sanitizer's cost. *4 is deliberately looser than
-// maxRunes — it exists only to keep the sanitizer from ever seeing a
-// pathological payload, not to duplicate the real (rune-count) bound, which
-// still runs afterward on the cleaned, trimmed value.
+// cleanTextBounded is cleanText plus a raw-byte guard for every free-text field
+// that runs through cleanText. sanitizeToFixpoint is quadratic in input length,
+// so bounding only its output lets a nested-entity payload cost seconds of CPU
+// (and even sanitize under maxRunes and be accepted). The byte pre-check on the
+// untouched input makes rejection O(len(v)). *4 is deliberately looser than
+// maxRunes: it only keeps pathological payloads away from the sanitizer, and the
+// real rune-count bound still runs on the cleaned value.
 func cleanTextBounded(v string, maxRunes int, fieldName string) (string, error) {
 	if len(v) > maxRunes*4 {
 		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
@@ -149,8 +121,6 @@ func cleanTextBounded(v string, maxRunes int, fieldName string) (string, error) 
 	return cleaned, nil
 }
 
-// resolveOptional picks the column value for one nullable text field: the
-// sanitized patch when it was supplied, the existing row otherwise.
 func resolveOptional(patch *string, existing *string) *string {
 	if patch == nil {
 		return existing
@@ -158,31 +128,21 @@ func resolveOptional(patch *string, existing *string) *string {
 	return nullable(cleanText(*patch))
 }
 
-// UpdateProfile applies a ProfilePatch: username and avatar as before, plus
-// the nullable display name and about text. Returns the updated user for
-// response building.
+// UpdateProfile applies a ProfilePatch and returns the updated user.
 func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch ProfilePatch) (*db.User, error) {
 	ctx, done := traceCall(ctx, "service/user", "UserService.UpdateProfile",
 		telemetry.Int64("user_id", userID),
 	)
 	defer done()
 
-	// Bound the raw bytes before either reaches cleanText
-	// (sanitizeToFixpoint) below — its cost is quadratic in input length,
-	// and an adversarial nested-entity payload can sanitize down to
-	// something well under the rune-count bound while still costing seconds
-	// of CPU to get there, so the rune-count check alone never rejects it
-	// early. This is the same cheap byte-length pre-check the handler uses
-	// for username/avatar (profile_handler.go); *4 still admits any
-	// legitimate UTF-8 value at the rune bound. UpdateProfile is the one
-	// function every transport reaches (see ProfilePatch's doc comment), so
-	// the guard belongs here rather than only in the REST handler.
+	// Bound the raw bytes before cleanText: see cleanTextBounded for why. *4 still
+	// admits any legitimate UTF-8 value at the rune bound. The guard lives here, not
+	// only in the REST handler, because every transport reaches UpdateProfile.
 	if err := checkProfileByteBounds(patch); err != nil {
 		return nil, err
 	}
 
-	// Display name is single-line visible text: collapse, character-check and
-	// cap it the same way the custom status is (cleanVisibleBounded).
+	// Display name is single-line visible text, capped like the custom status.
 	var cleanDisplayName *string
 	if patch.DisplayName != nil {
 		cleaned, err := cleanVisibleBounded(*patch.DisplayName, MaxDisplayNameLen, "display_name")
@@ -200,14 +160,11 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		return nil, err
 	}
 
-	// The update writes every column, so a partial patch has to be merged
-	// against the current row first — otherwise setting only a display name
-	// would silently clear the about text. That read-merge-write must be
-	// serialized per user: PATCH /users/me and POST /users/me/avatar both
-	// land here for the same account, and without a lock the second call's
-	// read can land between the first call's read and write, so its merge
-	// (built from the pre-race row) silently reverts the first call's change
-	// when it writes.
+	// The update writes every column, so a partial patch is merged against the
+	// current row (else a display-name-only patch would clear about). That
+	// read-merge-write is serialized per user: PATCH /users/me and POST
+	// /users/me/avatar race for one account, and an interleaved read would make the
+	// second merge revert the first call's change.
 	unlock := s.profileLocks.lock(userID)
 	defer unlock()
 
@@ -218,13 +175,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if err := s.checkTimedOutProfileEdit(ctx, userID, current, cleanDisplayName, patch.Username); err != nil {
 		return nil, err
 	}
-	// An empty Username means "unspecified", the same as a nil
-	// DisplayName/About pointer — merged against the current row rather
-	// than written verbatim. This is what lets an avatar-only caller
-	// (handleUploadAvatar) leave username alone without handing over a
-	// snapshot that could be stale by the time this call lands: PATCH
-	// /users/me always validates and rejects an empty username before
-	// calling in, so "" never reaches here as a real rename request.
+	// An empty Username means "unspecified", like a nil pointer. That lets the avatar
+	// upload leave username alone without a snapshot that could be stale; PATCH
+	// /users/me rejects an empty username before calling in.
 	username := patch.Username
 	if username == "" {
 		username = current.Username
@@ -246,26 +199,16 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		}
 		return nil, fmt.Errorf("%w: failed to update profile: %w", ErrInternal, err)
 	}
-	// This re-read, like the audit write below, must survive a request ctx
-	// canceled after the write above committed — otherwise a client that
-	// hangs up right after the commit turns a successful write into
-	// ErrInternal here, and the caller (handleUpdateProfile) never reaches
-	// broadcastUserUpdate: every other connected client is left showing the
-	// stale profile indefinitely even though the DB already has the new one.
+	// This re-read, like the audit write, must survive a request ctx canceled after
+	// the commit: otherwise a hang-up turns a successful write into ErrInternal,
+	// handleUpdateProfile never broadcasts, and other clients show the stale profile.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
-		// The write above already committed, so this re-read failing
-		// (SQLITE_BUSY, an I/O error, pool exhaustion — anything short of the
-		// context cancellation the comment above already covers) must not be
-		// reported as ErrInternal. A caller that treats any UpdateProfile
-		// error as "the write never landed" — handleUploadAvatar deletes the
-		// file it just stored on that assumption — would otherwise delete a
-		// file the committed avatar column now points at, permanently
-		// breaking it with no user_update ever broadcast. UpdateUserProfile
-		// only ever writes username/avatar/display_name/about and the
-		// banner, so merging those onto the pre-write snapshot (current) reconstructs the
-		// row that is now actually in the database without needing the read
-		// to succeed.
+		// The write committed, so a failing re-read (SQLITE_BUSY, I/O error, pool
+		// exhaustion) must not be ErrInternal: handleUploadAvatar treats any error as
+		// "the write never landed" and deletes the file the committed avatar now points
+		// at. UpdateUserProfile writes only username, avatar, display_name, about and the
+		// banner, so merging those onto the pre-write snapshot reconstructs the row.
 		slog.Error("UpdateProfile post-commit re-read failed; returning locally merged row",
 			"user_id", userID, "error", err)
 		merged := *current
@@ -283,10 +226,8 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	return user, nil
 }
 
-// SetCustomStatus stores (or clears, with an empty string) the user's custom
-// status line. It is the presence path's counterpart to UpdateProfile: the
-// value persists across reconnects and is cleared explicitly on logout, which
-// is why it is stored rather than held on the connection.
+// SetCustomStatus stores (or clears, with "") the custom status. It persists across
+// reconnects and is cleared on logout, so it is stored, not held on the connection.
 func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text string) error {
 	cleaned, err := cleanVisibleBounded(text, MaxCustomStatusLen, "custom_status")
 	if err != nil {
@@ -298,9 +239,8 @@ func (s *UserService) SetCustomStatus(ctx context.Context, userID int64, text st
 	return nil
 }
 
-// ClearCustomStatus wipes the custom status line. Called on logout: the text
-// is a "what I am doing right now" note, and leaving it standing after the
-// user signed out states something about them that is no longer true.
+// ClearCustomStatus wipes the custom status on logout: a "right now" note left
+// standing after sign-out would state something no longer true.
 func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error {
 	if err := s.st.UpdateUserCustomStatus(ctx, userID, nil); err != nil {
 		return fmt.Errorf("%w: failed to clear custom status: %w", ErrInternal, err)
@@ -308,19 +248,15 @@ func (s *UserService) ClearCustomStatus(ctx context.Context, userID int64) error
 	return nil
 }
 
-// UpdateIdentityKey publishes the user's long-term E2EE identity public key
-// (F3 voice E2EE TOFU). Last write wins; every write is audited so a key
-// rotation — which peers surface as a TOFU mismatch — leaves a trail.
-// Returns the updated user for response building.
+// UpdateIdentityKey publishes the user's E2EE identity public key (voice E2EE
+// TOFU). Last write wins; every write is audited so a rotation, which peers
+// surface as a TOFU mismatch, leaves a trail.
 func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key string) (*db.User, error) {
 	if err := s.st.UpdateUserIdentityKey(ctx, userID, &key); err != nil {
 		return nil, fmt.Errorf("%w: failed to update identity key: %w", ErrInternal, err)
 	}
-	// Detached for the same reason as UpdateProfile's post-commit re-read: a
-	// request ctx canceled right after the write above commits must not turn
-	// an already-successful key rotation into ErrInternal here, which would
-	// stop the caller from broadcasting the new key to peers relying on it
-	// for TOFU pinning.
+	// Detached like UpdateProfile's re-read: a canceled ctx must not turn a
+	// successful rotation into ErrInternal and stop the broadcast peers pin on.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch updated user: %w", ErrInternal, err)
@@ -330,12 +266,10 @@ func (s *UserService) UpdateIdentityKey(ctx context.Context, userID int64, key s
 	return user, nil
 }
 
-// ChangePasswordResult reports a completed password change. RevokeFailed is
-// set when the password committed but other sessions could not be revoked —
-// a partial success the caller must surface as a warning, never as a 5xx:
-// the old password is already unusable, so telling the user the change
-// "failed" walks them into retrying with a dead password and tripping the
-// password-confirm lockout.
+// ChangePasswordResult reports a completed password change. RevokeFailed means
+// the password committed but other sessions could not be revoked: surface it as a
+// warning, never a 5xx, since the old password is already dead and a "failed"
+// answer would walk the user into retrying with it and tripping the lockout.
 type ChangePasswordResult struct {
 	SessionsRevoked int64
 	RevokeFailed    bool
@@ -347,9 +281,8 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 		return ChangePasswordResult{}, fmt.Errorf("%w: failed to update password: %w", ErrInternal, err)
 	}
 
-	// The password is committed from here on: every path below reports
-	// success and writes the audit row — even if the request ctx has been
-	// canceled, revocation and audit are the security tail of the change.
+	// The password is committed: every path below reports success and audits, even
+	// on a canceled ctx, as revocation and audit are the security tail of the change.
 	tailCtx := context.WithoutCancel(ctx)
 
 	var res ChangePasswordResult
@@ -357,9 +290,8 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, newPassw
 	res.SessionsRevoked = revoked
 	if err != nil {
 		slog.Error("UserService.ChangePassword DeleteOtherSessions", "err", err, "user_id", userID)
-		// One bounded compensating retry: revocation is the security tail of
-		// the change and a single immediate retry covers transient write-lock
-		// contention. ponytail: one retry, add backoff only if logs show it.
+		// One immediate retry covers transient write-lock contention; add backoff only if
+		// logs show it.
 		if revokedRetry, retryErr := s.st.DeleteOtherSessions(tailCtx, userID, keepSessionID); retryErr == nil {
 			res.SessionsRevoked += revokedRetry
 		} else {
@@ -381,8 +313,8 @@ func (s *UserService) ListPendingRegistrations(ctx context.Context, limit, offse
 	return pending, nil
 }
 
-// ApproveRegistration unlocks an approval-mode application so the account
-// can sign in. ErrNotFound when the id is not a pending application.
+// ApproveRegistration unlocks an approval-mode application so the account can
+// sign in. ErrNotFound when the id is not pending.
 func (s *UserService) ApproveRegistration(ctx context.Context, actorID, userID int64) error {
 	if err := s.st.ApprovePendingUser(ctx, userID); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -392,14 +324,13 @@ func (s *UserService) ApproveRegistration(ctx context.Context, actorID, userID i
 	}
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_approve", "user", userID, "application approved")
 	slog.Info("registration approved", "actor_id", actorID, "user_id", userID)
-	// The account is usable now: greet it. Best effort, never fails the approval.
+	// The account is usable now: greet it, best effort.
 	s.welcome.Greet(ctx, userID)
 	return nil
 }
 
-// DenyRegistration refuses an approval-mode application: the row is
-// anonymised and locked for good and its username released. Only a row that
-// is still pending is touched; an approved account never goes through here.
+// DenyRegistration refuses an application: the row is anonymised, locked for
+// good and its username released. Only a pending row is touched.
 func (s *UserService) DenyRegistration(ctx context.Context, actorID, userID int64) error {
 	if err := s.st.DenyPendingUser(ctx, userID); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -421,12 +352,10 @@ func (s *UserService) ListSessions(ctx context.Context, userID int64) ([]db.Sess
 	return sessions, nil
 }
 
-// MarkSessionsSeen acknowledges the account's unseen logins from the
-// caller's session (the new-login signal): every other
-// session's flag clears; the caller's own stays, so the device that just
-// signed in never acknowledges itself. An API-token principal passes 0 and
-// acknowledges them all. Nothing security-sensitive changes, so no audit
-// row is written.
+// MarkSessionsSeen acknowledges the account's unseen logins: every other
+// session's flag clears, the caller's own stays so the new device never
+// acknowledges itself. An API-token principal passes 0 and acknowledges all. No
+// audit row; nothing security-sensitive changes.
 func (s *UserService) MarkSessionsSeen(ctx context.Context, userID, callerSessionID int64) error {
 	if _, err := s.st.MarkSessionsSeen(ctx, userID, callerSessionID); err != nil {
 		return fmt.Errorf("%w: failed to acknowledge sessions: %w", ErrInternal, err)
@@ -442,46 +371,35 @@ func (s *UserService) RevokeSession(ctx context.Context, userID, sessionID int64
 		}
 		return fmt.Errorf("%w: failed to revoke session: %w", ErrInternal, err)
 	}
-	// Audit rows must survive a request canceled after the delete committed.
+	// Audit rows must survive a request canceled after the commit.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke", "session", sessionID, "session revoked")
 	slog.Info("session revoked", "user_id", userID, "session_id", sessionID)
 	return nil
 }
 
-// RevokeAllSessions is sign-out-everywhere: every session of
-// the user goes, the caller's own included, and so does every API token, so
-// a stolen credential anywhere stops working now and the caller
-// re-authenticates. Returns how many sessions were revoked.
+// RevokeAllSessions is sign-out-everywhere: every session, the caller's included,
+// and every API token, so a stolen credential stops working now. Returns the
+// sessions revoked.
 func (s *UserService) RevokeAllSessions(ctx context.Context, userID int64) (int64, error) {
 	n, tokens, err := s.st.SignOutEverywhere(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("%w: failed to revoke sessions: %w", ErrInternal, err)
 	}
 	if n == 0 && tokens == 0 {
-		// Nothing changed, so there is nothing to audit:
-		// a repeated call cannot grow the audit log.
+		// Nothing changed, so nothing to audit; a repeat cannot grow the audit log.
 		slog.Debug("sign-out-everywhere found nothing to revoke", "user_id", userID)
 		return 0, nil
 	}
-	// Audit rows must survive a request canceled after the delete committed.
-	// The row names the account and the counts, never a token or a device.
+	// Audit rows must survive a request canceled after the commit. The row names the
+	// account and counts, never a token or device.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "session_revoke_all", "user", userID,
 		fmt.Sprintf("signed out everywhere (%d sessions, %d API tokens revoked)", n, tokens))
 	slog.Info("all sessions revoked", "user_id", userID, "sessions_revoked", n, "api_tokens_revoked", tokens)
 	return n, nil
 }
 
-// ─── Admin-panel reads ────────────────────────────────────
-//
-// The admin panel's user section reads through these rather than the handle:
-// the server-stats tile, the paginated member table, and the single-user
-// lookups the PATCH flow does before and after its mutations. The mutations
-// themselves already belong to ModerationService and RoleService, so what is
-// left here is exactly the reads.
-
-// ServerStats returns the counters the admin dashboard renders. The live
-// connection count is not among them — that is hub state, not a row, and the
-// caller stamps it after this returns.
+// ServerStats returns the admin dashboard counters. The live connection count is
+// hub state; the caller stamps it afterwards.
 func (s *UserService) ServerStats(ctx context.Context) (*db.ServerStats, error) {
 	stats, err := s.st.GetServerStats(ctx)
 	if err != nil {
@@ -490,10 +408,8 @@ func (s *UserService) ServerStats(ctx context.Context) (*db.ServerStats, error) 
 	return stats, nil
 }
 
-// ListAll returns one page of the users matching f with their role names, in
-// id order. The caller bounds limit and offset; this does not re-bound them, so
-// an unbounded caller stays the caller's bug rather than becoming a silent
-// truncation here.
+// ListAll returns one page of users matching f with role names, in id order. The
+// caller bounds limit and offset; this does not re-bound them.
 func (s *UserService) ListAll(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error) {
 	users, err := s.st.ListAllUsers(ctx, f, limit, offset)
 	if err != nil {
@@ -503,9 +419,7 @@ func (s *UserService) ListAll(ctx context.Context, f db.UserListFilter, limit, o
 }
 
 // Get resolves one user, reporting a missing row as ErrNotFound rather than
-// (nil, nil) — every admin caller has to distinguish "no such user" (404) from
-// "the lookup failed" (500), and the raw wrapper's nil-nil made that the
-// caller's job to remember.
+// (nil, nil), so callers can tell 404 from 500.
 func (s *UserService) Get(ctx context.Context, id int64) (*db.User, error) {
 	user, err := s.st.GetUserByID(ctx, id)
 	if err != nil {
@@ -517,12 +431,9 @@ func (s *UserService) Get(ctx context.Context, id int64) (*db.User, error) {
 	return user, nil
 }
 
-// GetWithRoleName is Get plus the display name of the user's role, which the
-// admin user response carries. The role name is best-effort on purpose: a user
-// whose role row is missing or unreadable is still a user the panel must be
-// able to show and act on, so the name comes back empty rather than failing
-// the whole read — the same posture the response builder had when it made this
-// lookup itself.
+// GetWithRoleName is Get plus the user's role display name. The name is
+// best-effort: a missing or unreadable role row comes back as "" rather than
+// failing a user the panel must still be able to show.
 func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, string, error) {
 	user, err := s.Get(ctx, id)
 	if err != nil {
@@ -535,33 +446,20 @@ func (s *UserService) GetWithRoleName(ctx context.Context, id int64) (*db.User, 
 	return user, roleName, nil
 }
 
-// ── Connection lifecycle stamps ────────────────────
+// StampConnect records the status this session comes online as and returns it. It
+// is db.ConnectStatus(saved), not a flat "online", which made a saved Do Not
+// Disturb flash back to online on every reconnect: idle/dnd/invisible survive,
+// anything else becomes online. It writes even when unchanged, to refresh
+// last_seen.
 //
-// The two writes a WebSocket session makes about itself: the status it comes
-// online as, and the offline stamp when its last pump exits. They are a pair
-// on purpose — the second is only correct because of what the first chose to
-// preserve.
-
-// StampConnect records the status this session comes online as and returns it.
-//
-// It is db.ConnectStatus(saved), not a flat "online": stamping online on every
-// connect is what made a saved Do Not Disturb — and, before this phase, an
-// "appear offline" — flash back to online on every reconnect, with the client
-// racing to re-assert its choice afterwards. idle/dnd/invisible are deliberate
-// choices and survive; anything else becomes online. The write still happens
-// when the status is unchanged, because it also refreshes last_seen.
-//
-// With a batch installed the write is queued and lands on the next flush, at
-// most StampFlushInterval later. The member list does not wait on it (the hub
-// overlays each connection's live status, ws presentableMembers, and @here
-// and DM payloads read the same live status); a reader of the row itself may
-// see the pre-connect value for that long.
-// The SQL re-derives the status from the column at write time, which keeps
-// a chosen idle/dnd/invisible committed meanwhile, but it would turn a legacy
-// "offline" choice into online, so a committed presence_update drops the
-// pending stamp (ChannelService.HandlePresenceUpdate). A flush already in
-// flight when the presence_update commits can still land once, affecting
-// only that legacy "offline" value.
+// With a batch the write is queued and lands within StampFlushInterval. The member
+// list does not wait on it (the hub overlays each connection's live status), but
+// a reader of the row itself may see the pre-connect value that long. The SQL
+// re-derives the status at write time, which keeps a chosen idle/dnd/invisible
+// committed meanwhile but would turn a legacy "offline" into online, so a
+// committed presence_update drops the pending stamp
+// (ChannelService.HandlePresenceUpdate); a flush already in flight can still land
+// once, affecting only that legacy value.
 //
 // The caller must not cache the returned status unless the error is nil.
 func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatus string) (string, error) {
@@ -576,14 +474,11 @@ func (s *UserService) StampConnect(ctx context.Context, userID int64, savedStatu
 	return status, nil
 }
 
-// StampDisconnect records that the user has no live connection left.
-//
-// It clears only the non-choice "online" and refreshes last_seen; a chosen
-// idle/dnd/invisible is left standing, which is what StampConnect reads back
-// on the next connect. The stale-choice that leaves behind is handled at read
-// time instead: a member with no live connection renders offline whatever the
-// column says. A batched stamp lost to a crash leaves "online" behind, which
-// the boot-time ResetAllUserStatuses clears.
+// StampDisconnect records that the user has no live connection left. It clears
+// only the non-choice "online" and refreshes last_seen; a chosen idle/dnd/invisible
+// stays for StampConnect to read back. The stale choice is handled at read time:
+// a member with no live connection renders offline. A batched stamp lost to a
+// crash leaves "online", which the boot-time ResetAllUserStatuses clears.
 func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
 	if s.batch != nil {
 		s.batch.queueStamp(userID, false)
@@ -595,6 +490,6 @@ func (s *UserService) StampDisconnect(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// SetConnWrites installs the batch the connection stamps queue into. Call
-// once at startup, before the service is shared.
+// SetConnWrites installs the batch the connection stamps queue into. Call once at
+// startup, before the service is shared.
 func (s *UserService) SetConnWrites(w *ConnWrites) { s.batch = w }

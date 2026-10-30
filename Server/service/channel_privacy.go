@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ChannelPrivacyStore is the reads the channel-level private flag (3D-6) makes.
+// ChannelPrivacyStore is the reads the channel-level private flag makes.
 type ChannelPrivacyStore interface {
 	GetDefaultRole(ctx context.Context) (*db.Role, error)
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
@@ -37,10 +37,10 @@ type ChannelPrivacySnapshot struct {
 	overrides    map[int64]db.ChannelOverride
 }
 
-// PrivateOf reports whether the channel row is private in this snapshot. A
-// thread has no override of its own, so it is judged on its parent's.
-// It is the only exported verdict: the snapshot keys overrides by parent and
-// ordinary channel ids, so a bare id could be a thread and be judged public.
+// PrivateOf reports whether the channel row is private in this snapshot; a thread
+// is judged on its parent's override. It is the only exported verdict: the snapshot
+// keys overrides by parent and ordinary channel ids, so a bare id could be a thread
+// and be judged public.
 func (s ChannelPrivacySnapshot) PrivateOf(ch *db.Channel) bool {
 	return s.private(ch.AuthorityID())
 }

@@ -14,15 +14,12 @@ const (
 	maxTimeoutDuration = 28 * 24 * time.Hour
 )
 
-// TimeoutDurationFromSeconds bounds a raw client-supplied `duration_seconds`
-// before converting it to a Duration. The API handlers used to multiply by
-// time.Second first and let Timeout's range check inspect the product; a
-// Duration is an int64 nanosecond count, so that multiply wraps modulo 2^64
-// and a value like 36028797018967568 (3600 + 2^55) collapses to exactly one
-// hour, passing the 1-minute..28-day gate as a request the caller never made.
-// Checking the seconds first refuses it as bad input, and one
-// helper serves both entry points (the direct timeout route and ActOnReport)
-// so the check cannot drift between them.
+// TimeoutDurationFromSeconds bounds a raw client `duration_seconds` before
+// converting to a Duration. Multiplying by time.Second first and range-checking
+// the product wraps modulo 2^64 (36028797018967568 = 3600 + 2^55 collapses to
+// exactly one hour), passing the 1-minute..28-day gate as a request the caller
+// never made. Checking the seconds first refuses it, and one helper serves both
+// entry points (the timeout route and ActOnReport) so the check cannot drift.
 func TimeoutDurationFromSeconds(seconds int64) (time.Duration, error) {
 	if seconds < int64(minTimeoutDuration/time.Second) || seconds > int64(maxTimeoutDuration/time.Second) {
 		return 0, fmt.Errorf("%w: duration must be between 1 minute and 28 days", ErrBadRequest)
@@ -30,11 +27,10 @@ func TimeoutDurationFromSeconds(seconds int64) (time.Duration, error) {
 	return time.Duration(seconds) * time.Second, nil
 }
 
-// refreshTimeoutMirror reloads PermissionService's active-timeout mirror
-// after a committed timeout write (P5-O02), before the write returns, so the
-// next send sees it. Detached: the write already committed. A failed reload
-// drops the mirror, which Subject then treats as fail-closed, so the error
-// is only logged here.
+// refreshTimeoutMirror reloads PermissionService's active-timeout mirror after a
+// committed timeout write, before the write returns, so the next send sees it.
+// Detached: the write already committed. A failed reload drops the mirror, which
+// Subject treats as fail-closed, so the error is only logged.
 func (s *ModerationService) refreshTimeoutMirror(ctx context.Context) {
 	if s.perms == nil {
 		return

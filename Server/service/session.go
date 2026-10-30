@@ -9,26 +9,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// SessionService answers one question for every transport: who does this
-// bearer token authenticate, and is that still true?
-//
-// It is deliberately separate from AuthService, which owns the interactive
-// flows (login, 2FA enrolment, account deletion) and therefore holds
-// process-singleton state — the rate limiter's lockouts, the partial-auth and
-// pending-TOTP stores, the TOTP key, the broadcaster that tells connected
-// clients an account is gone. Resolution needs none of that: it reads rows.
-// Keeping them apart is what lets the WebSocket hub hold this one, which it
-// could not do with AuthService — the hub IS AuthService's broadcaster, so
-// depending on it would close a construction cycle.
+// SessionService answers, for every transport, who a bearer token authenticates
+// and whether that is still true. It is separate from AuthService (interactive
+// flows with process-singleton state: lockouts, partial-auth and pending-TOTP
+// stores, the TOTP key, the broadcaster) because resolution only reads rows, and
+// because the WebSocket hub holds this one: the hub IS AuthService's
+// broadcaster, so depending on it would close a construction cycle.
 type SessionService struct {
 	st Store
-	// keys stores a session's device identity key. It is a slice interface
-	// rather than a Store method so the Store surface does not grow
-	// (datastore_ratchet_test.go); nil when st does not provide it.
+	// keys stores a session's device identity key; a slice interface so the Store
+	// surface does not grow (datastore_ratchet_test.go). Nil when st lacks it.
 	keys SessionKeyStore
-	// batch, when set, takes TouchSession's write off the writer's hot path
-	// (P5-S07). nil writes each touch at once, which is what tests and the
-	// admin panel's own instance get.
+	// batch, when set, takes TouchSession's write off the writer's hot path; nil
+	// writes at once (tests, the admin panel's instance).
 	batch *ConnWrites
 }
 
@@ -43,11 +36,10 @@ type SessionKeyStore interface {
 	SetSessionIdentityKey(ctx context.Context, tokenHash, key string) error
 }
 
-// RecordSessionIdentityKey stores the device identity public key a WebSocket
-// auth frame carried on the session it authenticated (voice E2EE, key per
-// device). The caller has already validated key with ValidateIdentityKey. A
-// failure is returned wrapped in ErrInternal; the hub logs it and carries on,
-// because the key also rides on the live connection and a missed write never
+// RecordSessionIdentityKey stores the device identity public key a WebSocket auth
+// frame carried (voice E2EE, key per device) on its session; the caller already
+// ran ValidateIdentityKey. A failure is ErrInternal-wrapped and the hub just
+// logs it: the key also rides the live connection, so a missed write never
 // blocks sign-in.
 func (s *SessionService) RecordSessionIdentityKey(ctx context.Context, tokenHash, key string) error {
 	if s.keys == nil {
@@ -59,19 +51,12 @@ func (s *SessionService) RecordSessionIdentityKey(ctx context.Context, tokenHash
 	return nil
 }
 
-// ─── Bearer-token resolution ─────────
-//
-// Three transports authenticate the same bearer tokens: the REST middleware,
-// the admin panel's middleware, and the WebSocket handshake. Each used to walk
-// the session/user/role rows itself, and the rule they all have to get right
-// is the same one: a DATABASE FAILURE IS NOT A BAD CREDENTIAL.
-//
-// It matters because the two answers are opposite. A bad credential is
-// terminal — the client clears its stored token and stops retrying. An outage
-// is transient — the client must back off and try again. A transport that
-// collapses the two logs its users out during a blip and makes them sign in
-// again once it passes. Every refusal below is therefore a distinct sentinel,
-// and an unexpected error is ErrInternal, never one of them.
+// Bearer-token resolution: the REST middleware, the admin middleware and the
+// WebSocket handshake all authenticate the same tokens, and the rule they must
+// share is that a DATABASE FAILURE IS NOT A BAD CREDENTIAL. A bad credential is
+// terminal (the client clears its token); an outage is transient (back off and
+// retry), and collapsing them logs users out during a blip. So every refusal
+// below is a distinct sentinel and an unexpected error is ErrInternal.
 var (
 	// ErrSessionInvalid: no session row carries this token hash.
 	ErrSessionInvalid = errors.New("invalid session")
@@ -79,22 +64,17 @@ var (
 	ErrSessionExpired = errors.New("session expired")
 	// ErrPrincipalGone: the session is good but its user row is not there.
 	ErrPrincipalGone = errors.New("user not found")
-	// ErrPrincipalBanned: the user is banned, or ban-expired but not yet
-	// cleared. Separate from the three above because it is the one refusal
-	// the user can be told the reason for.
+	// ErrPrincipalBanned: the user is banned, or ban-expired but not yet cleared.
+	// Separate because it is the one refusal the user can be told the reason for.
 	ErrPrincipalBanned = errors.New("user is banned")
 )
 
-// ResolveSocketPrincipal resolves a WebSocket handshake's token hash to the
-// user it authenticates, applying the session-expiry and ban gates.
-//
-// It is session-only: unlike the REST and admin perimeters it does not fall
-// back to API tokens, because a long-lived headless credential has no business
-// holding an interactive socket open.
-//
-// The four refusals are distinct sentinels so the transport can answer a bad
-// credential terminally and an outage (ErrInternal) transiently — see the
-// block comment above.
+// ResolveSocketPrincipal resolves a WebSocket handshake's token hash to its user,
+// applying session-expiry and ban gates. Session-only: unlike REST and admin it
+// does not fall back to API tokens, since a long-lived headless credential has no
+// business holding an interactive socket open. The distinct sentinels let the
+// transport answer a bad credential terminally and an outage (ErrInternal)
+// transiently.
 func (s *SessionService) ResolveSocketPrincipal(ctx context.Context, tokenHash string) (*db.User, error) {
 	sess, err := s.st.GetSessionByTokenHash(ctx, tokenHash)
 	if err != nil {
@@ -115,44 +95,31 @@ func (s *SessionService) ResolveSocketPrincipal(ctx context.Context, tokenHash s
 		return nil, ErrPrincipalGone
 	}
 	if auth.IsEffectivelyBanned(user) {
-		// Name the account in the wrap: the handshake logs this refusal
-		// verbatim with no user of its own in scope, and a banned client
-		// stuck in a reconnect loop is only diagnosable if the log says
-		// which account it is.
+		// Name the account in the wrap: the handshake logs this verbatim with no user in
+		// scope, and a banned client in a reconnect loop is only diagnosable that way.
 		return nil, fmt.Errorf("user %d: %w", user.ID, ErrPrincipalBanned)
 	}
 	return user, nil
 }
 
-// SessionVerdict is what the hub's periodic sweep needs to know about one
-// connected client's session.
+// SessionVerdict is what the hub's sweep needs to know about one session.
 type SessionVerdict int
 
 const (
-	// SessionRevoked: the session was deleted or has expired. Disconnect
-	// without an explanation — there is nobody authenticated to explain to.
-	//
-	// Deliberately the zero value: a hash absent from a sweep's verdict map
-	// reads as revoked, so an authenticator that answers for only some of
-	// the sessions it was asked about disconnects the rest instead of
-	// silently keeping them. The pre-seam sweep kicked on a missing batch
-	// row; the zero value is what preserves that fail-closed posture for
-	// every implementation of the seam, not just the total one below.
+	// SessionRevoked: deleted or expired; disconnect without explanation. Deliberately
+	// the zero value: a hash absent from a sweep's verdict map reads as revoked, so
+	// an authenticator answering for only some sessions disconnects the rest instead
+	// of silently keeping them (the fail-closed posture of the pre-seam sweep).
 	SessionRevoked SessionVerdict = iota
-	// SessionLive: keep the connection.
 	SessionLive
-	// SessionBanned: the session is still valid but its user is banned.
-	// Disconnect after telling them why.
+	// SessionBanned: valid session, banned user; disconnect after telling them why.
 	SessionBanned
 )
 
 // SweepSessions classifies every connected client's session in one batched
-// lookup, so a periodic sweep costs one query rather than one per client.
-//
-// A failed lookup is an error and NOT a map of revocations: it says nothing
-// about any individual session, and treating it as "all revoked" would turn a
-// transient database error into a server-wide disconnect. The caller skips the
-// tick instead.
+// lookup (one query per sweep, not per client). A failed lookup is an error, NOT
+// a map of revocations: treating it as "all revoked" would turn a transient
+// database error into a server-wide disconnect, so the caller skips the tick.
 func (s *SessionService) SweepSessions(ctx context.Context, tokenHashes []string) (map[string]SessionVerdict, error) {
 	rows, err := s.st.GetSessionsWithBanStatusBatch(ctx, tokenHashes)
 	if err != nil {
@@ -174,12 +141,10 @@ func (s *SessionService) SweepSessions(ctx context.Context, tokenHashes []string
 }
 
 // TouchSession records that a login session was used and slides its expiry,
-// throttled by the caller — the REST middleware and the WebSocket
-// hub each call this at most once per interval per session so hot traffic
-// does not queue a write per request. With a batch installed it only queues
-// the touch; the write lands on the next flush, at most TouchFlushInterval
-// later, which the 30-day sliding window absorbs. Revocation never waits on
-// it: a revoked row is gone, and the touch's WHERE never revives one.
+// throttled by the caller (REST middleware and hub, at most once per interval per
+// session). With a batch it only queues; the write lands within TouchFlushInterval,
+// which the 30-day sliding window absorbs. Revocation never waits on it: a
+// revoked row is gone and the touch's WHERE never revives one.
 func (s *SessionService) TouchSession(ctx context.Context, tokenHash string) error {
 	if s.batch != nil {
 		s.batch.queueTouch(tokenHash)
@@ -188,15 +153,14 @@ func (s *SessionService) TouchSession(ctx context.Context, tokenHash string) err
 	return s.st.TouchSessions(ctx, []string{tokenHash})
 }
 
-// SetConnWrites installs the batch TouchSession queues into. Call once at
+// SetConnWrites installs the batch TouchSession queues into; call once at
 // startup, before the service is shared.
 func (s *SessionService) SetConnWrites(w *ConnWrites) { s.batch = w }
 
-// TouchAPIToken records that an API token was used. The REST middleware calls
-// it off the hot path so bot and CI traffic pays no latency for it. With a
-// batch installed it only queues the touch, which lands on the next touch
-// flush (at most TouchFlushInterval later), so a busy token costs one write a
-// minute instead of one per request; without one it writes at once.
+// TouchAPIToken records that an API token was used, called off the hot path so
+// bot and CI traffic pays no latency. With a batch it queues (landing within
+// TouchFlushInterval), so a busy token costs one write a minute; else it writes
+// at once.
 func (s *SessionService) TouchAPIToken(ctx context.Context, tokenHash string) error {
 	if s.batch != nil {
 		s.batch.queueAPITouch(tokenHash)
@@ -205,11 +169,9 @@ func (s *SessionService) TouchAPIToken(ctx context.Context, tokenHash string) er
 	return s.st.TouchAPIToken(ctx, tokenHash)
 }
 
-// DiscardSession deletes a session row by token hash. The REST middleware
-// calls it after answering 401 to an expired session, so the dead row does
-// not sit there until the maintenance sweep. With a batch installed it only
-// queues the delete, which lands on the next stamp flush (at most
-// StampFlushInterval later); without one it deletes at once.
+// DiscardSession deletes a session row by token hash; the REST middleware calls it
+// after a 401 for an expired session so the dead row does not wait for the
+// maintenance sweep. With a batch it queues (landing within StampFlushInterval).
 func (s *SessionService) DiscardSession(ctx context.Context, tokenHash string) error {
 	if s.batch != nil {
 		s.batch.queueDiscard(tokenHash)
@@ -218,27 +180,20 @@ func (s *SessionService) DiscardSession(ctx context.Context, tokenHash string) e
 	return s.st.DeleteSession(ctx, tokenHash)
 }
 
-// RecordSocketConnect writes the ws_connect audit row for a completed
-// handshake. Detached from the request context: the row must survive the
-// connection it records dying immediately afterwards, which is exactly the
-// case an operator reading the trail most wants to see.
+// RecordSocketConnect writes the ws_connect audit row for a completed handshake,
+// on a detached context: the row must survive the connection dying right after,
+// the case an operator most wants to see.
 func (s *SessionService) RecordSocketConnect(ctx context.Context, userID int64, remoteAddr string) {
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, userID, "ws_connect", "user", userID,
 		"WebSocket connected from "+remoteAddr)
 }
 
 // ResolveBearer resolves an HTTP bearer token hash to its principal: a login
-// session first, then an API token, so a headless client's token authenticates
-// the same routes its owning user can reach.
-//
-// It passes auth.ResolveTokenHash's sentinels through unchanged
-// (auth.ErrTokenExpired, ErrUserNotFound, ErrRoleNotFound, ErrTokenNotFound)
-// rather than restating them: that vocabulary belongs to the auth package, and
-// both HTTP perimeters already branch on exactly it. Anything else is a
-// wrapped database error and both perimeters answer it 503, not 401 — the same
-// rule the socket path states as ErrInternal, for the same reason.
-//
-// The Session is nil for an API-token principal; consumers must guard it.
+// session first, then an API token. It passes auth.ResolveTokenHash's sentinels
+// (ErrTokenExpired, ErrUserNotFound, ErrRoleNotFound, ErrTokenNotFound) through
+// unchanged, since both HTTP perimeters branch on that vocabulary; anything else
+// is a wrapped database error answered 503, not 401. Session is nil for an
+// API-token principal; consumers must guard it.
 func (s *SessionService) ResolveBearer(ctx context.Context, tokenHash string) (*db.User, *db.Role, *db.Session, error) {
 	return auth.ResolveTokenHash(ctx, s.st, tokenHash)
 }

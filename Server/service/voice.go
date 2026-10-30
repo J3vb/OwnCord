@@ -10,34 +10,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ErrVoiceChannelFull is returned by Join when the channel's voice_max_users
-// cap is already met. The store reports this as db.ErrChannelFull; the
-// service re-states it so a caller can branch on the refusal without
-// depending on the persistence layer's sentinel.
+// ErrVoiceChannelFull is returned by Join when the channel's voice_max_users cap
+// is met; re-stated from db.ErrChannelFull so callers need not depend on the
+// persistence sentinel.
 var ErrVoiceChannelFull = errors.New("voice channel is full")
 
-// VoiceService owns the voice_states table: who is in which voice channel,
-// since when, and the self- and moderator-imposed flags on that membership.
+// VoiceService owns the voice_states table: who is in which voice channel, since
+// when, and the self- and moderator-imposed flags. The hub keeps the transport
+// (SFU round trips, pub/sub topics, key-holder election, broadcasts) and asks
+// this service for the row. A membership is written from four goroutines that
+// never see each other (the member's pump, a moderator's pump, the stale sweep,
+// the LiveKit webhook), so the rules about WHICH row a write may touch live here:
 //
-// These decisions were moved off the hub. The hub keeps
-// everything that is genuinely transport — the SFU round trips, the pub/sub
-// topics, key-holder election and the broadcasts — and asks this service for
-// the row. The split matters because a voice membership is written from four
-// goroutines that never see each other (the member's own read pump, a
-// moderator's read pump, the stale sweep, and the LiveKit webhook), so the
-// rules about WHICH row a write may touch have to live in one place:
-//
-//   - every write that follows an authorization decision is scoped to the
-//     channel that was authorized, so a target who switches channels
-//     mid-request is never followed onto a channel nobody checked;
-//   - the compensating writes (rollback, restore) run on a context detached
-//     from the request, because the cancellation that triggered them must not
-//     also abort them.
+//   - every write after an authorization decision is scoped to the channel that
+//     was authorized, so a target switching channels mid-request is not followed
+//     onto a channel nobody checked;
+//   - compensating writes (rollback, restore) run on a context detached from the
+//     request, since the cancellation that triggered them must not abort them.
 type VoiceService struct {
 	st Store
-	// callLog is told about completed DM joins and voice row deletes so it can
-	// keep the call log. Set once by service.New; nil in a service
-	// built on its own, where the notes do nothing.
+	// callLog is told about completed DM joins and voice row deletes to keep the call
+	// log. Set by service.New; nil in a standalone service, where the notes do nothing.
 	callLog *CallLogService
 }
 
@@ -49,14 +42,12 @@ func NewVoiceService(st Store) *VoiceService {
 // SetCallLog installs the call log that join and leave notes go to.
 func (s *VoiceService) SetCallLog(c *CallLogService) { s.callLog = c }
 
-// NoteJoinCompleted tells the call log that userID finished joining
-// channelID. The hub calls it only after voiceJoinComplete succeeds, so a join
-// that rolled back is never a participant. It never blocks.
+// NoteJoinCompleted tells the call log userID finished joining channelID. The hub
+// calls it only after voiceJoinComplete succeeds, so a rolled-back join is never a
+// participant. It never blocks.
 func (s *VoiceService) NoteJoinCompleted(channelID, userID int64) {
 	s.callLog.NoteJoin(channelID, userID, time.Now().UTC())
 }
-
-// ── Reads ───────────────────────────────────────────────────────────────────
 
 // State returns the user's current voice membership, or (nil, nil) when they
 // are not in a voice channel.
@@ -69,33 +60,25 @@ func (s *VoiceService) ChannelStates(ctx context.Context, channelID int64) ([]db
 	return s.st.GetChannelVoiceStates(ctx, channelID)
 }
 
-// AllStates returns every voice membership on the server — the stale sweep's
-// input, reconciled against the hub's live client map.
+// AllStates returns every voice membership: the stale sweep's input, reconciled
+// against the hub's live client map.
 func (s *VoiceService) AllStates(ctx context.Context) ([]db.VoiceState, error) {
 	return s.st.GetAllVoiceStates(ctx)
 }
 
-// CountInChannel reports how many users are currently in a voice channel.
-// Advisory only: it answers "is there room right now", which a concurrent
-// join can invalidate before the caller acts on it. Join's capacity branch is
-// the atomic check.
+// CountInChannel reports how many users are in a voice channel. Advisory: a
+// concurrent join can invalidate it; Join's capacity branch is the atomic check.
 func (s *VoiceService) CountInChannel(ctx context.Context, channelID int64) (int, error) {
 	return s.st.CountChannelVoiceUsers(ctx, channelID)
 }
 
-// ── Membership ──────────────────────────────────────────────────────────────
-
-// Join persists userID's membership of channelID. maxUsers is the cap that
-// applies to this joiner: the channel's voice_max_users, or 0 for a voice
-// moderator there (ws.voiceJoinCapacity). A positive value takes the
-// capacity-checked insert, which counts and inserts in one statement so two
-// joins racing for the last slot cannot both win, and returns
-// ErrVoiceChannelFull when the cap is met. Zero or negative takes the plain
-// upsert.
-//
-// The two forms are one method so a caller cannot read a cap and then pick
-// the unchecked insert for a capped joiner: the only way past the cap is to
-// pass 0, which is the moderator decision made in one place.
+// Join persists userID's membership of channelID. maxUsers is the cap for this
+// joiner: the channel's voice_max_users, or 0 for a voice moderator there
+// (ws.voiceJoinCapacity). Positive takes the capacity-checked insert (count and
+// insert in one statement, so two joins racing for the last slot cannot both win)
+// and returns ErrVoiceChannelFull when met; zero or negative takes the plain
+// upsert. One method, so the only way past the cap is passing 0, the moderator
+// decision made in one place.
 func (s *VoiceService) Join(ctx context.Context, userID, channelID int64, maxUsers int) error {
 	if maxUsers > 0 {
 		err := s.st.JoinVoiceChannelIfCapacity(ctx, userID, channelID, maxUsers)
@@ -113,11 +96,10 @@ func (s *VoiceService) Join(ctx context.Context, userID, channelID int64, maxUse
 	return nil
 }
 
-// LeaveIfMatch deletes the membership only while it still names channelID and
-// the exact joinedAt instant the caller snapshotted, reporting whether a row
-// went. Every delete in the server is this one: a user who rejoined or moved
-// between the snapshot and the delete has a NEWER row, and an unconditional
-// delete by user id would destroy it.
+// LeaveIfMatch deletes the membership only while it still names channelID and the
+// caller's snapshotted joinedAt, reporting whether a row went. Every delete is
+// this one: a user who rejoined or moved has a NEWER row that an unconditional
+// delete by user id would destroy.
 func (s *VoiceService) LeaveIfMatch(ctx context.Context, userID, channelID int64, joinedAt string) (bool, error) {
 	deleted, err := s.st.LeaveVoiceChannelIfMatch(ctx, userID, channelID, joinedAt)
 	if deleted {
@@ -126,11 +108,8 @@ func (s *VoiceService) LeaveIfMatch(ctx context.Context, userID, channelID int64
 	return deleted, err
 }
 
-// ── Self flags ──────────────────────────────────────────────────────────────
-//
-// The user's own mute/deafen/camera/screenshare. Unlike the moderator flags
-// these are not channel-scoped: they are the member's own preference and
-// follow them across a channel switch.
+// Self flags: the user's own mute/deafen/camera/screenshare. Unlike moderator
+// flags they are not channel-scoped; they follow the member across a switch.
 
 // SetSelfMute records the user's own mute state.
 func (s *VoiceService) SetSelfMute(ctx context.Context, userID int64, muted bool) error {
@@ -152,75 +131,59 @@ func (s *VoiceService) SetScreenshare(ctx context.Context, userID int64, enabled
 	return s.st.UpdateVoiceScreenshare(ctx, userID, enabled)
 }
 
-// ReserveCamera turns the camera on only while the channel is under its
-// shared video budget, counting and setting in one statement. Reports false
-// when the budget is already spent.
+// ReserveCamera turns the camera on only while the channel is under its shared
+// video budget, counting and setting in one statement; false when spent.
 func (s *VoiceService) ReserveCamera(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
 	return s.st.EnableCameraIfUnderLimit(ctx, userID, channelID, maxVideo)
 }
 
-// ReserveScreenshare is ReserveCamera for the screenshare column. Both count
-// `camera = 1 OR screenshare = 1` against the same per-channel cap,
-// so neither publish kind can slip past the limit by ignoring the other.
+// ReserveScreenshare is ReserveCamera for screenshare. Both count
+// `camera = 1 OR screenshare = 1` against one per-channel cap, so neither kind
+// slips past by ignoring the other.
 func (s *VoiceService) ReserveScreenshare(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error) {
 	return s.st.EnableScreenshareIfUnderLimit(ctx, userID, channelID, maxVideo)
 }
 
-// ── Moderator flags ─────────────────────────────────────────────────────────
-
-// SetServerMute applies or lifts a moderator-imposed mute, scoped to the
-// channel the caller authorized against. It reports whether a row matched:
-// false means the target's membership moved off that channel between the
-// authorization and this write, and the caller must refuse rather than let
-// the write follow them.
+// SetServerMute applies or lifts a moderator mute, scoped to the channel the
+// caller authorized against. false means the target's membership moved off that
+// channel before this write; the caller must refuse rather than follow them.
 func (s *VoiceService) SetServerMute(ctx context.Context, userID, channelID int64, muted bool) (bool, error) {
 	return s.st.SetVoiceServerMute(ctx, userID, channelID, muted)
 }
 
 // MuteForTimeoutSession is SetServerMute scoped to one exact voice session
-// (channelID, joinedAt) instead of channelID alone, stamping actionID as
-// owner atomically with the mute: the timeout voice half's
-// authorization and its SFU mute must bind to the SAME session, not a
-// channel a separate, later read could resolve differently if the target
-// moved on in between.
+// (channelID, joinedAt), stamping actionID as owner atomically with the mute:
+// the timeout voice half's authorization and SFU mute must bind to the SAME
+// session, not one a later read could resolve differently.
 func (s *VoiceService) MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error) {
 	return s.st.MuteForTimeoutSession(ctx, userID, channelID, actionID, joinedAt, supersededIDs)
 }
 
-// ClearServerMuteOwnedBy clears the mute currently owned by any of
-// actionIDs and reports its channel/join token for the paired SFU call
-// — see db.DB.ClearServerMuteOwnedBy.
+// ClearServerMuteOwnedBy clears the mute owned by any of actionIDs and reports its
+// channel/join token for the paired SFU call (see db.DB.ClearServerMuteOwnedBy).
 func (s *VoiceService) ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error) {
 	return s.st.ClearServerMuteOwnedBy(ctx, userID, actionIDs)
 }
 
-// SetServerDeafen is SetServerMute for the server_deafened column, with the
-// same channel scoping and the same meaning for a false result.
+// SetServerDeafen is SetServerMute for server_deafened, with the same scoping and
+// meaning of false.
 func (s *VoiceService) SetServerDeafen(ctx context.Context, userID, channelID int64, deafened bool) (bool, error) {
 	return s.st.SetVoiceServerDeafen(ctx, userID, channelID, deafened)
 }
 
-// RestoreModFlags re-applies a moderator-imposed mute/deafen onto a
-// membership that has just been re-created — a channel switch deletes the row
-// the flags lived in and re-inserts a plain one, so without this a member
-// could clear a moderator's mute by hopping channels.
+// RestoreModFlags re-applies a moderator mute/deafen onto a just re-created
+// membership: a channel switch deletes and re-inserts the row, so without this a
+// member could clear a mute by hopping channels. It returns the re-read row so
+// the broadcast carries the restored flags; nil means nothing to restore or the
+// re-read failed. Every write is best-effort: a failure must not fail the join,
+// and nothing is written when neither flag is set.
 //
-// It returns the re-read row so the caller's broadcast carries the restored
-// flags rather than the insert defaults; nil means there was nothing to
-// restore or the re-read failed, and the caller keeps the row it already had.
-// Every write here is best-effort by design: a failure must not fail the join
-// the member has already been admitted to. Nothing is written when neither
-// flag is set, so an ordinary first join costs no round trips.
-//
-// serverMutedBy is the PRIOR session's owner: a
-// mute owned by a timeout must carry that SAME ownership onto the fresh
-// session, through the exact conditional write a timeout's own mute uses
-// (MuteForTimeoutSession) — which also refuses, leaving the fresh session
-// unmuted, when that owner is no longer active (lifted, or expired in the
-// gap between the switch and this restore, before the reconcile sweep next
-// runs): resurrecting a sanction with no owner left to ever clear it is
-// worse than dropping it early. nil means a manual moderator mute (or none
-// at all), restored the old, ownerless way.
+// serverMutedBy is the PRIOR session's owner. A timeout-owned mute carries that
+// ownership onto the fresh session through MuteForTimeoutSession, which also
+// refuses when the owner is no longer active (lifted or expired before the
+// reconcile sweep): resurrecting a sanction with no owner left to clear it is
+// worse than dropping it early. nil means a manual moderator mute (or none),
+// restored ownerless.
 func (s *VoiceService) RestoreModFlags(ctx context.Context, userID, channelID int64, muted, deafened bool, serverMutedBy *int64) *db.VoiceState {
 	if !muted && !deafened {
 		return nil
@@ -248,26 +211,21 @@ func (s *VoiceService) RestoreModFlags(ctx context.Context, userID, channelID in
 	return refreshed
 }
 
-// RollbackServerDeafen undoes a server_deafened write whose paired
-// server_muted write then failed to land. The two are separate statements —
-// no transaction spans them — and the pair that is never allowed to persist is
-// deafened=1 with muted=0: not muted at the SFU, yet still refusing the
-// target's own undeafen, for a deafen nobody was told about.
+// RollbackServerDeafen undoes a server_deafened write whose paired server_muted
+// write failed. They are separate statements, and the pair never allowed to
+// persist is deafened=1 with muted=0 (not muted at the SFU yet refusing the
+// target's own undeafen). requestedDeafen is the ORIGINAL direction and decides
+// the undo's channel:
 //
-// requestedDeafen is the direction of the ORIGINAL request, which decides
-// which channel the undo may touch:
+//   - a deafen (true) rolls back by CLEARING, which cannot authorize anything, so
+//     it follows the row to its current channel (a switch is the likeliest reason
+//     the paired write missed);
+//   - an undeafen (false) rolls back by RE-APPLYING, scoped to authorizedChannelID
+//     so it never stamps a restriction onto a channel the actor was not
+//     authorized against, and matches nothing if the target moved.
 //
-//   - a deafen (true) rolls back by CLEARING. Clearing a restriction cannot
-//     authorize anything, so the undo follows the row to whatever channel it
-//     is on now — which is the whole point, because a target switching
-//     channels is the likeliest reason the paired write missed.
-//   - an undeafen (false) rolls back by RE-APPLYING. Following the row there
-//     would stamp a restriction onto a channel the actor was never authorized
-//     against, so it is scoped to authorizedChannelID and simply
-//     matches nothing if the target has moved.
-//
-// Detached from ctx: the cancellation that most likely caused the failure
-// must not abort the undo as well.
+// Detached from ctx: the cancellation that likely caused the failure must not
+// abort the undo.
 func (s *VoiceService) RollbackServerDeafen(ctx context.Context, targetID, authorizedChannelID int64, requestedDeafen bool) {
 	compCtx := context.WithoutCancel(ctx)
 	cur, err := s.State(compCtx, targetID)
@@ -276,7 +234,7 @@ func (s *VoiceService) RollbackServerDeafen(ctx context.Context, targetID, autho
 		return
 	}
 	if cur == nil {
-		// The target left voice entirely — there is no row left to undo.
+		// The target left voice; no row left to undo.
 		return
 	}
 	scope := authorizedChannelID
@@ -288,9 +246,8 @@ func (s *VoiceService) RollbackServerDeafen(ctx context.Context, targetID, autho
 	}
 }
 
-// WriteModAudit records one voice-moderation action. Detached from ctx so the
-// row survives a moderator's connection dying the instant after the effect
-// landed — an unrecorded moderation action is worse than a late one.
+// WriteModAudit records one voice-moderation action on a detached ctx, so the
+// row survives the moderator's connection dying right after the effect.
 func (s *VoiceService) WriteModAudit(ctx context.Context, actorID int64, action string, targetID int64, detail string) {
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, action, "user", targetID, detail)
 }

@@ -32,14 +32,13 @@ func derefString(p *string) string {
 	return *p
 }
 
-// checkTimedOutProfileEdit applies the self-edit rules for the shown name.
-// next is the cleaned display name patch, nil when the patch leaves
-// the field alone; username is the patch's username, "" when unspecified.
-// Resending the current values is always allowed. A real change to either is
-// refused while a moderator timeout is active (read once, fail closed), so a
-// moderator's nickname reset cannot be undone by the member mid-timeout: with
-// the nickname cleared the username is what everyone sees. A display name
-// change is also refused when it equals another account's username.
+// checkTimedOutProfileEdit applies the self-edit rules for the shown name. next is
+// the cleaned display name patch (nil leaves it alone); username is the patch's
+// username, "" when unspecified. Resending current values is always allowed. A real
+// change to either is refused while a moderator timeout is active (read once, fail
+// closed), so a moderator's nickname reset cannot be undone mid-timeout: with the
+// nickname cleared the username is what everyone sees. A display name equal to
+// another account's username is also refused.
 func (s *UserService) checkTimedOutProfileEdit(ctx context.Context, userID int64, current *db.User, next *string, username string) error {
 	nameChanged := next != nil && displayNameChanged(current.DisplayName, *next)
 	usernameChanged := username != "" && username != current.Username
@@ -59,12 +58,11 @@ func (s *UserService) checkTimedOutProfileEdit(ctx context.Context, userID int64
 	return s.checkDisplayNameCollision(ctx, userID, *next)
 }
 
-// checkDisplayNameCollision refuses a non-empty display name that equals,
-// ignoring case, another account's username (the same NOCASE rule username
-// uniqueness uses, so only ASCII letters fold). The account's own username
-// stays allowed. The caller has already established that the value changes.
-// Best effort, like username uniqueness before its constraint: a username
-// taken between this read and the write is not caught.
+// checkDisplayNameCollision refuses a non-empty display name equal, ignoring case,
+// to another account's username (the NOCASE rule username uniqueness uses, so only
+// ASCII letters fold). The account's own username stays allowed; the caller has
+// established that the value changes. Best effort: a username taken between this
+// read and the write is not caught.
 func (s *UserService) checkDisplayNameCollision(ctx context.Context, userID int64, cleaned string) error {
 	if cleaned == "" {
 		return nil
