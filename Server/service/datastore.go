@@ -21,7 +21,7 @@ type Store interface {
 	gifFavoriteStore
 	inviteStore
 	messageRequestStore
-	messageStore
+	messageServiceStore
 	moderationStore
 	nsfwStore
 	permissionStore
