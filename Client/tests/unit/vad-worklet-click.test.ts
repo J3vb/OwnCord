@@ -3,13 +3,15 @@
 // the start of a word is not cut off. Drives the real public/vad-worklet.js
 // in the 128-sample render quanta the audio thread delivers.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { FIXTURE_SAMPLE_RATE, placeInRoomTone, readAudioFixture } from "../helpers/wav";
 import { vadThreshold } from "../../src/lib/voice/audioPipeline";
 
 type Message = { type: string; gated?: boolean; value?: number };
 type Processor = {
   port: { onmessage: (event: { data: unknown }) => void; postMessage: (m: Message) => void };
-  process(inputs: Float32Array[][]): boolean;
+  process(inputs: Float32Array[][], outputs?: Float32Array[][]): boolean;
+  _initWasm?(bytes: ArrayBuffer): Promise<void>;
 };
 
 const QUANTUM = 128;
@@ -19,36 +21,68 @@ const LOOKAHEAD_MS = 50;
 
 describe("voice gate on recorded audio", () => {
   let processorCtor: (new () => Processor) | null = null;
+  const registered = new Map<string, new () => Processor>();
 
   beforeEach(() => {
     vi.resetModules();
+    registered.clear();
     class FakeAudioWorkletProcessor {
       readonly port = { onmessage: null, postMessage: () => {} };
     }
     Object.assign(globalThis, {
-      registerProcessor: (_name: string, ctor: new () => Processor) => {
-        processorCtor = ctor;
+      registerProcessor: (name: string, ctor: new () => Processor) => {
+        registered.set(name, ctor);
+        if (name === "vad-processor") processorCtor = ctor;
       },
       AudioWorkletProcessor: FakeAudioWorkletProcessor,
     });
   });
+
+  /** RNNoise's speech probability for each quantum of `input`, as its
+   *  worklet's second output carries it to the gate's second input. */
+  async function speechProbabilities(input: Float32Array): Promise<Float32Array[]> {
+    // @ts-expect-error — worklet script has no module exports
+    await import("../../public/rnnoise-worklet.js");
+    const rnnoise = new (registered.get("rnnoise-processor")!)();
+    const wasm = readFileSync("public/rnnoise.wasm");
+    await rnnoise._initWasm!(wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.length));
+    const out: Float32Array[] = [];
+    for (let at = 0; at + QUANTUM <= input.length; at += QUANTUM) {
+      const speech = new Float32Array(QUANTUM);
+      rnnoise.process(
+        [[input.subarray(at, at + QUANTUM)]],
+        [[new Float32Array(QUANTUM)], [speech]],
+      );
+      out.push(speech);
+    }
+    return out;
+  }
 
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).registerProcessor;
     delete (globalThis as Record<string, unknown>).AudioWorkletProcessor;
   });
 
-  /** Run `input` through the gate; every message with the ms it was posted at. */
-  async function gate(sensitivity: number, input: Float32Array) {
+  /** Run `input` through the gate; every message with the ms it was posted
+   *  at. With `speech`, RNNoise's verdict per quantum feeds the gate's second
+   *  input and the speech rule is on, as automatic sensitivity runs it. */
+  async function gate(sensitivity: number, input: Float32Array, speech?: Float32Array[]) {
     // @ts-expect-error — worklet script has no module exports
     await import("../../public/vad-worklet.js");
     const processor = new processorCtor!();
     const messages: Array<Message & { atMs: number }> = [];
     let quantum = 0;
     processor.port.postMessage = (m) => messages.push({ ...m, atMs: quantum * QUANTUM_MS });
-    processor.port.onmessage({ data: { type: "config", threshold: vadThreshold(sensitivity) } });
+    processor.port.onmessage({
+      data: {
+        type: "config",
+        threshold: vadThreshold(sensitivity),
+        speechGate: speech !== undefined,
+      },
+    });
     for (let at = 0; at + QUANTUM <= input.length; at += QUANTUM, quantum++) {
-      processor.process([[input.subarray(at, at + QUANTUM)]]);
+      const audio = [input.subarray(at, at + QUANTUM)];
+      processor.process(speech === undefined ? [audio] : [audio, [speech[quantum]!]]);
     }
     return messages;
   }
@@ -91,6 +125,67 @@ describe("voice gate on recorded audio", () => {
     const firstOpen = opened(messages)[0];
     expect(firstOpen).toBeDefined();
     expect(firstOpen!.atMs - onsetMs).toBeLessThan(LOOKAHEAD_MS);
+  });
+
+  describe("with RNNoise's verdict (automatic sensitivity)", () => {
+    // The gate levels automatic sensitivity reaches: -40 dBFS over a voice,
+    // down to its -55 dBFS floor over suppressed silence.
+    it.each([50, 60, 70, 75])(
+      "a mouse click does not open the gate at sensitivity %i",
+      async (s) => {
+        const click = readAudioFixture("mouse-click.wav").map((v) => v * 2.5);
+        const input = placeInRoomTone(click, 1.5, 2.5);
+        const messages = await gate(s, input, await speechProbabilities(input));
+        expect(messages.some((m) => m.type === "gate" && m.gated === true)).toBe(true);
+        expect(opened(messages)).toEqual([]);
+      },
+    );
+
+    it("a burst of clicks (typing) does not open the gate, where its level alone would", async () => {
+      // Ten clicks 30 ms apart: enough sustained level to pass the attack.
+      const click = readAudioFixture("mouse-click.wav").map((v) => v * 2.5);
+      const gap = Math.round(0.03 * FIXTURE_SAMPLE_RATE);
+      const typing = new Float32Array(gap * 10 + click.length);
+      for (let i = 0; i < 10; i++) {
+        for (let j = 0; j < click.length; j++)
+          typing[i * gap + j] = (typing[i * gap + j] ?? 0) + click[j]!;
+      }
+      const input = placeInRoomTone(typing, 1.5, 2.5);
+
+      expect(opened(await gate(50, input))).not.toEqual([]);
+      expect(opened(await gate(50, input, await speechProbabilities(input)))).toEqual([]);
+    });
+
+    it.each([50, 60, 75])("opens for speech within the lookahead at sensitivity %i", async (s) => {
+      const speechAtMs = 1500;
+      const input = placeInRoomTone(readAudioFixture("speech.wav"), speechAtMs / 1000, 3);
+      const speech = await speechProbabilities(input);
+      // The onset: the first quantum the level clears the gate and RNNoise
+      // calls a voice. At -55 dBFS the room alone clears the level.
+      let onsetMs = Number.NaN;
+      for (let quantum = Math.ceil(speechAtMs / QUANTUM_MS); quantum < speech.length; quantum++) {
+        const q = input.subarray(quantum * QUANTUM, (quantum + 1) * QUANTUM);
+        const loud = Math.sqrt(q.reduce((sum, v) => sum + v * v, 0) / q.length) >= vadThreshold(s);
+        if (loud && speech[quantum]![QUANTUM - 1]! >= 0.5) {
+          onsetMs = quantum * QUANTUM_MS;
+          break;
+        }
+      }
+
+      const messages = await gate(s, input, speech);
+
+      const firstOpen = opened(messages)[0];
+      expect(firstOpen).toBeDefined();
+      expect(firstOpen!.atMs - onsetMs).toBeLessThan(LOOKAHEAD_MS);
+    });
+
+    it("the room tone closes the gate even at a sensitivity below its level", async () => {
+      // -69 dBFS: the level alone would never close on a -51 dBFS room; the
+      // verdict "not a voice" does.
+      const input = placeInRoomTone(new Float32Array(0), 1, 2);
+      const messages = await gate(99, input, await speechProbabilities(input));
+      expect(messages.some((m) => m.type === "gate" && m.gated === true)).toBe(true);
+    });
   });
 
   it("smooths the level over four quanta: one loud quantum reads at half its RMS", async () => {

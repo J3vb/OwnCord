@@ -187,6 +187,66 @@ describe("createMicProcessor", () => {
     });
   });
 
+  describe("speech detection", () => {
+    beforeEach(() => {
+      vi.stubGlobal("AudioWorkletNode", FakeAudioWorkletNode);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })),
+      );
+    });
+
+    it("runs RNNoise for its verdict alone: the voice goes around it, the probability reaches the detector's node", async () => {
+      const { processor, ctx, entry } = await started();
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+      const speech = ctx.nodes.filter((n) => n.kind === "gain")[2]!;
+      expect(processor.speechProbability).toBe(speech);
+
+      const detecting = processor.setSpeechDetection(true);
+      const rnnoise = await ready();
+      await expect(detecting).resolves.toBe(true);
+
+      expect(processor.speechDetection).toBe(true);
+      expect(processor.enhanced).toBe(false);
+      expect(entry.outputs).toEqual([rnnoise, ctx.node("analyser"), ctx.node("delay")]);
+      expect(rnnoise.connect).toHaveBeenCalledWith(speech, 1, 0);
+      expect(rnnoise.connect).not.toHaveBeenCalledWith(ctx.node("analyser"));
+
+      await expect(processor.setSpeechDetection(false)).resolves.toBe(false);
+      expect(processor.speechDetection).toBe(false);
+      expect(entry.outputs).toEqual([ctx.node("analyser"), ctx.node("delay")]);
+    });
+
+    it("keeps the verdict flowing while Enhanced Noise Suppression toggles", async () => {
+      const { processor, ctx, entry } = await started();
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+      const speech = ctx.nodes.filter((n) => n.kind === "gain")[2]!;
+      const detecting = processor.setSpeechDetection(true);
+      const rnnoise = await ready();
+      await detecting;
+
+      await processor.setEnhanced(true);
+      expect(entry.outputs).toEqual([rnnoise]);
+      expect(rnnoise.connect).toHaveBeenLastCalledWith(ctx.node("delay"));
+      expect(rnnoise.connect).toHaveBeenCalledWith(speech, 1, 0);
+
+      rnnoise.connect.mockClear();
+      await processor.setEnhanced(false);
+      expect(processor.speechDetection).toBe(true);
+      expect(entry.outputs).toEqual([rnnoise, ctx.node("analyser"), ctx.node("delay")]);
+      expect(rnnoise.connect).toHaveBeenCalledWith(speech, 1, 0);
+    });
+
+    it("leaves the gate on its level when RNNoise cannot load", async () => {
+      const { processor, entry, ctx } = await started();
+
+      await expect(processor.setSpeechDetection(true)).resolves.toBe(false);
+
+      expect(processor.speechDetection).toBe(false);
+      expect(entry.outputs).toEqual([ctx.node("analyser"), ctx.node("delay")]);
+    });
+  });
+
   it("stays off, and keeps passing audio, when RNNoise cannot load", async () => {
     const { processor, entry, ctx } = await started();
 

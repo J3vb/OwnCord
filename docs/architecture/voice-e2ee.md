@@ -910,7 +910,15 @@ of each processed 10 ms frame against `vadThreshold`, with a ~32 ms attack,
 drive the local speaking ring as the web detector's verdicts do. The web
 detector opens at the threshold and closes only 6 dB under it, after ~500 ms
 there (`lib/voice/gateScale.ts` holds the slider's decibel scale); the native
-gate still closes at the threshold after ~320 ms until it follows. The capture shares the
+gate still closes at the threshold after ~320 ms until it follows. With
+automatic sensitivity the web detector also reads RNNoise's per-frame speech
+probability (the RNNoise worklet's second output, into the detector's second
+input): a frame opens the gate only when it clears the level and RNNoise calls
+it a voice (probability ≥ 0.5), and counts as quiet when it drops under the
+close level or RNNoise stops calling it a voice (< 0.15). `MicProcessor`
+keeps RNNoise running for that verdict while Enhanced Noise Suppression is
+off, with the voice routed around it; the manual slider is a pure level gate.
+The native gate does not read the verdict yet. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
 sound server tore down, switches back to a chosen microphone once it is listed
 again, and, while "System default" is selected, follows the default source as

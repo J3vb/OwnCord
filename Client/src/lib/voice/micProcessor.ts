@@ -6,6 +6,11 @@
 //                                                            (voice gate × push-to-talk)
 //                                                            → MediaStreamDestination = processedTrack
 //
+// RNNoise's second output, its speech probability, feeds a GainNode
+// (`speechProbability`) the voice detector reads on its second input. With
+// speech detection on and Enhanced Noise Suppression off, RNNoise still runs
+// on the entry signal for that verdict while the voice goes around it.
+//
 // Input Volume sits ahead of the detector's tap so the gate, the settings
 // meter and the slider agree: turning a quiet mic up lifts it over the gate.
 //
@@ -22,7 +27,11 @@
 
 import type { Track, TrackProcessor, AudioProcessorOptions } from "livekit-client";
 import { createLogger } from "@lib/logger";
-import { createRNNoiseNode, type RNNoiseNode } from "@lib/voice/noiseSuppression";
+import {
+  createRNNoiseNode,
+  RNNOISE_SPEECH_OUTPUT,
+  type RNNoiseNode,
+} from "@lib/voice/noiseSuppression";
 
 const log = createLogger("micProcessor");
 
@@ -70,6 +79,11 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   readonly context: AudioContext;
   /** Post-RNNoise tap for the voice detector; null before init(). */
   readonly analyser: AnalyserNode | null;
+  /** RNNoise's speech probability as a signal, for the voice detector's
+   *  second input; null before init(). Silent until RNNoise runs. */
+  readonly speechProbability: AudioNode | null;
+  /** Whether RNNoise is running for the detector's verdict. */
+  readonly speechDetection: boolean;
   /** The GainNode's current value; null before init(). */
   readonly gainValue: number | null;
   readonly inputGain: number;
@@ -81,6 +95,10 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   setLookahead(seconds: number): void;
   /** Route through RNNoise or around it; a load failure leaves it off. */
   setEnhanced(on: boolean): Promise<void>;
+  /** Run RNNoise for its speech probability (automatic sensitivity), with
+   *  or without Enhanced Noise Suppression. Resolves whether it runs: a
+   *  load failure leaves the detector on its level alone. */
+  setSpeechDetection(on: boolean): Promise<boolean>;
 }
 
 export function createMicProcessor(): MicProcessor {
@@ -91,11 +109,15 @@ export function createMicProcessor(): MicProcessor {
   let delay: DelayNode | null = null;
   let gain: GainNode | null = null;
   let dest: MediaStreamAudioDestinationNode | null = null;
+  let speech: GainNode | null = null;
   let rnnoise: RNNoiseNode | null = null;
   let loadingRnnoise: Promise<void> | null = null;
   /** The last setEnhanced request: a load that settles late applies it. */
   let wantEnhanced = false;
   let enhanced = false;
+  /** The last setSpeechDetection request, applied once RNNoise is loaded. */
+  let wantDetect = false;
+  let detecting = false;
   let inputGain = 1;
   const closed: Record<GateSource, boolean> = { vad: false, ptt: false };
   let destroyed = false;
@@ -105,15 +127,45 @@ export function createMicProcessor(): MicProcessor {
     gain.gain.setTargetAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime, timeConstant);
   }
 
-  /** Wire entry → (RNNoise →) analyser + delay for the current `enhanced`. */
+  /** Wire entry → (RNNoise →) analyser + delay for the current `enhanced`,
+   *  and RNNoise → speech probability while it runs for either reason. */
   function route(): void {
-    if (entry === null || analyser === null || delay === null) return;
+    if (entry === null || analyser === null || delay === null || speech === null) return;
     entry.disconnect();
     if (rnnoise !== null) rnnoise.node.disconnect();
+    enhanced = wantEnhanced && rnnoise !== null;
+    detecting = wantDetect && rnnoise !== null;
+    if (rnnoise !== null && (enhanced || detecting)) {
+      entry.connect(rnnoise.node);
+      rnnoise.node.connect(speech, RNNOISE_SPEECH_OUTPUT, 0);
+    }
     const head = enhanced && rnnoise !== null ? rnnoise.node : entry;
-    if (head !== entry) entry.connect(head);
     head.connect(analyser);
     head.connect(delay);
+  }
+
+  /** Load RNNoise once; later callers share the load. Resolves once it is
+   *  loaded, or failed (then `rnnoise` stays null). */
+  function loadRnnoise(): Promise<void> {
+    if (rnnoise !== null || destroyed) return Promise.resolve();
+    loadingRnnoise ??= createRNNoiseNode(ctx)
+      .then(
+        (node) => {
+          if (destroyed) node.destroy();
+          else rnnoise = node;
+        },
+        (err) => {
+          // Enhanced Noise Suppression was asked for and is not there: say
+          // so. Detection alone falls back to the level gate quietly.
+          if (wantEnhanced)
+            log.warn("RNNoise failed to start — Enhanced Noise Suppression stays off", err);
+          else log.info("RNNoise failed to start — the voice gate runs on its level alone", err);
+        },
+      )
+      .finally(() => {
+        loadingRnnoise = null;
+      });
+    return loadingRnnoise;
   }
 
   function connectSource(track: MediaStreamTrack): void {
@@ -137,6 +189,12 @@ export function createMicProcessor(): MicProcessor {
     get enhanced() {
       return enhanced;
     },
+    get speechProbability() {
+      return speech;
+    },
+    get speechDetection() {
+      return detecting;
+    },
     get processedTrack(): MediaStreamTrack | undefined {
       return dest?.stream.getAudioTracks()[0];
     },
@@ -157,6 +215,7 @@ export function createMicProcessor(): MicProcessor {
       dest = ctx.createMediaStreamDestination();
       delay.connect(gain);
       gain.connect(dest);
+      speech = ctx.createGain();
       route();
       connectSource(opts.track);
       log.info("Mic processor started", { inputGain, gated: closed });
@@ -181,6 +240,7 @@ export function createMicProcessor(): MicProcessor {
       delay?.disconnect();
       gain?.disconnect();
       dest?.disconnect();
+      speech?.disconnect();
       await rnnoiseStopped;
       void ctx.close();
       log.info("Mic processor destroyed");
@@ -208,24 +268,17 @@ export function createMicProcessor(): MicProcessor {
 
     async setEnhanced(on: boolean): Promise<void> {
       wantEnhanced = on;
-      if (on && rnnoise === null && !destroyed) {
-        loadingRnnoise ??= createRNNoiseNode(ctx)
-          .then(
-            (node) => {
-              if (destroyed) node.destroy();
-              else rnnoise = node;
-            },
-            (err) =>
-              log.warn("RNNoise failed to start — Enhanced Noise Suppression stays off", err),
-          )
-          .finally(() => {
-            loadingRnnoise = null;
-          });
-        await loadingRnnoise;
-      }
+      if (on) await loadRnnoise();
       if (destroyed) return;
-      enhanced = wantEnhanced && rnnoise !== null;
       route();
+    },
+
+    async setSpeechDetection(on: boolean): Promise<boolean> {
+      wantDetect = on;
+      if (on) await loadRnnoise();
+      if (destroyed) return false;
+      route();
+      return detecting;
     },
   };
 }

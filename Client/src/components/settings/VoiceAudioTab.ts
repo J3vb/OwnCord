@@ -27,6 +27,7 @@ import {
   micCaptureOptions,
   micProcessingOptions,
   isMissingDeviceError,
+  speechDetectionOf,
   startVadDetector,
   vadThreshold,
 } from "@lib/voice/audioPipeline";
@@ -1530,6 +1531,8 @@ function buildVoiceAudioTabInner(
               paint();
             },
           },
+          undefined,
+          speechDetectionOf(processor),
         );
         meterThresholdSetter = detector.setThreshold;
         meterResetFloor = detector.resetFloor;

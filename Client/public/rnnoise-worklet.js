@@ -3,11 +3,20 @@
 //
 // Runs on the audio rendering thread. Receives WASM module bytes from the
 // main thread, initializes RNNoise, and processes 480-sample frames at 48kHz.
+//
+// Output 0 is the denoised audio. Output 1 carries RNNoise's own verdict on
+// the latest frame, its speech probability (0 to 1), as a constant sample
+// value, for the voice detector (vad-worklet.js) to read on its second
+// input: automatic sensitivity opens the gate only on what RNNoise calls a
+// voice.
 // =============================================================================
 
 const FRAME_SIZE = 480;
 const OUTPUT_RING_CAPACITY = 50;
 const RN_NOISE_INT16_SCALE = 32768;
+// Frames (10 ms) after a start whose speech probability is not reported:
+// the model's state settles in its first ~100 ms and reads as voice.
+const SPEECH_WARMUP_FRAMES = 15;
 
 // public/rnnoise.wasm is the module @jitsi/rnnoise-wasm's sync build embeds
 // (dist/rnnoise-sync.js): the current RNNoise model. The package's standalone
@@ -52,6 +61,11 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
     this._ready = false;
     /** @type {boolean} */
     this._destroyed = false;
+    /** RNNoise's speech probability for the latest processed frame. Its
+     *  first frames after a start read as voice whatever they hold, so the
+     *  first SPEECH_WARMUP_FRAMES report none. */
+    this._speechProbability = 0;
+    this._framesProcessed = 0;
 
     // Ring buffer to accumulate 480-sample frames
     this._inputRing = new Float32Array(FRAME_SIZE);
@@ -188,7 +202,9 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
       this._heapF32[inOff + i] = this._inputRing[i] * RN_NOISE_INT16_SCALE;
     }
 
-    this._process(this._state, this._outputPtr, this._inputPtr);
+    const probability = this._process(this._state, this._outputPtr, this._inputPtr);
+    this._framesProcessed++;
+    this._speechProbability = this._framesProcessed > SPEECH_WARMUP_FRAMES ? probability : 0;
 
     // Write to contiguous buffer
     const writeStart = this._outWritePos * FRAME_SIZE;
@@ -297,6 +313,7 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
     if (!inputs || !inputs[0] || !inputs[0][0] || !outputs || !outputs[0] || !outputs[0][0]) {
       return true; // Pass through silence or existing data
     }
+    const speechOut = outputs[1] !== undefined ? outputs[1][0] : undefined;
 
     const input = inputs[0];
     const output = outputs[0];
@@ -315,11 +332,13 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
       if (copyLength < outData.length) {
         outData.fill(0, copyLength);
       }
+      if (speechOut !== undefined) speechOut.fill(0);
       return true;
     }
 
     this._processInputRingBuffer(inData);
     this._fillOutputFromRingBuffer(outData);
+    if (speechOut !== undefined) speechOut.fill(this._speechProbability);
 
     return true;
   }

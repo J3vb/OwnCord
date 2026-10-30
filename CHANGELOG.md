@@ -78,6 +78,7 @@ and only when it changes something a contributor or fork holder must do
 - The Input Sensitivity slider is now in decibels, like Discord's: each step is the same loudness change anywhere on the slider, and the value beside the meter reads "-40 dB" instead of a percentage. A saved sensitivity is moved onto the new scale once and keeps the gate level it had.
 - Voice Activity opens the mic at the slider's level and closes it only 6 dB lower, after half a second of quiet, so a voice near the line no longer flickers and the quieter stretches of a word are not cut.
 - Automatic input sensitivity now learns how loud your voice is and sets the gate between the room's noise and your voice, instead of a fixed step above the noise. With Noise Suppression on, breaths, chairs and keyboards no longer open the mic once you have spoken; in a loud room the gate stays low enough for soft words. A louder room is followed within 3 s.
+- Automatic input sensitivity also asks the noise suppressor whether what it hears is a voice, like Discord's Krisp gate: typing, a cough or a fan that clears the level no longer opens the mic, and quiet speech at the line still does. This works on the desktop app on Windows and in the browser client; Enhanced Noise Suppression does not have to be on.
 
 **Phones and touch screens**
 
