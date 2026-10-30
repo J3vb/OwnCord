@@ -164,12 +164,11 @@ func lineTime(line []byte) (time.Time, bool) {
 	if !bytes.HasPrefix(line, []byte(prefix)) {
 		return time.Time{}, false
 	}
-	rest := line[len(prefix):]
-	end := bytes.IndexByte(rest, '"')
-	if end < 0 {
+	ts, _, ok := bytes.Cut(line[len(prefix):], []byte(`"`))
+	if !ok {
 		return time.Time{}, false
 	}
-	t, err := time.Parse(time.RFC3339Nano, string(rest[:end]))
+	t, err := time.Parse(time.RFC3339Nano, string(ts))
 	return t, err == nil
 }
 
@@ -256,8 +255,7 @@ func readLogHistory(ctx context.Context, dir string, q logHistoryQuery) (logHist
 	}
 	toDay := q.to.UTC().Add(logHistoryDaySlack).Format(time.DateOnly)
 	var scanned int64
-	for i := len(files) - 1; i >= 0; i-- {
-		fi := files[i]
+	for _, fi := range slices.Backward(files) {
 		if q.cursor.set && q.cursor.key.less(fi.key) {
 			continue
 		}
@@ -320,7 +318,10 @@ func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *
 			return nil
 		}
 		var e LogEntry
-		if json.Unmarshal(line, &e) != nil || !q.matches(&e) {
+		if err := json.Unmarshal(line, &e); err != nil {
+			return nil //nolint:nilerr // a damaged line is skipped, not a failed read
+		}
+		if !q.matches(&e) {
 			return nil
 		}
 		resp.Entries = append(resp.Entries, e)
