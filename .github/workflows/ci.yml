@@ -1927,7 +1927,7 @@ jobs:
         run: |
           apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n 1)
           test -n "$apk" || { echo "::error::no APK was built"; exit 1; }
-          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
           "$tools/zipalign" -c -P 16 4 "$apk"
           out="$RUNNER_TEMP/owncord-android-${SHA::7}.apk"
           cp "$apk" "$out"
