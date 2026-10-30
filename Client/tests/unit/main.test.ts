@@ -1707,7 +1707,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
     await vi.advanceTimersByTimeAsync(800);
 
     // The real dispatcher's auth_error handler records the host when the
-    // server says this client's epoch is too old (dispatcher.test.ts covers
+    // server says this client's epoch is too old (dispatcher/core.test.ts covers
     // that); the dispatcher is stubbed here, so set what it would have set,
     // then end the session the way auth_error does.
     mockCheckForUpdate.mockResolvedValue({ available: false, version: null, body: null });
