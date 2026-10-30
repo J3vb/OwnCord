@@ -1903,16 +1903,34 @@ jobs:
             exit 0
           fi
           umask 077
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/owncord-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/owncord-release.jks"
+          # A secret pasted with a trailing newline is a different password;
+          # the Gradle config strips the same characters.
+          STORE_PW=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n')
+          ALIAS=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+          export STORE_PW
+          # Fail here, before the 7-minute build, and say which part is wrong.
+          if ! keytool -list -keystore "$RUNNER_TEMP/owncord-release.jks" -storepass:env STORE_PW > /dev/null; then
+            echo "::error::keytool cannot open the keystore with ANDROID_KEYSTORE_PASSWORD (or ANDROID_KEYSTORE_BASE64 is not the keystore file)"
+            exit 1
+          fi
+          if ! keytool -list -keystore "$RUNNER_TEMP/owncord-release.jks" -storepass:env STORE_PW -alias "$ALIAS" > /dev/null; then
+            echo "::error::the keystore has no key named by ANDROID_KEY_ALIAS"
+            keytool -list -keystore "$RUNNER_TEMP/owncord-release.jks" -storepass:env STORE_PW | grep -i "entry" || true
+            exit 1
+          fi
+          # Passwords stay in the environment of the build step; the file
+          # holds only the keystore path and the alias.
           {
             echo "storeFile=$RUNNER_TEMP/owncord-release.jks"
-            echo "storePassword=$KEYSTORE_PASSWORD"
-            echo "keyAlias=$KEY_ALIAS"
-            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$ALIAS"
           } > src-tauri/gen/android/keystore.properties
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
       - name: Build the APK (arm64)
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           start=$(date +%s)
           npx tauri android build --apk --target aarch64 --ci

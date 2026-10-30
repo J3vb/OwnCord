@@ -15,9 +15,10 @@ val tauriProperties = Properties().apply {
     }
 }
 
-// CI writes keystore.properties (storeFile, storePassword, keyAlias,
-// keyPassword) from repository secrets, with the keystore itself outside the
-// checkout. Without the file a release build is left unsigned.
+// CI writes keystore.properties (storeFile, keyAlias) with the keystore itself
+// outside the checkout, and passes the passwords as ANDROID_KEYSTORE_PASSWORD
+// and ANDROID_KEY_PASSWORD from repository secrets. Without the file a release
+// build is left unsigned.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 
 android {
@@ -38,9 +39,12 @@ android {
         signingConfigs {
             create("release") {
                 storeFile = file(keystoreProperties.getProperty("storeFile"))
-                storePassword = keystoreProperties.getProperty("storePassword")
+                val storePw = System.getenv("ANDROID_KEYSTORE_PASSWORD").orEmpty().trimEnd('\r', '\n')
+                storePassword = storePw
                 keyAlias = keystoreProperties.getProperty("keyAlias")
-                keyPassword = keystoreProperties.getProperty("keyPassword")
+                // A PKCS12 keystore (keytool's default) has one password for
+                // the store and the key, so an empty key password falls back.
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD").orEmpty().trimEnd('\r', '\n').ifEmpty { storePw }
             }
         }
     }
