@@ -344,7 +344,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "ff17920",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/core.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -1429,7 +1429,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/slowMode.test.ts",
         "revertProof": "pass",
         "branchCommit": "88033f02"
       },
@@ -5901,7 +5901,7 @@
       "suggestedFix": "In destroyChannel, invalidate the window it is tearing down before clearing the id \u2014 one guard in the shared choke point covers every teardown path: replace `_currentChannelId = null;` (line 172) with `if (_currentChannelId !== null) invalidateChannelMessageWindow(_currentChannelId); _currentChannelId = null;`. mountChannel's existing call at line 193 then becomes redundant (invalidateChannelMessageWindow early-returns when the flag is already gone) and can stay or be removed; existing tests still pass because the first mount's destroyChannel sees _currentChannelId === null and the switch case still invalidates the previous id. The dispatcher.ts:410 gap is a separate fix (invalidate loaded windows on a resync even when the active channel was cleared).",
       "fix": {
         "commit": "5118428",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/core.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -10091,7 +10091,7 @@
       "finder": "opus",
       "fix": {
         "commit": "fce5efd",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/callbacks.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Route every send through one per-controller FIFO promise chain instead of only the text branch, so a reply/attachment send cannot jump an in-flight persist. In performSend, replace the `if (...) { void savePendingText(...).then(sendNow) } else sendNow()` split with a single chained dispatch, e.g. a controller-scoped `let sendChain = Promise.resolve();` and `sendChain = sendChain.then(() => needsPersist ? savePendingText(owner, draft).catch(toastOnce) : undefined).then(sendNow);`. One chain in the shared function orders both branches; guarding each caller would not."
@@ -11753,7 +11753,7 @@
       "suggestedFix": "Call settleThreadNavigation(channelId) in the forum branch of mountChannel after the forum view is mounted.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/channel-controller.test.ts (opens a followed post asked for from another channel once the forum mounts)",
+        "test": "Client/tests/unit/channelController/core.test.ts (opens a followed post asked for from another channel once the forum mounts)",
         "revertProof": "fail (without the fix openById is never called)"
       },
       "confidence": "high",
@@ -11822,7 +11822,7 @@
       "suggestedFix": "Clear the cache in ChannelController.destroyChannel and on a full-ready resync.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/channel-controller.test.ts (drops cached who-reacted lists when leaving a channel...), Client/tests/unit/dispatcher/readyResync.test.ts (drops every cached who-reacted list on a second ready...)",
+        "test": "Client/tests/unit/channelController/core.test.ts (drops cached who-reacted lists when leaving a channel...), Client/tests/unit/dispatcher/readyResync.test.ts (drops every cached who-reacted list on a second ready...)",
         "revertProof": "fail (cached list survived both)"
       },
       "confidence": "high",
