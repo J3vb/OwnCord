@@ -1,7 +1,7 @@
 // The flip button in the call bar: front to back camera and back, on a phone.
 // Loaded on demand, so it stays out of the eager MainPage chunk.
 import { loadPref } from "@lib/prefs/preferences";
-import { switchVideoDevice } from "@lib/livekitSession";
+import { switchVideoDevice } from "@lib/voice/livekitSession";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("cameraFlip");

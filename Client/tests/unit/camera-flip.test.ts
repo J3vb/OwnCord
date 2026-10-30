@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const switchVideoDevice = vi.hoisted(() => vi.fn());
-vi.mock("@lib/livekitSession", () => ({ switchVideoDevice }));
+vi.mock("@lib/voice/livekitSession", () => ({ switchVideoDevice }));
 
 import {
   cameraFlipAvailable,
