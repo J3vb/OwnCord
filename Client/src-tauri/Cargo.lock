@@ -1628,6 +1628,7 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+ "zlib-rs",
 ]
 
 [[package]]
@@ -2544,7 +2545,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -3062,9 +3063,9 @@ dependencies = [
 
 [[package]]
 name = "libwebrtc"
-version = "0.3.52"
+version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8718693f33f921a97c784f34fcbf085ebe68989e53bf4802f93aa8e083cf0a65"
+checksum = "c0399e372f69d3bb3ad8d51f6354f3090c57317de4f61521aa2f5a542c06fe1f"
 dependencies = [
  "cxx",
  "jni 0.21.1",
@@ -3113,7 +3114,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 
 [[package]]
 name = "livekit"
-version = "0.9.5"
+version = "0.10.0"
 dependencies = [
  "bmrng",
  "bytes",
@@ -3140,18 +3141,18 @@ dependencies = [
 
 [[package]]
 name = "livekit-common"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a41d06b9a8c37ad2691faabc091394101c876c2eb8ab1e61b3b021b4d5aacfd4"
+checksum = "728a0e2cc2991a3392e2a1c9321b92f3f49d35f02ffc3e071ec75ea66fa9a5bc"
 dependencies = [
  "livekit-protocol",
 ]
 
 [[package]]
 name = "livekit-data-stream"
-version = "0.1.8"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e424524e3a8278e5a5d498e18817c017df922dae37551943e3afbf1458843e88"
+checksum = "97cf9d2dc503dc26c365fb90f994e0a5fed0eaf8800cd32abfc53e4645f09c39"
 dependencies = [
  "async-compression",
  "bmrng",
@@ -3167,14 +3168,15 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "uuid",
 ]
 
 [[package]]
 name = "livekit-datatrack"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51ea81d9e992be78a6089a2700cba7a2225bf3ebb9b821d1b9479a59537d9341"
+checksum = "a610cb4b2a6927fb21dee3d089bfb5d39da1b71de383201a89b7ac9bf80e1c74"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3191,9 +3193,9 @@ dependencies = [
 
 [[package]]
 name = "livekit-net"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9528a26c807f49d3fa6d075c01db5fd77bf32454b1e700c530fb8c670892008"
+checksum = "92ee1131d54701875cf3d0a1ef5ea09f8e328c93afc8845ac65b36cdadf80422"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -3230,9 +3232,9 @@ dependencies = [
 
 [[package]]
 name = "livekit-rpc"
-version = "0.1.4"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d948a38a139c142aa3c42d3679b3f39d04d3e07981e4de5b16bae21b1eb50189"
+checksum = "64484e0a669d6b6f1ec1572caef775fcab5a67325f3cc41ebc255a86d9e309db"
 dependencies = [
  "livekit-common",
  "livekit-data-stream",
@@ -3247,9 +3249,9 @@ dependencies = [
 
 [[package]]
 name = "livekit-signaling"
-version = "0.1.6"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e3867060e1f1e7073f367c218688042fc014f8b8ebd65749e411400ad9b7e3a"
+checksum = "8e4c039320b98bc615890653143735c8f7f45789bca074dc97a6392ea04390a5"
 dependencies = [
  "base64 0.21.7",
  "device-info",
@@ -6162,7 +6164,7 @@ dependencies = [
  "tokio",
  "url",
  "windows-sys 0.61.2",
- "zip 9.1.3",
+ "zip",
 ]
 
 [[package]]
@@ -6297,7 +6299,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -7207,9 +7209,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc-sys"
-version = "0.3.49"
+version = "0.3.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b803a52c561fbb9faaf09c1b6fc0260f337cbc1ae6f2a525f673c77eb4411022"
+checksum = "bae66695bde7b250a9e5f7976db6015e30fa06033afc1745e5499d55aa51612a"
 dependencies = [
  "cc",
  "cxx",
@@ -7222,9 +7224,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc-sys-build"
-version = "0.3.19"
+version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cd4f418e16f4b7ba028e6b5c70e4f532c7d2b5ca39726d42b699f3e4591ed5c"
+checksum = "8d67326bcdd69af2a902c37d2f19101eaf4298fc81b699b89a2017a9a0c46267"
 dependencies = [
  "anyhow",
  "fs2",
@@ -7232,7 +7234,7 @@ dependencies = [
  "reqwest 0.12.28",
  "scratch",
  "semver",
- "zip 0.6.6",
+ "zip",
 ]
 
 [[package]]
@@ -8177,23 +8179,12 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "0.6.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "760394e246e4c28189f19d488c058bf16f564016aefac5d32bb1f3b51d5e9261"
-dependencies = [
- "byteorder",
- "crc32fast",
- "crossbeam-utils",
- "flate2",
-]
-
-[[package]]
-name = "zip"
 version = "9.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1156b39d142a34b999c2310a50455e0cb3760bf7efad0122f796d813bee26ccb"
 dependencies = [
  "crc32fast",
+ "flate2",
  "getrandom 0.4.3",
  "indexmap 2.14.0",
  "memchr",
@@ -8201,6 +8192,12 @@ dependencies = [
  "typed-path",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"

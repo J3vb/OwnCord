@@ -151,7 +151,7 @@ pub struct TrackPublishOptions {
     /// - Screen share: `MaintainResolution` (clarity is critical for text/UI)
     /// - Other/unknown: `Balanced`
     pub degradation_preference: Option<DegradationPreference>,
-    // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.9.5. See OWNCORD-PATCH.md.
+    // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
     /// Audio only; signals TF_STEREO (and `AddTrackRequest.stereo`) so the SFU
     /// negotiates stereo Opus (`stereo=1`) for the published track. Ignored
     /// for video tracks.

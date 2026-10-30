@@ -12,7 +12,7 @@
 [package]
 edition = "2021"
 name = "livekit"
-version = "0.9.5"
+version = "0.10.0"
 build = "build.rs"
 autolib = false
 autobins = false
@@ -159,25 +159,25 @@ version = "1.4"
 version = "0.8.6"
 
 [dependencies.libwebrtc]
-version = "0.3.52"
+version = "0.3.55"
 
 [dependencies.livekit-common]
-version = "0.1.5"
+version = "0.1.6"
 
 [dependencies.livekit-data-stream]
-version = "0.1.8"
+version = "0.2.0"
 
 [dependencies.livekit-datatrack]
-version = "0.2.3"
+version = "0.2.4"
 
 [dependencies.livekit-protocol]
-version = "0.8.1"
+version = "0.8.2"
 
 [dependencies.livekit-rpc]
-version = "0.1.4"
+version = "0.2.0"
 
 [dependencies.livekit-signaling]
-version = "0.1.6"
+version = "0.1.8"
 
 [dependencies.log]
 version = "0.4"
@@ -220,15 +220,15 @@ version = "1.0.99"
 version = "1.1"
 
 [dev-dependencies.livekit-api]
-version = "0.9.0"
+version = "0.10.0"
 features = ["services"]
 
 [dev-dependencies.livekit-data-stream]
-version = "0.1.8"
+version = "0.2.0"
 features = ["test-utils"]
 
 [dev-dependencies.livekit-token]
-version = "0.3.0"
+version = "0.4.0"
 
 [dev-dependencies.rand]
 version = "0.9"
