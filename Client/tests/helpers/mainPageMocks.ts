@@ -263,6 +263,7 @@ export function pageSidebarAreaMock() {
         buildMemberPanel,
         syncMemberSection,
         renameGroup: mockRenameGroup,
+        openCall: vi.fn(),
       };
     },
   };
@@ -346,6 +347,7 @@ export function pageChatAreaMock() {
           sidebarToggle: document.createElement("button"),
         },
         sidebarToggle: document.createElement("button"),
+        refreshCallBar: vi.fn(),
         closePinnedPanel: vi.fn(),
         searchCtrl: { open: vi.fn(), cleanup: vi.fn() },
         dmProfileSlot,

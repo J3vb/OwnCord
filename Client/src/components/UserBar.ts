@@ -9,7 +9,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
-import { voiceStore, isSelfMuted, type VoiceState } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { createSelfProfileCard, type SelfProfileCard } from "@components/SelfProfileCard";
@@ -39,6 +39,7 @@ import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence/presence";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
+import { micControlState } from "./voiceStatusText";
 import { portalText } from "../i18n/portal";
 
 export interface UserBarOptions {
@@ -106,30 +107,16 @@ function swapIcon(btn: HTMLButtonElement, name: IconName): void {
  *  mute, and an idle push-to-talk key reads as its own state, not a mute. */
 function renderVoiceControls(muteBtn: HTMLButtonElement, deafenBtn: HTMLButtonElement): void {
   const voice = voiceStore.getState();
-  const inCall = voice.currentChannelId !== null;
-  const userMuted = isSelfMuted(voice);
-  const serverMuted = voice.localServerMuted === true;
   const serverDeafened = voice.localServerDeafened === true;
-  // The AFK channel is listen-only for everyone: the mic reads muted and is locked.
-  const afkLocked = inCall && voice.inAfkChannel === true;
-  const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
-  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly && !afkLocked;
+  const mic = micControlState(voice);
 
-  muteBtn.classList.toggle("active-ctrl", userMuted);
-  muteBtn.classList.toggle("ptt-gated", pttGated);
-  muteBtn.classList.toggle("ub-listen-only", listenOnly);
-  swapIcon(muteBtn, userMuted || listenOnly || afkLocked ? "mic-off" : "mic");
-  muteBtn.setAttribute("aria-pressed", String(userMuted || afkLocked));
-  muteBtn.disabled = serverMuted || listenOnly || afkLocked;
-  muteBtn.title = serverMuted
-    ? voiceText("widget.mutedByModerator")
-    : afkLocked
-      ? voiceText("widget.control.afkLocked")
-      : listenOnly
-        ? voiceText("widget.control.listenOnly")
-        : pttGated
-          ? voiceText("widget.control.pttGated")
-          : voiceText(userMuted ? "widget.control.unmute" : "widget.control.mute");
+  muteBtn.classList.toggle("active-ctrl", mic.userMuted);
+  muteBtn.classList.toggle("ptt-gated", mic.pttGated);
+  muteBtn.classList.toggle("ub-listen-only", mic.listenOnly);
+  swapIcon(muteBtn, mic.micOff ? "mic-off" : "mic");
+  muteBtn.setAttribute("aria-pressed", String(mic.pressed));
+  muteBtn.disabled = mic.disabled;
+  muteBtn.title = mic.title;
 
   deafenBtn.classList.toggle("active-ctrl", voice.localDeafened);
   swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");

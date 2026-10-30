@@ -12,6 +12,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { reconcileModels, sameModel } from "@lib/net/reconcile";
 import { select, eventSource, type Selection } from "@lib/ui/select";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { MountableComponent } from "@lib/text/safeRender";
 import {
   channelsStore,
@@ -94,6 +95,8 @@ const volumeMenuScreen = createLazyScreen(
   "user-volume-menu",
   () => import("./channel-sidebar/volumeMenu"),
 );
+// The phone join sheet loads on its first tap.
+const joinSheetScreen = createLazyScreen("voice-join-sheet", () => import("./VoiceJoinSheet"));
 /** Latest open request per sidebar (keyed by its lifetime signal); an earlier one still loading is dropped. */
 const volumeMenuAttempts = new WeakMap<AbortSignal, number>();
 
@@ -705,6 +708,19 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
           const status = voiceStore.getState().voiceStatus;
           if (status === "joining" || status === "securing") return;
           onOpenCall();
+        } else if (isPhoneLayout()) {
+          // A stray tap in the drawer should not put you in a call: ask first.
+          void joinSheetScreen
+            .load(() => !disposable.signal.aborted)
+            .then((m) => {
+              if (m === null || disposable.signal.aborted) return;
+              m.openVoiceJoinSheet({
+                channelId: channel.id,
+                onJoin: onVoiceJoin,
+                signal: disposable.signal,
+                fallbackFocus: () => wrapper.querySelector<HTMLElement>(":scope > .channel-item"),
+              });
+            });
         } else {
           onVoiceJoin(channel.id);
         }
