@@ -9,7 +9,16 @@
  * is between servers, and between sequential accounts on one host through the
  * store and cache resets.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockedObject,
+} from "vitest";
 
 // ---------------------------------------------------------------------------
 // Tauri API mocks — reuse the ws-mocks.ts event-registry helper so ws.ts's
@@ -242,11 +251,15 @@ import { createConnectPage } from "@pages/ConnectPage";
 const A = "a.example:8443";
 const B = "b.example:8443";
 
+// main.ts builds its profile manager once at startup, before the per-test
+// mock clear wipes mock.results.
+let startupProfileManager: MockedObject<ReturnType<typeof createProfileManager>>;
 beforeAll(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   await import("../../src/main");
   await Promise.resolve();
   await Promise.resolve();
+  startupProfileManager = vi.mocked(vi.mocked(createProfileManager).mock.results[0]!.value, true);
 });
 
 beforeEach(() => {
@@ -539,7 +552,7 @@ describe("quick switch keeps each server's saved sign-in", () => {
       { ...PROFILES[0]!, id: "p-main", host: shared },
       { ...PROFILES[0]!, id: "p-alt", host: shared },
     );
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       removeProfile: ReturnType<typeof vi.fn>;
     };
     manager.removeProfile.mockImplementation((id: string) => {
@@ -660,7 +673,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
   });
 
   it("resumes with the profile's auto-login as it is when the server comes back", async () => {
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       setAutoLogin: ReturnType<typeof vi.fn>;
     };
     const original = PROFILES[0]!;
@@ -699,7 +712,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
 
   it("ends the wait at once when the waited-on profile is deleted", async () => {
     const original = PROFILES[0]!;
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       removeProfile: ReturnType<typeof vi.fn>;
     };
     manager.removeProfile.mockImplementation((id: string) => {
@@ -774,7 +787,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
   });
 
   it("still never resumes after an explicit logout (skip-auto-login)", async () => {
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       getAutoConnectProfile: ReturnType<typeof vi.fn>;
     };
     manager.getAutoConnectProfile.mockReturnValue({ ...PROFILES[0]!, autoConnect: true });
