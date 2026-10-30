@@ -22,7 +22,7 @@ const permissionsImportPath = "github.com/J3vb/OwnCord/Server/permissions"
 //
 // Everything else in the package is a chokepoint rather than a raw check and
 // is deliberately absent: the channel predicates (CanViewChannel,
-// CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice),
+// CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanPassChannelPassword, CanModerateVoice),
 // Subject.Has, and Checker — those are what a call site is supposed to use.
 var rawPermChecks = map[string]bool{
 	"HasPerm":               true,
@@ -251,7 +251,7 @@ func (h authzHit) excessMessage(want, got int) string {
 }
 
 // authzPredicateList names the channel predicates a call site should be using.
-const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice, CanReadContent, CanDeleteMessage, CanPinMessage, CanMentionRole"
+const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanPassChannelPassword, CanModerateVoice, CanReadContent, CanDeleteMessage, CanPinMessage, CanMentionRole"
 
 // authzHits reports every raw permission check in one file, whether or not it
 // is allowlisted, so the rule and TestAuthzResidueAllowIsLive read the same

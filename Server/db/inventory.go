@@ -71,6 +71,7 @@ var SubjectInventory = []InventoryClass{
 	{"18b gif favorites", `SELECT COUNT(*) FROM gif_favorites WHERE user_id = ?`, inventoryByUID},
 	{"18c category user overrides", `SELECT COUNT(*) FROM category_user_overrides WHERE user_id = ?`, inventoryByUID},
 	{"18d thread follows", `SELECT COUNT(*) FROM thread_members WHERE user_id = ?`, inventoryByUID},
+	{"18e channel password grants", `SELECT COUNT(*) FROM channel_password_grants WHERE user_id = ?`, inventoryByUID},
 	{"19 voice state", `SELECT COUNT(*) FROM voice_states WHERE user_id = ?`, inventoryByUID},
 	{"20 replay events", `SELECT COUNT(*) FROM events WHERE ` + EventNamesUserPredicate, inventoryByUID},
 	{"20a channel retention updated_by", `SELECT COUNT(*) FROM channel_retention WHERE updated_by = ?`, inventoryByUID},

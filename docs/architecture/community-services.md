@@ -106,7 +106,13 @@ retention, erasure and backup behaviour; no new data class. **Amended 2026-10-27
 identity key):** `085_session_identity_key.sql` adds one nullable column to `sessions`,
 `identity_public_key`: the voice E2EE public key a device sent in its WebSocket auth frame.
 It is part of the session row and shares its ownership, retention, erasure (deleted with the
-session) and backup behaviour; no new data class. Other historical
+session) and backup behaviour; no new data class. **Amended 2026-10-29 (channel
+password):** `086_channel_password.sql` adds `password_hash` and `password_version` to
+`channels` and the table `channel_password_grants(channel_id, user_id, password_version,
+granted_at)`. The hash is channel configuration and never leaves the server; a grant only
+records that a member entered a voice channel's current password, is never read as
+permission, and is deleted with the channel or the account (lifecycle row 18e in
+`data-lifecycle.md`). Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a

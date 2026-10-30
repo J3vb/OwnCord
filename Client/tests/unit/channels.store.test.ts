@@ -1175,6 +1175,41 @@ describe("channels store", () => {
       expect(ch?.voiceMaxVideo).toBe(1);
     });
 
+    it("reads password_protected from ready, channel_create and channel_update", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "vault",
+          type: "voice",
+          category: null,
+          position: 0,
+          password_protected: true,
+        },
+        { id: 2, name: "lounge", type: "voice", category: null, position: 1 },
+      ]);
+      expect(channelsStore.getState().channels.get(1)?.passwordProtected).toBe(true);
+      // An older server omits it: unprotected.
+      expect(channelsStore.getState().channels.get(2)?.passwordProtected).toBeFalsy();
+
+      addChannel({
+        id: 3,
+        name: "den",
+        type: "voice",
+        category: null,
+        position: 2,
+        password_protected: true,
+      } as ChannelCreatePayload);
+      expect(channelsStore.getState().channels.get(3)?.passwordProtected).toBe(true);
+
+      updateChannel({ id: 2, password_protected: true } as ChannelUpdatePayload);
+      expect(channelsStore.getState().channels.get(2)?.passwordProtected).toBe(true);
+      // An update that does not mention it leaves it alone; false clears it.
+      updateChannel({ id: 2, topic: "x" } as ChannelUpdatePayload);
+      expect(channelsStore.getState().channels.get(2)?.passwordProtected).toBe(true);
+      updateChannel({ id: 2, password_protected: false } as ChannelUpdatePayload);
+      expect(channelsStore.getState().channels.get(2)?.passwordProtected).toBe(false);
+    });
+
     it("applies a channel_update that flips the flags", () => {
       setChannels([{ id: 1, name: "general", type: "text", category: null, position: 0 }]);
 

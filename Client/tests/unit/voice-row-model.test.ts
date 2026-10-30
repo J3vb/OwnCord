@@ -282,6 +282,47 @@ describe("voiceChannelChrome mentions", () => {
   });
 });
 
+describe("voice row password lock", () => {
+  const lock = (wrapper: Element): HTMLElement | null =>
+    wrapper.querySelector<HTMLElement>(".channel-item > .ch-password");
+
+  it("is drawn only for a protected channel, with an accessible label", () => {
+    const protectedRow = drawVoiceChannelChrome(
+      voiceChannelChrome(channel({ passwordProtected: true }), inputs()),
+    );
+    const badge = lock(protectedRow);
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute("role")).toBe("img");
+    expect(badge?.getAttribute("aria-label")).toBe("Password protected");
+    expect(badge?.querySelector("svg")).not.toBeNull();
+
+    expect(lock(drawVoiceChannelChrome(voiceChannelChrome(channel(), inputs())))).toBeNull();
+    expect(
+      lock(
+        drawVoiceChannelChrome(voiceChannelChrome(channel({ passwordProtected: false }), inputs())),
+      ),
+    ).toBeNull();
+  });
+
+  it("appears and disappears in place when the flag changes", () => {
+    const open = voiceChannelChrome(channel({ voiceMaxUsers: 5 }), inputs());
+    const locked = voiceChannelChrome(
+      channel({ voiceMaxUsers: 5, passwordProtected: true }),
+      inputs(),
+    );
+    const wrapper = drawVoiceChannelChrome(open);
+
+    patchVoiceChannelChrome(wrapper, locked);
+    expect(lock(wrapper)).not.toBeNull();
+    // Before the capacity badge, as a fresh draw orders them.
+    expect(lock(wrapper)?.nextElementSibling?.classList.contains("ch-capacity")).toBe(true);
+    expect(wrapper.innerHTML).toBe(drawVoiceChannelChrome(locked).innerHTML);
+
+    patchVoiceChannelChrome(wrapper, open);
+    expect(lock(wrapper)).toBeNull();
+  });
+});
+
 describe("voice row mention badge", () => {
   const chromeFor = (mentionCount: number) =>
     voiceChannelChrome(channel({ mentionCount, unreadCount: 9 }), inputs());

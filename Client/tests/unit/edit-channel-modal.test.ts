@@ -7,7 +7,7 @@ import {
   MAX_VOICE_LIMIT,
 } from "@components/EditChannelModal";
 import type { EditChannelModalOptions, EditChannelData } from "@components/EditChannelModal";
-import { channelsStore, setChannels } from "@stores/channels.store";
+import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
 
 describe("EditChannelModal", () => {
   let container: HTMLDivElement;
@@ -34,6 +34,7 @@ describe("EditChannelModal", () => {
       channelNsfw: overrides?.channelNsfw,
       channelVoiceMaxUsers: overrides?.channelVoiceMaxUsers,
       channelVoiceMaxVideo: overrides?.channelVoiceMaxVideo,
+      channelPasswordProtected: overrides?.channelPasswordProtected,
       onSave: overrides?.onSave ?? vi.fn(async () => {}),
       onClose: overrides?.onClose ?? vi.fn(),
       ...(overrides?.channelType !== undefined ? { channelType: overrides.channelType } : {}),
@@ -568,6 +569,131 @@ describe("EditChannelModal", () => {
       await vi.waitFor(() => {
         expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ voice_max_users: 0 }));
       });
+      modal.destroy?.();
+    });
+  });
+
+  // ─── Channel password ──────────────────────────────────────────────────────
+
+  describe("channel password", () => {
+    const q = (id: string): HTMLElement | null =>
+      container.querySelector<HTMLElement>(`[data-testid='${id}']`);
+    const passwordInput = (): HTMLInputElement =>
+      q("edit-channel-password-input") as HTMLInputElement;
+    const click = (id: string): void => q(id)!.click();
+    const rename = (): void => {
+      (q("edit-channel-name-input") as HTMLInputElement).value = "renamed";
+    };
+
+    beforeEach(() => {
+      setChannels([{ id: 1, name: "general", type: "voice", category: "Chat", position: 0 }]);
+    });
+
+    it("offers a masked, length-capped input on an unprotected voice channel", () => {
+      const { modal } = makeModal({ channelType: "voice" });
+      expect(passwordInput().type).toBe("password");
+      expect(passwordInput().maxLength).toBe(64);
+      expect(q("edit-channel-password-set")).toBeNull();
+      modal.destroy?.();
+    });
+
+    it("is not offered on a text channel, and a text edit sends no password", async () => {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, channelType: "text" });
+      expect(q("edit-channel-password-group")).toBeNull();
+      rename();
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
+      modal.destroy?.();
+    });
+
+    it("sends no password when the user left it empty", async () => {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, channelType: "voice" });
+      rename();
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
+      modal.destroy?.();
+    });
+
+    it("sets a password on an unprotected channel", async () => {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, channelType: "voice" });
+      passwordInput().value = "s3cret";
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ password: "s3cret" }));
+      modal.destroy?.();
+    });
+
+    it("shows that a password is set without a field, and saves nothing untouched", async () => {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const onClose = vi.fn();
+      const { modal } = makeModal({
+        onSave,
+        onClose,
+        channelType: "voice",
+        channelPasswordProtected: true,
+      });
+      expect(q("edit-channel-password-set")?.textContent).toBe("Password is set");
+      expect(q("edit-channel-password-input")).toBeNull();
+      click("edit-channel-submit");
+      expect(onSave).not.toHaveBeenCalled();
+      modal.destroy?.();
+    });
+
+    it("Change reveals the input and sends the new password", async () => {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, channelType: "voice", channelPasswordProtected: true });
+      click("edit-channel-password-change");
+      passwordInput().value = "n3w";
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ password: "n3w" }));
+      modal.destroy?.();
+    });
+
+    it("Change with nothing typed keeps the password", async () => {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, channelType: "voice", channelPasswordProtected: true });
+      click("edit-channel-password-change");
+      rename();
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
+      modal.destroy?.();
+    });
+
+    it("Remove sends an empty string, and Keep password takes it back", async () => {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, channelType: "voice", channelPasswordProtected: true });
+      click("edit-channel-password-remove");
+      expect(q("edit-channel-password-removed")).not.toBeNull();
+      click("edit-channel-password-keep");
+      expect(q("edit-channel-password-set")).not.toBeNull();
+      click("edit-channel-password-remove");
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith({ password: "" }));
+      modal.destroy?.();
+    });
+
+    it("follows another admin removing the password while open", () => {
+      setChannels([
+        {
+          id: 1,
+          name: "general",
+          type: "voice",
+          category: "Chat",
+          position: 0,
+          password_protected: true,
+        },
+      ]);
+      const { modal } = makeModal({ channelType: "voice", channelPasswordProtected: true });
+      expect(q("edit-channel-password-set")).not.toBeNull();
+      updateChannel({ id: 1, password_protected: false } as never);
+      channelsStore.flush();
+      expect(q("edit-channel-password-set")).toBeNull();
+      expect(passwordInput()).not.toBeNull();
       modal.destroy?.();
     });
   });

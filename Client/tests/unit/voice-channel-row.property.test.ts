@@ -25,6 +25,7 @@ const capacity = fc.record({ label: text, title: text });
 
 /** The patchable part of a chrome model. */
 const patchable = fc.record({
+  passwordProtected: fc.boolean(),
   afk: fc.boolean(),
   joined: fc.boolean(),
   frozenReason: fc.option(text, { nil: null }),
@@ -54,6 +55,8 @@ function mutateChrome(model: VoiceChannelChromeModel, field: string): VoiceChann
       return { ...model, nsfw: !model.nsfw };
     case "private":
       return { ...model, private: !model.private };
+    case "passwordProtected":
+      return { ...model, passwordProtected: !model.passwordProtected };
     case "afk":
       return { ...model, afk: !model.afk };
     case "joined":
@@ -124,6 +127,7 @@ describe("voice channel row view", () => {
       "frozenReason",
       "joined",
       "mentionCount",
+      "passwordProtected",
       "timeoutReason",
     ]);
   });

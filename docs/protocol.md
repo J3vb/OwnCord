@@ -610,6 +610,12 @@ means nothing; the two voice limits are the values
 the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
 
+`password_protected` is always present on every guild channel object (`ready`
+`channels[]`, `channel_create`, `channel_update`) and is `true` only for a voice
+channel that has a password (see `voice_join`). It is the same for every viewer: there
+is no per-viewer "unlocked" flag, a client tries the join and reacts to
+`PASSWORD_REQUIRED`. The password and its hash are never sent.
+
 `private` (3D-6) is the channel-level lock flag, always present on every guild
 channel object (`ready` `channels[]`, `channel_create`, `channel_update`), voice
 channels included, and never on a DM, so a client can draw a lock icon. A channel is
@@ -2816,7 +2822,7 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 ### voice_join (Client -> Server)
 
 ```json
-{ "type": "voice_join", "payload": { "channel_id": 10, "user_initiated": true } }
+{ "type": "voice_join", "payload": { "channel_id": 10, "user_initiated": true, "password": "..." } }
 ```
 
 `user_initiated` is optional: the client sets it when the user chose the join
@@ -2829,6 +2835,22 @@ interaction_ under DM Authorization).
 
 The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
 `READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
+
+`password` is optional and only read for a channel with `password_protected: true`.
+A voice channel can have a password. A member who has not entered the current one
+yet must send it with the join; the server then stores that they did, and never asks
+that member again until the password changes. A join without it answers
+`PASSWORD_REQUIRED`, a password that does not match answers `WRONG_PASSWORD`, and
+nothing is joined either way. An Administrator and anyone holding `MANAGE_CHANNELS`
+in that channel join without it. Guesses are limited to 5 per minute per member and
+channel and answer `RATE_LIMITED` beyond that. Changing the password makes every
+member enter the new one on their next join; removing it opens the channel again;
+setting one does not remove anybody already inside. Only the member's own
+`voice_join` asks: a moderator's move and the AFK move put the member in without
+the password (the server stores the grant before it sends `voice_moved`), and
+`voice_token_refresh` never asks. A client that sends the join of an automatic
+rejoin with no password gets in on the stored grant, and sees `PASSWORD_REQUIRED`
+only if the password changed meanwhile. Older servers ignore `password`.
 
 A channel with `voice_max_users` set refuses a join with `CHANNEL_FULL` once it
 holds that many users, except for a caller with `can_moderate_voice` in that
@@ -2853,7 +2875,8 @@ rolls back only the join that was refused, never on an error answering another
 command. Servers before this change sent join refusals with no `id`; the client
 still treats an id-less error as a refusal when its code is one a join can
 return (`CHANNEL_FULL`, `VOICE_ERROR`, `FORBIDDEN`, `NOT_FOUND`, `BAD_REQUEST`,
-`RATE_LIMITED`, `ALREADY_JOINED`, `INTERNAL`, `TIMED_OUT`).
+`RATE_LIMITED`, `ALREADY_JOINED`, `INTERNAL`, `TIMED_OUT`, `PASSWORD_REQUIRED`,
+`WRONG_PASSWORD`).
 
 ### voice_token (Server -> Client, direct)
 
@@ -3727,6 +3750,8 @@ The full list is `error_codes.ws` of `protocol/schema.json`, generated into the
 | `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                     |
 | `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                 |
 | `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                     |
+| `PASSWORD_REQUIRED`        | `voice_join` into a password-protected channel without the password. Nothing was joined. Refines `FORBIDDEN`.                                                                                                                                 |
+| `WRONG_PASSWORD`           | `voice_join` with a password that does not match, or that changed while the join ran. Nothing was joined. Refines `FORBIDDEN`.                                                                                                                |
 | `VOICE_ERROR`              | Voice-specific error                                                                                                                                                                                                                          |
 | `VIDEO_LIMIT`              | Maximum video streams reached                                                                                                                                                                                                                 |
 | `BANNED`                   | User is banned                                                                                                                                                                                                                                |
