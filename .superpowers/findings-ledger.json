@@ -976,7 +976,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/renderers.test.ts",
+        "test": "Client/tests/unit/renderers/attachmentsAndReplies.test.ts, Client/tests/unit/renderers/messages.test.ts",
         "revertProof": "pass",
         "branchCommit": "e25fe56a"
       },
@@ -3166,7 +3166,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "19315e5",
-        "test": "Client/tests/unit/renderers.test.ts",
+        "test": "Client/tests/unit/renderers/actionsAndFormatting.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -3535,7 +3535,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/renderers.test.ts",
+        "test": "Client/tests/unit/renderers/actionsAndFormatting.test.ts",
         "revertProof": "pass",
         "branchCommit": "826b8aa7"
       },
