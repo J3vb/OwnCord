@@ -79,15 +79,18 @@ func uniquifyImportChannelName(ctx context.Context, q *dbgen.Queries, channelID 
 	if place.CategoryID != nil {
 		cat = *place.CategoryID
 	}
-	taken := func(name string) (bool, error) {
-		n, err := q.CountVisibleChannelsNamed(ctx, dbgen.CountVisibleChannelsNamedParams{
-			SelfID: channelID, CategoryID: &cat, Name: name,
-		})
-		return n > 0, err
-	}
-	free, err := taken(place.Name)
-	if err != nil || !free {
+	names, err := q.ListVisibleChannelNamesInCategory(ctx, dbgen.ListVisibleChannelNamesInCategoryParams{
+		SelfID: channelID, CategoryID: &cat,
+	})
+	if err != nil {
 		return err
+	}
+	// The same case folding the admin create route uses.
+	taken := func(name string) bool {
+		return slices.ContainsFunc(names, func(other string) bool { return strings.EqualFold(other, name) })
+	}
+	if !taken(place.Name) {
+		return nil
 	}
 	for i := 1; i <= 1000; i++ {
 		suffix := " (imported)"
@@ -99,13 +102,9 @@ func uniquifyImportChannelName(ctx context.Context, q *dbgen.Queries, channelID 
 			base = base[:room]
 		}
 		candidate := strings.TrimSpace(string(base)) + suffix
-		used, err := taken(candidate)
-		if err != nil {
-			return err
-		}
-		if !used {
+		if !taken(candidate) {
 			return q.RenameImportChannel(ctx, dbgen.RenameImportChannelParams{Name: candidate, ID: channelID})
 		}
 	}
-	return nil
+	return fmt.Errorf("%w: no free name for the imported channel %q", ErrConflict, place.Name)
 }

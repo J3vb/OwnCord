@@ -218,7 +218,9 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	if !admitted {
 		stop()
 		setLive(jobID, false)
-		r.abandon(context.WithoutCancel(ctx), jobID, channelID, db.ImportFailed, ErrShuttingDown.Error(), db.ImportProgress{})
+		halted := make(chan struct{})
+		close(halted)
+		r.abandon(context.WithoutCancel(ctx), halted, jobID, channelID, db.ImportFailed, ErrShuttingDown.Error(), db.ImportProgress{})
 		return nil, ErrShuttingDown
 	}
 	return job, nil
@@ -291,8 +293,13 @@ func (r *Runner) run(ctx, stop context.Context, ex Export, account, channelID, j
 		// Nobody asked: the server is stopping.
 		reason = ErrServerStopped.Error()
 	}
-	// The channel is removed even when ctx is what ended the job.
-	r.abandon(context.WithoutCancel(ctx), jobID, channelID, status, reason, st.prog)
+	// The channel is removed even when ctx is what ended the job. A server
+	// shutdown (ctx done, no administrator stop) cuts the clean-up retries short.
+	var halt <-chan struct{}
+	if st.stop.Err() == nil {
+		halt = ctx.Done()
+	}
+	r.abandon(context.WithoutCancel(ctx), halt, jobID, channelID, status, reason, st.prog)
 	if status == db.ImportFailed {
 		slog.Warn("discord import failed", "job_id", jobID, "error", err)
 	}

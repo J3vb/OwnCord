@@ -522,7 +522,7 @@ func TestDateBounds_SurviveAPublishedImportOfOlderMessages(t *testing.T) {
 
 // Imported history is old on purpose. The server-wide window must not sweep it
 // away, but a window set on the imported channel itself still applies.
-func TestRetention_ImportedChannelIsExemptFromTheServerWindowOnly(t *testing.T) {
+func TestRetention_ImportedMessagesAreExemptFromTheServerWindowOnly(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	admin := seedUser(t, database, "admin")
@@ -542,6 +542,15 @@ func TestRetention_ImportedChannelIsExemptFromTheServerWindowOnly(t *testing.T) 
 	if err := database.SetSetting(ctx, db.RetentionDaysKey, "30"); err != nil {
 		t.Fatal(err)
 	}
+	// A native message posted later in the imported channel is old by the time
+	// the sweep looks at it, and follows the server window like any other.
+	nativeID, err := database.CreateMessage(ctx, ch, admin, "posted here later", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE messages SET timestamp = '2020-06-01 00:00:00' WHERE id = ?`, nativeID); err != nil {
+		t.Fatal(err)
+	}
 
 	windowFor := func() map[int64]db.RetentionWindow {
 		t.Helper()
@@ -555,8 +564,8 @@ func TestRetention_ImportedChannelIsExemptFromTheServerWindowOnly(t *testing.T) 
 		}
 		return out
 	}
-	if w := windowFor(); len(w) != 1 || w[native].Days != 30 {
-		t.Errorf("windows under the server policy = %+v, want only the native channel", w)
+	if w := windowFor(); len(w) != 2 || w[native].Days != 30 || w[ch].Source != "server" {
+		t.Errorf("windows under the server policy = %+v, want both channels on the server window", w)
 	}
 
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
@@ -569,9 +578,12 @@ func TestRetention_ImportedChannelIsExemptFromTheServerWindowOnly(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, e := range preview.Channels {
-		if e.ChannelID == ch && (e.WouldDelete != 0 || e.Days != 0) {
-			t.Errorf("preview would delete %d imported messages under the server window", e.WouldDelete)
+		if e.ChannelID == ch && e.WouldDelete != 1 {
+			t.Errorf("preview would delete %d under the server window, want only the native message", e.WouldDelete)
 		}
+	}
+	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -30)); err != nil || n != 1 {
+		t.Errorf("sweep candidates under the server window = %d, %v; want 1", n, err)
 	}
 
 	if err := database.SetChannelRetention(ctx, ch, 365, admin); err != nil {
@@ -586,9 +598,12 @@ func TestRetention_ImportedChannelIsExemptFromTheServerWindowOnly(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, e := range preview.Channels {
-		if e.ChannelID == ch && e.WouldDelete != 2 {
-			t.Errorf("preview with a channel window would delete %d, want 2", e.WouldDelete)
+		if e.ChannelID == ch && e.WouldDelete != 3 {
+			t.Errorf("preview with a channel window would delete %d, want all 3", e.WouldDelete)
 		}
+	}
+	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -365)); err != nil || n != 3 {
+		t.Errorf("sweep candidates under the channel window = %d, %v; want 3", n, err)
 	}
 }
 
@@ -682,6 +697,28 @@ func TestPublishImport_DuplicateNamesGetAnImportedSuffix(t *testing.T) {
 	}
 	if got, _ := database.GetChannel(ctx, ch); got.Name != "elsewhere" {
 		t.Errorf("free name changed to %q", got.Name)
+	}
+}
+
+// Names clash under full Unicode case folding, as the admin routes compare
+// them, not only under SQLite's ASCII-only NOCASE.
+func TestPublishImport_NameClashFoldsNonASCIICase(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	author, _ := database.EnsureImportAccount(ctx)
+	seedChannel(t, database, "\u00e4rger")
+	ch, job := startTestImport(ctx, t, database, "\u00c4RGER")
+	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
+		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(1, "m"), Progress: db.ImportProgress{Imported: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.PublishImport(ctx, job, ch, ids["ma"], db.ImportProgress{Imported: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := database.GetChannel(ctx, ch); got.Name != "\u00c4RGER (imported)" {
+		t.Errorf("name = %q, want the imported suffix", got.Name)
 	}
 }
 

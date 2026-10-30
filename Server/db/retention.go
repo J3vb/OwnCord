@@ -125,19 +125,10 @@ func (d *DB) DeleteChannelRetention(ctx context.Context, channelID int64) (bool,
 	return n > 0, err
 }
 
-// importedChannel is true for a channel a Discord import built (the SQL is
-// spelled once per way the channel id is named). Its messages keep the dates they
-// were sent on, often years old, so the server-wide window must not take them:
-// only a window set on that channel itself applies.
-const (
-	importedChannel     = `EXISTS (SELECT 1 FROM import_jobs ij WHERE ij.channel_id = c.id AND ij.status = 'done')`
-	importedChannelBare = `EXISTS (SELECT 1 FROM import_jobs ij WHERE ij.channel_id = channels.id AND ij.status = 'done')`
-)
-
 // RetentionWindows returns the effective policy of every non-DM channel that
 // has one: the channel override where present (a thread's being its
-// parent's), else the server window, which an imported channel is exempt
-// from; channels with an effective 0 are omitted. DMs are never in scope.
+// parent's), else the server window;
+// channels with an effective 0 are omitted. DMs are never in scope.
 func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	serverDays, err := d.ServerRetentionDays(ctx)
 	if err != nil {
@@ -147,8 +138,7 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 		`SELECT c.id, c.name, cr.days FROM channels c
 		   LEFT JOIN channel_retention cr ON cr.channel_id = COALESCE(c.parent_channel_id, c.id)
 		  WHERE c.type <> 'dm' AND c.is_group = 0 AND c.import_pending = 0
-		    AND NOT (cr.days IS NULL AND `+importedChannel+`)
-		  ORDER BY c.id`) //nolint:gosec // G202: importedChannel is a constant
+		  ORDER BY c.id`)
 	if err != nil {
 		return nil, fmt.Errorf("RetentionWindows: %w", err)
 	}
@@ -186,7 +176,17 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 // remove in a channel: older than the cutoff (messages.timestamp is UTC
 // 'YYYY-MM-DD HH:MM:SS', compared bytewise, so the cutoff is formatted the
 // same way), never a pinned message, tombstones included.
-const retentionCandidates = `channel_id = ? AND pinned = 0 AND timestamp < ?`
+//
+// A message a Discord import wrote keeps the date it was sent, often years old,
+// so the server-wide window must not take it: it is a candidate only when its
+// channel has a window of its own. A native message in the same channel follows
+// the server window like any other.
+const (
+	retentionBase       = `channel_id = ? AND pinned = 0 AND timestamp < ?`
+	notImportedMessage  = `NOT EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = messages.id)`
+	retentionCandidates = retentionBase + ` AND (EXISTS (SELECT 1 FROM channel_retention cr JOIN channels ch ON ch.id = messages.channel_id
+		WHERE cr.channel_id = COALESCE(ch.parent_channel_id, ch.id)) OR ` + notImportedMessage + `)`
+)
 
 // CountRetentionCandidates is the preview: how many messages a sweep of
 // channelID with this cutoff would remove.

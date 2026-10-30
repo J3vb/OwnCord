@@ -3,8 +3,13 @@
 -- Cost: every import job record and every imported message's Discord author name
 -- is lost. Imported messages and channels stay, owned by the hidden import
 -- account, which keeps its registration_status of 'system' (an older binary
--- already lists only 'active' members, so the account stays out of sight). A
--- channel still being built (import_pending = 1) is deleted, since an older
+-- already lists only 'active' members, so the account stays out of sight).
+--
+-- An older binary does not know the retention exemption of imported messages:
+-- its server-wide retention window deletes imported history by the original
+-- dates, so turn retention off before rolling back if that history matters.
+--
+-- A channel still being built (import_pending = 1) is deleted, since an older
 -- binary would show it half finished.
 DELETE FROM channels WHERE import_pending = 1;
 DROP INDEX IF EXISTS idx_users_system_account;

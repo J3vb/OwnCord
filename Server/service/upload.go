@@ -209,7 +209,7 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 
 	// A channel a Discord import is still building does not exist for anyone yet.
 	if aa.ChannelPending {
-		return errFileForbidden()
+		return fmt.Errorf("attachment not found%.0w", ErrNotFound)
 	}
 
 	isAdmin := role != nil && permissions.HasAdmin(role.Permissions)

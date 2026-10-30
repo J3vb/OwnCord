@@ -957,11 +957,14 @@ imported message with `mention_count` 0, and marks the job `done`. Then one
 channel-created event goes out. There are no per-message events and no
 notifications.
 
-Retention: an imported channel is exempt from the server-wide window, since its
-messages keep the dates they were sent on. A window set on that channel itself
-still applies, by the original dates. Date bounds in search and in the ban purge
-find native messages as before: the id probe skips imported rows, and an
-imported row is judged by its timestamp alone. Publishing renames the channel
+Retention: an imported message (a row in `message_import_authors`) is exempt
+from the server-wide window, since it keeps the date it was sent on. A native
+message posted later in the same channel follows the server window like any
+other, and a window set on the channel itself applies to every message in it,
+by the original dates. Date bounds in search and in the ban purge find native
+messages as before: the id probe leaves out the channels a finished import
+built, a search that includes such a channel judges its rows by timestamp alone,
+and every other channel in the same search keeps its id range. Publishing renames the channel
 with " (imported)", then " (imported 2)" and so on if a visible text channel in
 the same category already has the name. A file in a pending channel is not
 readable by anyone.

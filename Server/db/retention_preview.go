@@ -129,7 +129,7 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 		overrides[change.ChannelID] = *change.Days
 	}
 	// A thread takes its parent's override, as RetentionWindows does.
-	rows, err := tx.QueryContext(ctx, `SELECT id, name, COALESCE(parent_channel_id, id), `+importedChannelBare+` FROM channels WHERE type <> 'dm' AND is_group = 0 AND import_pending = 0 ORDER BY id`) //nolint:gosec // G202: importedChannelBare is a constant
+	rows, err := tx.QueryContext(ctx, `SELECT id, name, COALESCE(parent_channel_id, id) FROM channels WHERE type <> 'dm' AND is_group = 0 AND import_pending = 0 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -138,8 +138,7 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 	for rows.Next() {
 		w := RetentionWindow{Days: p.ServerDays, Source: "server"}
 		var authority int64
-		var imported bool
-		if err := rows.Scan(&w.ChannelID, &w.ChannelName, &authority, &imported); err != nil {
+		if err := rows.Scan(&w.ChannelID, &w.ChannelName, &authority); err != nil {
 			return nil, err
 		}
 		if days, ok := overrides[authority]; ok {
@@ -147,8 +146,6 @@ func proposedRetentionWindows(ctx context.Context, tx *sql.Tx, p *RetentionPolic
 			if days < 0 || days > RetentionMaxDays {
 				w.Days = 0 // same fail-safe as RetentionWindows
 			}
-		} else if imported {
-			w.Days = 0 // an imported channel is exempt from the server window
 		}
 		windows = append(windows, w)
 	}
@@ -163,7 +160,13 @@ func retentionEffectTx(ctx context.Context, tx *sql.Tx, w RetentionWindow, obser
 	}
 	cutoff := observed.UTC().Add(-time.Duration(w.Days) * 24 * time.Hour)
 	e.Cutoff = cutoff.Format(time.RFC3339)
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates,
+	// The proposed policy is not stored yet, so the window's own source decides
+	// whether an imported message is in reach: only a channel window takes it.
+	candidates := retentionBase + ` AND ` + notImportedMessage
+	if w.Source == "channel" {
+		candidates = retentionBase
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+candidates,
 		w.ChannelID, cutoff.Format(dbtime.SQLiteLayout)).Scan(&e.WouldDelete); err != nil {
 		return e, err
 	}

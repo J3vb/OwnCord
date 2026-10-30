@@ -147,3 +147,40 @@ func TestStart_TakesOverAJobWhoseCleanUpNeverLanded(t *testing.T) {
 		t.Error("same job")
 	}
 }
+
+// A stopping server does not sit out the retry waits: one attempt, then the
+// boot clean-up takes over.
+func TestAbandon_ShutdownCutsTheRetriesShort(t *testing.T) {
+	h := newHarness(t, 2)
+	h.runner.retryDelay = time.Hour
+	flaky := &flakyAbandon{Store: h.database, fail: 1000}
+	h.runner.cfg.Store = flaky
+	halted := make(chan struct{})
+	close(halted)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.runner.abandon(context.Background(), halted, 1, 1, db.ImportFailed, "x", db.ImportProgress{})
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandon kept waiting after the server stopped")
+	}
+	if n := flaky.attempts.Load(); n != 1 {
+		t.Errorf("attempts = %d, want 1", n)
+	}
+}
+
+// Even with no shutdown the retries stop once the time budget cannot cover the
+// next wait.
+func TestAbandon_BudgetCapsTheRetries(t *testing.T) {
+	h := newHarness(t, 2)
+	h.runner.retryDelay = time.Hour
+	flaky := &flakyAbandon{Store: h.database, fail: 1000}
+	h.runner.cfg.Store = flaky
+	h.runner.abandon(context.Background(), nil, 1, 1, db.ImportFailed, "x", db.ImportProgress{})
+	if n := flaky.attempts.Load(); n != 1 {
+		t.Errorf("attempts = %d, want 1", n)
+	}
+}

@@ -43,11 +43,17 @@ func setLive(id int64, on bool) {
 // ErrServerStopped is the reason recorded on a job a shutdown cut short.
 var ErrServerStopped = errors.New("the server stopped before the import finished")
 
+// abandonBudget caps the time spent retrying one clean-up, so a database that
+// stays busy cannot hold a stopping server.
+const abandonBudget = 10 * time.Second
+
 // abandon ends an unfinished job and deletes its channel. A busy database is
-// retried with a doubling wait; if every attempt fails the job stays running
-// and the next start takes it over.
-func (r *Runner) abandon(ctx context.Context, jobID, channelID int64, status, reason string, pr db.ImportProgress) {
+// retried with a doubling wait for at most abandonBudget; a closed halt (the
+// server is stopping) ends the retries early. Whatever is left unfinished stays
+// running, and the next start's boot clean-up takes it over.
+func (r *Runner) abandon(ctx context.Context, halt <-chan struct{}, jobID, channelID int64, status, reason string, pr db.ImportProgress) {
 	delay := r.retryDelay
+	deadline := time.Now().Add(abandonBudget)
 	var err error
 	for attempt := 1; attempt <= abandonAttempts; attempt++ {
 		endCtx, cancel := context.WithTimeout(ctx, finishTimeout)
@@ -56,10 +62,18 @@ func (r *Runner) abandon(ctx context.Context, jobID, channelID int64, status, re
 		if err == nil || errors.Is(err, db.ErrNotFound) {
 			return
 		}
-		if attempt < abandonAttempts {
-			time.Sleep(delay)
-			delay *= 2
+		if attempt == abandonAttempts || time.Until(deadline) < delay {
+			break
 		}
+		wait := time.NewTimer(delay)
+		select {
+		case <-wait.C:
+		case <-halt:
+			wait.Stop()
+			slog.Error("discord import clean-up failed", "job_id", jobID, "error", err)
+			return
+		}
+		delay *= 2
 	}
 	slog.Error("discord import clean-up failed", "job_id", jobID, "error", err)
 }

@@ -148,6 +148,11 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		sb   strings.Builder
 		args []any
 	)
+	imported, err := d.importedChannelIDs(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	native, importedInScope := splitImportedScope(q.ChannelIDs, imported)
 	sb.WriteString(" AND m.channel_id IN (" + placeholders(len(q.ChannelIDs)) + ")")
 	args = appendIDs(args, q.ChannelIDs)
 	if len(q.AuthorIDs) > 0 {
@@ -159,16 +164,20 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 		if err != nil {
 			return "", nil, err
 		}
-		sb.WriteString(" AND (" + idCol + " >= ? OR " + importedRow + ") AND m.timestamp >= ?")
-		args = append(args, lo, q.AfterTS)
+		bound, boundArgs := idBound(idCol+" >=", lo, native, importedInScope)
+		sb.WriteString(bound + " AND m.timestamp >= ?")
+		args = append(args, boundArgs...)
+		args = append(args, q.AfterTS)
 	}
 	if q.BeforeTS != "" {
 		hi, err := d.firstIDAtOrAfter(ctx, q.BeforeTS)
 		if err != nil {
 			return "", nil, err
 		}
-		sb.WriteString(" AND (" + idCol + " < ? OR " + importedRow + ") AND m.timestamp < ?")
-		args = append(args, hi, q.BeforeTS)
+		bound, boundArgs := idBound(idCol+" <", hi, native, importedInScope)
+		sb.WriteString(bound + " AND m.timestamp < ?")
+		args = append(args, boundArgs...)
+		args = append(args, q.BeforeTS)
 	}
 	extra, extraArgs, err := searchExtraFilters(q)
 	if err != nil {
@@ -199,27 +208,98 @@ func (d *DB) rankCutoff(ctx context.Context, match, filter string, filterArgs []
 	return cutoff, true, nil
 }
 
-// importedRow is true for a message a Discord import wrote. Such a row has an
-// id from the day of the import and a timestamp from the day it was sent, so it
-// breaks the id-follows-time assumption: the probe below skips these rows, and
-// a date bound lets them past the id range and judges them by timestamp alone.
-const importedRow = `EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = m.id)`
+// importedChannelIDs lists the channels a finished Discord import built. Their
+// messages keep the dates they were sent on, so an id says nothing about when a
+// row was written there; every other channel's ids still follow time.
+func (d *DB) importedChannelIDs(ctx context.Context) ([]int64, error) {
+	rows, err := d.reader.QueryContext(ctx, `SELECT channel_id FROM import_jobs WHERE status = 'done' AND channel_id IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("importedChannelIDs: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("importedChannelIDs scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("importedChannelIDs: %w", err)
+	}
+	return ids, nil
+}
 
-// notImportedRow is the probe's form of the same test, over the bare table.
-const notImportedRow = `NOT EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = messages.id)`
+// splitImportedScope divides the searched channels into those whose ids follow
+// time and those an import built. With no imported channel in scope native is
+// the whole scope and imported is nil.
+func splitImportedScope(scope, imported []int64) (native, importedInScope []int64) {
+	if len(imported) == 0 {
+		return scope, nil
+	}
+	isImported := make(map[int64]bool, len(imported))
+	for _, id := range imported {
+		isImported[id] = true
+	}
+	for _, id := range scope {
+		if isImported[id] {
+			importedInScope = append(importedInScope, id)
+		} else {
+			native = append(native, id)
+		}
+	}
+	return native, importedInScope
+}
+
+// idBound renders one side of a date bound as an id range. A channel an import
+// built is exempt from the range (its rows are judged by timestamp alone), so
+// that a native channel keeps its id range scan; with no imported channel in
+// scope the fragment is the plain range.
+func idBound(cmp string, bound int64, native, importedInScope []int64) (string, []any) {
+	if len(importedInScope) == 0 {
+		return " AND " + cmp + " ?", []any{bound}
+	}
+	imp := appendIDs(nil, importedInScope)
+	imports := "m.channel_id IN (" + placeholders(len(importedInScope)) + ")"
+	if len(native) == 0 {
+		return " AND " + imports, imp
+	}
+	args := appendIDs(nil, native)
+	args = append(args, bound)
+	args = append(args, imp...)
+	return " AND ((m.channel_id IN (" + placeholders(len(native)) + ") AND " + cmp + " ?) OR " + imports + ")", args
+}
 
 // firstIDAtOrAfter returns a message id b such that every message with id < b
 // has a timestamp before ts and every message with id >= b may qualify. It
 // binary-searches messages.id (monotonic with timestamp on every native insert
-// path; imported rows are skipped, see importedRow) in about 2x20 rowid probes, so a date bound becomes an id range scan with no
+// path; the channels an import built are left out, see importedChannelIDs) in
+// about 2x20 rowid probes, so a date bound becomes an id range scan with no
 // timestamp index. The caller still applies the exact timestamp predicate, so
 // there are no false positives; a backward clock step can hide rows near a
 // bound (accepted in the 3A-14 design, D7). Hard-deleted id gaps are
 // skipped by probing for the first existing id at or above each midpoint.
 func (d *DB) firstIDAtOrAfter(ctx context.Context, ts string) (int64, error) {
+	imported, err := d.importedChannelIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	where, whereArgs := "", []any(nil)
+	if len(imported) > 0 {
+		where, whereArgs = " AND channel_id NOT IN ("+placeholders(len(imported))+")", appendIDs(nil, imported)
+	}
 	var minID, maxID sql.NullInt64
-	if err := d.reader.QueryRowContext(ctx, `SELECT MIN(id), MAX(id) FROM messages WHERE `+notImportedRow).Scan(&minID, &maxID); err != nil {
-		return 0, fmt.Errorf("firstIDAtOrAfter bounds: %w", err)
+	for _, end := range []struct {
+		order string
+		dst   *sql.NullInt64
+	}{{"ASC", &minID}, {"DESC", &maxID}} {
+		err := d.reader.QueryRowContext(ctx,
+			`SELECT id FROM messages WHERE 1 = 1`+where+` ORDER BY id `+end.order+` LIMIT 1`, whereArgs...).Scan(end.dst)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("firstIDAtOrAfter bounds: %w", err)
+		}
+		end.dst.Valid = err == nil
 	}
 	if !minID.Valid || !maxID.Valid {
 		return 0, nil
@@ -230,7 +310,8 @@ func (d *DB) firstIDAtOrAfter(ctx context.Context, ts string) (int64, error) {
 		var id int64
 		var rowTS string
 		err := d.reader.QueryRowContext(ctx,
-			`SELECT id, timestamp FROM messages WHERE id >= ? AND `+notImportedRow+` ORDER BY id LIMIT 1`, mid).Scan(&id, &rowTS)
+			`SELECT id, timestamp FROM messages WHERE id >= ?`+where+` ORDER BY id LIMIT 1`,
+			append([]any{mid}, whereArgs...)...).Scan(&id, &rowTS)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			hi = mid

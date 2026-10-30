@@ -52,11 +52,11 @@ WHERE id = ? AND status = 'running';
 UPDATE channels SET import_pending = 0 WHERE id = ? AND import_pending = 1;
 
 -- name: MarkImportChannelRead :exec
--- Every non-system account's read pointer (an applicant still waiting for approval included) goes past the last imported message, so
--- an import raises no unread badge. The hidden import account has no read states.
+-- Every active account's read pointer, and every pending applicant's, goes past
+-- the last imported message, so an import raises no unread badge. The hidden import account has no read states.
 INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count)
 SELECT u.id, sqlc.arg(channel_id), sqlc.arg(last_message_id), 0
-FROM users u WHERE u.registration_status <> 'system'
+FROM users u WHERE u.registration_status IN ('active', 'pending')
 ON CONFLICT(user_id, channel_id) DO UPDATE SET
     last_message_id = excluded.last_message_id,
     mention_count = 0;
@@ -79,14 +79,14 @@ DELETE FROM channels WHERE id = ? AND import_pending = 1;
 -- name: GetImportChannelPlacement :one
 SELECT name, category_id FROM channels WHERE id = ?;
 
--- name: CountVisibleChannelsNamed :one
--- Visible text channels in one category (0 = none) that already use the name,
--- ignoring case, other than the channel itself.
-SELECT COUNT(*) FROM channels
+-- name: ListVisibleChannelNamesInCategory :many
+-- Names of the visible text channels in one category (0 = none), other than the
+-- channel itself. The caller compares them with the same case folding the admin
+-- routes use.
+SELECT name FROM channels
 WHERE id <> sqlc.arg(self_id) AND import_pending = 0 AND type = 'text'
   AND parent_channel_id IS NULL
-  AND COALESCE(category_id, 0) = sqlc.arg(category_id)
-  AND name = sqlc.arg(name) COLLATE NOCASE;
+  AND COALESCE(category_id, 0) = sqlc.arg(category_id);
 
 -- name: RenameImportChannel :exec
 UPDATE channels SET name = ? WHERE id = ?;

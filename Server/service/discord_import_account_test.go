@@ -201,8 +201,8 @@ func TestAuthorize_RefusesFilesOfAPendingImportChannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := uploads.Authorize(ctx, aa, admin, role); err == nil {
-		t.Error("an administrator could read a file of a channel still being imported")
+	if err := uploads.Authorize(ctx, aa, admin, role); !errors.Is(err, ErrNotFound) {
+		t.Errorf("file of a channel still being imported: err = %v, want not found", err)
 	}
 	if err := database.PublishImport(ctx, job, ch, ids["a"], db.ImportProgress{Imported: 1}); err != nil {
 		t.Fatal(err)
@@ -210,5 +210,17 @@ func TestAuthorize_RefusesFilesOfAPendingImportChannel(t *testing.T) {
 	aa, _ = uploads.Resolve(ctx, "att-1")
 	if err := uploads.Authorize(ctx, aa, admin, role); err != nil {
 		t.Errorf("after publishing: %v", err)
+	}
+}
+
+func TestIssueRecoveryAssist_RefusesTheHiddenImportAccount(t *testing.T) {
+	ctx := context.Background()
+	svc, owner, _, database := newAssistFixture(t, false)
+	sys, err := database.EnsureImportAccount(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.IssueRecoveryAssist(ctx, owner.ID, sys, "in_person"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("assist for the import account = %v, want not found", err)
 	}
 }
