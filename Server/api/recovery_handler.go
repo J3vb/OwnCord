@@ -41,7 +41,6 @@ type recoverRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
-// handleEnrolRecoveryKit processes POST /api/v1/users/me/recovery-kit.
 func handleEnrolRecoveryKit(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)
@@ -62,7 +61,6 @@ func handleEnrolRecoveryKit(svc AuthService) http.HandlerFunc {
 	}
 }
 
-// handleRecoveryKitStatus processes GET /api/v1/users/me/recovery-kit.
 func handleRecoveryKitStatus(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)

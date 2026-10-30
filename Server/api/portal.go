@@ -20,8 +20,6 @@ import (
 // the router's plain 404 and an unknown API path is never answered with HTML.
 // The router mounts it only when server.browser_client_enabled is on.
 
-// portalNotIncluded is the body of GET / when the binary carries only the
-// placeholder bundle.
 const portalNotIncluded = "browser client not included in this build\n"
 
 const (

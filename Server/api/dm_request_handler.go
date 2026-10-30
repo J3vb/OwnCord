@@ -37,10 +37,9 @@ const (
 	dmRequestActionBlock
 )
 
-// dmRequestSenderResponse mirrors ws's dmRequestSenderPayload — the two are
-// independent (api and ws build their own wire shapes, like dm_handler.go's
-// response types and ws/messages.go's dm_channel_open builder) but must stay
-// in step with docs/protocol.md's dm_request section.
+// dmRequestSenderResponse mirrors ws's dmRequestSenderPayload. The two are built
+// independently (api and ws each own their wire shapes) but must stay in step
+// with docs/protocol.md's dm_request section.
 type dmRequestSenderResponse struct {
 	ID          int64  `json:"id"`
 	Username    string `json:"username"`
@@ -62,8 +61,6 @@ type dmRequestListItem struct {
 	CreatedAt string                    `json:"created_at"`
 }
 
-// handleListDMRequests handles GET /api/v1/dm-requests: the caller's pending
-// inbox, newest first.
 func handleListDMRequests(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -100,7 +97,6 @@ func handleListDMRequests(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// dmRequestTransitionResponse is the 200 body for every transition route.
 type dmRequestTransitionResponse struct {
 	ID        int64   `json:"id"`
 	State     string  `json:"state"`
@@ -125,11 +121,10 @@ func handleDMRequestTransition(svc *service.Services, broadcaster DMBroadcaster,
 		var (
 			req *db.MessageRequest
 			err error
-			// blockedSenderID is only set by the block action, and only when
-			// BlockUser itself committed — see MessageRequestService.Block's
-			// doc comment. Checked below regardless of err, so a block that
-			// committed but then lost the race on its own state transition
-			// still evicts the sender from voice.
+			// blockedSenderID is set only by the block action, and only when
+			// BlockUser itself committed (see MessageRequestService.Block). It
+			// is checked regardless of err, so a block that committed but lost
+			// the race on its own transition still evicts the sender from voice.
 			blockedSenderID int64
 		)
 		switch action {
@@ -157,12 +152,11 @@ func handleDMRequestTransition(svc *service.Services, broadcaster DMBroadcaster,
 	}
 }
 
-// notifyDMRequestTransition sends the recipient (userID, the caller who just
-// decided) every event a transition owes their other devices: dm_channel_open
-// on acceptance only (broadcastDMOpen, dm_handler.go's existing builder),
-// then dm_request with the new state and no preview, always. Best-effort and
-// detached from the request context — the transition already committed, so a
-// caller whose connection drops right after must not silently drop it.
+// notifyDMRequestTransition sends the deciding recipient's other devices every
+// event a transition owes: dm_channel_open on acceptance only (broadcastDMOpen),
+// then dm_request with the new state and no preview. Best-effort and detached
+// from the request context: the transition committed, so a dropped connection
+// must not drop the events.
 func notifyDMRequestTransition(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, userID int64, req *db.MessageRequest, opened bool) {
 	if broadcaster == nil {
 		return

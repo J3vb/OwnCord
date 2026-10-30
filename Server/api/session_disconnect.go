@@ -21,8 +21,6 @@ type SessionDisconnector interface {
 // fix closed — with nothing failing to say so.
 var _ SessionDisconnector = (*ws.Hub)(nil)
 
-// disconnectIfSessionRevoked asks the hub to drop userID's socket if the
-// session it rode was just revoked.
 func disconnectIfSessionRevoked(broadcaster ProfileBroadcaster, userID int64) {
 	if d, ok := broadcaster.(SessionDisconnector); ok {
 		d.DisconnectIfSessionRevoked(userID)

@@ -1,13 +1,8 @@
-// gif_handler.go — server-side proxy for the Klipy GIF API.
-//
-// The Klipy API key lives in server config and never leaves the server: the
-// client asks its own server for GIFs and the server does the upstream call.
-// This closes the "secret in the client bundle" hole — a VITE_ variable is
-// inlined into the shipped bundle by design and can never hold a credential.
-//
-// Default-off contract: with no gif.api_key configured both endpoints answer
-// 503 with error code GIF_DISABLED, which the client uses to hide/disable the
-// GIF picker instead of showing a broken one.
+// gif_handler.go is the server-side proxy for the Klipy GIF API. The API key
+// lives in server config and never leaves the server: the client asks its own
+// server (a VITE_ variable is inlined into the shipped bundle and can never hold
+// a credential). With no gif.api_key both endpoints answer 503 GIF_DISABLED,
+// which the client uses to hide the picker.
 
 package api
 
@@ -58,16 +53,15 @@ const (
 	gifMaxConcurrentUpstream = 8
 )
 
-// gifFetcher performs the upstream call under the whole outbound-content
-// policy (Server/safefetch): https on 443 only, every resolved address
-// classified before the connect, no redirects at all — the upstream host is a
-// constant, so a redirect is either a provider change or an attack — a 10 s
-// total deadline, a streaming 2 MiB ceiling on the wire and after inflation,
-// a JSON-only content-type allowlist, and a concurrency cap.
-//
-// text/plain rides along in the allowlist because http.DetectContentType
-// reports it for every textual format, JSON included; the pairing still
-// refuses an HTML error page served with a JSON Content-Type.
+// gifFetcher performs the upstream call under the outbound-content policy
+// (Server/safefetch): https on 443 only, every resolved address classified
+// before connect, no redirects (the host is constant, so a redirect is a
+// provider change or an attack), a 10 s deadline, a streaming 2 MiB ceiling on
+// the wire and after inflation, a JSON-only content-type allowlist and a
+// concurrency cap.
+// text/plain is allowed because http.DetectContentType reports it for every
+// textual format, JSON included; the pairing still refuses an HTML error page
+// served as JSON.
 var gifFetcher = safefetch.MustNew(safefetch.Policy{
 	Schemes:              []string{"https"},
 	Ports:                []int{443},
@@ -79,15 +73,13 @@ var gifFetcher = safefetch.MustNew(safefetch.Policy{
 	MaxConcurrent:        gifMaxConcurrentUpstream,
 })
 
-// gifMediaFormat is a single renderable variant of a GIF.
 type gifMediaFormat struct {
 	URL string `json:"url"`
 }
 
-// gifResult is one GIF. Decoding the upstream body into this struct and
-// re-encoding it IS the field allowlist: anything Klipy returns that is not
-// declared here (including any echo of our API key) is dropped on the floor
-// and never reaches the client.
+// gifResult is one GIF. Decoding into this struct and re-encoding IS the field
+// allowlist: anything else Klipy returns (including any echo of our API key) is
+// dropped.
 type gifResult struct {
 	ID           string `json:"id"`
 	Title        string `json:"title"`
@@ -97,21 +89,18 @@ type gifResult struct {
 	} `json:"media_formats"`
 }
 
-// gifResponse is the JSON envelope returned by both GIF endpoints.
-//
-// Next is the opaque cursor for the following page (Tenor v2's `next`). It is
-// empty when there is nothing more, and the client passes it back as `pos`.
+// gifResponse is the JSON envelope of both GIF endpoints. Next is the opaque
+// cursor for the following page (Tenor v2's `next`), empty when there is none;
+// the client passes it back as `pos`.
 type gifResponse struct {
 	Results []gifResult `json:"results"`
 	Next    string      `json:"next"`
 }
 
-// MountGIFRoutes registers the authenticated GIF proxy endpoints.
-//
-// Both routes require a session (same as sibling content endpoints) and share
-// a dedicated per-IP rate-limit bucket — the picker searches on every debounced
-// keystroke, so it must not share the empty-prefix bucket used by password and
-// TOTP endpoints.
+// MountGIFRoutes registers the authenticated GIF proxy endpoints. They share a
+// dedicated per-IP rate-limit bucket: the picker searches on every debounced
+// keystroke and must not share the empty-prefix bucket used by password and TOTP
+// endpoints.
 func MountGIFRoutes(r chi.Router, sessions *service.SessionService, limiter *auth.RateLimiter, cfg *config.Config, favorites *service.GIFFavoriteService) {
 	r.Route("/api/v1/gif", func(r chi.Router) {
 		r.Use(AuthMiddleware(sessions))
@@ -186,12 +175,10 @@ func handleGIFProxy(apiKey, upstreamPath string, requireQuery bool) http.Handler
 	}
 }
 
-// validGIFResultURL reports whether a URL forwarded to the client from inside
-// the upstream body is safe for the client to load directly: it must parse,
-// be https, carry a non-empty host, and carry no embedded credentials.
-// safefetch already bounded and type-checked the response envelope; this is
-// a second gate on the values *inside* it, since the media URLs are exactly
-// what the client's own renderer fetches next, unproxied and unvalidated.
+// validGIFResultURL reports whether a URL from inside the upstream body is safe
+// for the client to load: parseable, https, non-empty host, no embedded
+// credentials. safefetch only checked the envelope; the media URLs are what the
+// client fetches next, unproxied.
 func validGIFResultURL(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -210,8 +197,6 @@ type gifUpstreamBody struct {
 	Next    json.RawMessage `json:"next"`
 }
 
-// decodeGIFNext turns the raw upstream `next` into a string: a JSON string as
-// is, a JSON number as its literal decimal text, anything else as "".
 func decodeGIFNext(raw json.RawMessage) string {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
@@ -236,9 +221,9 @@ func decodeGIFNext(raw json.RawMessage) string {
 }
 
 // validGIFPos reports whether s is an acceptable paging cursor: 1 to
-// gifMaxPosLen characters, each in [A-Za-z0-9._:=+/%~-] (params.Encode escapes them). The same rule gates the
-// client's `pos` going upstream and the upstream's `next` coming back, so a
-// hostile upstream cannot hand the client (or a later request) arbitrary text.
+// gifMaxPosLen characters in [A-Za-z0-9._:=+/%~-] (what params.Encode escapes).
+// The same rule gates the client's `pos` going upstream and upstream's `next`
+// coming back, so a hostile upstream cannot hand arbitrary text onward.
 func validGIFPos(s string) bool {
 	if s == "" || len(s) > gifMaxPosLen {
 		return false
@@ -270,8 +255,6 @@ func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) (gifRespo
 		return gifResponse{}, errGIFUpstream
 	}
 
-	// The body is already inside the byte ceilings and already type-checked,
-	// so there is nothing left to bound here.
 	var upstream gifUpstreamBody
 	if err := json.Unmarshal(resp.Body, &upstream); err != nil {
 		slog.Warn("gif proxy: decoding upstream response failed", "error", redactKey(err.Error(), apiKey))
@@ -305,14 +288,12 @@ func fetchGIFs(r *http.Request, upstreamURL, apiKey string, limit int) (gifRespo
 	return gifResponse{Results: results, Next: next}, nil
 }
 
-// errGIFUpstream marks a non-200 upstream response.
 var errGIFUpstream = errors.New("gif proxy: upstream error")
 
-// redactKey removes the API key from a string destined for the logs. It
-// matches both the literal key and its percent-encoded query-string form
-// (url.Error embeds the encoded request URL, and params.Encode() escapes any
-// character outside [A-Za-z0-9-_.~] — common in base64-style keys) so an
-// encoded form is caught too.
+// redactKey removes the API key from a string destined for logs, both literal
+// and percent-encoded (url.Error embeds the encoded request URL, and
+// params.Encode escapes characters outside [A-Za-z0-9-_.~], common in
+// base64-style keys).
 func redactKey(s, apiKey string) string {
 	if apiKey == "" {
 		return s
@@ -321,8 +302,6 @@ func redactKey(s, apiKey string) string {
 	return strings.ReplaceAll(s, url.QueryEscape(apiKey), "[REDACTED]")
 }
 
-// parseGIFLimit parses and validates the `limit` query param. An empty value
-// yields the default; anything non-numeric or out of range is rejected.
 func parseGIFLimit(raw string) (int, bool) {
 	if raw == "" {
 		return gifDefaultLimit, true
@@ -334,9 +313,9 @@ func parseGIFLimit(raw string) (int, bool) {
 	return n, true
 }
 
-// mountGIF mounts the GIF proxy, which keeps the Klipy API key server-side.
-// Mounted unconditionally; with no key configured the endpoints answer 503
-// GIF_DISABLED so the client can hide the picker rather than discover a 404.
+// mountGIF mounts the GIF proxy unconditionally; with no key the endpoints
+// answer 503 GIF_DISABLED so the client hides the picker instead of discovering
+// a 404.
 func mountGIF(r chi.Router, cfg *config.Config, svc *service.Services, limiter *auth.RateLimiter) {
 	MountGIFRoutes(r, svc.Sessions, limiter, cfg, svc.GIFFavorites)
 	if cfg.GIF.APIKey == "" {

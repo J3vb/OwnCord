@@ -12,24 +12,21 @@ import (
 )
 
 // ModQueueBroadcaster is the hub capability the report routes need: notify
-// connected moderation-bit holders of a queue change. Satisfied by *ws.Hub.
-// Takes the INTERNAL report id — the hub resolves the public id itself
-// (db.Report.PublicID) so every caller stays oblivious to the distinction.
-//
-// BroadcastMemberBan/BroadcastChatBulkDeleted are the two transport
-// broadcasts the queue's act route (moderation_queue_handler.go) sends after
-// a report-linked ban or removal commits — the SAME calls the direct admin
-// PATCH route and the direct purge route make: ban and
-// removal have no live-target notifier of their own the way Warn/Timeout do
-// (ModerationService.notifyModAction), so without these two methods here,
-// acting through the queue silently dropped both broadcasts.
+// connected moderation-bit holders of a queue change (satisfied by *ws.Hub). It
+// takes the INTERNAL report id; the hub resolves the public id
+// (db.Report.PublicID).
+// BroadcastMemberBan/BroadcastChatBulkDeleted are the transport broadcasts the
+// queue's act route sends after a report-linked ban or removal commits, the same
+// calls the direct admin PATCH and purge routes make. Ban and removal have no
+// live-target notifier of their own (unlike Warn/Timeout's
+// ModerationService.notifyModAction), so without these acting through the queue
+// silently dropped both.
 type ModQueueBroadcaster interface {
 	BroadcastModQueue(ctx context.Context, reportID int64, state string)
 	BroadcastMemberBan(userID int64)
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 }
 
-// fileReportRequest is POST /api/v1/reports' body.
 type fileReportRequest struct {
 	TargetType string `json:"target_type"`
 	TargetID   string `json:"target_id"`
@@ -115,12 +112,9 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// writeReportServiceError special-cases the report-shaped errors this
-// endpoint's wire contract names — validation as INVALID_INPUT (not the
-// generic BAD_REQUEST), duplicates as DUPLICATE_REPORT (not the generic
-// CONFLICT), and a moderator acting on their own filed report as
-// SELF_REVIEW (not the generic FORBIDDEN) — falling through to
-// writeServiceError for everything else.
+// writeReportServiceError maps report-shaped errors to this endpoint's wire
+// contract (INVALID_INPUT, DUPLICATE_REPORT, and SELF_REVIEW for a moderator
+// acting on their own report) and falls through to writeServiceError otherwise.
 func writeReportServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrDuplicateReport):

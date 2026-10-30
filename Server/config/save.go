@@ -12,9 +12,9 @@ import (
 	goyaml "go.yaml.in/yaml/v3"
 )
 
-// DefaultPath is the CWD-relative config file path the server loads at
-// startup. Shared by main.go, token_cli.go and the setup wizard so they can
-// never disagree about which file is authoritative.
+// DefaultPath is the CWD-relative config path the server loads at startup,
+// shared by main.go, token_cli.go and the setup wizard so they cannot disagree
+// about which file is authoritative.
 const DefaultPath = "config.yaml"
 
 // Patch lists the config.yaml keys the first-run setup wizard may change.
@@ -26,28 +26,24 @@ type Patch struct {
 	TLSDomain       *string
 	UploadMaxSizeMB *int
 	VoiceQuality    *string // low | medium | high
-	// VoiceAutoDownload toggles voice.auto_download_livekit (download and run
-	// livekit-server automatically when no livekit_binary is set).
+	// VoiceAutoDownload toggles voice.auto_download_livekit.
 	VoiceAutoDownload *bool
 
-	// VoiceAPIKey/VoiceAPISecret are written ONLY when the file's
-	// corresponding value is absent or empty. This persists the
-	// runtime-generated LiveKit credentials (see ensureVoiceCredentials) so
-	// voice tokens survive restarts, without ever clobbering operator-set
+	// VoiceAPIKey/VoiceAPISecret are written ONLY when the file's value is
+	// absent or empty. This persists the generated LiveKit credentials (see
+	// ensureVoiceCredentials) across restarts without clobbering operator-set
 	// values.
 	VoiceAPIKey    *string
 	VoiceAPISecret *string
 }
 
-// saveMu serialises Save calls so concurrent writers cannot interleave the
-// read-modify-write cycle.
+// saveMu serialises Save's read-modify-write cycle.
 var saveMu sync.Mutex
 
-// Save patches the config file at path with the non-nil fields of p,
-// preserving comments, key order, hand edits and keys it does not model.
-// The write is atomic (temp file + rename) and the result is verified to
-// parse and unmarshal before it replaces the original — Save never leaves
-// behind a file the server would refuse to boot from.
+// Save patches the config file at path with the non-nil fields of p, preserving
+// comments, key order, hand edits and keys it does not model. The write is
+// atomic (temp file + rename) and verified to parse and unmarshal first, so Save
+// never leaves a file the server would refuse to boot from.
 func Save(path string, p Patch) error {
 	saveMu.Lock()
 	defer saveMu.Unlock()
@@ -91,7 +87,6 @@ func Save(path string, p Patch) error {
 	return atomicWrite(path, buf.Bytes())
 }
 
-// applyPatch upserts every non-nil Patch field into the document root.
 func applyPatch(root *goyaml.Node, p Patch) {
 	if p.ServerPort != nil {
 		setScalar(section(root, "server"), "port", strconv.Itoa(*p.ServerPort), "!!int")
@@ -152,10 +147,9 @@ func mappingRoot(doc *goyaml.Node) (*goyaml.Node, error) {
 	return root, nil
 }
 
-// section returns the mapping value node for a top-level section key,
-// creating and appending the section when absent. A present-but-null section
-// (e.g. bare "voice:" with all children commented out) is promoted to a
-// mapping in place so its comments survive.
+// section returns the mapping node for a top-level section key, creating it when
+// absent. A present-but-null section (bare "voice:" with children commented out)
+// is promoted to a mapping in place so its comments survive.
 func section(root *goyaml.Node, name string) *goyaml.Node {
 	if v := findValue(root, name); v != nil {
 		if v.Kind != goyaml.MappingNode {
@@ -173,7 +167,6 @@ func section(root *goyaml.Node, name string) *goyaml.Node {
 	return v
 }
 
-// findValue returns the value node for key within a mapping node, or nil.
 func findValue(m *goyaml.Node, key string) *goyaml.Node {
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
@@ -183,9 +176,8 @@ func findValue(m *goyaml.Node, key string) *goyaml.Node {
 	return nil
 }
 
-// setScalar upserts key: value inside the mapping node m. Values are set as
-// node content, never spliced into text, so a value containing YAML syntax
-// is encoded as one (quoted) scalar — injection is structurally impossible.
+// setScalar upserts key: value in mapping m. Values are set as node content,
+// never spliced into text, so YAML syntax in a value stays one quoted scalar.
 func setScalar(m *goyaml.Node, key, value, tag string) {
 	if v := findValue(m, key); v != nil {
 		v.Kind = goyaml.ScalarNode
@@ -210,9 +202,8 @@ func verifyLoadable(raw []byte, path string) error {
 	return err
 }
 
-// atomicWrite replaces path with data via temp file + rename so a crash
-// mid-write can never leave a truncated config. os.Rename replaces the
-// destination on both Unix and Windows.
+// atomicWrite replaces path via temp file + rename so a crash mid-write cannot
+// leave a truncated config.
 func atomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".config-*.yaml.tmp")
