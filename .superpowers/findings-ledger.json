@@ -2039,7 +2039,7 @@
       "confidence": "high",
       "fix": {
         "commit": "db0275a2",
-        "test": "Client/tests/unit/connect-page.test.ts",
+        "test": "Client/tests/unit/connectPage/authFlows.test.ts",
         "revertProof": "pass",
         "branchCommit": "152a32f9",
         "pr": 1369
@@ -10673,7 +10673,7 @@
       "fixed": "2026-09-25",
       "fix": {
         "commit": "cdea5ab0",
-        "test": "Client/tests/unit/connect-page.test.ts; Client/tests/e2e/connect-page.spec.ts",
+        "test": "Client/tests/unit/connectPage/authFlows.test.ts; Client/tests/e2e/connect-page.spec.ts",
         "revertProof": "self-reported",
         "pr": 1798
       }
@@ -11868,7 +11868,7 @@
       "suggestedFix": "Clear the placeholder in writeHost when the host changes and in the host input listener.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/connect-page.test.ts (drops the saved password when switching to a server with no saved username / when the user types a different host)",
+        "test": "Client/tests/unit/connectPage/formAndSavedPassword.test.ts (drops the saved password when switching to a server with no saved username / when the user types a different host)",
         "revertProof": "fail (isUsingSavedPassword stayed true)"
       },
       "confidence": "high",
