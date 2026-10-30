@@ -59,6 +59,10 @@ function onOurEntry(): boolean {
   return typeof state === "object" && state !== null && HISTORY_KEY in state;
 }
 
+// A reload keeps history.state, so the page can start on an entry an earlier
+// load pushed. Unmarked, a later Back that lands on it reads as a Back.
+if (onOurEntry()) history.replaceState(null, "");
+
 function wantsEntry(): boolean {
   return claims.length > 0 || guard?.active === true;
 }
@@ -121,6 +125,7 @@ function onUserPop(e: Event): void {
 export function claimBack(onBack: () => void, signal?: AbortSignal): BackClaim {
   const claim: Claim = { onBack };
   const release = (): void => {
+    signal?.removeEventListener("abort", release);
     const index = claims.indexOf(claim);
     if (index === -1) return;
     claims.splice(index, 1);
@@ -140,6 +145,7 @@ export function claimBack(onBack: () => void, signal?: AbortSignal): BackClaim {
 export function holdBackGuard(onBack: () => void, signal: AbortSignal): BackGuard {
   const mine = { onBack, active: false };
   const release = (): void => {
+    signal.removeEventListener("abort", release);
     if (guard !== mine) return;
     guard = null;
     reconcile();

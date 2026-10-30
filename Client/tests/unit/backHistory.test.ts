@@ -143,6 +143,34 @@ describe("claimBack", () => {
   });
 });
 
+describe("a reload", () => {
+  it("unmarks an entry an earlier page load left on top, so the next Back still counts", async () => {
+    history.pushState({ owncordBack: true }, "");
+    vi.resetModules();
+    // Only the module under test loads again, not the session registry's graph.
+    vi.doMock("../../src/lib/net/sessionRegistry", () => ({
+      registerSessionReset: () => undefined,
+    }));
+    const fresh = await import("../../src/lib/ui/backHistory");
+    vi.doUnmock("../../src/lib/net/sessionRegistry");
+    expect(onEntry()).toBe(false);
+    const onBack = vi.fn();
+    fresh.claimBack(onBack, owner().signal);
+    await pressBack();
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("abort listeners", () => {
+  it("a released claim and guard leave no listener on their signal", () => {
+    const ac = owner();
+    const remove = vi.spyOn(ac.signal, "removeEventListener");
+    claimBack(vi.fn(), ac.signal).release();
+    holdBackGuard(vi.fn(), ac.signal).release();
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("holdBackGuard", () => {
   it("holds an entry only while active, and Back runs its action", async () => {
     const onBack = vi.fn();

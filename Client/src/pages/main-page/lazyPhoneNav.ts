@@ -5,6 +5,7 @@
  * every touch or Back, so turning the device after they loaded needs nothing.
  */
 
+import { createLogger } from "@lib/logger";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { PhoneGesturesOptions } from "./phoneGestures";
 
@@ -18,6 +19,8 @@ export interface PhoneNavOptions extends Pick<
   readonly closeView: () => void;
 }
 
+const log = createLogger("phone-nav");
+
 export function installPhoneNavWhenPhone(opts: PhoneNavOptions): void {
   const { signal } = opts;
   let started = false;
@@ -28,8 +31,12 @@ export function installPhoneNavWhenPhone(opts: PhoneNavOptions): void {
     void Promise.all([import("./phoneGestures"), import("./overlayBack")]).then(
       ([gestures, overlays]) => {
         if (signal.aborted) return;
-        gestures.installPhoneGestures(opts);
-        overlays.installOverlayBack({ signal, root: opts.root, closeView: opts.closeView });
+        try {
+          gestures.installPhoneGestures(opts);
+          overlays.installOverlayBack({ signal, root: opts.root, closeView: opts.closeView });
+        } catch (err: unknown) {
+          log.warn("Phone navigation failed to install", err);
+        }
         return;
       },
       () => {

@@ -58,6 +58,20 @@ describe("installPhoneNavWhenPhone", () => {
     });
   });
 
+  it("a throwing install is caught and logged, not left as an unhandled rejection", async () => {
+    installGestures.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    installPhoneNavWhenPhone(options());
+    await vi.dynamicImportSettled();
+    expect(installGestures).toHaveBeenCalledTimes(1);
+    expect(
+      warn.mock.calls.some((c) => c.join(" ").includes("Phone navigation failed to install")),
+    ).toBe(true);
+    warn.mockRestore();
+  });
+
   it("loads nothing off the phone layout, and installs once it becomes one", async () => {
     phone = false;
     installPhoneNavWhenPhone(options());
