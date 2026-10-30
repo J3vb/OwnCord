@@ -233,6 +233,62 @@ jobs:
       # No fuzz output/corpus artifact: this repository is public. A generated
       # reproducer is committed only with its fix (Server/Makefile policy).
 
+  query-benchmarks:
+    # The read-path benchmarks on a synthetic 400k-message database, run at dev
+    # and at the ref in Server/testdata/bench/query-baseline.json, alternating on
+    # this one runner so both see the same machine. bench-gate.mjs fails on an
+    # allocation increase or a median slowdown over 20 % against the ref.
+    name: Nightly query benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.27"
+          cache-dependency-path: Server/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+      - name: Build the benchmark binaries at dev and at the ref
+        working-directory: Server
+        run: |
+          ref=$(node -p 'require("./testdata/bench/query-baseline.json").ref')
+          git worktree add --detach "$RUNNER_TEMP/bench-ref" "$ref"
+          # The ref may predate the benchmark file; the current one only uses
+          # the exported db API, so it is copied in.
+          cp db/query_perf_bench_test.go "$RUNNER_TEMP/bench-ref/Server/db/"
+          go test -c -o "$RUNNER_TEMP/db-cur.test" ./db
+          (cd "$RUNNER_TEMP/bench-ref/Server" && go test -c -o "$RUNNER_TEMP/db-ref.test" ./db)
+      - name: Run them alternately
+        working-directory: Server/db
+        run: |
+          bench() {
+            "$RUNNER_TEMP/db-$1.test" -test.run '^$' -test.bench 'SearchCommonWord|HistoryPage|UnreadCounts' \
+              -test.benchtime 1s -test.benchmem >> "$RUNNER_TEMP/bench-$1.txt"
+          }
+          for _ in 1 2 3 4; do
+            bench cur; bench ref
+            bench ref; bench cur
+          done
+      - name: Gate
+        run: >-
+          node Server/scripts/bench/bench-gate.mjs
+          --baseline Server/testdata/bench/query-baseline.json
+          --current "$RUNNER_TEMP/bench-cur.txt"
+          --ref "$RUNNER_TEMP/bench-ref.txt"
+          --summary "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: query-benchmarks
+          path: ${{ runner.temp }}/bench-*.txt
+          retention-days: 30
+
   long-session-soak:
     # B7-11: the long run of the long-session soak (Client/tests/e2e/config/playwright.config.soak.ts:
     # 200 cycles, then 30 idle-connected minutes). The PR soak (20 cycles) gates
