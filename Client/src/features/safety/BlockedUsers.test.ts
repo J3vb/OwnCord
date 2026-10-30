@@ -3,12 +3,12 @@
 // fallback and the teardown/refetch edge cases.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 import { expectConsole } from "../../../tests/helpers/console";
 import { captureLogs } from "../../../tests/helpers/log-capture";
 import { ApiClientError } from "@lib/api";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { blocksStore, setUserBlockedByMe } from "@stores/blocks.store";
 import { dmStore, type DmChannel, type DmUser } from "@stores/dm.store";
 import { membersStore, type Member } from "@stores/members.store";

@@ -53,7 +53,7 @@ vi.mock("@lib/voice/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
 vi.mock("@lib/voice/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
 
@@ -99,7 +99,7 @@ import {
 } from "../../src/features/moderation/store";
 import { safetyStore } from "../../src/features/safety/store";
 import type { ServerMessage } from "../../src/lib/types";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import * as livekitSession from "@lib/voice/livekitSession";
 import { createOutgoingCall, createRingController } from "../../src/lib/voice/callRing";
 

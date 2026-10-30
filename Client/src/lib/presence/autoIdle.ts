@@ -34,8 +34,8 @@
  * touches the window rather than at the next poll.
  */
 
-import { Disposable } from "./disposable";
-import type { UserStatus } from "./types";
+import { Disposable } from "../disposable";
+import type { UserStatus } from "../types";
 import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "./userStatus";
 
 /** How long without input before the status flips to idle. Discord's number. */

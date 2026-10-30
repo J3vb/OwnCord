@@ -52,7 +52,7 @@ vi.mock("../../lib/voice/livekitSession", () => ({
   resendWatching: vi.fn(),
   retryWatching: vi.fn(),
 }));
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../../lib/voice/screenShare", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/voice/screenShare")>();
   return { ...actual, rollbackPendingVideo: vi.fn() };
@@ -75,7 +75,7 @@ import {
 import { rollbackPendingVideo } from "../../lib/voice/screenShare";
 import { expectConsole } from "../../../tests/helpers/console";
 import { captureLogs } from "../../../tests/helpers/log-capture";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 
 function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_state"> {
   return {

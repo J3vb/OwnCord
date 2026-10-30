@@ -39,7 +39,7 @@ vi.mock("@lib/voice/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
 vi.mock("@lib/voice/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
 

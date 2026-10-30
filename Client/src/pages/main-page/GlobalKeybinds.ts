@@ -30,7 +30,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
-import { dialogOpen, isDisplayed } from "@lib/dialogOpen";
+import { dialogOpen, isDisplayed } from "@lib/ui/dialogOpen";
 import {
   GLOBAL_DEAFEN_VK_PREF,
   GLOBAL_MUTE_VK_PREF,
@@ -46,7 +46,7 @@ import {
   type ActionId,
   type EffectiveKeybinds,
 } from "@lib/prefs/keybinds";
-import { inputMode } from "@lib/inputMode";
+import { inputMode } from "@lib/ui/inputMode";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 
 const log = createLogger("global-keybinds");

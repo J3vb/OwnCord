@@ -17,7 +17,7 @@ const mockGetUserLocalMute = vi.fn((_userId?: unknown) => false);
 const mockSetUserLocalMute = vi.fn();
 
 const mockShowToast = vi.hoisted(() => vi.fn());
-vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast: mockShowToast }));
 
 vi.mock("@lib/voice/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),

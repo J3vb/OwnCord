@@ -19,7 +19,7 @@ import {
   clearPeerWatching,
 } from "../../stores/voice.store";
 import { ensureIdentityKeyPublished } from "../../lib/net/identity";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/voice/watchRequest";
 import { noteJoinSent, takeJoinRefusal } from "./joinRequest";

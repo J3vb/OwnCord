@@ -31,7 +31,7 @@ import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/voice/ptt";
-import { inputMode } from "@lib/inputMode";
+import { inputMode } from "@lib/ui/inputMode";
 import { invokeOrThrow } from "./nativeInvoke";
 import type { PushToTalk } from "../contracts/pushToTalk";
 import type { GlobalKeysStatus } from "../contracts/globalShortcuts";

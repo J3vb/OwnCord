@@ -33,7 +33,7 @@
       "features/voice/sessionState.ts": 1,
       "stores/voice.store.ts": 1
     },
-    "lib/channel-navigation.ts": {
+    "lib/nav/channelNavigation.ts": {
       "stores/channels.store.ts": 1,
       "stores/dm.store.ts": 1,
       "stores/ui.store.ts": 1
@@ -117,7 +117,7 @@
       "stores/members.store.ts": 1,
       "stores/messages.store.ts": 1
     },
-    "lib/notificationSound.ts": {
+    "lib/media/notificationSound.ts": {
       "features/voice/native/platform.ts": 1
     },
     "lib/pendingMessages.ts": {
@@ -127,7 +127,7 @@
       "stores/auth.store.ts": 1,
       "stores/channels.store.ts": 1
     },
-    "lib/presence.ts": {
+    "lib/presence/presence.ts": {
       "stores/auth.store.ts": 1,
       "stores/members.store.ts": 1
     },
@@ -152,7 +152,7 @@
       "features/voice/videoCodec.ts": 1,
       "stores/voice.store.ts": 1
     },
-    "lib/statusTimer.ts": {
+    "lib/presence/statusTimer.ts": {
       "stores/auth.store.ts": 1,
       "stores/members.store.ts": 1
     },

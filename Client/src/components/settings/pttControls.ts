@@ -19,7 +19,7 @@ import {
   globalKeysErrorCode,
   markPortalBound,
   portalHoldsShortcuts,
-} from "@lib/globalKeys";
+} from "@lib/ui/globalKeys";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { desktop } from "../../platform/desktop";
 import { REBINDABLE_ACTIONS, loadEffectiveKeybinds } from "@lib/prefs/keybinds";

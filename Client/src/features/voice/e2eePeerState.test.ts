@@ -8,7 +8,7 @@ vi.mock("../../stores/members.store", () => ({
   memberDisplayName: (m: { username: string }) => m.username,
 }));
 vi.mock("../../stores/voice.store", () => ({ setPeerVerification: vi.fn() }));
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../../lib/net/identity", () => ({
   getIdentityPin: vi.fn(),
   storeIdentityPin: vi.fn(),
@@ -34,7 +34,7 @@ vi.mock("../../lib/logger", () => ({
 }));
 
 import { setPeerVerification } from "../../stores/voice.store";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { getIdentityPin, storeIdentityPin } from "../../lib/net/identity";
 import { verifyEphemeralKeySignature } from "../../lib/net/e2eeCrypto";
 import { E2EEPeerState } from "./e2eePeerState";

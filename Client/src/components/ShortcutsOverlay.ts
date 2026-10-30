@@ -13,7 +13,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS } from "@lib/prefs/keybindCatalog";
 import { loadEffectiveKeybinds } from "@lib/prefs/keybinds";
 import { comboLabel, comboOrNotSet } from "@lib/prefs/keybindLabels";

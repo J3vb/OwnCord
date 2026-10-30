@@ -132,7 +132,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-store-write-in-ws-on",
     shape: "getState() mutator",
-    filePath: "src/lib/presence.ts",
+    filePath: "src/lib/presence/presence.ts",
     code: `import { messagesStore } from "@stores/messages.store";
     ws.on("x", (p) => { messagesStore.getState().addMessage(p); });`,
     messageId: "storeWriteOutsideDispatcher",
@@ -190,7 +190,7 @@ const CANARIES: readonly Canary[] = [
   },
   {
     rule: "local/layer-direction",
-    filePath: "src/lib/presence.ts",
+    filePath: "src/lib/presence/presence.ts",
     code: `import { MainPage } from "@pages/MainPage";`,
     messageId: "upwardImport",
     hasOptions: true,

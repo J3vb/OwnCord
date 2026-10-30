@@ -19,7 +19,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { errorText } from "@lib/api";
 import { canManageChannels } from "@lib/permissions";
 import { forumsEnabled } from "@lib/net/serverCapabilities";

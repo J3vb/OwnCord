@@ -10,7 +10,7 @@
  */
 
 import { createLogger } from "../logger";
-import { publicAssetUrl } from "../publicAssets";
+import { publicAssetUrl } from "../media/publicAssets";
 
 const log = createLogger("appAudioTrack");
 

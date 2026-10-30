@@ -14,8 +14,8 @@
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { ApiClientError } from "@lib/api";
-import { showToast } from "@lib/toast";
-import { findChannelById, navigateToChannel } from "@lib/channel-navigation";
+import { showToast } from "@lib/ui/toast";
+import { findChannelById, navigateToChannel } from "@lib/nav/channelNavigation";
 import {
   setAroundMessages,
   hasMessageLoaded,

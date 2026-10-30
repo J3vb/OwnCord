@@ -38,12 +38,12 @@
  * a `presence` frame like everyone else's.
  */
 
-import { Disposable } from "./disposable";
-import { createLogger } from "./logger";
-import { ServerMessageType as S } from "./protocolTypes";
+import { Disposable } from "../disposable";
+import { createLogger } from "../logger";
+import { ServerMessageType as S } from "../protocolTypes";
 import { setMusicRefusalHandler } from "./gameActivityBridge";
-import { onGameActivityPolicy, serverSupportsListeningActivity } from "./net/serverCapabilities";
-import type { WsClient } from "./ws";
+import { onGameActivityPolicy, serverSupportsListeningActivity } from "../net/serverCapabilities";
+import type { WsClient } from "../ws";
 import {
   MUSIC_ACTIVITY_PREF_KEY,
   MUSIC_PREFS_KEY,
@@ -52,9 +52,9 @@ import {
   loadMusicPrefs,
   recordSeenPlayer,
   toMediaPrefs,
-} from "./prefs/musicActivityPrefs";
-import type { MediaPrefs, MediaReading } from "../platform/contracts/mediaDetector";
-import { onPrefChange } from "./prefs/preferences";
+} from "../prefs/musicActivityPrefs";
+import type { MediaPrefs, MediaReading } from "../../platform/contracts/mediaDetector";
+import { onPrefChange } from "../prefs/preferences";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("musicActivity");

@@ -7,7 +7,7 @@
 // =============================================================================
 
 import { createLogger } from "@lib/logger";
-import { publicAssetUrl } from "@lib/publicAssets";
+import { publicAssetUrl } from "@lib/media/publicAssets";
 
 const log = createLogger("noise-suppression");
 

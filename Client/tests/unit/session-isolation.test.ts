@@ -51,7 +51,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
@@ -77,7 +77,7 @@ const PROFILES = [
     color: "#5865F2",
   },
 ];
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
@@ -95,8 +95,8 @@ vi.mock("@lib/profiles", () => ({
 // The media session is its own suite (session-isolation-media.test.ts); here
 // only the switch's call into it is observed.
 vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
-vi.mock("@lib/notificationSound", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/notificationSound")>()),
+vi.mock("@lib/media/notificationSound", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/media/notificationSound")>()),
   cleanupNotificationAudio: vi.fn(),
 }));
 
@@ -232,11 +232,11 @@ import type { DmChannel } from "@stores/dm.store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
-import { cleanupNotificationAudio } from "@lib/notificationSound";
+import { cleanupNotificationAudio } from "@lib/media/notificationSound";
 import { leaveVoice } from "@lib/voice/livekitSession";
 import { deleteCredential, loadCredential } from "@lib/net/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
-import { createProfileManager } from "@lib/profiles";
+import { createProfileManager } from "@lib/presence/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
 
 const A = "a.example:8443";

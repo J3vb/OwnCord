@@ -7,7 +7,7 @@
 
 import { deleteCredential } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import type { SessionScope } from "@lib/net/sessionScope";
 import { setTransientError } from "@stores/ui.store";
 import { connectText } from "../i18n/connect";

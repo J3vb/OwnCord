@@ -239,7 +239,7 @@ vi.mock("@stores/messages.store", () => ({
   clearChannelContent: mockClearChannelContent,
 }));
 
-vi.mock("@lib/message-navigation", () => ({
+vi.mock("@lib/nav/messageNavigation", () => ({
   jumpToMessage: mockJumpToMessage,
 }));
 

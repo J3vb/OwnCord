@@ -9,8 +9,8 @@
  * synchronously inside it.
  */
 
-import { createLogger } from "./logger";
-import { shallowEqual } from "./store";
+import { createLogger } from "../logger";
+import { shallowEqual } from "../store";
 
 const log = createLogger("select");
 

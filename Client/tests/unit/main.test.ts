@@ -74,7 +74,7 @@ const { mockLeaveVoice } = vi.hoisted(() => ({
 vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
@@ -92,8 +92,9 @@ const mockProfileManager = vi.hoisted(() => ({
   setLastConnected: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", async (importOriginal) => ({
-  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
+vi.mock("@lib/presence/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/presence/profiles")>())
+    .deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => mockProfileManager),
 }));
@@ -250,12 +251,12 @@ import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.s
 import { deleteCredential, loadCredential, saveCredential } from "@lib/net/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
-import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
+import { loadUserStatus, loadUserStatusOrigin } from "@lib/presence/userStatus";
 import { createMainPage } from "@pages/MainPage";
 import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
 import { createConnectPage } from "@pages/ConnectPage";
-import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
+import { setActivePresenceSender, type PresenceSender } from "@lib/presence/presence";
 
 // ---------------------------------------------------------------------------
 // Import the module under test AFTER all mocks are registered. #app must
@@ -378,7 +379,7 @@ describe("main.ts tray status-change listener", () => {
 
     // This is the crux of OC-0037: the tray path must agree with the
     // client's own documented "single source of truth" for the selected
-    // status (lib/userStatus.ts), the same way UserBar's StatusPicker does.
+    // status (lib/presence/userStatus.ts), the same way UserBar's StatusPicker does.
     // Before the fix nothing here ever calls saveUserStatus, so this stays
     // "online" forever regardless of what the tray sent over the wire.
     expect(loadUserStatus()).toBe("dnd");
@@ -394,7 +395,7 @@ describe("main.ts tray status-change listener", () => {
 
 describe("main.ts notification-click opens the message (U1d)", () => {
   it("routes a clicked message notification through the shared jumper", async () => {
-    const { jumpToMessage } = await import("@lib/message-navigation");
+    const { jumpToMessage } = await import("@lib/nav/messageNavigation");
     // Let the notifier's subscription register (the event API resolves async).
     await Promise.resolve();
     await Promise.resolve();
@@ -412,7 +413,7 @@ describe("main.ts notification-click opens the message (U1d)", () => {
   });
 
   it("routes a clicked call notification (no message id) to the jumper, to open the DM", async () => {
-    const { jumpToMessage } = await import("@lib/message-navigation");
+    const { jumpToMessage } = await import("@lib/nav/messageNavigation");
     await Promise.resolve();
     await Promise.resolve();
     const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");
@@ -426,7 +427,7 @@ describe("main.ts notification-click opens the message (U1d)", () => {
   });
 
   it("forwards a cross-server click to the jumper, which applies the guard (F6)", async () => {
-    const { jumpToMessage } = await import("@lib/message-navigation");
+    const { jumpToMessage } = await import("@lib/nav/messageNavigation");
     await Promise.resolve();
     await Promise.resolve();
     const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");

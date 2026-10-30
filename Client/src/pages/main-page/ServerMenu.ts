@@ -14,7 +14,7 @@ import {
   showContextMenu,
   type ContextMenuItem,
   type ContextMenuSeparator,
-} from "@lib/context-menu";
+} from "@lib/ui/contextMenu";
 import { canManageChannels, canManageInvites, canViewAuditLog } from "@lib/permissions";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { unreadChannelIds } from "@lib/read-state";

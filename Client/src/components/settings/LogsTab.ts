@@ -26,7 +26,7 @@ import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
-import { copyThenRelabel } from "@lib/clipboard";
+import { copyThenRelabel } from "@lib/ui/clipboard";
 
 // ---------------------------------------------------------------------------
 // Constants

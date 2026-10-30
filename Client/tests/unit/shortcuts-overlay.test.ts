@@ -3,7 +3,7 @@ import { closeShortcutsOverlay, openShortcutsOverlay } from "../../src/component
 import { saveGlobalShortcutVk } from "../../src/lib/voice/voiceShortcuts";
 import { saveKeybind } from "../../src/lib/prefs/keybinds";
 import { KEYBIND_GROUPS } from "../../src/lib/prefs/keybindCatalog";
-import { dialogOpen } from "../../src/lib/dialogOpen";
+import { dialogOpen } from "../../src/lib/ui/dialogOpen";
 import { settingsText as t } from "../../src/i18n/settings";
 
 const overlay = (): HTMLElement | null =>

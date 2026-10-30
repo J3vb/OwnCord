@@ -11,7 +11,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionScope } from "@lib/net/sessionScope";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 
 const hoisted = vi.hoisted(() => ({
   loadCredential: vi.fn(),

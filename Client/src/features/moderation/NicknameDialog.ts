@@ -20,7 +20,7 @@
 import { errorText } from "@lib/api";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import {
   attachLimitHint,
   collapseSpaces,

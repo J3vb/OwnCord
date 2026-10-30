@@ -12,7 +12,7 @@ import { channelsStore, clearUnread, setReadPointer } from "@stores/channels.sto
 import { dmStore, clearDmUnread, setDmReadPointer } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 import { uiStore } from "@stores/ui.store";
-import { dialogOpen } from "./dialogOpen";
+import { dialogOpen } from "./ui/dialogOpen";
 import { readPointerEnabled } from "./net/serverCapabilities";
 
 /** Channels whose mounted list is scrolled away from the live tail. */

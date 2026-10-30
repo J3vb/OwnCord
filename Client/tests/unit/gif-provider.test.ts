@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { searchGifs, getTrendingGifs, type GifApi } from "../../src/lib/gifProvider";
+import { searchGifs, getTrendingGifs, type GifApi } from "../../src/lib/media/gifProvider";
 import type { GifSearchResponse } from "../../src/lib/types";
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
 }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createProfileManager: vi.fn().mockReturnValue({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockReturnValue([]),

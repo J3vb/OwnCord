@@ -58,11 +58,11 @@ vi.mock("@lib/logger", () => ({
   setLogLevel: vi.fn(),
 }));
 
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createProfileManager: vi.fn().mockReturnValue({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockReturnValue([]),
@@ -168,7 +168,7 @@ import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main
 import { setSidebarMode } from "../../src/stores/ui.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { shellText } from "../../src/i18n/shell";
 
 type Callbacks = Record<string, (...args: unknown[]) => void>;

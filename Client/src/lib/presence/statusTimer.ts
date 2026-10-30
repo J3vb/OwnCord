@@ -2,7 +2,7 @@
  * Status timers: Idle, Do Not Disturb or Invisible "for 1 hour", then back to
  * Online.
  *
- * Entirely client-side, like auto-idle (lib/autoIdle.ts): the server only ever
+ * Entirely client-side, like auto-idle (lib/presence/autoIdle.ts): the server only ever
  * sees the status flip to Online when the time is up. The expiry is stored
  * beside the saved status (userStatus.ts), so an app restart inside the window
  * still ends it on time, and one that starts after the end reverts at once.
@@ -23,9 +23,9 @@
  *    it can never override a newer manual choice it has not heard about yet.
  */
 
-import { Disposable } from "./disposable";
-import { setOwnedTimeout } from "./dom";
-import type { UserStatus } from "./types";
+import { Disposable } from "../disposable";
+import { setOwnedTimeout } from "../dom";
+import type { UserStatus } from "../types";
 import {
   clearStatusTimer,
   loadStatusTimer,

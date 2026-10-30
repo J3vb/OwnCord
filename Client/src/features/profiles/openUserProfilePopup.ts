@@ -16,7 +16,7 @@ import type {
   ProfileRolesControl,
   UserProfilePopupComponent,
 } from "../../components/UserProfilePopup";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { requestsText } from "../../i18n/requests";
 import { formatDate } from "../../i18n/format";

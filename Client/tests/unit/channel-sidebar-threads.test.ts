@@ -10,7 +10,11 @@ vi.mock("@lib/voice/livekitSession", () => ({
   getUserLocalMute: vi.fn(() => false),
   rePinPeerIdentity: vi.fn(async () => true),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn(), initToast: vi.fn(), teardownToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({
+  showToast: vi.fn(),
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+}));
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {

@@ -200,7 +200,7 @@ vi.mock("@lib/logger", () => ({
 }));
 
 const mockShowActionToast = vi.hoisted(() => vi.fn());
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
   showActionToast: mockShowActionToast,
 }));

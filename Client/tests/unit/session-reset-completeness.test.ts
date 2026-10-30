@@ -96,7 +96,7 @@ import {
 import type { MessageRequest } from "../../src/features/message-requests/api";
 import { loadRequests, requestsApi } from "../../src/features/message-requests/sync";
 import type { DispatchApi } from "../../src/features/connection/dispatchContext";
-import type { GifFavoritesApi } from "../../src/lib/gifProvider";
+import type { GifFavoritesApi } from "../../src/lib/media/gifProvider";
 import type { ReadyMember } from "../../src/lib/types";
 
 interface Probe {

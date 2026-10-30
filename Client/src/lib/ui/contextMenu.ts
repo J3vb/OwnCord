@@ -8,9 +8,9 @@
  * nested submenu.
  */
 
-import { isImeCommit } from "./text/ime";
-import { Disposable } from "./disposable";
-import { createElement, setOwnedTimeout } from "./dom";
+import { isImeCommit } from "../text/ime";
+import { Disposable } from "../disposable";
+import { createElement, setOwnedTimeout } from "../dom";
 import { setRovingTabindex } from "./a11y";
 
 /** A nested flyout submenu, whether or not its role is set yet. */

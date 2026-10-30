@@ -7,8 +7,11 @@
  * `globalShortcuts.status().backend`, and these helpers only shape its data.
  */
 
-import type { GlobalKeysErrorCode, GlobalKeysStatus } from "../platform/contracts/globalShortcuts";
-import { loadPref, savePref } from "./prefs/preferences";
+import type {
+  GlobalKeysErrorCode,
+  GlobalKeysStatus,
+} from "../../platform/contracts/globalShortcuts";
+import { loadPref, savePref } from "../prefs/preferences";
 
 /** Set after a portal bind returned a trigger, so the next start can restore it. */
 export const GLOBAL_KEYS_PORTAL_BOUND_PREF = "globalKeysPortalBound";

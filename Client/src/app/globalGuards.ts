@@ -7,7 +7,7 @@
 import { wantsNativeMenu } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { installFileDropGuard } from "../features/messaging/fileDropGuard";
 import { desktop } from "../platform/desktop";
 import { connectText } from "../i18n/connect";
@@ -26,7 +26,7 @@ export function installGlobalGuards(): void {
     typeof window.matchMedia === "function" &&
     window.matchMedia("(any-pointer: coarse)").matches
   ) {
-    import("@lib/touchInput").then(
+    import("@lib/ui/touchInput").then(
       (m) => m.installTouchInput(new Disposable().signal),
       (err: unknown) => log.warn("touch input failed to load", err),
     );

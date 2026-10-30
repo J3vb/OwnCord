@@ -21,7 +21,7 @@ vi.mock("@lib/voice/livekitSession", () => ({
 }));
 
 const toastCalls: Array<{ msg: string; type: string }> = [];
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: (msg: string, type: string) => {
     toastCalls.push({ msg, type });
   },
@@ -43,7 +43,7 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import { renderMentionSegment } from "../../src/components/message-list/content-parser";
-import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
+import { jumpToMessage, setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import {
   deleteMessage,
   messagesStore,

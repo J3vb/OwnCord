@@ -15,8 +15,8 @@
  * the timer alone cannot tell them apart.
  */
 
-import type { UserStatus } from "./types";
-import { loadPref, onPrefChange, savePref } from "./prefs/preferences";
+import type { UserStatus } from "../types";
+import { loadPref, onPrefChange, savePref } from "../prefs/preferences";
 
 export const USER_STATUS_PREF_KEY = "userStatus";
 /** Where the current status came from. Separate key so an older client's

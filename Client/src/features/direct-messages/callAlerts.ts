@@ -8,9 +8,9 @@
  * message notification uses, so a call from another server is dropped there.
  */
 import { loadPref } from "../../lib/prefs/preferences";
-import { loadUserStatus } from "../../lib/userStatus";
+import { loadUserStatus } from "../../lib/presence/userStatus";
 import { getChannelMutesHost } from "../../lib/prefs/channelMutes";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { createLogger } from "../../lib/logger";
 import type { RingState } from "../../lib/voice/callRing";
 import { desktop } from "../../platform/desktop";

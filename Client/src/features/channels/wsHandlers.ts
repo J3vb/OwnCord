@@ -66,7 +66,7 @@ import {
   readPointerEnabled,
   stickersEnabled,
 } from "../../lib/net/serverCapabilities";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import {
   notifyChannelActivity,
   notifyMention,

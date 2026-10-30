@@ -6,7 +6,7 @@ import {
   openMessageTarget,
   resetNotificationCoalescing,
 } from "../../src/lib/notifications";
-import { cleanupNotificationAudio } from "../../src/lib/notificationSound";
+import { cleanupNotificationAudio } from "../../src/lib/media/notificationSound";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
@@ -17,7 +17,7 @@ import { setBlockedByMe } from "../../src/stores/blocks.store";
 import type { ChannelActivityEntry, ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
 import { muteChannel, setChannelMutesHost, unmuteChannel } from "../../src/lib/prefs/channelMutes";
-import { setMessageJumpHandler } from "../../src/lib/message-navigation";
+import { setMessageJumpHandler } from "../../src/lib/nav/messageNavigation";
 
 // The three tests that assert on the logger's debug lines raise the level the
 // global setup lowered (C-04) for themselves; this puts it back.

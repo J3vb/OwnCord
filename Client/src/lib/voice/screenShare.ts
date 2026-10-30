@@ -32,7 +32,7 @@ import { loadPref } from "@lib/prefs/preferences";
 import { offeredShareFps } from "@lib/voice/shareFps";
 import { setH264GpuProfiles } from "@lib/voice/h264Profile";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import {
   isLinuxDesktop,
   PICKER_DISMISSED,

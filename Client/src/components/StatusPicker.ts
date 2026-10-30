@@ -10,7 +10,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
+import { MAX_CUSTOM_STATUS_LEN } from "@lib/presence/userStatus";
 import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/text/nameLimits";
 import { shellText } from "../i18n/shell";
 import { connectText } from "../i18n/connect";

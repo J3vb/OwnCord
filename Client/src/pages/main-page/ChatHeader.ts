@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import type { ChannelType } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";

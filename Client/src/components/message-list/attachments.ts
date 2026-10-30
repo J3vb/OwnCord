@@ -5,14 +5,14 @@
 
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
-import { closeOnBackdropClick } from "@lib/modalFactory";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/prefs/mediaVisibility";
-import { createZoomPan, PAN_MIN_SCALE } from "@lib/zoomPan";
+import { createZoomPan, PAN_MIN_SCALE } from "@lib/ui/zoomPan";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { formatByteSize } from "@lib/voice/connectionStats";
 import { ensureHttpProxy } from "@lib/net/httpProxy";
 import { authStore, getToken } from "@stores/auth.store";
@@ -33,9 +33,9 @@ import { messagingText } from "../../i18n/messaging";
 import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
-import { clearAnimatedStills } from "@lib/animatedStill";
+import { clearAnimatedStills } from "@lib/ui/animatedStill";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
-import { sniffImageBlob } from "@lib/imageHeader";
+import { sniffImageBlob } from "@lib/ui/imageHeader";
 import {
   ATTACHMENT_BOX_MAX_H,
   blobImageSize,

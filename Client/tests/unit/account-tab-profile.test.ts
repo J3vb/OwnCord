@@ -15,7 +15,7 @@ import {
 import { authStore } from "@stores/auth.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { ApiClientError } from "@lib/api";
-import * as imageCrop from "@lib/imageCrop";
+import * as imageCrop from "@lib/ui/imageCrop";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
 
 /**

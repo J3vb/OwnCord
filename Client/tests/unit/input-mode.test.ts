@@ -6,7 +6,7 @@ import {
   inputMode,
   migrateAutoInputSensitivity,
   migrateInputMode,
-} from "../../src/lib/inputMode";
+} from "../../src/lib/ui/inputMode";
 
 const PREFIX = "owncord:settings:";
 const set = (key: string, value: unknown): void =>

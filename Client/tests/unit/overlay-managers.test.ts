@@ -119,7 +119,7 @@ vi.mock("@lib/permissions", () => ({
   canManageInvites: () => mockCanManageInvites.value,
 }));
 
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   initToast: vi.fn(),
   teardownToast: vi.fn(),
   showToast: mockShowToast,

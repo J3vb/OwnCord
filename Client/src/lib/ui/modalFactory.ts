@@ -5,19 +5,19 @@
  *
  * Every factory modal carries the dialog accessibility contract:
  * role="dialog" + aria-modal on the container, focus moved into the dialog on
- * open and restored on close, and a Tab-cycling focus trap (lib/a11y.ts).
+ * open and restored on close, and a Tab-cycling focus trap (lib/ui/a11y.ts).
  *
  * CSS classes match the existing project convention:
  *   - div.modal-overlay.visible  (backdrop)
  *   - div.modal                  (content container)
  */
 
-import { Disposable } from "./disposable";
-import { isImeCommit } from "./text/ime";
-import { createElement } from "./dom";
+import { Disposable } from "../disposable";
+import { isImeCommit } from "../text/ime";
+import { createElement } from "../dom";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
-import { connectText } from "../i18n/connect";
-import { attachLimitHint } from "./text/nameLimits";
+import { connectText } from "../../i18n/connect";
+import { attachLimitHint } from "../text/nameLimits";
 import { showToast } from "./toast";
 
 export interface ModalOptions {

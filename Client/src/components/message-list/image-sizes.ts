@@ -14,7 +14,7 @@
 
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
-import type { ImageSize } from "@lib/imageHeader";
+import type { ImageSize } from "@lib/ui/imageHeader";
 
 /** Ceiling for an inline image box, in CSS px. */
 const BOX_MAX_W = 400;

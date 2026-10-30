@@ -12,7 +12,7 @@ import {
   runeCount,
   visibleLength,
 } from "../../src/lib/text/nameLimits";
-import { createPromptModal } from "../../src/lib/modalFactory";
+import { createPromptModal } from "../../src/lib/ui/modalFactory";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
@@ -21,7 +21,7 @@ import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 
 const mockToast = vi.hoisted(() => vi.fn());
-vi.mock("../../src/lib/toast", () => ({ showToast: mockToast }));
+vi.mock("../../src/lib/ui/toast", () => ({ showToast: mockToast }));
 vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));

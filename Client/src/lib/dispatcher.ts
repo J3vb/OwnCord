@@ -10,13 +10,13 @@
 
 import type { ConnectionState, WsClient } from "./ws";
 import { toConnectionStatus, setActiveChannelProvider } from "./ws";
-import { getActivePresenceSender } from "./presence";
-import { handleActivityRefusal } from "./gameActivityBridge";
+import { getActivePresenceSender } from "./presence/presence";
+import { handleActivityRefusal } from "./presence/gameActivityBridge";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { serverErrorText } from "./api";
 import type { ApiClient } from "./api";
-import { showToast } from "./toast";
+import { showToast } from "./ui/toast";
 import { connectText } from "../i18n/connect";
 import { ServerMessageType as S } from "./protocolTypes";
 import {

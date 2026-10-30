@@ -48,9 +48,9 @@ import {
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { resolveAuthor } from "@lib/text/formatting";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { markdownToPlainText } from "@lib/text/markdown";
-import { jumpToMessage } from "@lib/message-navigation";
+import { jumpToMessage } from "@lib/nav/messageNavigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { MessageController } from "./MessageController";

@@ -15,7 +15,7 @@
 import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { publicAssetUrl } from "@lib/publicAssets";
+import { publicAssetUrl } from "@lib/media/publicAssets";
 import {
   createMicProcessor,
   GATE_LOOKAHEAD_S,
@@ -23,7 +23,7 @@ import {
   type MicProcessor,
 } from "@lib/voice/micProcessor";
 import { voiceText } from "../../i18n/voice";
-import { effectiveVoiceGate, effectiveVoiceSensitivity } from "@lib/inputMode";
+import { effectiveVoiceGate, effectiveVoiceSensitivity } from "@lib/ui/inputMode";
 import { NoiseFloorTracker } from "@lib/voice/noiseFloor";
 
 const log = createLogger("audioPipeline");

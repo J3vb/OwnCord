@@ -13,7 +13,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import { type ApiClient, errorText } from "@lib/api";
 import type { RateLimiterSet } from "@lib/net/rateLimiter";
-import type { PresenceSender } from "@lib/presence";
+import type { PresenceSender } from "@lib/presence/presence";
 import type { ToastContainer } from "@components/Toast";
 import { createLogger } from "@lib/logger";
 import { createChannelSidebar } from "@components/ChannelSidebar";
@@ -54,8 +54,8 @@ import {
   findDirectDm,
   type DmHelperDeps,
 } from "./SidebarDmHelpers";
-import { createPromptModal } from "@lib/modalFactory";
-import type { ModalInstance } from "@lib/modalFactory";
+import { createPromptModal } from "@lib/ui/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import {
   CHANNEL_MUTE_CHANGED,
   muteChannel,
@@ -79,10 +79,10 @@ import {
 import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/keptCallDms";
 import { dmStore, closeDmLocally, restoreDmChannel, type DmChannel } from "@stores/dm.store";
 import { clearChannelVoiceUsers, voiceStore } from "@stores/voice.store";
-import { createProfileManager, createTauriBackend } from "@lib/profiles";
+import { createProfileManager, createTauriBackend } from "@lib/presence/profiles";
 import { openAdminPanel } from "@lib/admin-panel";
 import { canManageInvites, canModerateMembers, canViewAuditLog } from "@lib/permissions";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";
 import { trackCurrentView } from "../../features/navigation/contentView";
 import { navigationText } from "../../i18n/navigation";
@@ -127,7 +127,7 @@ export interface SidebarAreaOptions {
   /** MainPage's single shared presence sender — threaded to UserBar so its
    *  status picker shares the same limiter budget and retry as auto-idle
    *  and the settings Account tab instead of sending straight through `ws`
-   *  (see @lib/presence). */
+   *  (see @lib/presence/presence). */
   readonly presenceSender: PresenceSender;
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;

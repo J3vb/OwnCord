@@ -30,8 +30,8 @@ import type { DmChannelsResponse } from "../../lib/types";
 
 vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 import { notifyIncomingMessage } from "../../lib/notifications";
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-import { showToast } from "../../lib/toast";
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
+import { showToast } from "../../lib/ui/toast";
 import { setLiveTailInView } from "../../lib/read-state";
 import { expectConsole } from "../../../tests/helpers/console";
 

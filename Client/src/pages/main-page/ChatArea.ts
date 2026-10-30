@@ -16,8 +16,8 @@ import { createPinnedPanelController, createSearchOverlayController } from "./Ov
 import type { SearchOverlayController } from "./OverlayManagers";
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "./MessageJump";
-import { setMessageJumpHandler } from "@lib/message-navigation";
-import { navigateToChannel } from "@lib/channel-navigation";
+import { setMessageJumpHandler } from "@lib/nav/messageNavigation";
+import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { channelsStore } from "@stores/channels.store";
 import { channelBitOrRole } from "@lib/permissions";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";

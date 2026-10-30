@@ -54,7 +54,7 @@ vi.mock("@stores/voice.store", async (importOriginal) => ({
   isSelfMuted: (await importOriginal<typeof import("@stores/voice.store")>()).isSelfMuted,
 }));
 
-vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast: mockShowToast }));
 
 vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: mockUiGetState },

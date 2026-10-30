@@ -18,7 +18,7 @@ import {
   restateSelfVoiceState,
 } from "@stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
-import { inputMode } from "@lib/inputMode";
+import { inputMode } from "@lib/ui/inputMode";
 import { createLogger } from "@lib/logger";
 import { Disposable } from "@lib/disposable";
 import { AudioPipeline } from "@lib/voice/audioPipeline";

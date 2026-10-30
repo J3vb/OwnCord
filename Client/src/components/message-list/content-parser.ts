@@ -10,13 +10,13 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { navigateToChannel, findChannelByName, findChannelById } from "@lib/channel-navigation";
-import { parseInviteLink, parseMessageLink } from "@lib/deep-link";
+import { navigateToChannel, findChannelByName, findChannelById } from "@lib/nav/channelNavigation";
+import { parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import { getChannelMutesHost } from "@lib/prefs/channelMutes";
 import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
-import { requestInviteJoin } from "@lib/invite-navigation";
-import { jumpToMessage } from "@lib/message-navigation";
-import { showToast } from "@lib/toast";
+import { requestInviteJoin } from "@lib/nav/inviteNavigation";
+import { jumpToMessage } from "@lib/nav/messageNavigation";
+import { showToast } from "@lib/ui/toast";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 import { memberDisplayName, membersStore } from "@stores/members.store";
@@ -46,7 +46,7 @@ import {
   type InlineStyle,
 } from "@lib/text/markdown";
 import { highlightCode, resolveLanguage, type CodeToken } from "./syntax-highlight";
-import { copyThenRelabel } from "@lib/clipboard";
+import { copyThenRelabel } from "@lib/ui/clipboard";
 
 // -- Regex constants ----------------------------------------------------------
 

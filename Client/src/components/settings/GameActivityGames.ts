@@ -4,7 +4,7 @@
  * remove, and the "Add a game" picker over the programs running now.
  *
  * Everything here is a device-local choice (`@lib/prefs/gameActivityPrefs`); the loop
- * in `@lib/gameActivity` reads it on its next scan, and hiding the game being
+ * in `@lib/presence/gameActivity` reads it on its next scan, and hiding the game being
  * shown clears it at once. The list of running programs is read only when the
  * picker opens, is shown only here and is never stored or sent.
  */

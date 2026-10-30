@@ -11,7 +11,7 @@ export interface UploadProgress {
 
 /**
  * The HTTP fetch capability every native-dependent REST caller uses today
- * (`lib/api.ts`, `lib/profiles.ts`, `message-list/{attachments,embeds,media}.ts`).
+ * (`lib/api.ts`, `lib/presence/profiles.ts`, `message-list/{attachments,embeds,media}.ts`).
  *
  * Mirrors the Web-standard `fetch` signature: the native HTTP plugin already
  * implements it, and a browser adapter needs no translation at all — this is

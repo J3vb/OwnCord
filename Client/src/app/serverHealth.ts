@@ -6,7 +6,7 @@
 
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { deriveCompatibility, type Compatibility } from "@lib/profiles";
+import { deriveCompatibility, type Compatibility } from "@lib/presence/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
 import type { SessionScope } from "@lib/net/sessionScope";
 import type { ServerInfoResponse } from "@lib/types";

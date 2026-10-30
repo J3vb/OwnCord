@@ -12,7 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "@lib/api";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import type { RenderRecovery } from "@lib/text/safeRender";
 
 const hoisted = vi.hoisted(() => ({

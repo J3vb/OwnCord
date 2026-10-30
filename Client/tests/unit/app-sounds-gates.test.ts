@@ -11,7 +11,7 @@ const { playNotificationSound, playVoiceSound } = vi.hoisted(() => ({
   playVoiceSound: vi.fn(),
 }));
 
-vi.mock("../../src/lib/notificationSound", () => ({ playNotificationSound, playVoiceSound }));
+vi.mock("../../src/lib/media/notificationSound", () => ({ playNotificationSound, playVoiceSound }));
 vi.mock("../../src/lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   getSessionDebugInfo: vi.fn().mockReturnValue({}),

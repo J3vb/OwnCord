@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Track } from "livekit-client";
 import type { LocalTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import { initToast, teardownToast } from "@lib/toast";
+import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 import { expectConsole } from "../helpers/console";
 

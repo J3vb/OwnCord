@@ -57,7 +57,7 @@ vi.mock("@lib/voice/livekitSession", () => ({
   resendWatching: vi.fn(),
 }));
 const mockShowToast = vi.fn();
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
 vi.mock("@lib/net/identity", () => ({

@@ -31,7 +31,7 @@ vi.mock("../../src/platform/desktop", () => ({ desktop: { appAudio: host } }));
 vi.mock("../../src/lib/voice/appAudioTrack", () => ({
   openAppAudio: (...a: unknown[]) => openAppAudio(...a) as unknown,
 }));
-vi.mock("../../src/lib/toast", () => ({ showToast }));
+vi.mock("../../src/lib/ui/toast", () => ({ showToast }));
 vi.mock("../../src/lib/logger", () => ({
   createLogger: (name: string) => {
     logCreate(name);

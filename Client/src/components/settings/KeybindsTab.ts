@@ -11,7 +11,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { vkName } from "@lib/voice/ptt";
 import { loadPref } from "@lib/prefs/preferences";
-import { inputMode } from "@lib/inputMode";
+import { inputMode } from "@lib/ui/inputMode";
 import {
   keyEventToVk,
   loadGlobalShortcutVks,
@@ -19,7 +19,7 @@ import {
   shortcutConflict,
   type GlobalShortcutAction,
 } from "@lib/voice/voiceShortcuts";
-import { globalKeysErrorCode, markPortalBound, portalHoldsShortcuts } from "@lib/globalKeys";
+import { globalKeysErrorCode, markPortalBound, portalHoldsShortcuts } from "@lib/ui/globalKeys";
 import { desktop } from "../../platform/desktop";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";

@@ -30,7 +30,7 @@ import {
   stopRingback,
   stopRingChime,
   type VoiceSound,
-} from "@lib/notificationSound";
+} from "@lib/media/notificationSound";
 import { savePref } from "@lib/prefs/preferences";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voice/voiceDeafened";
 import type { NativeToneNote } from "../../src/platform/contracts/nativeVoice";

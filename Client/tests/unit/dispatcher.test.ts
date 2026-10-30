@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
-import { setActivityRefusalHandler } from "../../src/lib/gameActivityBridge";
+import { setActivityRefusalHandler } from "../../src/lib/presence/gameActivityBridge";
 // Vite's `?raw` suffix inlines the file's source text as a string (see
 // src/vite-env.d.ts's `vite/client` types) — used below for a structural
 // bundle-hygiene assertion, without pulling in node:fs.
@@ -57,9 +57,9 @@ import {
   serverSupportsGameActivity,
   serverSupportsListeningActivity,
 } from "../../src/lib/net/serverCapabilities";
-import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence";
+import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence/presence";
 import { createPresenceLimiter } from "../../src/lib/net/rateLimiter";
-import { loadCustomStatus, saveCustomStatus } from "../../src/lib/userStatus";
+import { loadCustomStatus, saveCustomStatus } from "../../src/lib/presence/userStatus";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 
@@ -134,7 +134,7 @@ vi.mock("@lib/voice/screenShare", () => ({
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
 const mockShowToast = vi.fn();
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
 

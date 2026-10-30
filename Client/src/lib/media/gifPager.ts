@@ -9,7 +9,7 @@
 // A generation token (bumped by begin()) makes a page that resolves after the
 // query changed a no-op, so it can never be appended to the new query's grid.
 
-import { ApiClientError } from "./api";
+import { ApiClientError } from "../api";
 import type { GifPage, GifResult } from "./gifProvider";
 import { RestErrorCode } from "@lib/protocolTypes";
 

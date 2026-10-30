@@ -15,15 +15,15 @@
  * DND, the switches) and the ring timers stay here, ahead of `playSpec`.
  */
 
-import { loadPref, onPrefChange } from "./prefs/preferences";
-import { loadAppSoundsGain, soundSwitchOn } from "./prefs/soundPrefs";
-import { USER_STATUS_PREF_KEY, loadUserStatus } from "./userStatus";
-import { isVoiceDeafened } from "./voice/voiceDeafened";
-import { createLogger } from "./logger";
-import { Disposable } from "./disposable";
-import { desktop } from "../platform/desktop";
-import type { NativeToneNote } from "../platform/contracts/nativeVoice";
-import { isLinuxDesktop } from "../features/voice/native/platform";
+import { loadPref, onPrefChange } from "../prefs/preferences";
+import { loadAppSoundsGain, soundSwitchOn } from "../prefs/soundPrefs";
+import { USER_STATUS_PREF_KEY, loadUserStatus } from "../presence/userStatus";
+import { isVoiceDeafened } from "../voice/voiceDeafened";
+import { createLogger } from "../logger";
+import { Disposable } from "../disposable";
+import { desktop } from "../../platform/desktop";
+import type { NativeToneNote } from "../../platform/contracts/nativeVoice";
+import { isLinuxDesktop } from "../../features/voice/native/platform";
 
 const log = createLogger("notifications");
 

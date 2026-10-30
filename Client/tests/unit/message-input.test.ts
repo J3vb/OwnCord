@@ -37,7 +37,7 @@ import {
   wrapWithMarker,
   type MessageInputOptions,
 } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 import { authStore } from "@stores/auth.store";
 import { canMention, mentionInComposer } from "../../src/features/messaging/activeComposer";
 

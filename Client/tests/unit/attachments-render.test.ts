@@ -47,7 +47,7 @@ vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 
 const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: showToastMock,
   initToast: vi.fn(),
   teardownToast: vi.fn(),

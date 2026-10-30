@@ -16,10 +16,10 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
 import { reconcileChildren } from "@lib/net/reconcile";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { createIcon, type IconName } from "@lib/icons";
-import type { ModalInstance } from "@lib/modalFactory";
-import { openMenuOnKeyboard } from "@lib/context-menu";
+import type { ModalInstance } from "@lib/ui/modalFactory";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {

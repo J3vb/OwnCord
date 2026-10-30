@@ -39,7 +39,7 @@ vi.mock("@lib/logPersistence", () => ({
 vi.mock("@lib/prefs/windowState", () => ({
   initWindowState: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({})),
 }));
@@ -111,7 +111,7 @@ describe("main.ts wiring of the router", () => {
     hoisted.applyInvite.mockClear();
 
     // An in-chat invite chip goes straight in; an outside link would ask first.
-    const { requestInviteJoin } = await import("@lib/invite-navigation");
+    const { requestInviteJoin } = await import("@lib/nav/inviteNavigation");
     requestInviteJoin("ABC123", "h.example");
 
     // clearAuth("server_switch") fires the logout subscriber, which navigates

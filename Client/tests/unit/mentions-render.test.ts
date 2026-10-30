@@ -21,7 +21,7 @@ import {
   resyncMentions,
 } from "../../src/components/message-list/content-parser";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
-import { setInviteJoinHandler } from "../../src/lib/invite-navigation";
+import { setInviteJoinHandler } from "../../src/lib/nav/inviteNavigation";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
   highlightsCurrentUser,

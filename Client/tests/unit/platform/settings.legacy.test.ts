@@ -1,4 +1,4 @@
-// Legacy binding for the SettingsStore suite: today's `lib/profiles.ts`
+// Legacy binding for the SettingsStore suite: today's `lib/presence/profiles.ts`
 // `createTauriBackend()`, assigned with no cast against the contract — if
 // this line needed a cast, the contract would be wrong (rule 5). B7-4
 // re-runs `settings.suite.ts` against `platform/desktop` instead of this
@@ -21,7 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
 vi.mock("@lib/net/httpProxy", () => ({ ensureHttpProxy: vi.fn() }));
 
-const { createTauriBackend } = await import("../../../src/lib/profiles");
+const { createTauriBackend } = await import("../../../src/lib/presence/profiles");
 const legacy: SettingsStore = createTauriBackend();
 
 describeSettingsStoreSuite(async () => {

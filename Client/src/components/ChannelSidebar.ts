@@ -10,8 +10,8 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { reconcileModels, sameModel } from "@lib/net/reconcile";
-import { select, eventSource, type Selection } from "@lib/select";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { select, eventSource, type Selection } from "@lib/ui/select";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import type { MountableComponent } from "@lib/text/safeRender";
 import {
   channelsStore,
@@ -19,7 +19,7 @@ import {
   UNCATEGORIZED_VOICE_CATEGORY,
   type CategoryRef,
 } from "@stores/channels.store";
-import { navigateToChannel } from "@lib/channel-navigation";
+import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { isChannelMuted } from "@lib/prefs/channelMutes";
 import { isHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import type { Channel, ChannelsState } from "@stores/channels.store";
@@ -29,7 +29,7 @@ import { safetyStore, type SafetyState } from "../features/safety/store";
 import { voiceStore } from "@stores/voice.store";
 import type { PeerVerification, VoiceState, VoiceUser } from "@stores/voice.store";
 import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
-import { openMenuOnKeyboard } from "@lib/context-menu";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createLazyScreen } from "./lazyScreen";
 import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";

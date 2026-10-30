@@ -87,7 +87,7 @@ const { mockLeaveVoice } = vi.hoisted(() => ({
 vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
@@ -105,8 +105,9 @@ const mockProfileManager = vi.hoisted(() => ({
   setLastConnected: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", async (importOriginal) => ({
-  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
+vi.mock("@lib/presence/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/presence/profiles")>())
+    .deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => mockProfileManager),
 }));
@@ -280,7 +281,7 @@ import { deleteCredential } from "@lib/net/credentials";
 import { joinVoiceChannel } from "@stores/voice.store";
 import { createConnectPage } from "@pages/ConnectPage";
 import { createMainPage } from "@pages/MainPage";
-import { requestInviteJoin } from "@lib/invite-navigation";
+import { requestInviteJoin } from "@lib/nav/inviteNavigation";
 
 let startupDone = false;
 beforeAll(async () => {

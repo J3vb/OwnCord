@@ -5,7 +5,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
-import { dialogOpen } from "@lib/dialogOpen";
+import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
@@ -70,7 +70,7 @@ import type { VoiceComposer } from "../features/voice-messages/voiceComposer";
 import { voiceMessagesText } from "../i18n/voiceMessages";
 import { messagingText } from "../i18n/messaging";
 import { stickersText } from "../i18n/stickers";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 export interface MessageInputOptions {
   readonly channelId: number;

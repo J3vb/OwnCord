@@ -35,7 +35,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
 import { voiceText as t } from "../i18n/voice";
 import { desktop } from "../platform/desktop";

@@ -6,10 +6,10 @@
  * commands for persistence (mockable via dependency injection).
  */
 
-import { createStore, type Store } from "./store";
-import { ensureHttpProxy } from "./net/httpProxy";
-import { desktop } from "../platform/desktop";
-import type { SettingsStore, SettingsSnapshot } from "../platform/contracts/settings";
+import { createStore, type Store } from "../store";
+import { ensureHttpProxy } from "../net/httpProxy";
+import { desktop } from "../../platform/desktop";
+import type { SettingsStore, SettingsSnapshot } from "../../platform/contracts/settings";
 
 // ---------------------------------------------------------------------------
 // Constants

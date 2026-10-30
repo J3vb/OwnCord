@@ -12,7 +12,7 @@
 // - Under (hover: none) a tap on a message shows its action bar.
 // - visualViewport drives --app-height so the keyboard does not hide the composer.
 
-import { setOwnedTimeout, wantsNativeMenu } from "./dom";
+import { setOwnedTimeout, wantsNativeMenu } from "../dom";
 
 const LONG_PRESS_MS = 500;
 const MOVE_TOLERANCE_PX = 10;

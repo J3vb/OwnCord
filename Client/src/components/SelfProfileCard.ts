@@ -14,7 +14,7 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import type { UserStatus } from "@lib/types";
 import {
   CLEAR_AFTER_OPTIONS,
@@ -30,7 +30,7 @@ import {
   loadUserStatus,
   onStatusTimerChange,
   onUserStatusChange,
-} from "@lib/userStatus";
+} from "@lib/presence/userStatus";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import { openSettings, uiStore } from "@stores/ui.store";

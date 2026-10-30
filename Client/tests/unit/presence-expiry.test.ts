@@ -9,9 +9,14 @@ import {
   applyPresenceBatch,
   type Member,
 } from "@stores/members.store";
-import { createPresenceSender } from "@lib/presence";
+import { createPresenceSender } from "@lib/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
-import { loadStatusTimer, loadUserStatus, saveStatusTimer, saveUserStatus } from "@lib/userStatus";
+import {
+  loadStatusTimer,
+  loadUserStatus,
+  saveStatusTimer,
+  saveUserStatus,
+} from "@lib/presence/userStatus";
 import type { WsClient } from "@lib/ws";
 
 type Frame = { type: string; payload: Record<string, unknown> };

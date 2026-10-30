@@ -9,7 +9,7 @@
  * offset by `-c * (f - 1)` and the point stays under the pointer.
  */
 
-import { Disposable } from "./disposable";
+import { Disposable } from "../disposable";
 
 /** Pixels a press may move and still count as a click, not a drag. */
 export const CLICK_SLOP = 5;

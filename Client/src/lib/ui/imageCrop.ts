@@ -8,7 +8,7 @@
  * show.
  */
 
-import { accountText } from "../i18n/account";
+import { accountText } from "../../i18n/account";
 
 const ACCEPTED_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 /** The server refuses an upload over 1 MiB. */

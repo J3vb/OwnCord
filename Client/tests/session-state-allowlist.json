@@ -122,7 +122,7 @@
       "reason": "Lookup built from the bundled unicode catalog"
     },
     {
-      "file": "lib/animatedStill.ts",
+      "file": "lib/ui/animatedStill.ts",
       "binding": "stills",
       "category": "reset-elsewhere",
       "reason": "Keyed by image-cache blob: URLs; clearAttachmentCaches clears it with them under the attachments:caches session reset"
@@ -164,7 +164,7 @@
       "reason": "The bundled changelog, not server data"
     },
     {
-      "file": "lib/channel-navigation.ts",
+      "file": "lib/nav/channelNavigation.ts",
       "binding": "reselectListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the disposer each subscriber holds"
@@ -206,13 +206,13 @@
       "reason": "Client diagnostics and log subscribers, not server data"
     },
     {
-      "file": "lib/notificationSound.ts",
+      "file": "lib/media/notificationSound.ts",
       "binding": "ringInterval",
       "category": "transient",
       "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
     },
     {
-      "file": "lib/notificationSound.ts",
+      "file": "lib/media/notificationSound.ts",
       "binding": "ringbackInterval",
       "category": "transient",
       "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
@@ -422,7 +422,7 @@
       "reason": "WeakMap keyed by the share's RTCRtpSender; a new share is a new sender and a closed one is collected with its entry, so nothing outlives the session that published it"
     },
     {
-      "file": "lib/clipboard.ts",
+      "file": "lib/ui/clipboard.ts",
       "binding": "pendingResets",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the copy button; a pending label reset goes with its button, and an owner's signal drops it on abort"

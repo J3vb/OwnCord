@@ -5,7 +5,7 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { createMenuItem, openMenuShell } from "@lib/context-menu";
+import { createMenuItem, openMenuShell } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
 import {
   setUserVolume,

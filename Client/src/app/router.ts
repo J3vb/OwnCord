@@ -16,7 +16,7 @@
 import { renderFallback, safeMount, type RenderRecovery } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";

@@ -6,7 +6,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
-import type { Compatibility, HealthStatus } from "@lib/profiles";
+import type { Compatibility, HealthStatus } from "@lib/presence/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
 import type { RegistrationMode } from "@lib/types";
 import { createServerPanel } from "./connect-page/ServerPanel";

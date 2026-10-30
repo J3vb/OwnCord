@@ -12,7 +12,7 @@ import type { ApiClient } from "@lib/api";
 import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import { safeMount } from "@lib/text/safeRender";
 import type { MountableComponent, RenderRecovery } from "@lib/text/safeRender";
 import { SessionScope } from "@lib/net/sessionScope";

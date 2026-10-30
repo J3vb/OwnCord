@@ -9,10 +9,10 @@
 
 import { ApiClientError } from "@lib/api";
 import { createStore } from "@lib/store";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { gifFavoritesText } from "../i18n/gifFavorites";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
-import type { GifFavoritesApi } from "@lib/gifProvider";
+import type { GifFavoritesApi } from "@lib/media/gifProvider";
 import type { GifFavorite } from "@lib/types";
 import { RestErrorCode } from "@lib/protocolTypes";
 

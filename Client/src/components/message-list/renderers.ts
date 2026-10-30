@@ -64,7 +64,7 @@ import {
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
 import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
 import { createAvatarElement, pickAvatarColor } from "./avatar";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { highlightsCurrentUser } from "@lib/text/mentions";

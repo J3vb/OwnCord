@@ -13,7 +13,7 @@ vi.mock("@lib/prefs/themes", async (importOriginal) => ({
 }));
 
 import { applyStoredAppearance } from "@lib/prefs/appearance";
-import { syncOsMotionListener } from "@lib/os-motion";
+import { syncOsMotionListener } from "@lib/ui/osMotion";
 
 /** jsdom has no matchMedia; startup syncs with the OS by default (B9-2, Q1). */
 function stubOsReducedMotion(matches: boolean): void {

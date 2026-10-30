@@ -221,7 +221,7 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the SessionScope that aborts the transport (api.ts owner.addCleanup)",
   },
   {
-    file: "lib/profiles.ts",
+    file: "lib/presence/profiles.ts",
     fn: "pingHost",
     category: "cancellation-token",
     reason: "owner: the per-attempt HEALTH_TIMEOUT_MS timer that aborts it",

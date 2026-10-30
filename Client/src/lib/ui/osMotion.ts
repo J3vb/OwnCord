@@ -4,8 +4,8 @@
  * SettingsOverlay and AccessibilityTab.
  */
 
-import { Disposable } from "./disposable";
-import { readStored } from "./prefs/preferences";
+import { Disposable } from "../disposable";
+import { readStored } from "../prefs/preferences";
 
 let owner: Disposable | null = null;
 

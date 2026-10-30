@@ -3,7 +3,7 @@
  * (src/features/clipboardDoor.test.ts holds that). Every copy reports its
  * result to the user, either as a toast or on the button that was pressed.
  */
-import { setText } from "./dom";
+import { setText } from "../dom";
 import { showToast } from "./toast";
 
 /**

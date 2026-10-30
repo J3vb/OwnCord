@@ -1,6 +1,6 @@
 // The camera picker behind the arrow beside Camera in the call bar.
 // Loaded on demand, so it stays out of the eager MainPage chunk.
-import { showContextMenu } from "@lib/context-menu";
+import { showContextMenu } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
 import { loadPref } from "@lib/prefs/preferences";
 import { createElement } from "@lib/dom";

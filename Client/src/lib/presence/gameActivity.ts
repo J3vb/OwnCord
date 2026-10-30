@@ -34,16 +34,16 @@
  * a `presence` frame like everyone else's.
  */
 
-import { Disposable } from "./disposable";
-import { createLogger } from "./logger";
-import { ServerMessageType as S } from "./protocolTypes";
+import { Disposable } from "../disposable";
+import { createLogger } from "../logger";
+import { ServerMessageType as S } from "../protocolTypes";
 import {
   GAME_ACTIVITY_PREF_KEY,
   isGameActivityShared,
   setActivityRefusalHandler,
 } from "./gameActivityBridge";
-import { onGameActivityPolicy, serverSupportsGameActivity } from "./net/serverCapabilities";
-import type { WsClient } from "./ws";
+import { onGameActivityPolicy, serverSupportsGameActivity } from "../net/serverCapabilities";
+import type { WsClient } from "../ws";
 import {
   GAME_PREFS_KEY,
   displayName,
@@ -51,9 +51,9 @@ import {
   loadGamePrefs,
   recordSeen,
   toDetectPrefs,
-} from "./prefs/gameActivityPrefs";
-import type { DetectedGame, DetectPrefs } from "../platform/contracts/gameDetector";
-import { onPrefChange } from "./prefs/preferences";
+} from "../prefs/gameActivityPrefs";
+import type { DetectedGame, DetectPrefs } from "../../platform/contracts/gameDetector";
+import { onPrefChange } from "../prefs/preferences";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("gameActivity");

@@ -22,7 +22,7 @@ import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
 import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { readableRoleColor } from "@lib/prefs/themes";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";

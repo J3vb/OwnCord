@@ -38,7 +38,7 @@ vi.mock("@lib/logPersistence", () => ({
 vi.mock("@lib/prefs/windowState", () => ({
   initWindowState: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({})),
 }));

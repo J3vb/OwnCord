@@ -18,7 +18,7 @@ import { AudioPresets, Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
-import { initToast, teardownToast } from "@lib/toast";
+import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 
 const createLocalVideoTrack = vi.fn();

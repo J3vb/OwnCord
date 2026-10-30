@@ -3,10 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const showToast = vi.fn();
-vi.mock("@lib/toast", () => ({ showToast: (...args: unknown[]) => showToast(...args) }));
+vi.mock("@lib/ui/toast", () => ({ showToast: (...args: unknown[]) => showToast(...args) }));
 
 import { ApiClientError, type FileReportRequest } from "@lib/api";
-import type { ModalInstance } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { openMessageReport, openUserReport } from "./openers";
 import { checkReportDetail, reportFailureText } from "./reportDialog";
 

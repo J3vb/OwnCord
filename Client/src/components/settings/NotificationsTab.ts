@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows, savePref } from "./helpers";
-import { playNotificationSound } from "@lib/notificationSound";
+import { playNotificationSound } from "@lib/media/notificationSound";
 import {
   APP_SOUNDS_VOLUME_KEY,
   SOUND_SWITCH_KEYS,
@@ -32,7 +32,7 @@ import {
   setChannelNotificationLevel,
   type NotificationLevel,
 } from "@lib/prefs/notificationLevel";
-import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { desktop } from "../../platform/desktop";

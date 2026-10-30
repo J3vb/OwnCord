@@ -13,8 +13,8 @@
  * logged no-op rather than a crash.
  */
 
-import { createLogger } from "./logger";
-import { getChannelMutesHost } from "./prefs/channelMutes";
+import { createLogger } from "../logger";
+import { getChannelMutesHost } from "../prefs/channelMutes";
 
 const log = createLogger("message-nav");
 

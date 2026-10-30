@@ -103,7 +103,7 @@ video[hidden] + .video-surface {
   height: 100%;
   object-fit: contain;
 }
-/* Ctrl + wheel zoom and drag pan (lib/zoomPan.ts bindVideoZoom): the host
+/* Ctrl + wheel zoom and drag pan (lib/ui/zoomPan.ts bindVideoZoom): the host
    tile or pop-out carries the view, its picture shows it. The individual
    properties apply outside `transform`, so your own camera's mirror stays. */
 .video-cell video,

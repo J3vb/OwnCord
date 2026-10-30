@@ -47,7 +47,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
@@ -65,8 +65,9 @@ const mockProfileManager = vi.hoisted(() => ({
   setLastConnected: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", async (importOriginal) => ({
-  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
+vi.mock("@lib/presence/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/presence/profiles")>())
+    .deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => mockProfileManager),
 }));

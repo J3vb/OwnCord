@@ -23,7 +23,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity,
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 const PARENT = 4;
 const THREAD = 91;

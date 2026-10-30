@@ -55,8 +55,8 @@ import {
 import { NativeVideoRenderer } from "../../features/voice/native/videoRenderer";
 import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
-import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
-import { autoInputSensitivity, inputMode, type InputMode } from "@lib/inputMode";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
+import { autoInputSensitivity, inputMode, type InputMode } from "@lib/ui/inputMode";
 import { NoiseFloorTracker } from "@lib/voice/noiseFloor";
 import { buildPttControls } from "./pttControls";
 

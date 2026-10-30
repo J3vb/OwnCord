@@ -5,13 +5,13 @@
  * Device-local like the other switches here (a `localStorage` pref, on by
  * default, no toast): the server never learns the setting, only the one game
  * name while it is on. Turning it off stops the scan and tells the server at
- * once; the loop that does both listens for the pref change (`@lib/gameActivity`).
+ * once; the loop that does both listens for the pref change (`@lib/presence/gameActivity`).
  * The "Detected now" line scans only while the switch is on, so what it shows
  * is what others can see. "Your games" is added below it (`./GameActivityGames`).
  */
 
 import { createElement, appendChildren, setOwnedTimeout, setText } from "@lib/dom";
-import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
+import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/presence/gameActivityBridge";
 import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/prefs/gameActivityPrefs";
 import {
   hasReceivedReady,

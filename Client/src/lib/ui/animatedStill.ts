@@ -90,7 +90,7 @@ function isAnimatedPng(bytes: Uint8Array): boolean {
 }
 
 /** Whether motion is reduced right now (the OS setting or the app toggle,
- *  both of which land on this class: `lib/os-motion.ts`). */
+ *  both of which land on this class: `lib/ui/osMotion.ts`). */
 export function motionReduced(): boolean {
   return document.documentElement.classList.contains("reduced-motion");
 }

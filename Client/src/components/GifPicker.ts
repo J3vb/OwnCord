@@ -5,11 +5,11 @@
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { ApiClientError } from "@lib/api";
-import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
-import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/gifProvider";
-import { createGifPager } from "@lib/gifPager";
+import { searchGifs, getTrendingGifs } from "@lib/media/gifProvider";
+import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/media/gifProvider";
+import { createGifPager } from "@lib/media/gifPager";
 import { gifFavoritesStore, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
 import {
   fetchExternalImage,

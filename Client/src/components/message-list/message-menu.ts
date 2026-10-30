@@ -16,7 +16,7 @@ import {
   showContextMenu,
   type ContextMenuItem,
   type ContextMenuSeparator,
-} from "@lib/context-menu";
+} from "@lib/ui/contextMenu";
 import { Disposable } from "@lib/disposable";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { wantsNativeMenu } from "@lib/dom";
@@ -39,7 +39,7 @@ import {
   messageActionGates,
 } from "./message-actions";
 import { atReactionLimit } from "./reactions";
-import { copyThenToast } from "@lib/clipboard";
+import { copyThenToast } from "@lib/ui/clipboard";
 
 export interface MessageMenuRequest {
   readonly msg: Message;

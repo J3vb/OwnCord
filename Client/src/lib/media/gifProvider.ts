@@ -8,8 +8,8 @@
 // The returned media URLs still point at Klipy's CDN, so they are validated
 // against the CDN allowlist below before anything is rendered.
 
-import type { ApiClient } from "./api";
-import type { GifSearchResponse } from "./types";
+import type { ApiClient } from "../api";
+import type { GifSearchResponse } from "../types";
 
 const DEFAULT_LIMIT = 20;
 

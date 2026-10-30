@@ -16,7 +16,7 @@ vi.mock("@lib/voice/livekitSession", () => ({
 }));
 
 const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: mockShowToast,
   initToast: vi.fn(),
   teardownToast: vi.fn(),

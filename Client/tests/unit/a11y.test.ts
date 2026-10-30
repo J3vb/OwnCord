@@ -6,7 +6,7 @@ import {
   focusDialog,
   enableRovingNavigation,
   setRovingTabindex,
-} from "@lib/a11y";
+} from "@lib/ui/a11y";
 
 let container: HTMLDivElement;
 

@@ -67,7 +67,7 @@ vi.mock("@lib/voice/livekitSession", () => ({
   setRemoteVideoView: vi.fn(),
 }));
 
-vi.mock("@lib/notificationSound", () => ({
+vi.mock("@lib/media/notificationSound", () => ({
   startRingChime: vi.fn(),
   stopRingChime: vi.fn(),
   startRingback: vi.fn(),
@@ -110,7 +110,7 @@ const { capturedAutoIdleOptions, autoIdleController } = vi.hoisted(() => ({
   autoIdleController: { destroy: vi.fn() },
 }));
 
-vi.mock("@lib/autoIdle", () => ({
+vi.mock("@lib/presence/autoIdle", () => ({
   startAutoIdle: (options: { onStatusChange: (status: string) => void }) => {
     capturedAutoIdleOptions.current = options;
     return autoIdleController;
@@ -362,9 +362,9 @@ import {
 } from "../../src/components/message-list/attachments";
 import { desktop } from "../../src/platform/desktop";
 import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
-import { saveUserStatus } from "../../src/lib/userStatus";
+import { saveUserStatus } from "../../src/lib/presence/userStatus";
 import { markAllRead } from "../../src/lib/read-state";
-import { startRingChime, startRingback, stopRingback } from "../../src/lib/notificationSound";
+import { startRingChime, startRingback, stopRingback } from "../../src/lib/media/notificationSound";
 import {
   alertIncomingCall,
   alertMissedCall,

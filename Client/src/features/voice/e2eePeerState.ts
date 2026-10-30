@@ -17,7 +17,7 @@ import { trustedPins } from "../../lib/net/identityPins";
 import { memberDisplayName, membersStore } from "../../stores/members.store";
 import { setPeerVerification } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { voiceText } from "../../i18n/voice";
 import { rawFromBase64 } from "./e2eeIdentity";
 
