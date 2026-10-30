@@ -159,7 +159,7 @@
       "lens": "reconnect-stale-continuations",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/voiceState.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -180,7 +180,7 @@
       "lens": "reconnect-stale-continuations",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/autoReconnectSlow.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -294,7 +294,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/handleVoiceToken.test.ts",
         "revertProof": "pass",
         "branchCommit": "df221814"
       },
@@ -344,7 +344,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "ff17920",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/core.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -447,7 +447,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/handleVoiceToken.test.ts",
         "revertProof": "pass",
         "branchCommit": "9e375c93"
       },
@@ -1000,7 +1000,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/reconnectMedia.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -1277,7 +1277,7 @@
       "confidence": "high",
       "fix": {
         "commit": "db0275a2",
-        "test": "Client/tests/unit/sidebar-area.test.ts",
+        "test": "Client/tests/unit/sidebarArea/channelCallbacks.test.ts",
         "revertProof": "pass",
         "branchCommit": "a1a1aa96",
         "pr": 1369
@@ -1429,7 +1429,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/slowMode.test.ts",
         "revertProof": "pass",
         "branchCommit": "88033f02"
       },
@@ -1963,7 +1963,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/reconnectMedia.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -2090,7 +2090,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/sidebar-area.test.ts",
+        "test": "Client/tests/unit/sidebarArea/structure.test.ts",
         "revertProof": "pass",
         "branchCommit": "4d167fd4"
       },
@@ -2311,7 +2311,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/sidebar-area.test.ts",
+        "test": "Client/tests/unit/sidebarArea/dms.test.ts",
         "revertProof": "pass",
         "branchCommit": "4d167fd4"
       },
@@ -2334,7 +2334,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/e2ee.test.ts",
         "revertProof": "pass",
         "branchCommit": "df221814"
       },
@@ -2722,7 +2722,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass",
         "branchCommit": "f5d9645b"
       },
@@ -2795,7 +2795,7 @@
       "confidence": "high",
       "fix": {
         "commit": "db0275a2",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts",
         "revertProof": "pass",
         "branchCommit": "4eca1171",
         "pr": 1369
@@ -2870,7 +2870,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "f653578",
-        "test": "Client/tests/unit/sidebar-area.test.ts",
+        "test": "Client/tests/unit/sidebarArea/channelCallbacks.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -3487,7 +3487,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/contextMenus.test.ts",
         "revertProof": "pass",
         "branchCommit": "b0f9576e"
       },
@@ -3511,7 +3511,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass",
         "branchCommit": "f5d9645b"
       },
@@ -4003,7 +4003,7 @@
       "confidence": "high",
       "fix": {
         "commit": "c7d8e13c",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "In the single shared handler at MainPage.ts:361-364, treat a zero/negative delay as a cancel rather than a countdown: `if (banner !== null && payload.reason !== \"shutdown\") { if (payload.delay_seconds <= 0) applyConnectionStatus(banner, uiStore.getState().connectionStatus); else banner.showRestart(payload.delay_seconds); }`. That re-syncs the banner to the real connection status (hidden while connected) and covers any future cancel broadcast without a per-reason list.",
@@ -4302,7 +4302,7 @@
       "confidence": "high",
       "fix": {
         "commit": "81b22f56",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/voiceRoster.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Resolve at render time in ChannelSidebar.ts:410 \u2014 it already imports membersStore (line 29): `const m = membersStore.getState().members.get(user.userId); const label = (m ? memberDisplayName(m) : user.username) || \"Unknown\";` and use `label` for the .vu-name text (leave the E2EE mismatch modal and moderation menu on user.username). One call site, no store/type/protocol change, and the \"Unknown\" empty-username test still passes.",
@@ -4993,7 +4993,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "0b4b7d5a95de9c5ee5ecde093ab7f54371c17c85",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Include the voice channel id in the signature so any channel switch immediately advances lastChannelId. In MainPage.ts:710-711, seed the signature with the channel id, e.g. `const channelId = state.currentChannelId; let sig = `${String(channelId)}|` + (state.localCamera ? \"c\" : \"\") + (state.localScreenshare ? \"s\" : \"\");` (moving the existing line 711 above line 710). One line at the single wake-up site; the controller's tested clear-on-change behavior is untouched.",
@@ -5016,7 +5016,7 @@
       "confidence": "high",
       "fix": {
         "commit": "05287f67725f44eb4933e29ff604481a1ad7baab",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/voiceIdentity.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Include the fingerprint (and safety number) in the structural signature at ChannelSidebar.ts:943 \u2014 replace `${verif ? `@${verif.status}` : \"\"}` with `${verif ? `@${verif.status}/${verif.safetyNumber ?? \"\"}/${verif.sessionFingerprint ?? \"\"}` : \"\"}`. One change in the shared selector covers every badge field the tooltip reads.",
@@ -5453,7 +5453,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "0b4b7d5a95de9c5ee5ecde093ab7f54371c17c85",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Route both call sites through one shared label helper that prefers memberDisplayName: in MainPage.ts:685-689 and VideoModeController.ts:178/199, look up membersStore.getState().members.get(userId) and use memberDisplayName(member) with user.username as fallback (the exact idiom at ChannelSidebar.ts:421-422). For the staleness half, add a VideoGrid.setLabel(tileId, text) and call it from the existing USER_UPDATE handling \u2014 cheapest hook is right after updateVoiceUserProfile in dispatcher.ts:815, relabelling the plain and SCREENSHARE_TILE_ID_OFFSET tiles for that user id \u2014 rather than un-latching localTileAdded, which would re-run addStream and churn srcObject.",
@@ -5499,7 +5499,7 @@
       "confidence": "high",
       "fix": {
         "commit": "aa963efa464fef4e2a5cece8706afd6d3072ee82",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/channelRows.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Do not hand rows the factory-lifetime signal. In createChannelSidebar add `let renderAc: AbortController | null = null;` and at the top of renderChannels() (before clearChildren) do `renderAc?.abort(); renderAc = new AbortController();`, then pass `renderAc.signal` instead of `ac.signal` into renderCategoryGroup at ChannelSidebar.ts:806, and add `renderAc?.abort(); renderAc = null;` beside `ac.abort()` in destroy(). One change in the shared render function covers the context menu, drag handlers, and every other per-row listener; the sidebar-lifetime `ac.signal` stays for header/root listeners (mount at :826-855) that are created once.",
@@ -5637,7 +5637,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "0b4b7d5a95de9c5ee5ecde093ab7f54371c17c85",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Guard the cancel on the channel's voice roster being empty of anyone but the leaver, in the single MainPage voice_leave handler (voiceStore is already imported at MainPage.ts:27):\n\nws.on(\"voice_leave\", (payload) => {\n  const ringing = ringCtrl?.current();\n  if (ringing === null || ringing === undefined) return;\n  if (payload.user_id !== ringing.fromUserId) return;\n  const roster = voiceStore.getState().voiceUsers.get(payload.channel_id);\n  const othersStillIn =\n    roster !== undefined && [...roster.keys()].some((id) => id !== payload.user_id);\n  if (!othersStillIn) ringCtrl?.cancel(payload.channel_id);\n});\n\n(The dispatcher's removeVoiceUser may or may not have run first; excluding payload.user_id makes the check order-independent, and keeps main-page.test.ts:503-528 green since that test's roster is empty.)",
@@ -5901,7 +5901,7 @@
       "suggestedFix": "In destroyChannel, invalidate the window it is tearing down before clearing the id \u2014 one guard in the shared choke point covers every teardown path: replace `_currentChannelId = null;` (line 172) with `if (_currentChannelId !== null) invalidateChannelMessageWindow(_currentChannelId); _currentChannelId = null;`. mountChannel's existing call at line 193 then becomes redundant (invalidateChannelMessageWindow early-returns when the flag is already gone) and can stay or be removed; existing tests still pass because the first mount's destroyChannel sees _currentChannelId === null and the switch case still invalidates the previous id. The dispatcher.ts:410 gap is a separate fix (invalidate loaded windows on a resync even when the active channel was cleared).",
       "fix": {
         "commit": "5118428",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/core.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -6632,7 +6632,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "4da361a",
-        "test": "Client/tests/unit/sidebar-area.test.ts",
+        "test": "Client/tests/unit/sidebarArea/dms.test.ts",
         "revertProof": "pass"
       }
     },
@@ -6655,7 +6655,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "0e3435a",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/voiceIdentity.test.ts",
         "revertProof": "pass"
       }
     },
@@ -6678,7 +6678,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "0e3435a",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/channelRows.test.ts",
         "revertProof": "pass"
       }
     },
@@ -6793,7 +6793,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "3767be1",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/voiceState.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7161,7 +7161,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "f4a60a6",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7299,7 +7299,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "f4a60a6",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/dmProfile.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7414,7 +7414,7 @@
       "fixed": "2026-09-01",
       "fix": {
         "commit": "b9ddb5a",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7827,7 +7827,7 @@
       "fixed": "2026-09-04",
       "fix": {
         "commit": "f70f04ea",
-        "test": "Client/tests/unit/main-page.test.ts \u2014 bare-IPv6 host bracketed, DNS host left alone",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts \u2014 bare-IPv6 host bracketed, DNS host left alone",
         "revertProof": "adversarial review (host-shape coverage vs isValidHost, TOFU cert_store_key unchanged) + suite green"
       }
     },
@@ -8814,7 +8814,7 @@
       "fixed": "2026-09-04",
       "fix": {
         "commit": "f70f04ea",
-        "test": "Client/tests/unit/main-page.test.ts \u2014 self tile keeps \"(You)\" through the server's own voice_state echo",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts \u2014 self tile keeps \"(You)\" through the server's own voice_state echo",
         "revertProof": "adversarial review (label branches compared character-by-character against VideoModeController; setOnRemoteVideo proved unreachable for self) + suite green"
       }
     },
@@ -9779,7 +9779,7 @@
       "finder": "opus",
       "fix": {
         "commit": "6db6287",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "One line in MainPage.destroy() (Client/src/pages/MainPage.ts, next to setActivePresenceSender(null) at line 970): `setMarkReadSender(null);` \u2014 setMarkReadSender already calls cancelPendingMarkAll(), so nulling the sender at teardown both drops the stale ws closure and kills the armed timers at the moment the connection is abandoned instead of 800 ms after the next server is live."
@@ -10010,7 +10010,7 @@
       "finder": "opus",
       "fix": {
         "commit": "d5bbfff",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/handleVoiceToken.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Re-arm the post-timeout attempt at the retry cadence, not the periodic one. In voiceTokenManager.ts add startRetryTimer() { this.clearTimers(); this._refreshTimer = setTimeout(() => this.requestRefresh(), RATE_LIMIT_MS); } and change livekitSession.ts:192 to onRefreshTimeout: () => this._tokenManager.startRetryTimer(). RATE_LIMIT_MS (60s) is safe against the server's 1-per-60s budget because _lastSentAt was stamped 60s earlier when the deadline was armed."
@@ -10091,7 +10091,7 @@
       "finder": "opus",
       "fix": {
         "commit": "fce5efd",
-        "test": "Client/tests/unit/channel-controller.test.ts",
+        "test": "Client/tests/unit/channelController/callbacks.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Route every send through one per-controller FIFO promise chain instead of only the text branch, so a reply/attachment send cannot jump an in-flight persist. In performSend, replace the `if (...) { void savePendingText(...).then(sendNow) } else sendNow()` split with a single chained dispatch, e.g. a controller-scoped `let sendChain = Promise.resolve();` and `sendChain = sendChain.then(() => needsPersist ? savePendingText(owner, draft).catch(toastOnce) : undefined).then(sendNow);`. One chain in the shared function orders both branches; guarding each caller would not."
@@ -10196,7 +10196,7 @@
       "finder": "opus",
       "fix": {
         "commit": "d5bbfff",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/connectAndSetup.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Apply the delivered bitrate to the Room's audio publish options (publishDefaults audio encoding) using the voice_config stored for the channel being joined, falling back to the current LiveKit default when no config has arrived yet."
@@ -10259,7 +10259,7 @@
       "finder": "opus",
       "fix": {
         "commit": "1672867",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/connectAndSetup.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Fix on the CLIENT, not by reordering the wire. The voice-join frame order is frozen by the epoch-1 golden transcripts (Server/ws/protocol_epoch1_contract_test.go, protocol/fixtures/epoch-1/), which compare frames in order and exist precisely to catch this kind of drift -- moving voice_config ahead of voice_token fails the voice-join-e2ee-leave journey, and regenerating the fixture would erase the record of what epoch 1 looked like. Instead apply the bitrate where the microphone is actually published rather than at Room construction: the mic publish happens well after connect, by which point voice_config has been processed. Pass explicit audio encoding on that publish, keeping publishDefaults as the fallback."
@@ -10548,7 +10548,7 @@
       "finder": "media-e2e-flake",
       "fix": {
         "commit": "59cc8825",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/connectAndSetup.test.ts",
         "revertProof": "pass"
       }
     },
@@ -11188,7 +11188,7 @@
       "fixed": "2026-09-27",
       "fix": {
         "commit": "58c81b6bc1ca4e7502645d7e2a250decf2937f3b",
-        "test": "Client/tests/unit/member-list.test.ts, Client/tests/unit/sidebar-area.test.ts, Client/tests/e2e/user-profile.spec.ts",
+        "test": "Client/tests/unit/member-list.test.ts, Client/tests/unit/sidebarArea/memberAndEntries.test.ts, Client/tests/e2e/user-profile.spec.ts",
         "revertProof": "self-reported"
       },
       "note": "Phase B lane B6 item BUG-05. The un-fixme'd e2e asserts the Call action opens the DM and rings its voice channel; two unit tests cover the MemberList onCall wiring (incl. no button for yourself) and the SidebarArea open-or-create flow."
@@ -11428,7 +11428,7 @@
       "suggestedFix": "Show the renderer's canvas itself in the tile and keep the track only for identity and lifecycle.",
       "fix": {
         "commit": "pending",
-        "test": "Client/src/lib/videoSurface.test.ts, Client/src/features/voice/native/videoRenderer.test.ts (is the picture of its track, which captures no frames), Client/tests/unit/video-grid.test.ts (shows a canvas-drawn stream's canvas with its video, in the window and back), Client/src/features/voice/miniPlayer.test.ts",
+        "test": "Client/src/lib/videoSurface.test.ts, Client/src/features/voice/native/videoRenderer.test.ts (is the picture of its track, which captures no frames), Client/tests/unit/videoGrid/popout.test.ts (shows a canvas-drawn stream's canvas with its video, in the window and back), Client/src/features/voice/miniPlayer.test.ts",
         "revertProof": "fail (without the fix the renderer captures with the default rate and no canvas is shown beside the tile's video)"
       },
       "note": "Needs a re-test on the reporting laptop: the GPU path does not exist in CI.",
@@ -11452,7 +11452,7 @@
       "suggestedFix": "Give the <video> its stream again when it returns with no data.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/video-grid.test.ts (gives a video that came back empty its stream again; leaves a video that still plays on its return alone)",
+        "test": "Client/tests/unit/videoGrid/popout.test.ts (gives a video that came back empty its stream again; leaves a video that still plays on its return alone)",
         "revertProof": "fail (without the fix the returned video is never given its stream again)"
       },
       "note": "On Linux the canvas surface (OC-0494) already brings the picture back; this covers any <video> the pop-out moves.",
@@ -11661,7 +11661,7 @@
       "suggestedFix": "Cancel the ring, with no reason so it is not a missed call, and clear the outgoing call when a group that was in dmStore leaves it; never cancel merely because the channel is absent.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/main-page.test.ts (a ring for a group the user loses), Client/src/features/direct-messages/groupExitWatch.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts (a ring for a group the user loses), Client/src/features/direct-messages/groupExitWatch.test.ts",
         "revertProof": "fail (without the fix the ring banner stays up and times out into a missed call)"
       },
       "confidence": "high",
@@ -11684,7 +11684,7 @@
       "suggestedFix": "After the fallback's setLocalMuted(true), send voice_mute{muted:true} on a connected chat socket while in a call.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/livekit-session.test.ts (a failed unmute tells the server the member is muted again)",
+        "test": "Client/tests/unit/livekitSession/voiceState.test.ts (a failed unmute tells the server the member is muted again)",
         "revertProof": "fail (no voice_mute frame sent)"
       },
       "confidence": "high",
@@ -11753,7 +11753,7 @@
       "suggestedFix": "Call settleThreadNavigation(channelId) in the forum branch of mountChannel after the forum view is mounted.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/channel-controller.test.ts (opens a followed post asked for from another channel once the forum mounts)",
+        "test": "Client/tests/unit/channelController/core.test.ts (opens a followed post asked for from another channel once the forum mounts)",
         "revertProof": "fail (without the fix openById is never called)"
       },
       "confidence": "high",
@@ -11822,7 +11822,7 @@
       "suggestedFix": "Clear the cache in ChannelController.destroyChannel and on a full-ready resync.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/channel-controller.test.ts (drops cached who-reacted lists when leaving a channel...), Client/tests/unit/dispatcher/readyResync.test.ts (drops every cached who-reacted list on a second ready...)",
+        "test": "Client/tests/unit/channelController/core.test.ts (drops cached who-reacted lists when leaving a channel...), Client/tests/unit/dispatcher/readyResync.test.ts (drops every cached who-reacted list on a second ready...)",
         "revertProof": "fail (cached list survived both)"
       },
       "confidence": "high",
@@ -12008,7 +12008,7 @@
       "suggestedFix": "Before reading the roster, ping the socket: the server writes the ready or replay in the handshake, before it answers a ping, so a pong means the roster is current.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/livekit-session.test.ts (attemptAutoReconnect slow phase: reads the roster only after the returned socket's replay, not from its auth_ok)",
+        "test": "Client/tests/unit/livekitSession/autoReconnectSlow.test.ts (attemptAutoReconnect slow phase: reads the roster only after the returned socket's replay, not from its auth_ok)",
         "revertProof": "fail (the loop connected on the old token)"
       },
       "confidence": "high",

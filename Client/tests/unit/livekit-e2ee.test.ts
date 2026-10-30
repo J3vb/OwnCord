@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // --- Mocks must be declared before imports ---
 // The full E2EE protocol (announce verification, TOFU pinning, rotation-on-leave,
 // timeout paths) is exercised end-to-end through the LiveKitSession facade in
-// livekit-session.test.ts. This file is a focused smoke test of the extracted
+// the livekitSession/ tests. This file is a focused smoke test of the extracted
 // E2EEManager module surface.
 
 const mockSetKey = vi.hoisted(() => vi.fn());
