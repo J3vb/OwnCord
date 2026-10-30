@@ -28,7 +28,8 @@ function jobBlock(src, job) {
 }
 
 // What decides the scan's verdict: tool pins, the lockfile list, the Rust
-// toolchain action, and the two scanner invocations.
+// toolchain action, and the scanner invocations (osv-scanner, and cargo-deny's
+// policy and advisory checks).
 function scanFingerprint(block) {
   const lines = block.split("\n").map((l) => l.trim());
   return {
@@ -47,7 +48,7 @@ test("the weekly scan matches ci.yml's supply-chain job", () => {
   assert.equal(ci.pins.length, 4, "ci.yml pins osv-scanner and cargo-deny by version and digest");
   assert.ok(ci.lockfiles.length >= 5, "ci.yml names every lockfile");
   assert.equal(ci.toolchain.length, 1);
-  assert.equal(ci.commands.length, 2);
+  assert.equal(ci.commands.length, 3);
   assert.deepEqual(weekly, ci);
 });
 
