@@ -195,6 +195,33 @@ func (q *Queries) GetImportJob(ctx context.Context, id int64) (ImportJob, error)
 	return i, err
 }
 
+const getLatestImportJob = `-- name: GetLatestImportJob :one
+SELECT id, channel_id, created_by, source_name, discord_channel_id, status,
+       total, imported, skipped, skipped_attachments, error, created_at, finished_at
+FROM import_jobs ORDER BY id DESC
+`
+
+func (q *Queries) GetLatestImportJob(ctx context.Context) (ImportJob, error) {
+	row := q.db.QueryRowContext(ctx, getLatestImportJob)
+	var i ImportJob
+	err := row.Scan(
+		&i.ID,
+		&i.ChannelID,
+		&i.CreatedBy,
+		&i.SourceName,
+		&i.DiscordChannelID,
+		&i.Status,
+		&i.Total,
+		&i.Imported,
+		&i.Skipped,
+		&i.SkippedAttachments,
+		&i.Error,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const insertImportAuthor = `-- name: InsertImportAuthor :exec
 INSERT INTO message_import_authors (message_id, discord_user_id, name, color)
 VALUES (?, ?, ?, ?)

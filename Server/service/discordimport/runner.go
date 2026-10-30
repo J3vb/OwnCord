@@ -44,6 +44,8 @@ type Store interface {
 	AbandonImport(ctx context.Context, jobID, channelID int64, status, reason string, pr db.ImportProgress) error
 	CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetImportJob(ctx context.Context, id int64) (*db.ImportJob, error)
+	GetLatestImportJob(ctx context.Context) (*db.ImportJob, error)
 }
 
 // Files is the storage the media is copied into; api.ReservedStore implements it.
@@ -100,6 +102,10 @@ const abandonAttempts = 4
 type Runner struct {
 	cfg Config
 
+	// jobs holds the jobs this runner is running, so a cancel finds one by id.
+	jobsMu syncutil.Mutex
+	jobs   map[int64]*Job
+
 	// afterChunk, when set by a test, runs after each committed chunk.
 	afterChunk func(ctx context.Context, chunk int)
 	// retryDelay is the first wait between clean-up attempts.
@@ -117,7 +123,7 @@ func NewRunner(cfg Config) *Runner {
 	if cfg.ChunkAge == 0 {
 		cfg.ChunkAge = DefaultChunkAge
 	}
-	return &Runner{cfg: cfg, retryDelay: 500 * time.Millisecond}
+	return &Runner{cfg: cfg, retryDelay: 500 * time.Millisecond, jobs: map[int64]*Job{}}
 }
 
 // Request is one import.
@@ -198,8 +204,10 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	// at shutdown.
 	stopCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	job := &Job{ID: jobID, ChannelID: channelID, cancel: stop, done: make(chan struct{})}
+	r.track(job, true)
 	admitted := r.cfg.Group.Go(ctx, func(groupCtx context.Context) {
 		defer close(job.done)
+		defer r.track(job, false)
 		defer setLive(jobID, false)
 		defer stop()
 		runCtx, cancel := context.WithCancel(groupCtx)
@@ -209,6 +217,7 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	})
 	if !admitted {
 		stop()
+		r.track(job, false)
 		setLive(jobID, false)
 		halted := make(chan struct{})
 		close(halted)
@@ -216,6 +225,41 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 		return nil, ErrShuttingDown
 	}
 	return job, nil
+}
+
+func (r *Runner) track(j *Job, on bool) {
+	r.jobsMu.Lock()
+	defer r.jobsMu.Unlock()
+	if on {
+		r.jobs[j.ID] = j
+	} else {
+		delete(r.jobs, j.ID)
+	}
+}
+
+// Running returns the job with that id while it is running here, else nil.
+func (r *Runner) Running(id int64) *Job {
+	r.jobsMu.Lock()
+	defer r.jobsMu.Unlock()
+	return r.jobs[id]
+}
+
+// Status returns a job's stored state, db.ErrNotFound when there is none.
+func (r *Runner) Status(ctx context.Context, id int64) (*db.ImportJob, error) {
+	j, err := r.cfg.Store.GetImportJob(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("import status: %w", err)
+	}
+	return j, nil
+}
+
+// Latest returns the newest job's stored state, db.ErrNotFound when none ran.
+func (r *Runner) Latest(ctx context.Context) (*db.ImportJob, error) {
+	j, err := r.cfg.Store.GetLatestImportJob(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest import: %w", err)
+	}
+	return j, nil
 }
 
 var errHeaderDone = errors.New("header read")
