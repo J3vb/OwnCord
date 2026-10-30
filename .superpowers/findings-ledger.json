@@ -159,7 +159,7 @@
       "lens": "reconnect-stale-continuations",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/voiceState.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -180,7 +180,7 @@
       "lens": "reconnect-stale-continuations",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/autoReconnectSlow.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -294,7 +294,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/handleVoiceToken.test.ts",
         "revertProof": "pass",
         "branchCommit": "df221814"
       },
@@ -447,7 +447,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/handleVoiceToken.test.ts",
         "revertProof": "pass",
         "branchCommit": "9e375c93"
       },
@@ -1000,7 +1000,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/reconnectMedia.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -1963,7 +1963,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/reconnectMedia.test.ts",
         "revertProof": "pass",
         "branchCommit": "db7d518b"
       },
@@ -2334,7 +2334,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/e2ee.test.ts",
         "revertProof": "pass",
         "branchCommit": "df221814"
       },
@@ -6793,7 +6793,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "3767be1",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/voiceState.test.ts",
         "revertProof": "pass"
       }
     },
@@ -10010,7 +10010,7 @@
       "finder": "opus",
       "fix": {
         "commit": "d5bbfff",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/handleVoiceToken.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Re-arm the post-timeout attempt at the retry cadence, not the periodic one. In voiceTokenManager.ts add startRetryTimer() { this.clearTimers(); this._refreshTimer = setTimeout(() => this.requestRefresh(), RATE_LIMIT_MS); } and change livekitSession.ts:192 to onRefreshTimeout: () => this._tokenManager.startRetryTimer(). RATE_LIMIT_MS (60s) is safe against the server's 1-per-60s budget because _lastSentAt was stamped 60s earlier when the deadline was armed."
@@ -10196,7 +10196,7 @@
       "finder": "opus",
       "fix": {
         "commit": "d5bbfff",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/connectAndSetup.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Apply the delivered bitrate to the Room's audio publish options (publishDefaults audio encoding) using the voice_config stored for the channel being joined, falling back to the current LiveKit default when no config has arrived yet."
@@ -10259,7 +10259,7 @@
       "finder": "opus",
       "fix": {
         "commit": "1672867",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/connectAndSetup.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Fix on the CLIENT, not by reordering the wire. The voice-join frame order is frozen by the epoch-1 golden transcripts (Server/ws/protocol_epoch1_contract_test.go, protocol/fixtures/epoch-1/), which compare frames in order and exist precisely to catch this kind of drift -- moving voice_config ahead of voice_token fails the voice-join-e2ee-leave journey, and regenerating the fixture would erase the record of what epoch 1 looked like. Instead apply the bitrate where the microphone is actually published rather than at Room construction: the mic publish happens well after connect, by which point voice_config has been processed. Pass explicit audio encoding on that publish, keeping publishDefaults as the fallback."
@@ -10548,7 +10548,7 @@
       "finder": "media-e2e-flake",
       "fix": {
         "commit": "59cc8825",
-        "test": "Client/tests/unit/livekit-session.test.ts",
+        "test": "Client/tests/unit/livekitSession/connectAndSetup.test.ts",
         "revertProof": "pass"
       }
     },
@@ -11684,7 +11684,7 @@
       "suggestedFix": "After the fallback's setLocalMuted(true), send voice_mute{muted:true} on a connected chat socket while in a call.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/livekit-session.test.ts (a failed unmute tells the server the member is muted again)",
+        "test": "Client/tests/unit/livekitSession/voiceState.test.ts (a failed unmute tells the server the member is muted again)",
         "revertProof": "fail (no voice_mute frame sent)"
       },
       "confidence": "high",
@@ -12008,7 +12008,7 @@
       "suggestedFix": "Before reading the roster, ping the socket: the server writes the ready or replay in the handshake, before it answers a ping, so a pong means the roster is current.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/livekit-session.test.ts (attemptAutoReconnect slow phase: reads the roster only after the returned socket's replay, not from its auth_ok)",
+        "test": "Client/tests/unit/livekitSession/autoReconnectSlow.test.ts (attemptAutoReconnect slow phase: reads the roster only after the returned socket's replay, not from its auth_ok)",
         "revertProof": "fail (the loop connected on the old token)"
       },
       "confidence": "high",
