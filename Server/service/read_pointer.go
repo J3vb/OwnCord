@@ -126,7 +126,7 @@ func (s *MessageService) readAtLatestIsCurrent(ctx context.Context, userID, chan
 // admitReadPointer is admitReadState for commands that move a pointer without
 // focusing (mark_read, mark_unread): a thread is admitted through its parent, as
 // thread_focus does, since the thread panel and sidebar row mark it read.
-func admitReadPointer(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
+func admitReadPointer(ctx context.Context, st readAdmitStore, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)

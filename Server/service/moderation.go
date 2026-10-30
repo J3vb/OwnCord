@@ -13,9 +13,45 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
+// moderationStore is what ModerationService reads and writes. *db.DB satisfies it.
+type moderationStore interface {
+	db.Auditor
+	subjectStore
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	UpdateUserRole(ctx context.Context, userID, roleID int64) error
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
+	GetVoiceState(ctx context.Context, userID int64) (*db.VoiceState, error)
+	// WarnUser/TimeoutUser write their whole effect as one ledger row, in one
+	// transaction with the live rank guard: a target promoted after the caller's
+	// check is refused (db.ErrOutranked), not sanctioned.
+	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
+	// TimeoutUser also returns the ids it superseded; the caller passes them to the
+	// voice mute so the ownership transfer runs under ITS per-user lock.
+	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error)
+	// LiftTimeout returns the ids of the timeout rows it lifted (nil, none). The
+	// caller passes them to ClearServerMuteOwnedBy: ownership lives on the voice
+	// session, not this ledger.
+	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
+	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
+	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
+	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
+	ListOwnModerationActions(ctx context.Context, userID, limit int64) ([]db.OwnModerationAction, error)
+	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
+	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser plus a
+	// ledger row, in one transaction.
+	BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error)
+	// ForceLogoutWithAction's reason is the ledger row's text; empty falls back to
+	// the fixed phrase.
+	ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
+	RecordRemovalAction(ctx context.Context, targetID, actorID int64, reason string) error
+	UnbanUser(ctx context.Context, id int64) error
+}
+
 // ModerationService handles user ban, unban, warn, timeout and erasure operations.
 type ModerationService struct {
-	st    Store
+	st    moderationStore
 	perms *PermissionService
 	// erasure runs the administrator's account erasure; nil fails EraseUser closed.
 	erasure *ErasureService
@@ -71,7 +107,7 @@ type TimeoutVoiceMuter interface {
 }
 
 // NewModerationService creates a ModerationService.
-func NewModerationService(st Store, perms *PermissionService) *ModerationService {
+func NewModerationService(st moderationStore, perms *PermissionService) *ModerationService {
 	return &ModerationService{st: st, perms: perms, banPurgeSem: make(chan struct{}, 1)}
 }
 

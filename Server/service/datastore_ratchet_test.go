@@ -25,14 +25,16 @@ import (
 // type in api or service rather than db/models.go.
 const (
 	// storeMethodBaseline is the number of distinct methods in Store, counting
-	// transitively through embedded interfaces declared in this package
-	// (CallLogStore, GroupDMStore, EmojiStore). Methods promoted from the cross-package
-	// embeds in storeCrossPackageEmbeds are not counted here.
+	// transitively through embedded interfaces declared in this package (each
+	// service's own interface, and the slices those embed). Methods promoted
+	// from the cross-package embeds in storeCrossPackageEmbeds are not counted
+	// here.
 	//
-	// The pin was 306 when this test was written. WP 4.1a (#2582) landed first
-	// and replaced EraseAccount with the embedded ErasureStageStore slice, a net
-	// three more methods; it is accepted as the starting point.
-	storeMethodBaseline = 309 // 287 written in Store itself plus 22 more from the four same-package embeds (CallLogStore, GroupDMStore, ErasureStageStore, EmojiStore; EmojiStore's LogAudit is also written in Store)
+	// Store is the union of what the services call, so this only moves when a
+	// service starts or stops calling a method. It was 309 while Store listed
+	// its methods itself; it fell to 288 when each service declared its own
+	// interface and the methods no service calls left Store.
+	storeMethodBaseline = 288
 
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.
@@ -73,10 +75,9 @@ const (
 	modelsJSONTagBaseline = 121
 
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
-	// promoted methods from the cross-package embeds included (309 plus the 9
-	// of auth.SecondFactorPersister). It closes the gap the source count
-	// leaves for growth inside a cross-package embed.
-	storeFullSurfaceBaseline = 318
+	// promoted methods from the cross-package embeds included. It closes the
+	// gap the source count leaves for growth inside a cross-package embed.
+	storeFullSurfaceBaseline = 299
 )
 
 // storeCrossPackageEmbeds names every interface embedded in Store that is
@@ -85,6 +86,9 @@ const (
 // here deliberately.
 var storeCrossPackageEmbeds = map[string]string{
 	"auth.SecondFactorPersister": "durable second-factor state; stdlib types only because auth cannot import db",
+	"db.Auditor":                 "the audit write db.WriteAudit takes",
+	"db.EntryAuditor":            "the whole-entry audit write db.WriteAuditEntry takes",
+	"permissions.DB":             "the override and timeout reads permissions.NewChecker takes",
 }
 
 // storeSurface is the result of counting one interface.

@@ -102,12 +102,30 @@ type pushRoundItem struct {
 	req safefetch.Request
 }
 
+// pushDispatchStore is what PushDispatcher reads and writes. *db.DB satisfies it.
+type pushDispatchStore interface {
+	subjectStore
+	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
+	// IsBlocked answers the single (blocker, blocked) pair rather than ListBlockersOf's
+	// whole set. Push dispatch re-asks it before every delivery attempt: the
+	// audience-wide result is a pre-dispatch snapshot, and a block landing in flight
+	// must stop the remaining attempts.
+	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+	// ListPushSubscriptionsForDispatch and DeletePushSubscriptionByID are
+	// dispatch-only: the former returns push credentials for a caller-narrowed
+	// audience, the latter prunes by id on a push service's 404/410.
+	ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]db.PushSubscriptionForDispatch, error)
+	DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error)
+}
+
 // PushDispatcher is the composition root's PushNotifier: resolves the audience,
 // coalesces, encrypts and sends, retries transient failures within a budget,
 // prunes dead subscriptions and counts outcomes. Constructed only when both
 // push.enabled and push.dispatch_enabled are true.
 type PushDispatcher struct {
-	st     Store
+	st     pushDispatchStore
 	perms  *PermissionService
 	push   *PushService
 	online func(userID int64) bool
@@ -126,7 +144,7 @@ type PushDispatcher struct {
 
 // NewPushDispatcher constructs a PushDispatcher. fetch is nil in production (the
 // shared pushFetcher); tests pass a stub.
-func NewPushDispatcher(st Store, perms *PermissionService, push *PushService, online func(int64) bool, fetch PushFetcher) *PushDispatcher {
+func NewPushDispatcher(st pushDispatchStore, perms *PermissionService, push *PushService, online func(int64) bool, fetch PushFetcher) *PushDispatcher {
 	if fetch == nil {
 		fetch = pushFetcher
 	}

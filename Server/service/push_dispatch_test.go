@@ -1776,7 +1776,7 @@ func TestNotify_FailedLookupDoesNotReserveWindow(t *testing.T) {
 
 	fetch := newRecordingPushFetcher()
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, fetch)
-	dispatcher.st = &listingErrorOnceStore{Store: dispatcher.st}
+	dispatcher.st = &listingErrorOnceStore{Store: dispatcher.st.(Store)}
 
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
 	dispatcher.Notify(context.Background(), 10, 1, []int64{2})
@@ -1790,7 +1790,7 @@ func TestNotify_FailedLookupDoesNotReserveWindow(t *testing.T) {
 func TestPrune_DeleteFailureIsNotCounted(t *testing.T) {
 	f := newPushDispatchFixture(t)
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
-	dispatcher.st = deleteErrorStore{Store: dispatcher.st}
+	dispatcher.st = deleteErrorStore{Store: dispatcher.st.(Store)}
 
 	dispatcher.prune(context.Background(), 1)
 
