@@ -2882,6 +2882,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       } else {
         resyncMentions(el);
       }
+      // An imported author is not a member: no rename or role change reaches it.
+      if (msg.importedAuthor !== undefined) continue;
       const roleColor = userRoleColorVar(msg.user.id);
       const author = resolveAuthor(msg.user);
       const key = authorAvatarKey(author, roleColor);
@@ -2919,7 +2921,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     for (const bar of row.querySelectorAll<HTMLElement>(".msg-reply-ref")) {
       const replyTo = Number(bar.dataset["replyTo"] ?? "0");
       const parent = replyParents.find((m) => m.id === replyTo);
-      if (parent === undefined || parent.deleted) continue;
+      if (parent === undefined || parent.deleted || parent.importedAuthor !== undefined) continue;
       if (bar.classList.contains("msg-reply-ref--blocked")) continue;
       const roleColor = userRoleColorVar(parent.user.id);
       const author = resolveAuthor(parent.user);

@@ -64,6 +64,8 @@ import {
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
 import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
 import { createAvatarElement, pickAvatarColor } from "./avatar";
+import { importedAuthorKey } from "../../features/messaging/importedAuthor";
+import { createImportedAvatar, createImportedName, createImportedTag } from "./importedAuthor";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
 import { markdownToPlainText } from "@lib/text/markdown";
@@ -288,6 +290,17 @@ function renderReplyRef(
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
+    if (ref.importedAuthor !== undefined) {
+      bar.dataset["authorKey"] = importedAuthorKey(ref.importedAuthor);
+      appendChildren(
+        bar,
+        createImportedAvatar(ref.importedAuthor, "rr-avatar"),
+        createImportedName(ref.importedAuthor, "rr-author"),
+        createImportedTag(),
+        createElement("span", { class: "rr-text" }, preview),
+      );
+      return bar;
+    }
     const author = resolveAuthor(ref.user);
     const roleColor = userRoleColorVar(ref.user.id);
     // Tag the quoted author so a rename/role change repaints it in place,
@@ -304,6 +317,25 @@ function renderReplyRef(
       createElement("span", { class: "rr-text" }, preview),
     );
   } else if (referenced?.user) {
+    const importedParent = referenced.imported_author;
+    if (importedParent !== undefined) {
+      bar.dataset["authorKey"] = importedAuthorKey(importedParent);
+      const snippet =
+        stickerReplyPreview(referenced.content) ??
+        markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
+      appendChildren(
+        bar,
+        createImportedAvatar(importedParent, "rr-avatar"),
+        createImportedName(importedParent, "rr-author"),
+        createImportedTag(),
+        createElement(
+          "span",
+          { class: "rr-text" },
+          snippet === "" ? messagingText("reply.attachment") : snippet,
+        ),
+      );
+      return bar;
+    }
     const author = resolveAuthor(referenced.user);
     const roleColor = userRoleColorVar(referenced.user.id);
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
@@ -645,14 +677,20 @@ export function renderMessage(
   // rename or a new avatar has to show up on the messages already on screen.
   const author = resolveAuthor(msg.user);
   const roleColor = userRoleColorVar(msg.user.id);
+  const imported = msg.importedAuthor;
   // Tag the row with the identity it was drawn from, so MessageList can repaint
   // only the rows whose author actually changed on a roleRevision bump.
-  el.dataset["authorKey"] = authorAvatarKey(author, roleColor);
-  const avatar = createAvatarElement(author, {
-    className: "msg-avatar",
-    background: pickAvatarColor(author.username),
-    attrs: { "data-user-id": String(msg.user.id) },
-  });
+  el.dataset["authorKey"] =
+    imported === undefined ? authorAvatarKey(author, roleColor) : importedAuthorKey(imported);
+  // An imported author has no account to open, so its avatar carries no user id.
+  const avatar =
+    imported === undefined
+      ? createAvatarElement(author, {
+          className: "msg-avatar",
+          background: pickAvatarColor(author.username),
+          attrs: { "data-user-id": String(msg.user.id) },
+        })
+      : createImportedAvatar(imported, "msg-avatar");
   el.appendChild(avatar);
 
   if (isGrouped) {
@@ -674,23 +712,26 @@ export function renderMessage(
   }
 
   const header = createElement("div", { class: "msg-header" });
-  const authorEl = createElement(
-    "span",
-    {
-      class: "msg-author",
-      // The list's one delegated handler opens the author's profile from this
-      // (and from the avatar), so the name is a real control for the keyboard.
-      role: "button",
-      tabindex: "0",
-      "data-user-id": String(msg.user.id),
-      // The username stays as the title so the handle you would @mention is
-      // one hover away even when a display name is standing in for it.
-      title: author.username,
-      style: `color: ${readableRoleColor(roleColor)}`,
-      "data-role-color": roleColor,
-    },
-    resolveDisplayName(author),
-  );
+  const authorEl =
+    imported !== undefined
+      ? createImportedName(imported, "msg-author msg-author--imported")
+      : createElement(
+          "span",
+          {
+            class: "msg-author",
+            // The list's one delegated handler opens the author's profile from this
+            // (and from the avatar), so the name is a real control for the keyboard.
+            role: "button",
+            tabindex: "0",
+            "data-user-id": String(msg.user.id),
+            // The username stays as the title so the handle you would @mention is
+            // one hover away even when a display name is standing in for it.
+            title: author.username,
+            style: `color: ${readableRoleColor(roleColor)}`,
+            "data-role-color": roleColor,
+          },
+          resolveDisplayName(author),
+        );
   const time = createElement(
     "span",
     { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
@@ -703,7 +744,9 @@ export function renderMessage(
     { class: "msg-compact-time", title: fullDateTimeTitle(msg.timestamp) },
     formatClockTime(msg.timestamp),
   );
-  appendChildren(header, compactTime, authorEl, time);
+  appendChildren(header, compactTime, authorEl);
+  if (imported !== undefined) header.appendChild(createImportedTag());
+  header.appendChild(time);
   el.appendChild(header);
 
   if (editor !== undefined) {

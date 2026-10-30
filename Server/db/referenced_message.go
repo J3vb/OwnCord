@@ -93,5 +93,8 @@ func (d *DB) GetReferencedMessages(ctx context.Context, channelID int64, ids []i
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("GetReferencedMessages rows: %w", err)
 	}
+	if err := d.attachReferencedImportedAuthors(ctx, out); err != nil {
+		return nil, fmt.Errorf("GetReferencedMessages: %w", err)
+	}
 	return out, nil
 }

@@ -843,6 +843,9 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 	if err := d.attachThreads(ctx, msgs); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages threads: %w", err)
 	}
+	if err := d.attachImportedAuthors(ctx, msgs); err != nil {
+		return nil, fmt.Errorf("scanAndEnrichMessages imported authors: %w", err)
+	}
 
 	return d.attachReferencedMessages(ctx, msgs)
 }

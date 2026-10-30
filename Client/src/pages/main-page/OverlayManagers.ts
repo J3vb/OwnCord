@@ -12,7 +12,7 @@ import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@components/lazyScreen";
 import type { InviteItem } from "@components/InviteManager";
-import type { InviteResponse } from "@lib/types";
+import type { ImportedAuthor, InviteResponse } from "@lib/types";
 import type { PinnedMessage } from "@components/PinnedMessages";
 import { showToast } from "@lib/ui/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
@@ -129,9 +129,11 @@ export function mapToPinnedMessage(msg: {
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
   readonly mention_roles?: readonly number[];
+  readonly imported_author?: ImportedAuthor;
 }): PinnedMessage {
   const author = resolveAuthor(msg.user);
   return {
+    ...(msg.imported_author !== undefined ? { importedAuthor: msg.imported_author } : {}),
     id: msg.id,
     author: resolveDisplayName(author),
     avatar: author.avatar,

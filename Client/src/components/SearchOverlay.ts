@@ -16,6 +16,7 @@ import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
 import { parseTimestamp, resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
+import { createImportedName, createImportedTag } from "./message-list/importedAuthor";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { formatDate } from "../i18n/format";
@@ -242,15 +243,25 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const channel = createElement("span", { class: "search-result-channel" });
       const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id);
       setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);
-      const who = resolveAuthor(r.user);
-      const authorName = resolveDisplayName(who);
-      const author = createElement("span", { class: "search-result-author" });
-      setText(author, authorName);
-      appendChildren(header, channel, author);
-      if (authorName !== who.username) {
-        const handle = createElement("span", { class: "search-result-handle" });
-        setText(handle, messagingText("search.authorHandle", { username: who.username }));
-        header.appendChild(handle);
+      if (r.imported_author !== undefined) {
+        // No account behind it: the Discord name and tag, and no @handle.
+        appendChildren(
+          header,
+          channel,
+          createImportedName(r.imported_author, "search-result-author"),
+          createImportedTag(),
+        );
+      } else {
+        const who = resolveAuthor(r.user);
+        const authorName = resolveDisplayName(who);
+        const author = createElement("span", { class: "search-result-author" });
+        setText(author, authorName);
+        appendChildren(header, channel, author);
+        if (authorName !== who.username) {
+          const handle = createElement("span", { class: "search-result-handle" });
+          setText(handle, messagingText("search.authorHandle", { username: who.username }));
+          header.appendChild(handle);
+        }
       }
       const time = createElement("span", { class: "search-result-time" });
       setText(time, formatTimestamp(r.timestamp));
