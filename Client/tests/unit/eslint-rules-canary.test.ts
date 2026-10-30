@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ESLint, Linter } from "eslint";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 // @ts-expect-error -- no type declarations for the plain-JS rules module
 import localRules from "../../eslint-rules.js";
 
@@ -268,26 +268,31 @@ describe("custom lint-rule canaries", () => {
   });
 });
 
-// 5.4e: a *.view.ts draws from a row model and imports no store. These are
-// core rules, so they are checked through the real config, not a flat Linter.
+// The import bans are core rules, so the rule entries come from the real
+// config at that path but run through the flat Linter. eslint.lintText would
+// build the type-aware program for the whole project on its first call, which
+// can run past 60 s on a loaded CI runner and proves nothing about these rules.
+const IMPORT_BANS = ["no-restricted-imports", "no-restricted-syntax"] as const;
+
+async function restricted(code: string, filePath: string): Promise<string[]> {
+  const abs = path.join(clientRoot, filePath);
+  const config = await eslint.calculateConfigForFile(abs);
+  const rules = Object.fromEntries(
+    IMPORT_BANS.filter((id) => config?.rules?.[id] !== undefined).map((id) => [
+      id,
+      config.rules[id],
+    ]),
+  );
+  return linter
+    .verify(code, [{ files: ["**/*.ts"], languageOptions: flatConfig.languageOptions, rules }], abs)
+    .map((m) => String(m.ruleId))
+    .filter((id) => (IMPORT_BANS as readonly string[]).includes(id));
+}
+
+// 5.4e: a *.view.ts draws from a row model and imports no store.
 describe("view-file store ban", () => {
   const VIEW = "src/features/members/memberRow.view.ts";
   const NON_VIEW = "src/features/members/memberRowModel.ts";
-
-  async function restricted(code: string, filePath: string): Promise<string[]> {
-    const [result] = await eslint.lintText(code, { filePath: path.join(clientRoot, filePath) });
-    return (result?.messages ?? [])
-      .map((m) => m.ruleId)
-      .filter((id) => id === "no-restricted-imports" || id === "no-restricted-syntax")
-      .map(String);
-  }
-
-  // The first lint through the real config builds the type-aware program for
-  // the whole client. Under coverage on a busy CI runner that alone can pass a
-  // minute, so it is set-up here rather than part of the first case's budget.
-  beforeAll(async () => {
-    await eslint.lintText("", { filePath: path.join(clientRoot, VIEW) });
-  }, 240_000);
 
   it("flags a static store import in a view file", async () => {
     expect(
@@ -332,14 +337,6 @@ describe("view-file store ban", () => {
 describe("browser platform native-import ban", () => {
   const BROWSER = "src/platform/browser/index.ts";
   const DESKTOP = "src/platform/desktop/appMetadata.ts";
-
-  async function restricted(code: string, filePath: string): Promise<string[]> {
-    const [result] = await eslint.lintText(code, { filePath: path.join(clientRoot, filePath) });
-    return (result?.messages ?? [])
-      .map((m) => m.ruleId)
-      .filter((id) => id === "no-restricted-imports" || id === "no-restricted-syntax")
-      .map(String);
-  }
 
   it("flags a static @tauri-apps import in the browser platform", async () => {
     expect(

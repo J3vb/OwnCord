@@ -149,6 +149,10 @@ pub const UPDATE_CANCELLED: &str = "update cancelled";
 /// pkexec could not authorize the update, or no polkit agent is running (127).
 #[cfg(target_os = "linux")]
 pub const UPDATE_NOT_AUTHORIZED: &str = "update not authorized";
+/// Android may not install apps from OwnCord yet; the settings page that
+/// allows it was opened instead of the installer.
+#[cfg(target_os = "android")]
+pub const UPDATE_INSTALL_PERMISSION: &str = "update install permission needed";
 /// The root helper refused the package (exit 10 to 13).
 #[cfg(target_os = "linux")]
 pub const UPDATE_PACKAGE_CHECK_FAILED: &str = "download/install failed: package check failed";

@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Android**
+
+- The Android app is on the release page: download `OwnCord_<version>_arm64.apk` and install it (Android asks once to allow installs from your browser). After that the app updates itself: it shows "Update available", downloads the new version and opens Android's installer, where you tap Install. Your sign-in and settings stay.
+
 **Phones and touch screens**
 
 - Message actions, the emoji/GIF/sticker picker and member profiles open as bottom sheets on phones: big reaction buttons, full-width picker, large Message and Call buttons. Swipe down, tap outside or press Back to close. The header search box is a search icon.
