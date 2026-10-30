@@ -2722,7 +2722,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass",
         "branchCommit": "f5d9645b"
       },
@@ -2795,7 +2795,7 @@
       "confidence": "high",
       "fix": {
         "commit": "db0275a2",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts",
         "revertProof": "pass",
         "branchCommit": "4eca1171",
         "pr": 1369
@@ -3511,7 +3511,7 @@
       "confidence": "high",
       "fix": {
         "commit": "7be9ccd2",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass",
         "branchCommit": "f5d9645b"
       },
@@ -4003,7 +4003,7 @@
       "confidence": "high",
       "fix": {
         "commit": "c7d8e13c",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "In the single shared handler at MainPage.ts:361-364, treat a zero/negative delay as a cancel rather than a countdown: `if (banner !== null && payload.reason !== \"shutdown\") { if (payload.delay_seconds <= 0) applyConnectionStatus(banner, uiStore.getState().connectionStatus); else banner.showRestart(payload.delay_seconds); }`. That re-syncs the banner to the real connection status (hidden while connected) and covers any future cancel broadcast without a per-reason list.",
@@ -4993,7 +4993,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "0b4b7d5a95de9c5ee5ecde093ab7f54371c17c85",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Include the voice channel id in the signature so any channel switch immediately advances lastChannelId. In MainPage.ts:710-711, seed the signature with the channel id, e.g. `const channelId = state.currentChannelId; let sig = `${String(channelId)}|` + (state.localCamera ? \"c\" : \"\") + (state.localScreenshare ? \"s\" : \"\");` (moving the existing line 711 above line 710). One line at the single wake-up site; the controller's tested clear-on-change behavior is untouched.",
@@ -5453,7 +5453,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "0b4b7d5a95de9c5ee5ecde093ab7f54371c17c85",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Route both call sites through one shared label helper that prefers memberDisplayName: in MainPage.ts:685-689 and VideoModeController.ts:178/199, look up membersStore.getState().members.get(userId) and use memberDisplayName(member) with user.username as fallback (the exact idiom at ChannelSidebar.ts:421-422). For the staleness half, add a VideoGrid.setLabel(tileId, text) and call it from the existing USER_UPDATE handling \u2014 cheapest hook is right after updateVoiceUserProfile in dispatcher.ts:815, relabelling the plain and SCREENSHARE_TILE_ID_OFFSET tiles for that user id \u2014 rather than un-latching localTileAdded, which would re-run addStream and churn srcObject.",
@@ -5637,7 +5637,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "0b4b7d5a95de9c5ee5ecde093ab7f54371c17c85",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Guard the cancel on the channel's voice roster being empty of anyone but the leaver, in the single MainPage voice_leave handler (voiceStore is already imported at MainPage.ts:27):\n\nws.on(\"voice_leave\", (payload) => {\n  const ringing = ringCtrl?.current();\n  if (ringing === null || ringing === undefined) return;\n  if (payload.user_id !== ringing.fromUserId) return;\n  const roster = voiceStore.getState().voiceUsers.get(payload.channel_id);\n  const othersStillIn =\n    roster !== undefined && [...roster.keys()].some((id) => id !== payload.user_id);\n  if (!othersStillIn) ringCtrl?.cancel(payload.channel_id);\n});\n\n(The dispatcher's removeVoiceUser may or may not have run first; excluding payload.user_id makes the check order-independent, and keeps main-page.test.ts:503-528 green since that test's roster is empty.)",
@@ -7161,7 +7161,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "f4a60a6",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7299,7 +7299,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "f4a60a6",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/dmProfile.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7414,7 +7414,7 @@
       "fixed": "2026-09-01",
       "fix": {
         "commit": "b9ddb5a",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7827,7 +7827,7 @@
       "fixed": "2026-09-04",
       "fix": {
         "commit": "f70f04ea",
-        "test": "Client/tests/unit/main-page.test.ts \u2014 bare-IPv6 host bracketed, DNS host left alone",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts \u2014 bare-IPv6 host bracketed, DNS host left alone",
         "revertProof": "adversarial review (host-shape coverage vs isValidHost, TOFU cert_store_key unchanged) + suite green"
       }
     },
@@ -8814,7 +8814,7 @@
       "fixed": "2026-09-04",
       "fix": {
         "commit": "f70f04ea",
-        "test": "Client/tests/unit/main-page.test.ts \u2014 self tile keeps \"(You)\" through the server's own voice_state echo",
+        "test": "Client/tests/unit/mainPage/videoGrid.test.ts \u2014 self tile keeps \"(You)\" through the server's own voice_state echo",
         "revertProof": "adversarial review (label branches compared character-by-character against VideoModeController; setOnRemoteVideo proved unreachable for self) + suite green"
       }
     },
@@ -9779,7 +9779,7 @@
       "finder": "opus",
       "fix": {
         "commit": "6db6287",
-        "test": "Client/tests/unit/main-page.test.ts",
+        "test": "Client/tests/unit/mainPage/accountAndStatus.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "One line in MainPage.destroy() (Client/src/pages/MainPage.ts, next to setActivePresenceSender(null) at line 970): `setMarkReadSender(null);` \u2014 setMarkReadSender already calls cancelPendingMarkAll(), so nulling the sender at teardown both drops the stale ws closure and kills the armed timers at the moment the connection is abandoned instead of 800 ms after the next server is live."
@@ -11661,7 +11661,7 @@
       "suggestedFix": "Cancel the ring, with no reason so it is not a missed call, and clear the outgoing call when a group that was in dmStore leaves it; never cancel merely because the channel is absent.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/main-page.test.ts (a ring for a group the user loses), Client/src/features/direct-messages/groupExitWatch.test.ts",
+        "test": "Client/tests/unit/mainPage/ringing.test.ts (a ring for a group the user loses), Client/src/features/direct-messages/groupExitWatch.test.ts",
         "revertProof": "fail (without the fix the ring banner stays up and times out into a missed call)"
       },
       "confidence": "high",
