@@ -4164,7 +4164,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "5980a38b",
-        "test": "Client/tests/unit/messages.store.test.ts",
+        "test": "Client/tests/unit/messagesStore/sendAndWindows.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "One guard in addMessage's append branch (messages.store.ts:257): keep unreconciled rows at the tail instead of appending blindly \u2014 walk back over trailing rows whose status !== \"sent\" and splice the server message in before them, e.g. `let at = existing.length; while (at > 0 && existing[at-1]!.status !== \"sent\") at--; let updatedMsgs = [...existing.slice(0,at), message, ...existing.slice(at)];` leaving the MAX_MESSAGES_PER_CHANNEL trim below unchanged. With the pending row kept last, confirmSend's in-place stamp can no longer produce an id/timestamp inversion, and MessageList's tryAppendMessages simply falls back to a full rebuild (it already returns false for any non-suffix change).",
@@ -6099,7 +6099,7 @@
       "suggestedFix": "Fix once in the shared predicate at messages.store.ts:194 rather than at either call site: add a module-local `echoNormalize(s)` that mirrors the server's sanitizePass approximation (decode HTML entities, strip tags, decode again) and change the last clause to `optimistic.content === candidate.content || echoNormalize(optimistic.content) === candidate.content`. Both consumers (addMessage step 2 at :244 and setMessages' carry-over at :429-434) inherit it, and the widening stays bounded by the existing same-author / pending-or-OFFLINE / consume-each-candidate-once guards. Also correct the now-wrong comment at :240-243.",
       "fix": {
         "commit": "6293792",
-        "test": "Client/tests/unit/messages.store.test.ts",
+        "test": "Client/tests/unit/messagesStore/sendAndWindows.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -6165,7 +6165,7 @@
       "suggestedFix": "Do not let an empty snapshot act as a carry threshold of 0, but keep protecting rows that genuinely arrived after the fetch started. Capture a watermark when the fetch begins and use it as the floor: in setChannelLoading (messages.store.ts:380, which MessageController.ts:82 calls synchronously before the GET) record `loadWatermark.set(channelId, max id currently in prev.messagesByChannel.get(channelId))`; in setMessages compute `const carryFloor = Math.max(maxSnapshotId, prev.loadWatermark.get(channelId) ?? 0)` and use `m.id > carryFloor` at line 429, deleting the watermark entry in the same update. A purged channel then drops every pre-fetch row while a live broadcast that landed mid-fetch (id above the watermark) is still carried. Do NOT use the one-line `trimmed.length > 0 ? m.id > maxSnapshotId : false` \u2014 it would discard a real live row that arrived during the fetch of an empty channel, which the reduce(...,0) default currently protects.",
       "fix": {
         "commit": "6293792",
-        "test": "Client/tests/unit/messages.store.test.ts",
+        "test": "Client/tests/unit/messagesStore/sendAndWindows.test.ts",
         "revertProof": "self-reported"
       }
     },
