@@ -3,9 +3,9 @@
 
 import { desktop } from "../platform/desktop";
 import { createLogger } from "./logger";
-import { ensureHttpProxy } from "./httpProxy";
-import { isValidHost } from "./hostValidation";
-import { SessionScope } from "./sessionScope";
+import { ensureHttpProxy } from "./net/httpProxy";
+import { isValidHost } from "./net/hostValidation";
+import { SessionScope } from "./net/sessionScope";
 import {
   NSFW_ACKNOWLEDGEMENT_REQUIRED,
   nsfwContentBlocked,

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mediaVisibility from "../../src/lib/prefs/mediaVisibility";
 import { observeMedia, unobserveMedia, pauseAllMedia } from "../../src/lib/prefs/mediaVisibility";
-import { runSessionResets } from "../../src/lib/sessionRegistry";
+import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 
 // Resolved off the namespace so a missing export fails the assertion, not the import.
 const discardMedia = (mediaVisibility as Record<string, unknown>).discardMedia as (

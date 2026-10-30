@@ -4,7 +4,11 @@
  */
 
 import { clearAuth } from "@stores/auth.store";
-import { createProfileManager, createTauriBackend, type ServerProfile } from "@lib/profiles";
+import {
+  createProfileManager,
+  createTauriBackend,
+  type ServerProfile,
+} from "@lib/presence/profiles";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("server-switch");

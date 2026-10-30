@@ -19,7 +19,7 @@ import type {
   NativeVoiceStats,
 } from "../../../platform/contracts/nativeVoice";
 import type { PublishCodec } from "../videoCodec";
-import type { StreamQuality } from "@lib/screenShare";
+import type { StreamQuality } from "@lib/voice/screenShare";
 import { PICKER_DISMISSED, PORTAL_NOT_STARTED } from "./platform";
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";

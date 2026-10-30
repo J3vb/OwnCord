@@ -20,8 +20,8 @@ import {
 } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import type { ChannelAccess } from "../../features/channels/channelRow.view";
-import { formatChannelLink } from "@lib/deep-link";
-import { navigateToChannel } from "@lib/channel-navigation";
+import { formatChannelLink } from "@lib/nav/deepLink";
+import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { markChannelRead, showsUnreadBadge } from "@lib/read-state";
 import {
   getChannelMute,
@@ -34,7 +34,7 @@ import {
   createSubmenuTrigger,
   openMenuOnKeyboard,
   openMenuShell,
-} from "@lib/context-menu";
+} from "@lib/ui/contextMenu";
 import {
   NOTIFICATION_LEVELS,
   effectiveNotificationLevel,

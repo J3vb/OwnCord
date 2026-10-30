@@ -15,7 +15,7 @@ import {
   importIdentityPublicKey,
   exportIdentityKeyPair,
   importIdentityKeyPair,
-} from "@lib/e2eeCrypto";
+} from "@lib/net/e2eeCrypto";
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -29,7 +29,7 @@ describe("e2eeCrypto", () => {
       vi.resetModules();
       vi.stubGlobal("crypto", cryptoStub);
       try {
-        return await import("@lib/e2eeCrypto");
+        return await import("@lib/net/e2eeCrypto");
       } finally {
         vi.unstubAllGlobals();
       }

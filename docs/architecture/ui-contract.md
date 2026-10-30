@@ -148,7 +148,7 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
 - The composer draws one ring: `.message-input-box` takes the textarea's
   `--focus-ring` outline around the whole box, and the textarea draws none.
   Login fields likewise show only the base outline, with no focus glow.
-- Dialogs use `createModal` (`Client/src/lib/modalFactory.ts`). It applies
+- Dialogs use `createModal` (`Client/src/lib/ui/modalFactory.ts`). It applies
   `role="dialog"` and `aria-modal`, traps Tab, closes on Escape, and restores
   focus to the opener on close.
   - Pass `ariaLabel` or `ariaLabelledBy` to name the dialog.
@@ -165,13 +165,13 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
 
 ## Keyboard
 
-| Control                                       | Keys                                                                                                                                                                                                                                                      |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every action                                  | reachable with Tab/Shift+Tab; activates with Enter (and Space for buttons); nothing is hover-only                                                                                                                                                         |
-| Dialog                                        | Tab cycles inside; Escape closes and restores focus                                                                                                                                                                                                       |
-| Switch (`createToggle`)                       | Enter or Space toggles; `label` is required and becomes the accessible name                                                                                                                                                                               |
-| Radio group, grid of options, navigation list | `setRovingTabindex` + `enableRovingNavigation` (`lib/a11y.ts`): one Tab stop, arrows/Home/End move, Enter/Space choose; a stacked list passes `"vertical"` for ArrowUp/Down; a grid of rows passes `"grid"` (Up/Down step a row within the cell's parent) |
-| Combobox over a listbox                       | as the quick switcher: `aria-controls`, `aria-activedescendant`                                                                                                                                                                                           |
+| Control                                       | Keys                                                                                                                                                                                                                                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Every action                                  | reachable with Tab/Shift+Tab; activates with Enter (and Space for buttons); nothing is hover-only                                                                                                                                                            |
+| Dialog                                        | Tab cycles inside; Escape closes and restores focus                                                                                                                                                                                                          |
+| Switch (`createToggle`)                       | Enter or Space toggles; `label` is required and becomes the accessible name                                                                                                                                                                                  |
+| Radio group, grid of options, navigation list | `setRovingTabindex` + `enableRovingNavigation` (`lib/ui/a11y.ts`): one Tab stop, arrows/Home/End move, Enter/Space choose; a stacked list passes `"vertical"` for ArrowUp/Down; a grid of rows passes `"grid"` (Up/Down step a row within the cell's parent) |
+| Combobox over a listbox                       | as the quick switcher: `aria-controls`, `aria-activedescendant`                                                                                                                                                                                              |
 
 ## Announcements
 
@@ -192,7 +192,7 @@ tokens, no keys.
 Motion is reduced when the in-app **Reduce Motion** toggle is on, or when
 **Sync with OS** is on and the OS asks for it. Sync with OS defaults to on.
 Either source can reduce motion, and neither can force it back on over the
-other. `syncOsMotionListener()` in `lib/os-motion.ts` derives the
+other. `syncOsMotionListener()` in `lib/ui/osMotion.ts` derives the
 `reduced-motion` class on `<html>` (`applyStoredAppearance()` in
 `lib/prefs/appearance.ts` pre-sets it from the manual preference, then calls it), and
 `app/accessibility.css` zeroes animation and transition durations under it.

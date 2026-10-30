@@ -4,8 +4,8 @@
 import { joinVoiceChannel, voiceStore } from "../../stores/voice.store";
 import { channelsStore } from "../../stores/channels.store";
 import { uiStore } from "../../stores/ui.store";
-import { registerSessionReset } from "../../lib/sessionRegistry";
-import { showToast } from "../../lib/toast";
+import { registerSessionReset } from "../../lib/net/sessionRegistry";
+import { showToast } from "../../lib/ui/toast";
 import { createLogger } from "../../lib/logger";
 import type { MountableComponent } from "../../lib/text/safeRender";
 import type { PasswordProblem } from "../../components/ChannelPasswordDialog";

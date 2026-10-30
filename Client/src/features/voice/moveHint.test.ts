@@ -3,7 +3,7 @@
  * read: each is spent by the first connect or acknowledgement that settles it.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { runSessionResets } from "../../lib/sessionRegistry";
+import { runSessionResets } from "../../lib/net/sessionRegistry";
 import {
   clearAfkMove,
   isVoiceMovePending,

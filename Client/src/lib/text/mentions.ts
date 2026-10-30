@@ -10,7 +10,7 @@
 
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
-import { roleIdByName } from "../roleLookup";
+import { roleIdByName } from "../presence/roleLookup";
 
 /**
  * An @token that stands alone as a word. Group 1 is the preceding character,

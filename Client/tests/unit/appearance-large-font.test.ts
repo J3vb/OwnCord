@@ -23,7 +23,10 @@ vi.mock("@lib/prefs/themes", async (importOriginal) => ({
   restoreAccent: vi.fn(),
   restoreTheme: vi.fn(),
 }));
-vi.mock("@lib/os-motion", () => ({ SYNC_OS_MOTION_DEFAULT: true, syncOsMotionListener: vi.fn() }));
+vi.mock("@lib/ui/osMotion", () => ({
+  SYNC_OS_MOTION_DEFAULT: true,
+  syncOsMotionListener: vi.fn(),
+}));
 
 import { applyStoredAppearance } from "@lib/prefs/appearance";
 import { buildAccessibilityTab } from "@components/settings/AccessibilityTab";

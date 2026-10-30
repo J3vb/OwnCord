@@ -12,7 +12,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { connectText } from "../i18n/connect";
 
 export interface BlocksState {

@@ -12,10 +12,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../src/features/voice/releaseRoom", () => ({ releaseRoom: mocks.releaseRoom }));
 vi.mock("@stores/voice.store", () => ({ leaveVoiceChannel: mocks.leaveVoiceChannel }));
-vi.mock("@lib/roomEventHandlers", () => ({ setJoinedVoiceStatus: mocks.setJoinedVoiceStatus }));
-vi.mock("@lib/livekitDiagnostics", () => ({ logIceConnectionInfo: mocks.logIceConnectionInfo }));
+vi.mock("@lib/voice/roomEventHandlers", () => ({
+  setJoinedVoiceStatus: mocks.setJoinedVoiceStatus,
+}));
+vi.mock("@lib/voice/livekitDiagnostics", () => ({
+  logIceConnectionInfo: mocks.logIceConnectionInfo,
+}));
 
-import { attemptAutoReconnect, type ReconnectDeps } from "../../src/lib/livekitReconnect";
+import { attemptAutoReconnect, type ReconnectDeps } from "../../src/lib/voice/livekitReconnect";
 import { savePref } from "../../src/lib/prefs/preferences";
 
 const CHANNEL = 7;

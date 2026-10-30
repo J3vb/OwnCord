@@ -16,7 +16,7 @@ import { memberDisplayName } from "../../stores/members.store";
 import type { UiState } from "../../stores/ui.store";
 import type { PeerVerification, VoiceState, VoiceUser } from "../../stores/voice.store";
 import type { SafetyState } from "../safety/store";
-import { resolveDisplayName } from "../../lib/avatar";
+import { resolveDisplayName } from "../../lib/ui/avatar";
 import { shellText } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { ownIdentityTitle, verifyPresentation } from "../voice/peerVerification";

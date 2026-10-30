@@ -20,7 +20,7 @@ import {
   updatePresence,
   type Member,
 } from "@stores/members.store";
-import { listSessionResets, runSessionResets } from "@lib/sessionRegistry";
+import { listSessionResets, runSessionResets } from "@lib/net/sessionRegistry";
 import type { ListeningActivity, ReadyMember } from "@lib/types";
 
 const ALICE: ReadyMember = {

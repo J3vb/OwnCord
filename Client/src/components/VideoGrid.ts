@@ -6,11 +6,11 @@
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { openMenuOnKeyboard } from "@lib/context-menu";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -20,12 +20,12 @@ import {
   setScreenshareAudioVolume,
   setUserLocalMute,
   setUserVolume,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { syncVideoSurface, videoSurfaceOf } from "@lib/videoSurface";
-import { bindVideoZoom } from "@lib/zoomPan";
-import type { ZoomPan } from "@lib/zoomPan";
+import { syncVideoSurface, videoSurfaceOf } from "@lib/voice/videoSurface";
+import { bindVideoZoom } from "@lib/ui/zoomPan";
+import type { ZoomPan } from "@lib/ui/zoomPan";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceText } from "../i18n/voice";
 import { viewersLabel } from "./video-grid/viewers";

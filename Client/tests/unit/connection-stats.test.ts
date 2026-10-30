@@ -15,7 +15,7 @@ import {
   formatRateCompact,
   qualityFromSignals,
   type ConnectionStatsPoller,
-} from "../../src/lib/connectionStats";
+} from "../../src/lib/voice/connectionStats";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers

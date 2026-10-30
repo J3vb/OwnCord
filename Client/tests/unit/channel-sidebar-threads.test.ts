@@ -4,13 +4,17 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: vi.fn(() => false),
   rePinPeerIdentity: vi.fn(async () => true),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn(), initToast: vi.fn(), teardownToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({
+  showToast: vi.fn(),
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+}));
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {

@@ -5,7 +5,7 @@
  */
 
 import type { ApiClient } from "@lib/api";
-import type { ModalInstance } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import type { Message } from "@stores/messages.store";
 import { reportsText as t } from "../../i18n/reports";
 import { openReportDialog, type ReportTarget } from "./reportDialog";

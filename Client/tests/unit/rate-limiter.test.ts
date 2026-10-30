@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RateLimiter, createRateLimiterSet, createPresenceLimiter } from "@lib/rate-limiter";
+import { RateLimiter, createRateLimiterSet, createPresenceLimiter } from "@lib/net/rateLimiter";
 
 // ---------------------------------------------------------------------------
 // Core RateLimiter behaviour

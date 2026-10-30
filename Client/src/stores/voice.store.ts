@@ -15,9 +15,9 @@ import type {
 import { membersStore } from "@stores/members.store";
 import { channelsStore, isAfkChannel } from "@stores/channels.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
-import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
+import { setVoiceDeafened, setVoiceInSession } from "@lib/voice/voiceDeafened";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 
 export interface VoiceUser {

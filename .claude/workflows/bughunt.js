@@ -146,7 +146,7 @@ const SURFACE_LENSES = [
     key: "voice-e2ee",
     prompt:
       `Surface: voice/video E2EE key lifecycle, spanning three languages. Files: Server/ws/handler_v2_voice*.go and ` +
-      `any Server/ws/*voice*.go or *e2ee*.go; Client/src/lib/e2eeCrypto.ts, livekitE2EE.ts, ` +
+      `any Server/ws/*voice*.go or *e2ee*.go; Client/src/lib/net/e2eeCrypto.ts, livekitE2EE.ts, ` +
       `livekitSession.ts, identity.ts; Client/src-tauri/src/tofu.rs, secret_store.rs, fallback_crypto.rs, dpapi.rs.\n\n` +
       `Hunt specifically for: a key-rotation window where a participant can decrypt after they should be excluded; ` +
       `TOFU pin re-check that reads state captured before a rotation (time-of-check/time-of-use); a participant ` +

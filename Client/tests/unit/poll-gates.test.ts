@@ -6,7 +6,7 @@ import {
   applyReadyCapabilities,
   pollsEnabled,
   resetServerCapabilities,
-} from "@lib/serverCapabilities";
+} from "@lib/net/serverCapabilities";
 import {
   ME,
   OTHER,

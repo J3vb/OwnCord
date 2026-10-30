@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { openNicknameDialog } from "../../src/features/moderation/NicknameDialog";
-import type { ModalInstance } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { ApiClientError, TransportError } from "@lib/api";
 
 const q = <T extends Element = HTMLElement>(testId: string): T =>

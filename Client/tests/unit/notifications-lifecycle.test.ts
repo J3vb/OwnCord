@@ -12,7 +12,7 @@ import type { ChannelActivityEntry } from "../../src/lib/types";
 import "../../src/lib/prefs/preferences";
 import "../../src/lib/prefs/channelMutes";
 import "../../src/lib/prefs/notificationLevel";
-import "../../src/lib/userStatus";
+import "../../src/lib/presence/userStatus";
 import "../../src/stores/auth.store";
 import "../../src/stores/channels.store";
 import "../../src/stores/dm.store";
@@ -21,13 +21,13 @@ import "../../src/stores/members.store";
 import "../../src/stores/blocks.store";
 import "../../src/lib/text/messageKind";
 import "../../src/lib/text/mentions";
-import "../../src/lib/message-navigation";
+import "../../src/lib/nav/messageNavigation";
 import "../../src/lib/logger";
-import "../../src/lib/sessionRegistry";
-import "../../src/lib/notificationSound";
+import "../../src/lib/net/sessionRegistry";
+import "../../src/lib/media/notificationSound";
 import "../../src/lib/prefs/soundPrefs";
 import "../../src/lib/text/formatting";
-import "../../src/lib/avatar";
+import "../../src/lib/ui/avatar";
 import "../../src/i18n/connect";
 import "../../src/lib/text/markdown";
 
@@ -113,9 +113,9 @@ describe("the notification service's session registrations", () => {
   it("registers its resets ahead of the voice and domain resets and acts on a session reset", async () => {
     const { notifyChannelActivity, resetNotificationCoalescing } = await lib();
     const { registerSessionReset, listSessionResets, runSessionResets } =
-      await import("../../src/lib/sessionRegistry");
+      await import("../../src/lib/net/sessionRegistry");
     const { playNotificationSound, cleanupNotificationAudio } =
-      await import("../../src/lib/notificationSound");
+      await import("../../src/lib/media/notificationSound");
     const { addLogListener, setLogLevel } = await import("../../src/lib/logger");
 
     // Registered in the session phase, ahead of the voice and domain resets.

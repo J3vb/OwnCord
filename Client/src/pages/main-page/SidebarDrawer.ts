@@ -19,7 +19,7 @@
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
-import { focusDialog } from "@lib/a11y";
+import { focusDialog } from "@lib/ui/a11y";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { shellText } from "../../i18n/shell";

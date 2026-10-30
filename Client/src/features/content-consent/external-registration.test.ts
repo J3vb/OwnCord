@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 const { register } = vi.hoisted(() => ({ register: vi.fn() }));
-vi.mock("@lib/sessionRegistry", () => ({ registerSessionReset: register }));
+vi.mock("@lib/net/sessionRegistry", () => ({ registerSessionReset: register }));
 
 import { externalAllowed, requestExternalItem, setExternalConsentChoice } from "./external";
 

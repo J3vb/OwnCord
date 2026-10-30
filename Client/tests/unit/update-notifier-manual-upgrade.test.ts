@@ -14,14 +14,14 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: mockCheckForUpdate,
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: mockSubscribeToUpdateInstall,
 }));
 
 import { createUpdateNotifier } from "../../src/components/UpdateNotifier";
-import type { UpdateInstallState } from "../../src/lib/updater";
+import type { UpdateInstallState } from "../../src/lib/net/updater";
 
 const unsubscribeInstall = vi.fn();
 const MANUAL_TEXT =

@@ -6,10 +6,10 @@
 
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
-import { isDisplayed } from "@lib/dialogOpen";
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
+import { isDisplayed } from "@lib/ui/dialogOpen";
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
-import { closeOnBackdropClick } from "@lib/modalFactory";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import type { IconName } from "@lib/icons";

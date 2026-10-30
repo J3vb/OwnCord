@@ -4,7 +4,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createMenuItem as buildMenuItem, openMenuShell, type OpenMenu } from "@lib/context-menu";
+import { createMenuItem as buildMenuItem, openMenuShell, type OpenMenu } from "@lib/ui/contextMenu";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";

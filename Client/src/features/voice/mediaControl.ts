@@ -15,13 +15,13 @@ import {
   bumpLocalCameraRev,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
-import type { AudioPipeline } from "../../lib/audioPipeline";
-import type { AudioElements } from "../../lib/audioElements";
-import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
+import type { AudioPipeline } from "../../lib/voice/audioPipeline";
+import type { AudioElements } from "../../lib/voice/audioElements";
+import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
-import { setH264GpuProfiles } from "../../lib/h264Profile";
+import { setH264GpuProfiles } from "../../lib/voice/h264Profile";
 import { h264GpuPublish } from "./videoCodec";
 import { savePref } from "../../lib/prefs/preferences";
 import {
@@ -36,7 +36,7 @@ import {
   reconcileVideoFlags as doReconcileVideoFlags,
   inPlaceSourceChange,
   getLocalScreenshareStats,
-} from "../../lib/screenShare";
+} from "../../lib/voice/screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
 const log = createLogger("livekitSession");

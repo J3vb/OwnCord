@@ -2,10 +2,10 @@
  * The local loopback tunnels that let the webview talk to a self-signed
  * server without ever accepting its certificate itself.
  *
- * `ensureHttpProxy` has the exact signature of `lib/httpProxy.ts`'s export;
+ * `ensureHttpProxy` has the exact signature of `lib/net/httpProxy.ts`'s export;
  * `setLiveKitServerHost`/`resolveLiveKitUrl`/`stopLiveKitProxy` mirror
  * `LiveKitUrlResolver`'s `setServerHost`/`resolve`/`stopProxy` one-for-one
- * (`lib/livekitUrlResolver.ts`). Both tunnels live in
+ * (`lib/voice/livekitUrlResolver.ts`). Both tunnels live in
  * `platform/desktop/nativeProxies.ts` since the platform seam, which holds the LiveKit
  * server host the class used to; the `lib/` names stay as their callers'
  * handles.

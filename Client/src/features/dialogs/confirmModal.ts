@@ -18,7 +18,7 @@
 import { Disposable } from "../../lib/disposable";
 import { createElement, setText } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
-import { createModal, type ModalInstance } from "../../lib/modalFactory";
+import { createModal, type ModalInstance } from "../../lib/ui/modalFactory";
 import { connectText } from "../../i18n/connect";
 
 export interface ConfirmModalOptions {

@@ -15,7 +15,7 @@ import { createVoiceWidget } from "../../src/components/VoiceWidget";
 // clearAuth (used below to test the real logoutWasInVoice ordering fix)
 // lazily imports livekitSession when a voice session is active — mock it so
 // that stays a fire-and-forget call instead of pulling in the real SDK.
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
 }));
 

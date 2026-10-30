@@ -3,7 +3,7 @@
  * the Keybinds tab and the Ctrl+/ shortcuts overlay.
  */
 
-import { vkName } from "../ptt";
+import { vkName } from "../voice/ptt";
 import type { ActionId, KeyCombo } from "./keybinds";
 import type { SettingsTextKey } from "./keybindCatalog";
 import { settingsText as t } from "../../i18n/settings";

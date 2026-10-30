@@ -39,7 +39,7 @@ vi.mock("../../src/features/voice/native/devices", () => ({
   onNativeDevicesChanged: () => null,
 }));
 
-import { DeviceManager } from "../../src/lib/deviceManager";
+import { DeviceManager } from "../../src/lib/voice/deviceManager";
 
 /** Chromium's device list after the USB mic is plugged back in: the OS
  *  default is the USB mic again (the `default` entry shares its groupId). */

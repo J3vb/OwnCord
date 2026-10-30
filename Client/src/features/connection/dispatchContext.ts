@@ -107,8 +107,8 @@ export function createReconnectClock(): ReconnectClock {
 /** Lazily import the LiveKit session module. livekit-client (~1.3 MB) is kept
  *  out of the entry chunk; voice handlers load it on first use. Once a voice
  *  flow has started the module is cached, so this resolves in a microtask. */
-export function livekitSession(): Promise<typeof import("../../lib/livekitSession")> {
-  return import("../../lib/livekitSession");
+export function livekitSession(): Promise<typeof import("../../lib/voice/livekitSession")> {
+  return import("../../lib/voice/livekitSession");
 }
 
 /**

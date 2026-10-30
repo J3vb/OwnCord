@@ -5,9 +5,9 @@ import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
-import { loadUserStatus, saveUserStatus, saveCustomStatus } from "@lib/userStatus";
-import { createPresenceSender } from "@lib/presence";
-import { createPresenceLimiter } from "@lib/rate-limiter";
+import { loadUserStatus, saveUserStatus, saveCustomStatus } from "@lib/presence/userStatus";
+import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 
 function setAuthState(

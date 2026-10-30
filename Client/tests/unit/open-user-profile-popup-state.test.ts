@@ -30,7 +30,7 @@ import {
   type OpenUserProfilePopupOptions,
 } from "../../src/features/profiles/openUserProfilePopup";
 import { setNotesContextSource } from "../../src/features/profiles/userNotes";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { setRoles } from "@stores/channels.store";
 import { channelsStore } from "@stores/channels.store";
 import type {

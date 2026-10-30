@@ -18,13 +18,13 @@
  *  - The letter is what renders until (and if) the bytes arrive. An avatar that
  *    fails to load leaves a normal-looking row rather than a broken image.
  *
- * The pure name/letter helpers stay in `@lib/avatar`; this module owns the DOM
+ * The pure name/letter helpers stay in `@lib/ui/avatar`; this module owns the DOM
  * and the fetch, so it lives beside the attachments helper it needs.
  */
 
 import { createElement } from "@lib/dom";
-import { avatarInitial, resolveDisplayName, type AvatarSubject } from "@lib/avatar";
-import { animatedStill, bindAnimatedImage, type AnimationMode } from "@lib/animatedStill";
+import { avatarInitial, resolveDisplayName, type AvatarSubject } from "@lib/ui/avatar";
+import { animatedStill, bindAnimatedImage, type AnimationMode } from "@lib/ui/animatedStill";
 import {
   fetchImageAsObjectUrl,
   isSafeUrl,

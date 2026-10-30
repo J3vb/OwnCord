@@ -3,7 +3,7 @@ import { createSidebarDrawer } from "../../src/pages/main-page/SidebarDrawer";
 import type { SidebarDrawer } from "../../src/pages/main-page/SidebarDrawer";
 import { setActiveChannel } from "@stores/channels.store";
 import { openSettings, closeSettings } from "@stores/ui.store";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 
 /** A controllable `(max-width: 800px)` media query: jsdom has no matchMedia. */
 class FakeMediaQueryList extends EventTarget {

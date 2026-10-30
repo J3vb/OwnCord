@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRingController, createOutgoingCall, RING_TIMEOUT_MS } from "@lib/call-ring";
-import type { RingEndReason, RingState, OutgoingCallState } from "@lib/call-ring";
+import { createRingController, createOutgoingCall, RING_TIMEOUT_MS } from "@lib/voice/callRing";
+import type { RingEndReason, RingState, OutgoingCallState } from "@lib/voice/callRing";
 
 /**
  * Statechart harness. The timer is injected rather than faked globally so a

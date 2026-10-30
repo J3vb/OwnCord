@@ -28,7 +28,7 @@ vi.mock("@lib/notifications", () => ({
   cleanupNotificationAudio: vi.fn(),
 }));
 const showToast = vi.hoisted(() => vi.fn());
-vi.mock("@lib/toast", () => ({ showToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast }));
 
 const USER = { id: 10, username: "me", avatar: null, role: "member" };
 const AUTH_OK = { user: USER, server_name: "S", motd: "" };

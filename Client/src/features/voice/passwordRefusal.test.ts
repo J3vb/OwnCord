@@ -7,15 +7,15 @@ import { voiceStore, resetVoiceStore, joinVoiceChannel } from "../../stores/voic
 import { channelsStore, setChannels } from "../../stores/channels.store";
 import { setConnectionStatus } from "../../stores/ui.store";
 import { authStore } from "../../stores/auth.store";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import type { DispatchWs, Payload } from "../connection/dispatchContext";
 
-vi.mock("../../lib/livekitSession", () => ({
+vi.mock("../../lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   isVoiceSessionActive: vi.fn(() => false),
   failPendingRejoin: vi.fn(),
 }));
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 const error = (code: Payload<"error">["code"]): Payload<"error"> => ({ code, message: "" });
 

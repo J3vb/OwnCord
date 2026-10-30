@@ -1,5 +1,5 @@
 /**
- * Identity-key storage — the OS keyring / TOFU pin seam `lib/identity.ts`
+ * Identity-key storage — the OS keyring / TOFU pin seam `lib/net/identity.ts`
  * wraps today. Seam: `saveIdentityKey`, `loadIdentityKey`, `deleteIdentityKey`,
  * `storeIdentityPin` and `getIdentityPin` are exported functions already, so
  * each contract method below has that function's exact signature.
@@ -7,14 +7,14 @@
  * The higher-level lifecycle (`getOrCreateIdentityKeyPair`, the legacy-key
  * migration, `ensureIdentityKeyPublished`) is app logic built on top of these
  * five primitives, not itself part of the native seam — it stays in
- * `lib/identity.ts` and keeps calling this contract's methods after the seam is introduced.
+ * `lib/net/identity.ts` and keeps calling this contract's methods after the seam is introduced.
  */
 
 /** Re-declared, structurally identical to `StoreIdentityPinResult`
- *  (`lib/identity.ts`). */
+ *  (`lib/net/identity.ts`). */
 export type StoreIdentityPinResult = "stored" | "no-store" | "failed";
 
-/** Re-declared, structurally identical to `IdentityPinLookup` (`lib/identity.ts`). */
+/** Re-declared, structurally identical to `IdentityPinLookup` (`lib/net/identity.ts`). */
 export type IdentityPinLookup =
   | { readonly status: "pinned"; readonly pin: string }
   | { readonly status: "unpinned" }

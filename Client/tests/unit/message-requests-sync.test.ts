@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { expectConsole } from "../helpers/console";
 import { captureLogs } from "../helpers/log-capture";
-import { listSessionResets, runSessionResets } from "../../src/lib/sessionRegistry";
+import { listSessionResets, runSessionResets } from "../../src/lib/net/sessionRegistry";
 import { loadRequests, requestsApi } from "../../src/features/message-requests/sync";
 import {
   messageRequestsStore,

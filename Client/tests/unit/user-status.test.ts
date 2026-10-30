@@ -7,7 +7,7 @@ import {
   onUserStatusChange,
   saveCustomStatus,
   saveUserStatus,
-} from "@lib/userStatus";
+} from "@lib/presence/userStatus";
 
 describe("userStatus", () => {
   beforeEach(() => {

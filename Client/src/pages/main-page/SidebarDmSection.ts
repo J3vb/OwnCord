@@ -7,8 +7,8 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
-import { reconcileChildren } from "@lib/reconcile";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { reconcileChildren } from "@lib/net/reconcile";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { totalDmUnread } from "@lib/dmUnread";
 import type { DmChannel } from "@stores/dm.store";
@@ -20,8 +20,8 @@ import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
 import { voiceStore } from "@stores/voice.store";
 import { createIcon } from "@lib/icons";
-import { openMenuOnKeyboard } from "@lib/context-menu";
-import type { ModalInstance } from "@lib/modalFactory";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import {
   openDmContextMenu,
   openLeaveConfirm,

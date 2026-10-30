@@ -6,8 +6,8 @@ import {
   nextAutoStatus,
   startAutoIdle,
   type AutoIdleController,
-} from "../../src/lib/autoIdle";
-import { loadUserStatus, saveUserStatus } from "../../src/lib/userStatus";
+} from "../../src/lib/presence/autoIdle";
+import { loadUserStatus, saveUserStatus } from "../../src/lib/presence/userStatus";
 
 type Target = Pick<Window, "addEventListener" | "removeEventListener">;
 

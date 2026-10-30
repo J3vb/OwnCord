@@ -5,14 +5,14 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { createMenuItem, openMenuShell } from "@lib/context-menu";
+import { createMenuItem, openMenuShell } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
 import {
   setUserVolume,
   getUserVolume,
   setUserLocalMute,
   getUserLocalMute,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
 
 /** Moderation section wiring. Passed only when the local user may moderate

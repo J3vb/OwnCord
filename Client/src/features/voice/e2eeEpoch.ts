@@ -4,7 +4,7 @@
 // with its timer and in-flight/deferred flags. The session generation, the
 // key-holder role, the ECDH keypair and the peer set stay owned by
 // E2EEManager; this module reads them only through E2EEEpochHost.
-import { generateRoomKey } from "../../lib/e2eeCrypto";
+import { generateRoomKey } from "../../lib/net/e2eeCrypto";
 import { createLogger } from "../../lib/logger";
 
 // Same logger tag as before the extraction, so the E2EE log lines are unchanged.

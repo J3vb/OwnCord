@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { syncOsMotionListener } from "../../src/lib/os-motion";
+import { syncOsMotionListener } from "../../src/lib/ui/osMotion";
 
 /** A media query list that is a real event target, so a listener registered
  *  with an AbortSignal really stops hearing changes once it aborts. */

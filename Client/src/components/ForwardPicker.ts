@@ -12,8 +12,8 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
-import { showToast } from "@lib/toast";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import { showToast } from "@lib/ui/toast";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
 import { dmStore } from "@stores/dm.store";

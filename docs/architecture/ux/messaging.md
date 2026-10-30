@@ -331,7 +331,7 @@ survives a reconnect or a REST reload of the DM list instead of resetting to 0.
 Every affordance that can jump — a search hit, a pinned entry, the quoted
 reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
 opened from the OS, a clicked message notification — goes through one path
-(`lib/message-navigation.ts` registry → `main-page/MessageJump.ts`), so they
+(`lib/nav/messageNavigation.ts` registry → `main-page/MessageJump.ts`), so they
 behave identically. A reply never groups into the previous message, so it
 always keeps its quoted-parent header (`shouldGroup`).
 
@@ -477,6 +477,6 @@ the same signal in future.
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
 `src/components/MentionAutocomplete.ts`, `src/lib/text/mentions.ts`,
 `src/components/message-list/content-parser.ts` (+ `syntax-highlight.ts`),
-`src/lib/text/markdown.ts`, `src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
+`src/lib/text/markdown.ts`, `src/lib/nav/channelNavigation.ts`, `src/lib/notifications.ts`;
 server `Server/service/message.go`, `Server/service/mentions.go`,
 `Server/ws/handlers_chat.go`.

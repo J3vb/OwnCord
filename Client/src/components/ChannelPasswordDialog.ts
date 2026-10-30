@@ -8,7 +8,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { isImeCommit } from "@lib/text/ime";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { connectText } from "../i18n/connect";
 import { voiceText } from "../i18n/voice";

@@ -7,7 +7,7 @@ const { mockRePinPeerIdentity, mockGetUserLocalMute } = vi.hoisted(() => ({
   mockRePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
   mockGetUserLocalMute: vi.fn((_userId: number) => false),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: (userId: number) => mockGetUserLocalMute(userId),
@@ -16,7 +16,7 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: mockShowToast,
   initToast: vi.fn(),
   teardownToast: vi.fn(),
@@ -24,8 +24,8 @@ vi.mock("@lib/toast", () => ({
 
 // Stub the identity-key crypto so the mismatch modal's fingerprint compute is
 // deterministic in jsdom (real WebCrypto key import needs a valid SPKI blob).
-vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/lib/e2eeCrypto")>();
+vi.mock("@lib/net/e2eeCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/net/e2eeCrypto")>();
   return {
     ...actual,
     importIdentityPublicKey: vi.fn(() => Promise.resolve({} as CryptoKey)),
@@ -73,7 +73,7 @@ import {
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
-import { computeKeyFingerprint } from "@lib/e2eeCrypto";
+import { computeKeyFingerprint } from "@lib/net/e2eeCrypto";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
 import {

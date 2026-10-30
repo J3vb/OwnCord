@@ -1,5 +1,5 @@
 // Shrink-only ratchet: a hand-written `signature` passed to reconcileChildren
-// is a stale-row hazard. New row lists use reconcileModels (src/lib/reconcile.ts),
+// is a stale-row hazard. New row lists use reconcileModels (src/lib/net/reconcile.ts),
 // which derives the signature from a row model. Migrate a file, then delete its entry.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";

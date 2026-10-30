@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { listSessionResets } from "../../src/lib/sessionRegistry";
+import { listSessionResets } from "../../src/lib/net/sessionRegistry";
 import {
   blocksStore,
   setBlockedByMe,

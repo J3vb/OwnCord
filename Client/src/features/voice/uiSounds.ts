@@ -3,7 +3,7 @@
  * member's in your channel — and on mute/unmute and deafen/undeafen.
  *
  * The sounds themselves and their shared output device live in
- * `lib/notificationSound.ts`; this module only decides *when* they play. It
+ * `lib/media/notificationSound.ts`; this module only decides *when* they play. It
  * subscribes to voiceStore directly (a page-local UI reader, like the ringing
  * handler in MainPage), which is allowed as long as it never writes a store.
  *
@@ -33,8 +33,8 @@ import {
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
 import { loadPref } from "@lib/prefs/preferences";
-import { loadUserStatus } from "@lib/userStatus";
-import { playVoiceSound, type VoiceSound } from "@lib/notificationSound";
+import { loadUserStatus } from "@lib/presence/userStatus";
+import { playVoiceSound, type VoiceSound } from "@lib/media/notificationSound";
 import { soundSwitchOn, type SoundSwitch } from "@lib/prefs/soundPrefs";
 import { takeVoiceMoved, isVoiceMovePending } from "./moveHint";
 

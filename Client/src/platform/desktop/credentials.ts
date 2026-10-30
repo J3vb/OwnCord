@@ -3,7 +3,7 @@
  * contract — Windows Credential Manager / GNOME Keyring / macOS Keychain,
  * through the verified encrypted store.
  *
- * Lifted verbatim from `lib/credentials.ts`: same commands, same
+ * Lifted verbatim from `lib/net/credentials.ts`: same commands, same
  * arguments, same error handling, same log lines. A behavioural improvement
  * to credential handling is not this milestone's business.
  */

@@ -20,7 +20,7 @@ vi.mock("../../src/lib/prefs/preferences", () => ({
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
 
-vi.mock("../../src/lib/notificationSound", () => ({ playVoiceSound }));
+vi.mock("../../src/lib/media/notificationSound", () => ({ playVoiceSound }));
 
 import {
   voiceStore,

@@ -5,7 +5,7 @@ import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOur
 import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, TransportError, errorText } from "@lib/api";
-import { normaliseInviteCode } from "@lib/deep-link";
+import { normaliseInviteCode } from "@lib/nav/deepLink";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";

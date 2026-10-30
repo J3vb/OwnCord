@@ -115,7 +115,7 @@ export default defineConfig({
         "src/pages/MainPage.ts",
         // RNNoise AudioWorklet host: needs a real AudioContext/WASM runtime
         // that jsdom cannot provide. Exercised by tests/browser and e2e.
-        "src/lib/noise-suppression.ts",
+        "src/lib/voice/noiseSuppression.ts",
       ],
       thresholds: {
         statements: AGGREGATE_FLOOR,

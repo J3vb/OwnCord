@@ -13,7 +13,7 @@ import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { connectText } from "../../i18n/connect";
 import { accountText } from "../../i18n/account";
 import { groupDmText } from "../../i18n/groupDm";

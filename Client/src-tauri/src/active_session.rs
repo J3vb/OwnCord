@@ -147,7 +147,7 @@ impl ActiveSession {
 }
 
 /// The bare host part of an identity scope. Identity-key commands receive
-/// `{userId}@{host}` (see `lib/identity.ts::identityScopeKey`); a legacy host
+/// `{userId}@{host}` (see `lib/net/identity.ts::identityScopeKey`); a legacy host
 /// has no `@`. `isValidHost` forbids `@` in a real host, so splitting on the
 /// last `@` is unambiguous.
 fn scope_host(scope: &str) -> &str {

@@ -1,6 +1,6 @@
 /**
  * WP 6.7b: Windows per-app share audio on the web share path
- * (src/lib/screenShare.ts + src/lib/appAudioShare.ts). The host commands are
+ * (src/lib/voice/screenShare.ts + src/lib/voice/appAudioShare.ts). The host commands are
  * driven through the real desktop wrappers over a mocked Tauri `invoke`; the
  * socket-to-track step (`openAppAudio`) is mocked.
  */
@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { Track } from "livekit-client";
 import type { LocalTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import { initToast, teardownToast } from "@lib/toast";
+import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 import { expectConsole } from "../helpers/console";
 
@@ -33,7 +33,7 @@ vi.mock("livekit-client", async (importOriginal) => {
   };
 });
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) as unknown }));
-vi.mock("../../src/lib/appAudioTrack", () => ({
+vi.mock("../../src/lib/voice/appAudioTrack", () => ({
   openAppAudio: (...a: unknown[]) => openAppAudio(...a) as unknown,
 }));
 vi.mock("@lib/prefs/preferences", () => ({
@@ -42,7 +42,7 @@ vi.mock("@lib/prefs/preferences", () => ({
 }));
 
 const { disableScreenshare, enableScreenshare, stopManualScreenTracks } =
-  await import("@lib/screenShare");
+  await import("@lib/voice/screenShare");
 const { setScreenSourcePicker } = await import("../../src/features/voice/native/screenPickerSlot");
 const { voiceStore } = await import("@stores/voice.store");
 

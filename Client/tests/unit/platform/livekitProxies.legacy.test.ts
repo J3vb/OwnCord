@@ -1,5 +1,5 @@
 // Legacy binding for the LiveKit-proxies suite: today's `LiveKitUrlResolver`
-// (`lib/livekitUrlResolver.ts`), wrapped with no cast against the seam subset
+// (`lib/voice/livekitUrlResolver.ts`), wrapped with no cast against the seam subset
 // of the contract. The class still exists (it is the LiveKit session's
 // handle, now delegating to `platform/desktop`), so the suite runs here and in
 // `livekitProxies.desktop.test.ts`.
@@ -19,7 +19,7 @@ vi.mock("@lib/logger", () => ({
 describeLiveKitProxiesSuite(async () => {
   vi.resetModules();
   invoke.mockReset().mockResolvedValue(undefined);
-  const { LiveKitUrlResolver } = await import("../../../src/lib/livekitUrlResolver");
+  const { LiveKitUrlResolver } = await import("../../../src/lib/voice/livekitUrlResolver");
   const resolver = new LiveKitUrlResolver();
   const legacy: LiveKitProxiesSeam = {
     setLiveKitServerHost: (host) => resolver.setServerHost(host),

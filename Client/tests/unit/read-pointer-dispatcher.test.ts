@@ -28,7 +28,7 @@ import {
   setMarkUnreadSender,
 } from "../../src/components/message-list/mark-unread";
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
-import { readPointerEnabled } from "../../src/lib/serverCapabilities";
+import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
 import { expectConsole } from "../helpers/console";
@@ -39,7 +39,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),
@@ -60,14 +60,14 @@ vi.mock("@lib/livekitSession", () => ({
 // id. afterEach waits for that import: one still pending when the file ends
 // resolves after the mocks are gone and loads the real module into a torn-down
 // environment.
-vi.mock("@lib/screenShare", () => ({
+vi.mock("@lib/voice/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
 }));
 const mockShowToast = vi.fn();
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 
@@ -148,7 +148,7 @@ const chan = (id: number) => channelsStore.getState().channels.get(id);
 // is torn down, vitest throws an unhandled EnvironmentTeardownError even though
 // every test passed. Loading it once up front makes the later import a cache hit.
 beforeAll(async () => {
-  await import("../../src/lib/screenShare");
+  await import("../../src/lib/voice/screenShare");
 });
 
 describe("read pointer through the dispatcher", () => {
