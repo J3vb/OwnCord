@@ -1327,7 +1327,7 @@
       "confidence": "high",
       "fix": {
         "commit": "db0275a2",
-        "test": "Client/tests/unit/overlay-managers.test.ts",
+        "test": "Client/tests/unit/overlayManagers/inviteManager.test.ts",
         "revertProof": "pass",
         "branchCommit": "8875523c",
         "pr": 1369
@@ -3682,7 +3682,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/overlay-managers.test.ts",
+        "test": "Client/tests/unit/overlayManagers/quickSwitcherAndSearch.test.ts",
         "revertProof": "pass",
         "branchCommit": "185a420a"
       },
@@ -11499,7 +11499,7 @@
       "suggestedFix": "Ignore auto-repeat in both Ctrl+K handlers.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/overlay-managers.test.ts, Client/tests/unit/quick-switcher.test.ts (a held Ctrl+K opens once and repeats do not close it)",
+        "test": "Client/tests/unit/overlayManagers/quickSwitcherAndSearch.test.ts, Client/tests/unit/quick-switcher.test.ts (a held Ctrl+K opens once and repeats do not close it)",
         "revertProof": "fail (without the fix the repeat closes the switcher)"
       },
       "confidence": "high",
