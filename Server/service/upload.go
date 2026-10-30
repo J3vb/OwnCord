@@ -26,6 +26,9 @@ type UploadService struct {
 	// cloner is the storage a forward clones files in; guarded by quota.mu, nil until
 	// the composition root installs it.
 	cloner FileCloner
+	// own backs the signed-in user's own upload list and removal (user_uploads.go);
+	// set once by NewUploadService, nil when the store cannot serve it.
+	own OwnUploadStore
 }
 
 var _ BannerFileStore = (*db.DB)(nil)
@@ -38,7 +41,8 @@ type BannerFileStore interface {
 
 // NewUploadService creates an UploadService.
 func NewUploadService(st Store, perms *PermissionService) *UploadService {
-	return &UploadService{st: st, perms: perms}
+	own, _ := st.(OwnUploadStore)
+	return &UploadService{st: st, perms: perms, own: own}
 }
 
 // AttachmentRecord is the metadata of one stored file, whose bytes the caller has

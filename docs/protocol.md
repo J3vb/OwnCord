@@ -1437,6 +1437,15 @@ edit keeps. Editing never raises anyone's
 `mention_count`: a badge is only ever raised by the original send, so
 re-adding an already-counted mention cannot double-count it.
 
+An author removing one of their uploaded files from the My uploads page
+(`DELETE /api/v1/users/me/uploads/{id}`) is also a `chat_edited`. It carries an
+extra `attachments` array: the message's full remaining file list, `[]` once the
+last file is gone while the message keeps its text. A client replaces the
+message's attachments with it. `edited_at` is unchanged (`null` for a message
+never edited), `content` is the stored text, and `mentions` are the message's
+current set. A message left with no text and no other content is sent as a
+`chat_deleted` instead.
+
 The end of a DM call log row is also a `chat_edited`, with `edited_at: null`,
 the row's `kind` (`"call"`) and its final `call` block (see `chat_message`). It
 is not an edit by anyone: a client replaces `content` and `call` and does not
