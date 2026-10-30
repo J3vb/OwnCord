@@ -39,11 +39,19 @@ type WelcomeNotifier interface {
 	WelcomeRow(ctx context.Context, res *WelcomeResult)
 }
 
+// welcomeServiceStore is what WelcomeService reads and writes. *db.DB satisfies it.
+type welcomeServiceStore interface {
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetSetting(ctx context.Context, key string) (string, error)
+}
+
 // WelcomeService writes the line greeting a new member in the admin-picked
 // channel. All best effort: a failure is logged and never reaches the registration
 // or approval that triggered it.
 type WelcomeService struct {
-	st       Store
+	st       welcomeServiceStore
 	store    WelcomeStore
 	notifier WelcomeNotifier
 }
@@ -51,7 +59,7 @@ type WelcomeService struct {
 // NewWelcomeService creates a WelcomeService. It returns nil when st cannot
 // also insert a welcome row (a test double); a nil *WelcomeService greets
 // nobody.
-func NewWelcomeService(st Store) *WelcomeService {
+func NewWelcomeService(st welcomeServiceStore) *WelcomeService {
 	ws, ok := st.(WelcomeStore)
 	if !ok {
 		return nil
@@ -137,10 +145,15 @@ func (s *WelcomeService) Greet(ctx context.Context, userID int64) {
 	s.notifier.WelcomeRow(ctx, res)
 }
 
+// channelGetter reads one channel row.
+type channelGetter interface {
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+}
+
 // validateWelcomeChannel is the PATCH rule for WelcomeChannelKey: blank clears
 // it; anything else must be the id of an existing, non-archived text channel.
 // It returns the canonical value to store.
-func validateWelcomeChannel(ctx context.Context, st Store, value string) (string, error) {
+func validateWelcomeChannel(ctx context.Context, st channelGetter, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
