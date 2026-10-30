@@ -34,6 +34,14 @@ let refusal: Refusal | null = null;
 
 let nonRetryJoinListener: (() => void) | null = null;
 
+// Counts every join sent, so work started for one join can tell a newer one began.
+let joinCount = 0;
+
+/** How many joins have been sent; compare two reads to see whether a newer join started. */
+export function joinSequence(): number {
+  return joinCount;
+}
+
 /**
  * Runs whenever a join other than a typed-password retry starts: whatever that
  * join is for, a password dialog still open is about an older attempt. The one
@@ -49,6 +57,7 @@ export function onNonRetryJoin(listener: () => void): void {
  */
 export function noteJoinSent(id: string | undefined, passwordRetry = false): void {
   if (!passwordRetry) nonRetryJoinListener?.();
+  joinCount += 1;
   pendingId = id ?? null;
   pendingPasswordRetry = id !== undefined && passwordRetry;
   refusal = null;

@@ -104,8 +104,8 @@ func TestChannelPassword_VoiceOnlyAndNeverInTheChannelRow(t *testing.T) {
 
 	setChannelPassword(t, d, voice, &db.ChannelPasswordChange{Hash: "$2a$10$voicehashvoicehashvoice"})
 	got, err := d.GetChannel(ctx, voice.ID)
-	if err != nil || got == nil || !got.PasswordProtected {
-		t.Fatalf("GetChannel: %+v err=%v, want PasswordProtected", got, err)
+	if err != nil || got == nil || !got.JoinLocked {
+		t.Fatalf("GetChannel: %+v err=%v, want JoinLocked", got, err)
 	}
 	list, err := d.ListChannels(ctx)
 	if err != nil {
@@ -116,8 +116,8 @@ func TestChannelPassword_VoiceOnlyAndNeverInTheChannelRow(t *testing.T) {
 		if strings.Contains(string(raw), "$2a$") || strings.Contains(string(raw), "password_hash") {
 			t.Fatalf("channel JSON leaks the hash: %s", raw)
 		}
-		if list[i].ID == voice.ID && !list[i].PasswordProtected {
-			t.Fatal("ListChannels lost PasswordProtected")
+		if list[i].ID == voice.ID && !list[i].JoinLocked {
+			t.Fatal("ListChannels lost JoinLocked")
 		}
 	}
 }

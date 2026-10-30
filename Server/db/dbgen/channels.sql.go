@@ -134,7 +134,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.thread_locked,
        c.forum_require_tag,
        c.forum_default_auto_archive_minutes,
-       CAST(c.password_hash IS NOT NULL AS INTEGER) AS password_protected
+       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1
@@ -163,7 +163,7 @@ type GetAFKChannelRow struct {
 	ThreadLocked                   int64   `json:"threadLocked"`
 	ForumRequireTag                int64   `json:"forumRequireTag"`
 	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
-	PasswordProtected              int64   `json:"passwordProtected"`
+	JoinLocked                     int64   `json:"joinLocked"`
 }
 
 func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
@@ -192,7 +192,7 @@ func (q *Queries) GetAFKChannel(ctx context.Context) (GetAFKChannelRow, error) {
 		&i.ThreadLocked,
 		&i.ForumRequireTag,
 		&i.ForumDefaultAutoArchiveMinutes,
-		&i.PasswordProtected,
+		&i.JoinLocked,
 	)
 	return i, err
 }
@@ -217,7 +217,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.thread_locked,
        c.forum_require_tag,
        c.forum_default_auto_archive_minutes,
-       CAST(c.password_hash IS NOT NULL AS INTEGER) AS password_protected
+       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?
@@ -246,7 +246,7 @@ type GetChannelRow struct {
 	ThreadLocked                   int64   `json:"threadLocked"`
 	ForumRequireTag                int64   `json:"forumRequireTag"`
 	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
-	PasswordProtected              int64   `json:"passwordProtected"`
+	JoinLocked                     int64   `json:"joinLocked"`
 }
 
 func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, error) {
@@ -275,7 +275,7 @@ func (q *Queries) GetChannel(ctx context.Context, id int64) (GetChannelRow, erro
 		&i.ThreadLocked,
 		&i.ForumRequireTag,
 		&i.ForumDefaultAutoArchiveMinutes,
-		&i.PasswordProtected,
+		&i.JoinLocked,
 	)
 	return i, err
 }
@@ -484,7 +484,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.thread_locked,
        c.forum_require_tag,
        c.forum_default_auto_archive_minutes,
-       CAST(c.password_hash IS NOT NULL AS INTEGER) AS password_protected
+       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id
@@ -515,7 +515,7 @@ type ListChannelsRow struct {
 	ThreadLocked                   int64   `json:"threadLocked"`
 	ForumRequireTag                int64   `json:"forumRequireTag"`
 	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
-	PasswordProtected              int64   `json:"passwordProtected"`
+	JoinLocked                     int64   `json:"joinLocked"`
 }
 
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
@@ -550,7 +550,7 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			&i.ThreadLocked,
 			&i.ForumRequireTag,
 			&i.ForumDefaultAutoArchiveMinutes,
-			&i.PasswordProtected,
+			&i.JoinLocked,
 		); err != nil {
 			return nil, err
 		}

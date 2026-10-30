@@ -42,9 +42,9 @@ type channelFields struct {
 	// settings columns (migration 075), meaningful on a type 'forum' row.
 	ForumRequireTag                int64
 	ForumDefaultAutoArchiveMinutes int64
-	// PasswordProtected is whether the channel has a password (migration 086).
+	// JoinLocked is whether the channel has a password (migration 086).
 	// Only that fact is read here: the hash stays in the database.
-	PasswordProtected int64
+	JoinLocked int64
 }
 
 func channelFromFields(f channelFields) Channel {
@@ -71,8 +71,8 @@ func channelFromFields(f channelFields) Channel {
 			Archived: f.ThreadArchived != 0,
 			Locked:   f.ThreadLocked != 0,
 		},
-		Forum:             forumFromFields(f),
-		PasswordProtected: f.PasswordProtected != 0,
+		Forum:      forumFromFields(f),
+		JoinLocked: f.JoinLocked != 0,
 	}
 }
 

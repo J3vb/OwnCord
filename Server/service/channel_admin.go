@@ -410,7 +410,7 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 	slog.Info("channel updated", "actor_id", actorID, "channel_id", existing.ID, "name", meta.Name, "nsfw", req.NSFW)
 	db.WriteAudit(tail, s.st, actorID, "channel_update", "channel", existing.ID,
 		fmt.Sprintf("updated #%s%s%s", meta.Name, nsfwAuditSuffix(existing.NSFW, req.NSFW),
-			passwordAuditSuffix(existing.PasswordProtected, pwChange)))
+			passwordAuditSuffix(existing.JoinLocked, pwChange)))
 
 	updated, err := s.st.GetChannel(tail, existing.ID)
 	if err != nil || updated == nil {

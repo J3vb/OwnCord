@@ -352,7 +352,7 @@ func TestVoiceJoinPassword_PayloadsNeverCarryTheHash(t *testing.T) {
 	if err != nil || ch == nil {
 		t.Fatalf("GetChannel: %v", err)
 	}
-	if !ch.PasswordProtected {
+	if !ch.JoinLocked {
 		t.Fatal("channel row must say it is password protected")
 	}
 	raw, _ := json.Marshal(ch)

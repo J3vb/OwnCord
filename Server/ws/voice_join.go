@@ -203,7 +203,7 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// The password is the user's own join only: CanJoinVoice above also gates
 	// a moderator's move, the AFK move and the token refresh, and those must
 	// keep working without it.
-	if !h.voiceJoinPasswordGate(ctx, c, sub, channelID, ch.PasswordProtected, intent.Password, reqID) {
+	if !h.voiceJoinPasswordGate(ctx, c, sub, channelID, ch.JoinLocked, intent.Password, reqID) {
 		return 0, nil, 0, false
 	}
 

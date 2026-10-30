@@ -27,11 +27,11 @@ type channelPayload struct {
 	// sent, and identical for every recipient, so the shared channel_update
 	// frame stays shared. Members in it can listen but not publish.
 	AFK bool `json:"afk"`
-	// PasswordProtected is whether a voice channel has a password (migration
+	// JoinLocked is whether a voice channel has a password (migration
 	// 086). Always sent and identical for every recipient, so the shared
 	// channel_update frame stays shared. It is not a per-viewer unlocked flag:
 	// a client tries the join and reacts to PASSWORD_REQUIRED.
-	PasswordProtected bool `json:"password_protected"`
+	JoinLocked bool `json:"password_protected"`
 	// Private is the channel-level lock flag (3D-6): the default role cannot
 	// read the channel after its override is applied. Always sent, like NSFW,
 	// and identical for every recipient — never per-viewer — so the shared
@@ -80,21 +80,21 @@ type channelPayload struct {
 // events can never disagree about which fields a client is told about.
 func channelPayloadFrom(ch *db.Channel, private bool) channelPayload {
 	return channelPayload{
-		ID:                ch.ID,
-		Name:              ch.Name,
-		Type:              ch.Type,
-		Category:          ch.Category,
-		CategoryID:        ch.CategoryID,
-		CategoryPosition:  ch.CategoryPosition,
-		Topic:             ch.Topic,
-		Position:          ch.Position,
-		SlowMode:          ch.SlowMode,
-		NSFW:              ch.NSFW,
-		AFK:               ch.AFK,
-		PasswordProtected: ch.PasswordProtected,
-		Private:           private,
-		VoiceMaxUsers:     ch.VoiceMaxUsers,
-		VoiceMaxVideo:     ch.VoiceMaxVideo,
-		Forum:             ch.Forum,
+		ID:               ch.ID,
+		Name:             ch.Name,
+		Type:             ch.Type,
+		Category:         ch.Category,
+		CategoryID:       ch.CategoryID,
+		CategoryPosition: ch.CategoryPosition,
+		Topic:            ch.Topic,
+		Position:         ch.Position,
+		SlowMode:         ch.SlowMode,
+		NSFW:             ch.NSFW,
+		AFK:              ch.AFK,
+		JoinLocked:       ch.JoinLocked,
+		Private:          private,
+		VoiceMaxUsers:    ch.VoiceMaxUsers,
+		VoiceMaxVideo:    ch.VoiceMaxVideo,
+		Forum:            ch.Forum,
 	}
 }

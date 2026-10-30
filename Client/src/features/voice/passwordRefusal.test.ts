@@ -245,6 +245,16 @@ describe("password dialog on a refused voice_join", () => {
     expect(dialog()).toBeNull();
   });
 
+  it("a newer join started while the prompt chunk loads leaves no dialog behind", async () => {
+    joinVoiceChannel(4);
+    noteJoinSent("join-0");
+    refuse("PASSWORD_REQUIRED", "join-0");
+    // The user clicks another channel before the lazy import resolves.
+    noteJoinSent("join-9");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(dialog()).toBeNull();
+  });
+
   it("does not open while the socket is down", () => {
     setConnectionStatus("disconnected");
     promptForChannelPassword(ws, 4, null);

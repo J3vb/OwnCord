@@ -14,7 +14,7 @@ import (
 // holds that one fact only: the hash is read through ChannelPasswordState and
 // never lives on a channel value.
 type ChannelPassword struct {
-	PasswordProtected bool `json:"password_protected"`
+	JoinLocked bool `json:"password_protected"`
 }
 
 // ChannelPasswordChange is a password write carried by ChannelUpdate. Clear

@@ -80,6 +80,8 @@ export function promptForChannelPassword(
   // A socket that is gone has nothing to join with; the session may be over.
   if (uiStore.getState().connectionStatus !== "connected") return;
   if (!channelsStore.getState().channels.has(channelId)) return;
+  // Another call is up: the refusal belongs to an older attempt.
+  if (voiceStore.getState().currentChannelId !== null) return;
   const mine = generation;
   const channelName = channelsStore.getState().channels.get(channelId)?.name ?? "";
   void import("../../components/ChannelPasswordDialog").then(

@@ -23,6 +23,7 @@ import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/watchRequest";
 import {
+  joinSequence,
   noteJoinSent,
   refusalWasPasswordRetry,
   takeJoinRefusal,
@@ -606,12 +607,15 @@ export function handleVoicePasswordRefusal(
     problem = "rateLimited";
   else if (payload.code !== WsErrorCode.PASSWORD_REQUIRED) return false;
   // Only this refusal needs the dialog, so it loads on demand. The prompt
-  // registers its sign-out reset only once loaded, so a session that ended
-  // while the chunk was loading must not get a dialog from it.
+  // registers its sign-out reset and its new-join listener only once loaded,
+  // so a session that ended, or a join started, while the chunk was loading
+  // must not get a dialog from it.
   const owner = authStore.getState().user?.id;
+  const seq = joinSequence();
   void import("./passwordPrompt").then(
     ({ promptForChannelPassword }) => {
       if (owner === undefined || authStore.getState().user?.id !== owner) return;
+      if (joinSequence() !== seq) return;
       promptForChannelPassword(ws, channelId, problem);
     },
     (err: unknown) => log.error("Password prompt failed to load", err),

@@ -53,7 +53,7 @@ import { handleMentionCount } from "../../src/features/channels/wsHandlers";
 import type { Channel } from "../../src/stores/channels.store";
 import { savePref } from "../../src/lib/preferences";
 import { expectConsole } from "../helpers/console";
-import { voiceStore } from "../../src/stores/voice.store";
+import { leaveVoiceChannel, voiceStore } from "../../src/stores/voice.store";
 import { promptForChannelPassword } from "../../src/features/voice/passwordPrompt";
 import { messagesStore } from "../../src/stores/messages.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -480,8 +480,9 @@ const PROBES: readonly Probe[] = [
     name: "voice:passwordPrompt",
     mutate: async () => {
       const priorStatus = uiStore.getState().connectionStatus;
-      // The prompt needs a live socket and a known channel to open.
+      // The prompt needs a live socket, a known channel and no call in progress to open.
       setConnectionStatus("connected");
+      leaveVoiceChannel();
       channelsStore.setState((s) => ({
         ...s,
         channels: new Map([[5, { id: 5, name: "vault", type: "voice" } as Channel]]),

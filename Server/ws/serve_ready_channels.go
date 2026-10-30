@@ -62,7 +62,7 @@ func readyChannelPayloads(visibleChannels []db.Channel, grants permissions.Membe
 			"afk": visibleChannels[i].AFK,
 			// Whether a voice channel has a password. The same for every
 			// viewer; the join itself says whether this one must enter it.
-			"password_protected": visibleChannels[i].PasswordProtected,
+			"password_protected": visibleChannels[i].JoinLocked,
 			"private":            privacy.PrivateOf(&visibleChannels[i]), // 3D-6, channel-level
 			// Whether THIS caller has acknowledged the label. Always
 			// present, like nsfw itself — false for an unlabelled channel,

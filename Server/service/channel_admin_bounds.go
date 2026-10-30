@@ -40,7 +40,7 @@ func channelPasswordChange(existing *db.Channel, requested *string) (*db.Channel
 		return nil, fmt.Errorf("a password can only be set on a voice channel%.0w", ErrBadRequest)
 	}
 	if *requested == "" {
-		if !existing.PasswordProtected {
+		if !existing.JoinLocked {
 			return nil, nil
 		}
 		return &db.ChannelPasswordChange{Clear: true}, nil
