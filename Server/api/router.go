@@ -27,6 +27,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/stackutil"
 	"github.com/J3vb/OwnCord/Server/storage"
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/sysstats"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/webclient"
@@ -58,6 +59,10 @@ type Runtime struct {
 	// block. The app starts its sampler (App.startHub) and stops it before the
 	// hub. Nil leaves the block out.
 	MetricsWindows *metrics.Windows
+	// SystemStats is the CPU and memory sampler behind the admin Dashboard's
+	// health row. The app starts and stops it beside MetricsWindows. Nil
+	// leaves those figures null.
+	SystemStats *sysstats.Sampler
 	// Auth is the account service, built by StartRuntime over the hub (its
 	// AuthBroadcaster) and shared with the erasure runner. NewRouter only mounts
 	// it.
@@ -233,7 +238,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	u := rt.Updater
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt)))
+		adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes))
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the
