@@ -194,9 +194,12 @@ func scanLinesBackward(ctx context.Context, f io.ReaderAt, end int64, fn func(li
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		n := min(int64(logHistoryChunk), pos)
-		pos -= n
-		buf := make([]byte, int(n)+len(tail))
+		n := logHistoryChunk
+		if pos < int64(n) {
+			n = int(pos)
+		}
+		pos -= int64(n)
+		buf := make([]byte, n+len(tail))
 		if _, err := f.ReadAt(buf[:n], pos); err != nil && !errors.Is(err, io.EOF) {
 			return err
 		}
