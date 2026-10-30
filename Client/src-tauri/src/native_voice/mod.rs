@@ -1288,7 +1288,7 @@ mod tests {
     #[test]
     fn build_info_reports_sdk_and_libwebrtc() {
         let info = native_voice_build_info();
-        assert!(info.contains("livekit 0.9.5"), "unexpected: {info}");
+        assert!(info.contains("livekit 0.10.0"), "unexpected: {info}");
         assert!(info.contains("libwebrtc-ok"), "unexpected: {info}");
     }
 

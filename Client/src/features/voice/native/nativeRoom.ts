@@ -187,7 +187,7 @@ export class NativeRemotePublication {
   setVideoQuality(quality: VideoQuality): void {
     this.setVideoView(this.isEnabled, (["low", "medium", "high"] as const)[quality] ?? "high");
   }
-  /** Maps the size to a quality by choice (livekit 0.9.5's
+  /** Maps the size to a quality by choice (livekit 0.10.0's
    *  update_video_dimensions exists but is not used): the smallest of the
    *  usual 180p/360p/720p layers that covers the tile. */
   setVideoDimensions({ width, height }: { width: number; height: number }): void {

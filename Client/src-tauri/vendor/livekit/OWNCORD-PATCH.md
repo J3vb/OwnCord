@@ -1,17 +1,17 @@
-# Vendored livekit 0.9.5 (OwnCord patch)
+# Vendored livekit 0.10.0 (OwnCord patch)
 
-This is the crates.io package `livekit-0.9.5` (checksum
-`b997899186e33ae91e6c87b9d3887632dd7ca5ba3fe02c0ebf0171974899571c`),
+This is the crates.io package `livekit-0.10.0` (checksum
+`51f6a9dd86d3255487f778582ec0d631092fd379d781ae11995479498f12daf4`),
 unpacked verbatim except for the files below and the removal of cargo's
 `.cargo-ok` marker. It is wired in by `[patch.crates-io]` in
-`Client/src-tauri/Cargo.toml`; the dependency stays `livekit = "=0.9.5"`.
+`Client/src-tauri/Cargo.toml`; the dependency stays `livekit = "=0.10.0"`.
 Its own `Cargo.toml` is untouched, so every dependency resolves to the same
 crates.io version `Cargo.lock` pins. Only the `livekit` crate is vendored.
 
 ## Why (WP LP-8d)
 
-0.9.5 never sets `AddTrackRequest.stereo` or `AudioTrackFeature::TfStereo`, so
-livekit-server strips `stereo=1` from the publisher's answer and libwebrtc
+Upstream (still in 0.10.0) never sets `AddTrackRequest.stereo` or
+`AudioTrackFeature::TfStereo`, so livekit-server strips `stereo=1` from the publisher's answer and libwebrtc
 builds a mono opus encoder: a Linux screen share's stereo audio is downmixed
 before it is sent. The patch adds `TrackPublishOptions::stereo` (default
 `false`, audio tracks only). `native_voice/session.rs` sets it for the screen
@@ -21,7 +21,7 @@ the crates.io ones.
 ## Patch
 
 All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
-(`diff -ru livekit-0.9.5 vendor/livekit`, paths trimmed):
+(`diff -ru livekit-0.10.0 vendor/livekit`, paths trimmed):
 
 ```diff
 --- src/room/options.rs
@@ -30,7 +30,7 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
      /// - Screen share: `MaintainResolution` (clarity is critical for text/UI)
      /// - Other/unknown: `Balanced`
      pub degradation_preference: Option<DegradationPreference>,
-+    // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.9.5. See OWNCORD-PATCH.md.
++    // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
 +    /// Audio only; signals TF_STEREO (and `AddTrackRequest.stereo`) so the SFU
 +    /// negotiates stereo Opus (`stereo=1`) for the published track. Ignored
 +    /// for video tracks.
@@ -52,17 +52,17 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
              req.audio_features.push(proto::AudioTrackFeature::TfPreconnectBuffer as i32);
          }
  
-+        // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.9.5.
++        // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0.
 +        apply_stereo_request(&mut req, &options, matches!(track, LocalTrack::Audio(_)));
 +
          req.packet_trailer_features =
              options.frame_metadata_features.to_proto().into_iter().map(|f| f as i32).collect();
  
-@@ -1179,12 +1182,52 @@
+@@ -1182,12 +1185,52 @@
      }
  }
  
-+// OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.9.5. Marks an audio
++// OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0. Marks an audio
 +// track's AddTrackRequest as stereo, both ways livekit-client does, so the
 +// SFU's publisher answer carries `stereo=1`. Video tracks are left alone.
 +// `AddTrackRequest.stereo` is deprecated in favour of TF_STEREO, but the

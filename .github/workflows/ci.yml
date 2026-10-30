@@ -1219,7 +1219,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v3
+          key: linux-webrtc-${{ runner.arch }}-webrtc-a545de4-v1
 
       - name: Install native-voice build prerequisites
         run: bash ../scripts/linux-webrtc-toolchain.sh
@@ -1564,7 +1564,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/owncord-linux-webrtc
-          key: linux-webrtc-${{ runner.arch }}-webrtc-89d790b-v3
+          key: linux-webrtc-${{ runner.arch }}-webrtc-a545de4-v1
 
       - name: Install native-voice build prerequisites
         if: startsWith(matrix.os, 'ubuntu')
