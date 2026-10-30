@@ -111,7 +111,6 @@ func (s *stopJoinLeaveStore) LeaveIfMatch(ctx context.Context, _, _ int64, _ str
 }
 
 func TestVoiceLeaveRetry_JoinedByStopHub(t *testing.T) {
-	t.Parallel()
 	old := voiceLeaveRetryTimeout.Load()
 	voiceLeaveRetryTimeout.Store(int64(time.Hour)) // only the hub stop may end the retry
 	t.Cleanup(func() { voiceLeaveRetryTimeout.Store(old) })

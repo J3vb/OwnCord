@@ -76,7 +76,6 @@ func payloadOf(f map[string]any) map[string]any {
 // A vote answers the voter, and every subscriber gets one sequenced, replayable
 // poll_update with the full counts, the version, and the voter's id and set.
 func TestPollVote_UpdateCarriesVersionAndVoter(t *testing.T) {
-	t.Parallel()
 	h := newForwardHarness(t)
 	h.focus(h.aliceCl, h.dstChan)
 	poll := h.rawPoll(t, h.dstChan, false)
@@ -152,7 +151,6 @@ func TestPollVote_DMUpdateIsAddressedToParticipants(t *testing.T) {
 }
 
 func TestPollEnd_UpdateAndRefusals(t *testing.T) {
-	t.Parallel()
 	h := newForwardHarness(t)
 	h.focus(h.aliceCl, h.dstChan)
 	poll := h.rawPoll(t, h.dstChan, false)
@@ -229,7 +227,6 @@ func countPollRows(t *testing.T, h *forwardHarness, q string) int {
 }
 
 func TestPollCommands_RefusalsAnswerErrorFrames(t *testing.T) {
-	t.Parallel()
 	h := newForwardHarness(t)
 	poll := h.rawPoll(t, h.dstChan, false)
 	for _, tc := range []struct {
@@ -277,7 +274,6 @@ func TestPollCommands_RefusalsAnswerErrorFrames(t *testing.T) {
 // A poll_update names a message and carries its tallies, so an unacknowledged
 // member of a labelled channel never receives it.
 func TestPollUpdate_NSFWGated(t *testing.T) {
-	t.Parallel()
 	h := newForwardHarness(t)
 	if _, err := h.database.ExecContext(context.Background(), `UPDATE channels SET nsfw = 1 WHERE id = ?`, h.dstChan); err != nil {
 		t.Fatal(err)
@@ -422,7 +418,6 @@ func TestPollVote_RaceEnd(t *testing.T) {
 // The expirer's notifier is the hub: a poll that ran out is announced as a
 // sequenced, replayable update, and a DM poll goes to its participants.
 func TestPollExpirer_AnnouncesThroughTheHub(t *testing.T) {
-	t.Parallel()
 	h := newForwardHarness(t)
 	h.focus(h.aliceCl, h.dstChan)
 	chanPoll := h.rawPoll(t, h.dstChan, false)

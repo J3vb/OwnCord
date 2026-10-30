@@ -291,7 +291,6 @@ func (c *collector) finish() {
 // Two moderators issue and lift concurrently: whatever the interleaving, the
 // last frame a moderator holds is the newest mirror, and so is the target's.
 func TestMemberTimeouts_ConcurrentIssueLiftConverges(t *testing.T) {
-	t.Parallel()
 	f := newTimeoutViewFixture(t)
 	ctx := context.Background()
 	col := collect(t, f.sends[f.modID])

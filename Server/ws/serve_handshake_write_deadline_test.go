@@ -72,7 +72,6 @@ func (l *tinySendBufListener) Accept() (net.Conn, error) {
 // be in flight at that point — which the member count below is sized well
 // past, for margin.
 func TestServeWS_HandshakeWrite_TimesOutOnStalledPeer(t *testing.T) {
-	t.Parallel()
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
 	hub := newTestHubDeps(t, database, limiter, nil)

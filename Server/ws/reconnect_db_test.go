@@ -285,7 +285,6 @@ func TestReconnect_ColdTierAtRowLimit_ForcesFullReady(t *testing.T) {
 // persisted row). The replay must deliver 501..710 — the 200 cold rows plus
 // the 10-event buffer tail.
 func TestReconnect_ColdTierMergesRingBufferTail(t *testing.T) {
-	t.Parallel()
 	database := openServeTestDB(t)
 	limiter := auth.NewRateLimiter()
 
