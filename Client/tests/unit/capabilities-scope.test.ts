@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 // component — not a cross-component contract test. See
 // docs/contributing.md#testing.
 import capabilityJson from "../../src-tauri/capabilities/default.json";
+import desktopCapabilityJson from "../../src-tauri/capabilities/desktop.json";
 
 interface ScopeEntry {
   readonly url?: string;
@@ -157,5 +158,29 @@ describe("Tauri default capability — HTTP scope", () => {
     for (const path of writes) {
       expect(path).not.toMatch(/^\$APPDATA(\/|$)/);
     }
+  });
+});
+
+// The Android build compiles without the desktop-only plugins, and tauri-build
+// refuses a capability that names a permission whose plugin is not compiled
+// in. Their grants therefore live in desktop.json, limited to the desktop
+// platforms, and never in the capability every platform loads.
+describe("Tauri capabilities — desktop-only plugins", () => {
+  const DESKTOP_ONLY = ["window-state:", "autostart:", "deep-link:"];
+  const isDesktopOnly = (p: Permission): boolean => {
+    const id = typeof p === "string" ? p : p.identifier;
+    return DESKTOP_ONLY.some((prefix) => id.startsWith(prefix));
+  };
+
+  it("the default capability grants no desktop-only plugin", () => {
+    expect(permissions.filter(isDesktopOnly)).toEqual([]);
+  });
+
+  it("desktop.json is limited to the desktop platforms and holds those grants", () => {
+    expect(desktopCapabilityJson.platforms).toEqual(["linux", "macOS", "windows"]);
+    expect(desktopCapabilityJson.windows).toEqual(["main"]);
+    const grants = desktopCapabilityJson.permissions as readonly Permission[];
+    expect(grants.length).toBeGreaterThan(0);
+    expect(grants.every(isDesktopOnly)).toBe(true);
   });
 });

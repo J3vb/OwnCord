@@ -500,6 +500,20 @@ test("a Rust change reaches rust-tests and the native job, not the browser jobs"
   assert.equal(sel.browser, false);
 });
 
+test("client source and the Rust shell build the Android APK; tests do not", () => {
+  assert.equal(runs("M\tClient/src/pages/MainPage.ts", "android"), true);
+  assert.equal(runs("M\tClient/src-tauri/src/lib.rs", "android"), true);
+  assert.equal(
+    runs("M\tClient/src-tauri/gen/android/app/build.gradle.kts", "android"),
+    true,
+    "the Gradle project is the APK's build",
+  );
+  assert.equal(runs("M\tClient/vite.config.desktop.ts", "android"), true);
+  assert.equal(runs("M\tClient/package-lock.json", "android"), true);
+  assert.equal(runs("M\tClient/tests/unit/dispatcher.test.ts", "android"), false);
+  assert.equal(runs("M\tServer/api/router.go", "android"), false);
+});
+
 // ─── Parser shape.
 
 test("the parser ignores anything that is not a name-status row", () => {

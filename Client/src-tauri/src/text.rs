@@ -12,23 +12,37 @@
 
 // --- Tray menu and tooltip -------------------------------------------------
 
+#[cfg(desktop)]
 pub const TRAY_SHOW_HIDE: &str = "Show/Hide";
+#[cfg(desktop)]
 pub const TRAY_STATUS: &str = "Status";
+#[cfg(desktop)]
 pub const TRAY_STATUS_ONLINE: &str = "Online";
+#[cfg(desktop)]
 pub const TRAY_STATUS_IDLE: &str = "Idle";
+#[cfg(desktop)]
 pub const TRAY_STATUS_DND: &str = "Do Not Disturb";
 // The app's status picker calls this "Invisible"; the tray must not say
 // "Offline" for the same state (F24).
+#[cfg(desktop)]
 pub const TRAY_STATUS_OFFLINE: &str = "Invisible";
+#[cfg(desktop)]
 pub const TRAY_OPEN_LOGS: &str = "Open Log Folder";
+#[cfg(desktop)]
 pub const TRAY_MUTE: &str = "Mute / Unmute";
+#[cfg(desktop)]
 pub const TRAY_DEAFEN: &str = "Deafen / Undeafen";
+#[cfg(desktop)]
 pub const TRAY_QUIT: &str = "Quit";
+#[cfg(desktop)]
 pub const TRAY_TOOLTIP: &str = "OwnCord";
+#[cfg(desktop)]
 pub const TRAY_TOOLTIP_UNREAD_ONE: &str = "OwnCord — 1 unread mention";
+#[cfg(desktop)]
 pub const TRAY_TOOLTIP_UNREAD: &str = "OwnCord — {count} unread mentions";
 
 /// The tray tooltip with the unread badge count; plain at 0.
+#[cfg(desktop)]
 pub fn tray_tooltip(count: u32) -> String {
     match count {
         0 => TRAY_TOOLTIP.to_string(),
@@ -41,6 +55,7 @@ pub fn tray_tooltip(count: u32) -> String {
 
 /// The click action on a message or call notification (macOS, Linux).
 #[cfg_attr(windows, allow(dead_code))]
+#[cfg(desktop)]
 pub const NOTIFICATION_OPEN: &str = "Open";
 
 // --- Global shortcuts (Wayland portal) -------------------------------------
@@ -56,18 +71,23 @@ pub const SHORTCUT_DEAFEN: &str = "Toggle Deafen";
 // --- Close to tray notice --------------------------------------------------
 
 /// Shown once, the first time the X button hides the window to the tray.
+#[cfg(desktop)]
 pub const TRAY_NOTICE_TITLE: &str = "OwnCord";
+#[cfg(desktop)]
 pub const TRAY_NOTICE_BODY: &str = "OwnCord is still running in the tray";
 
 // --- Startup failure dialog ------------------------------------------------
 
 // On Linux lib.rs shows it only when a display is set; a headless run keeps
 // the stderr line alone.
+#[cfg(desktop)]
 pub const STARTUP_DIALOG_TITLE: &str = "OwnCord failed to start";
+#[cfg(desktop)]
 pub const STARTUP_DIALOG_BODY: &str =
     "The application encountered a startup error and cannot continue.\n\n{error}";
 
 /// The startup dialog body with the raw error detail appended verbatim.
+#[cfg(desktop)]
 pub fn startup_dialog_body(error: &str) -> String {
     STARTUP_DIALOG_BODY.replace("{error}", error)
 }

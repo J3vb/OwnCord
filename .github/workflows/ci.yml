@@ -73,6 +73,7 @@ jobs:
       deps: ${{ steps.select.outputs.deps }}
       permissions: ${{ steps.select.outputs.permissions }}
       changelog: ${{ steps.select.outputs.changelog }}
+      android: ${{ steps.select.outputs.android }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -1832,6 +1833,125 @@ jobs:
             Client/test-results/
           retention-days: 7
 
+  # The Android app: the same client and Rust crate built as an arm64
+  # APK, signed with the release keystore the owner made locally and stored as
+  # repository secrets, and uploaded so it can be installed from the run's
+  # Summary page. The keystore is decoded into RUNNER_TEMP, outside the
+  # checkout and outside the artifact path, and removed at the end. CI never
+  # creates a keystore: artifacts of a public repository are public. A fork or
+  # Dependabot run has no secrets, so it builds the APK unsigned as a compile
+  # check and uploads nothing.
+  android-build:
+    name: Android APK
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.android == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: Client/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+
+      - name: Android toolchains
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-linux-android
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "NDK: $ANDROID_NDK_LATEST_HOME"
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: Client/src-tauri
+          key: android-aarch64
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Clippy for Android
+        working-directory: Client/src-tauri/
+        run: |
+          export CC_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
+          export AR_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+          mkdir -p ../dist
+          cargo clippy --target aarch64-linux-android -- -D warnings
+
+      - name: Signing config from secrets
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::notice::No Android signing secrets in this run; building an unsigned APK and uploading nothing"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/owncord-release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/owncord-release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > src-tauri/gen/android/keystore.properties
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Build the APK (arm64)
+        run: |
+          start=$(date +%s)
+          npx tauri android build --apk --target aarch64 --ci
+          echo "BUILD_SECONDS=$(( $(date +%s) - start ))" >> "$GITHUB_ENV"
+
+      - name: Remove the signing config
+        if: always()
+        run: rm -f "$RUNNER_TEMP/owncord-release.jks" src-tauri/gen/android/keystore.properties
+
+      - name: Check signature, page alignment and size
+        id: apk
+        env:
+          SIGNED: ${{ steps.signing.outputs.signed }}
+          SHA: ${{ github.sha }}
+        run: |
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*.apk' | head -n 1)
+          test -n "$apk" || { echo "::error::no APK was built"; exit 1; }
+          tools=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$tools/zipalign" -c -P 16 4 "$apk"
+          out="$RUNNER_TEMP/owncord-android-${SHA::7}.apk"
+          cp "$apk" "$out"
+          if [ "$SIGNED" = "true" ]; then
+            "$tools/apksigner" verify --print-certs "$out" | grep -v -i "digest" || true
+            "$tools/apksigner" verify "$out"
+          fi
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Android APK"
+            echo ""
+            echo "- Signed: $SIGNED"
+            echo "- Size: $(du -h "$out" | cut -f1) ($(stat -c %s "$out") bytes)"
+            echo "- \`tauri android build\`: ${BUILD_SECONDS} s"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: steps.signing.outputs.signed == 'true'
+        with:
+          name: owncord-android-${{ github.sha }}
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error
+
   # Workstream 17 asks for a refused unsupported major to be verified, and only
   # a real other-major Node can do it: `npm install --node-version=23` exits 0
   # against `>=24`, because the flag does not feed the root-package engine check.
@@ -1909,6 +2029,7 @@ jobs:
       - client-web
       - client-native
       - node-policy
+      - android-build
     if: >-
       ${{ always() && github.run_attempt == 1
       && contains(needs.*.result, 'failure')
