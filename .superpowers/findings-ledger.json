@@ -1939,7 +1939,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "760686c",
-        "test": "Client/tests/unit/message-input.test.ts",
+        "test": "Client/tests/unit/messageInput/sendAndDraft.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -5315,7 +5315,7 @@
       "confidence": "high",
       "fix": {
         "commit": "dbf2867514ee50cf15b390246470ffaacb17c344",
-        "test": "Client/tests/unit/message-input.test.ts",
+        "test": "Client/tests/unit/messageInput/pickersAndFormatting.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Add the bound at the single entry point rather than at each call site \u2014 in handlePasteFile, alongside the existing size/type guards (MessageInput.ts, just before the `const tempId = ...` line): `if (pendingAttachments.length >= 10) { showUploadError(\"You can attach at most 10 files to a message\"); return; }`. Placing it before the upload also stops the 11th file from being uploaded and orphaned.",
@@ -7092,7 +7092,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "31f73e3",
-        "test": "Client/tests/unit/message-input.test.ts",
+        "test": "Client/tests/unit/messageInput/pickersAndFormatting.test.ts",
         "revertProof": "pass"
       }
     },
@@ -10723,7 +10723,7 @@
       "fixed": "2026-09-25",
       "fix": {
         "commit": "cdea5ab0",
-        "test": "Client/tests/unit/message-input.test.ts",
+        "test": "Client/tests/unit/messageInput/sendAndDraft.test.ts",
         "revertProof": "self-reported",
         "pr": 1798
       }
