@@ -77,6 +77,7 @@ var panelEditableKeys = []string{
 	"tls.domain",
 	"tls.key_file",
 	"tls.mode",
+	"upload.import_max_mb",
 	"upload.max_size_mb",
 	"upload.storage_dir",
 	"upload.user_quota_mb",
@@ -131,9 +132,9 @@ func TestEditableKeys_ProtectedKeysStayOut(t *testing.T) {
 			t.Errorf("IsEditable(%q) = true for a key that is not a config leaf", key)
 		}
 	}
-	// Every config key is classified exactly once (parity_test pins 77).
-	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 77 {
-		t.Errorf("editable %d + excluded %d = %d keys, want all 77 classified",
+	// Every config key is classified exactly once (parity_test pins 78).
+	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 78 {
+		t.Errorf("editable %d + excluded %d = %d keys, want all 78 classified",
 			len(panelEditableKeys), len(panelExcludedKeys), n)
 	}
 }

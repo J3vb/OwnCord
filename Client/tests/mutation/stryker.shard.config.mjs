@@ -275,7 +275,7 @@ export const shards = {
   "lib-rest-6": [
     "src/lib/ui/a11y.ts",
     "src/lib/ui/clipboard.ts",
-    "src/lib/admin-panel.ts",
+    "src/lib/adminPanel.ts",
     "src/lib/notifications.ts",
     "src/lib/prefs/soundPrefs.ts",
     "src/features/unread-badge/unreadBadge.ts",

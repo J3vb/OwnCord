@@ -48,4 +48,16 @@ type SetupOptions struct {
 	// App.Close. The update apply tail watches it so a SIGTERM during the
 	// restart countdown aborts the binary swap. Nil never fires.
 	Shutdown <-chan struct{}
+	// DiscordImport runs "Import from Discord". Nil answers its routes 503,
+	// the direct-construction test path.
+	DiscordImport DiscordImporter
+	// ImportDir is where an uploaded export is held while it imports; the
+	// system temp directory when empty.
+	ImportDir string
+	// ImportMaxBytes caps one export upload (upload.import_max_mb);
+	// DefaultImportMaxBytes when zero.
+	ImportMaxBytes int64
+	// BeginTransfer gives the upload route the long-transfer deadline of the
+	// file routes. Nil leaves only the size cap.
+	BeginTransfer TransferBegin
 }

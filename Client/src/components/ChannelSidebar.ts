@@ -32,12 +32,12 @@ import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/consta
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createLazyScreen } from "./lazyScreen";
 import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
-import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
-import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
-import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";
-import { attachThreadContextMenu } from "./channel-sidebar/thread-menu";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volumeMenu";
+import { attachCategoryContextMenu } from "./channel-sidebar/categoryMenu";
+import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/contextMenu";
+import { attachThreadContextMenu } from "./channel-sidebar/threadMenu";
 import { followedThreadsStore, type FollowedThreadsView } from "@stores/followedThreads.store";
-import { attachCategoryDragHandlers, attachDragHandlers } from "./channel-sidebar/drag-reorder";
+import { attachCategoryDragHandlers, attachDragHandlers } from "./channel-sidebar/dragReorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { openIdentityMismatchModal } from "../features/voice/peerVerification";
 import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
@@ -92,7 +92,7 @@ import { PREF_CHANGE_EVENT } from "@lib/prefs/preferences";
 // The per-user volume menu loads on its first open.
 const volumeMenuScreen = createLazyScreen(
   "user-volume-menu",
-  () => import("./channel-sidebar/volume-menu"),
+  () => import("./channel-sidebar/volumeMenu"),
 );
 /** Latest open request per sidebar (keyed by its lifetime signal); an earlier one still loading is dropped. */
 const volumeMenuAttempts = new WeakMap<AbortSignal, number>();

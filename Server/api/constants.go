@@ -108,6 +108,9 @@ var bodyCapExemptPrefixes = []string{
 	// 5 MiB banner envelope, enforced the same way with
 	// bannerMaxBodySize.
 	"/api/v1/users/me/banner",
+	// Discord export upload: its own cap (upload.import_max_mb) and the
+	// transfer deadline, enforced by the handler.
+	"/admin/api/discord-imports/upload",
 }
 
 // bodyCapExemptPattern names the one upload route with an id mid-path, which a

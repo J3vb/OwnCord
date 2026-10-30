@@ -12,8 +12,8 @@ import { safetyStore } from "../../features/safety/store";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { shellText } from "../../i18n/shell";
 import type { MessageListOptions } from "../MessageList";
-import { attachReactionTooltip } from "./reaction-tooltip";
-import { buildCustomEmojiNode } from "./custom-emoji";
+import { attachReactionTooltip } from "./reactionTooltip";
+import { buildCustomEmojiNode } from "./customEmoji";
 
 // -- Reaction rendering -------------------------------------------------------
 

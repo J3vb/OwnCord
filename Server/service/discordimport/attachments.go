@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif" // registers the GIF header decoder for imageSize
+	_ "image/png" // registers the PNG header decoder for imageSize
 	"io"
 	"log/slog"
 	"net/http"
@@ -56,6 +59,7 @@ func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a 
 	}
 	mime := http.DetectContentType(sniff[:n])
 	fileID := uuid.New().String()
+	width, height := imageSize(sniff[:n], mime)
 	written, err := r.cfg.Files.SaveReserved(ctx, res, fileID, io.MultiReader(bytes.NewReader(sniff[:n]), media.Reader))
 	if err != nil {
 		if errors.Is(err, storage.ErrIO) || errors.Is(err, ErrZipTooLarge) {
@@ -63,7 +67,7 @@ func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a 
 		}
 		return "", nil
 	}
-	if err := r.cfg.Store.CreateAttachment(ctx, fileID, st.account, name, fileID, mime, written, nil, nil); err != nil {
+	if err := r.cfg.Store.CreateAttachment(ctx, fileID, st.account, name, fileID, mime, written, width, height); err != nil {
 		if delErr := r.cfg.Files.Delete(fileID); delErr != nil {
 			slog.Warn("failed to remove import file", "stored_as", fileID, "error", delErr)
 		}
@@ -75,6 +79,21 @@ func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a 
 	}
 	st.chunkBytes += max(written, 1)
 	return fileID, nil
+}
+
+// imageSize reads the size of a PNG or GIF from its first bytes, where the
+// header lives. A JPEG is left unmeasured: its size sits after the metadata
+// and its EXIF orientation can swap the sides, which this cheap pass cannot
+// settle, so clients size it once it loads.
+func imageSize(head []byte, mime string) (width, height *int) {
+	if mime != "image/png" && mime != "image/gif" {
+		return nil, nil
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(head))
+	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		return nil, nil
+	}
+	return &cfg.Width, &cfg.Height
 }
 
 // cleanFilename is the display name an attachment keeps: the export's file name

@@ -330,6 +330,10 @@ type UploadConfig struct {
 	// (MaxEmojiCount files of maxEmojiFileBytes) and still pass the
 	// disk-headroom floor, see migration 044. 0 (default) is unlimited.
 	UserQuotaMB int `yaml:"user_quota_mb"`
+	// ImportMaxMB caps one Discord export upload (the .json or .zip) in the
+	// admin panel. It is separate from MaxSizeMB, which bounds a single
+	// attachment; an export bundles many files, so it is larger.
+	ImportMaxMB int `yaml:"import_max_mb"`
 	// The storage.FileTypePolicy lists; an admin-panel value replaces each.
 	BlockedExtensions []string `yaml:"blocked_extensions"`
 	AllowedExtensions []string `yaml:"allowed_extensions"`
@@ -337,6 +341,10 @@ type UploadConfig struct {
 
 // UserQuotaBytes is the per-user quota in bytes; 0 means unlimited.
 func (u UploadConfig) UserQuotaBytes() int64 { return int64(u.UserQuotaMB) << 20 }
+
+// ImportMaxBytes is the Discord export upload cap in bytes. applyBounds keeps
+// the MiB value in [1, MaxInt64>>20], so the shift fits.
+func (u UploadConfig) ImportMaxBytes() int64 { return int64(u.ImportMaxMB) << 20 }
 
 // MinFreeDiskBytes is the reserved-headroom floor in bytes; 0 means no floor.
 // applyBounds keeps the MiB value in [0, MaxInt64>>20], so the shift fits.
@@ -411,6 +419,7 @@ func defaults() Config {
 		},
 		Upload: UploadConfig{
 			MaxSizeMB:         100,
+			ImportMaxMB:       500,
 			StorageDir:        "data/uploads",
 			BlockedExtensions: slices.Clone(storage.DefaultBlockedExtensions),
 			AllowedExtensions: []string{},
@@ -539,6 +548,8 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments and avatars); 0 = unlimited
+  # import_max_mb: 500        # largest Discord export (.json or .zip) the admin
+  #                           # panel accepts for "Import from Discord"
   # blocked_extensions: [bat, cmd, ps1]  # refused by name; a list replaces the
   #                           # default (Windows scripts, installers, disk images)
   # allowed_extensions: []    # non-empty = only these extensions may be uploaded

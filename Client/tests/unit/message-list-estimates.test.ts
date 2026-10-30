@@ -11,7 +11,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 import { estimateItemHeight, type VirtualItem } from "@components/MessageList";
-import { clearImageSizes, setImageBox } from "../../src/components/message-list/image-sizes";
+import { clearImageSizes, setImageBox } from "../../src/components/message-list/imageSizes";
 import type { Message } from "@stores/messages.store";
 
 const LINE = 22;

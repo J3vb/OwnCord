@@ -18,7 +18,7 @@ import { parseInline, parseBlocks } from "../../src/lib/text/markdown";
 import {
   renderInlineContent,
   renderMessageContent,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";

@@ -394,10 +394,26 @@ func (d *DB) GetImportJob(ctx context.Context, id int64) (*ImportJob, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetImportJob: %w", err)
 	}
+	return importJobFromRow(r), nil
+}
+
+// GetLatestImportJob returns the newest job, ErrNotFound when none has run.
+func (d *DB) GetLatestImportJob(ctx context.Context) (*ImportJob, error) {
+	r, err := d.q.GetLatestImportJob(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("GetLatestImportJob: %w", ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("GetLatestImportJob: %w", err)
+	}
+	return importJobFromRow(r), nil
+}
+
+func importJobFromRow(r dbgen.ImportJob) *ImportJob {
 	return &ImportJob{
 		ID: r.ID, ChannelID: r.ChannelID, CreatedBy: r.CreatedBy, SourceName: r.SourceName,
 		DiscordChannelID: r.DiscordChannelID, Status: r.Status, Total: r.Total, Imported: r.Imported,
 		Skipped: r.Skipped, SkippedAttachments: r.SkippedAttachments, Error: r.Error,
 		CreatedAt: r.CreatedAt, FinishedAt: r.FinishedAt,
-	}, nil
+	}
 }

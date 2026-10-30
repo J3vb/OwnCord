@@ -8,8 +8,8 @@ import { createLogger } from "@lib/logger";
 const log = createLogger("message-menu");
 
 /** Run `use` with the loaded menu module; a failed load is logged. */
-export function withMessageMenu(use: (menu: typeof import("./message-menu")) => void): void {
-  import("./message-menu")
+export function withMessageMenu(use: (menu: typeof import("./messageMenu")) => void): void {
+  import("./messageMenu")
     .then(use)
     .catch((err: unknown) => log.warn("Message menu failed to open", { error: String(err) }));
 }
