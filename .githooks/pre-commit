@@ -128,10 +128,10 @@ if printf '%s\n' "$changed" | grep -qE '^Server/.*\.go$|^docs/architecture/serve
 fi
 
 # Every mutated Client/src file must sit in exactly one shard of
-# Client/stryker.shard.config.mjs; an added or deleted file breaks the union.
+# Client/tests/mutation/stryker.shard.config.mjs; an added or deleted file breaks the union.
 if printf '%s\n' "$changed" | grep -qE '^Client/src/.*\.ts$|^Client/stryker\.(shard\.)?config\.mjs$'; then
     (cd Client && node scripts/check-mutation-shards.mjs) \
-        || fail "the mutation shards no longer match Client/src — update Client/stryker.shard.config.mjs"
+        || fail "the mutation shards no longer match Client/src — update Client/tests/mutation/stryker.shard.config.mjs"
 fi
 
 # ---------- Formatting (repository-wide) ----------

@@ -38,22 +38,18 @@ func handlePrometheusMetrics(src MetricsSources) http.HandlerFunc {
 	}
 }
 
-// promSample is one labelled sample of a family with a single label.
 type promSample struct {
 	label string
 	value float64
 }
 
-// promEncoder wraps PromText with the three shapes this file needs.
 type promEncoder struct{ t metrics.PromText }
 
-// scalar writes a family with one unlabelled sample.
 func (e *promEncoder) scalar(name, typ, help string, v float64) {
 	e.t.Family(name, typ, help)
 	e.t.Sample(nil, v)
 }
 
-// counters writes a counter family with one sample per value of the label.
 func (e *promEncoder) counters(name, help, labelName string, samples []promSample) {
 	e.t.Family(name, metrics.PromCounter, help)
 	for _, s := range samples {

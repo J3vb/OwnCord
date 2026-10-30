@@ -1,10 +1,9 @@
 package config
 
-// AttentionConfig holds the admin attention panel's floors. Each is
-// the lowest level that raises a warning; the rate floors are raised further
-// by a learned baseline once the server has observed its normal load. The
-// critical disk level is server.min_free_disk_mb. Attention state is served
-// only to the admin panel and is never exported off the host.
+// AttentionConfig holds the admin attention panel's warning floors; the rate
+// floors are raised further by a learned baseline once the server has seen its
+// normal load. The critical disk level is server.min_free_disk_mb. Attention
+// state is served only to the admin panel and never exported off the host.
 type AttentionConfig struct {
 	// DiskWarnFreeMB warns when free space on the data volume drops below it.
 	// 0, or a value at or below server.min_free_disk_mb, leaves only the

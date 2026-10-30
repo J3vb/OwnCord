@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
-import base from "./playwright.config";
+import { clientRoot, fromClientRoot } from "./clientRoot";
+import base from "../../../playwright.config";
 
 /**
  * Playwright config for testing against the PRODUCTION build.
@@ -14,7 +15,9 @@ import base from "./playwright.config";
  */
 export default defineConfig({
   ...base,
-  outputDir: "test-results/prod",
+  // The base config's testDir is relative to Client/; pinned so it still is.
+  testDir: fromClientRoot("tests/e2e"),
+  outputDir: fromClientRoot("test-results/prod"),
   // Cleared, not merely absent: the base config's CI fail-fast, its
   // self-terminate timeout and its globalTeardown all belong to the dev-server
   // run. The teardown in particular kills the listener the base config started,
@@ -24,10 +27,13 @@ export default defineConfig({
   globalTeardown: undefined,
   reporter: process.env.CI
     ? [
-        ["html", { open: "never", outputFolder: "playwright-report/prod" }],
-        ["junit", { outputFile: "test-results/prod-junit.xml" }],
+        ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/prod") }],
+        ["junit", { outputFile: fromClientRoot("test-results/prod-junit.xml") }],
       ]
-    : [["list"], ["html", { open: "never", outputFolder: "playwright-report/prod" }]],
+    : [
+        ["list"],
+        ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/prod") }],
+      ],
 
   use: {
     ...base.use,
@@ -35,6 +41,7 @@ export default defineConfig({
   },
 
   webServer: {
+    cwd: clientRoot,
     // Spawn Vite directly rather than through npm — see the note in
     // playwright.config.ts: an `npm run` wrapper leaves vite alive as an
     // orphaned grandchild on teardown and the runner never exits.

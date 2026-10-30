@@ -19,8 +19,8 @@ type Topic string
 // TopicGlobal is the well-known topic every client subscribes to on connect.
 const TopicGlobal Topic = "global"
 
-// topicFor builds "<prefix><id>" via strconv.AppendInt — topics are built on
-// every broadcast and subscription change, so skip fmt.Sprintf's overhead.
+// topicFor builds "<prefix><id>" via strconv.AppendInt: topics are built on every
+// broadcast and subscription change, so it skips fmt.Sprintf's overhead.
 func topicFor(prefix string, id int64) Topic {
 	b := make([]byte, 0, len(prefix)+20)
 	b = append(b, prefix...)
@@ -57,19 +57,15 @@ func UserTopic(userID int64) Topic {
 	return topicFor("user:", userID)
 }
 
-// PubSub provides topic-based publish/subscribe routing for WebSocket clients.
-// Broadcasting to a topic costs O(subscribers) instead of O(all connections).
-// Subscribers are connections (*Client), not users: one account may hold
-// several (one per device session), and each is subscribed on its own.
-//
-// Thread-safe: all methods may be called from any goroutine.
+// PubSub provides topic-based publish/subscribe routing for WebSocket clients, at
+// O(subscribers) per broadcast. Subscribers are connections (*Client), not users:
+// one account may hold several (one per device session), each subscribed on its
+// own. Safe for concurrent use.
 type PubSub struct {
 	mu syncutil.RankedRW[lockRankPubSub]
 
-	// Forward index: topic → set of subscribed connections
 	topics map[Topic]map[*Client]struct{}
 
-	// Reverse index: connection → set of topics (for efficient UnsubscribeAll)
 	clients map[*Client]map[Topic]struct{}
 }
 
@@ -87,17 +83,15 @@ func (ps *PubSub) Subscribe(client *Client, topic Topic) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 
-	// A dying connection must not (re-)take a topic: registerNow closes the
-	// old client's send BEFORE stripping it under this same lock, so a late
-	// Subscribe either sees sendClosed here and is refused, or slipped in
-	// earlier and is removed by the subsequent UnsubscribeAll. Without the
-	// refusal the dead connection would keep a subscription (and its entry in
-	// both indexes) for good.
+	// A dying connection must not (re-)take a topic: registerNow closes the old
+	// client's send BEFORE stripping it under this same lock, so a late Subscribe
+	// either sees sendClosed here and is refused, or slipped in earlier and is removed
+	// by the subsequent UnsubscribeAll. Without the refusal the dead connection would
+	// keep a subscription for good.
 	if client.isSendClosed() {
 		return
 	}
 
-	// Forward index
 	subs, ok := ps.topics[topic]
 	if !ok {
 		subs = make(map[*Client]struct{})
@@ -105,7 +99,6 @@ func (ps *PubSub) Subscribe(client *Client, topic Topic) {
 	}
 	subs[client] = struct{}{}
 
-	// Reverse index
 	ts, ok := ps.clients[client]
 	if !ok {
 		ts = make(map[Topic]struct{})
@@ -114,22 +107,17 @@ func (ps *PubSub) Subscribe(client *Client, topic Topic) {
 	ts[topic] = struct{}{}
 }
 
-// Unsubscribe removes client from the given topic.
-// No-op if the client is not subscribed.
+// Unsubscribe removes client from the given topic; a no-op if not subscribed.
 func (ps *PubSub) Unsubscribe(client *Client, topic Topic) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.unsubscribeLocked(client, topic)
 }
 
-// unsubscribeLocked removes client from topic. Caller must hold ps.mu (write).
-//
-// Subscribers are keyed by connection, so a client that has already been
-// replaced (same session, newer socket) or is a different device of the same
-// user can only ever strip its own entries; the other connections of the user
-// keep theirs.
+// unsubscribeLocked removes client from topic; the caller holds ps.mu (write).
+// Subscribers are keyed by connection, so a replaced client or another device of
+// the same user only ever strips its own entries.
 func (ps *PubSub) unsubscribeLocked(client *Client, topic Topic) {
-	// Forward index
 	if subs, ok := ps.topics[topic]; ok {
 		delete(subs, client)
 		if len(subs) == 0 {
@@ -137,7 +125,6 @@ func (ps *PubSub) unsubscribeLocked(client *Client, topic Topic) {
 		}
 	}
 
-	// Reverse index
 	if ts, ok := ps.clients[client]; ok {
 		delete(ts, topic)
 		if len(ts) == 0 {
@@ -146,9 +133,9 @@ func (ps *PubSub) unsubscribeLocked(client *Client, topic Topic) {
 	}
 }
 
-// UnsubscribeAll removes client from every topic it is subscribed to.
-// Called when a client disconnects. Deleting a key during range is defined, and
-// unsubscribeLocked drops the reverse-index entry once the last topic goes.
+// UnsubscribeAll removes client from every topic, on disconnect. Deleting a key
+// during range is defined, and unsubscribeLocked drops the reverse-index entry once
+// the last topic goes.
 func (ps *PubSub) UnsubscribeAll(client *Client) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
@@ -158,9 +145,8 @@ func (ps *PubSub) UnsubscribeAll(client *Client) {
 	}
 }
 
-// Priority levels for pub/sub delivery. DMs and direct mentions go through
-// Hub.SendToUserHigh -> Client.sendHighMsg directly, not through PubSub, so
-// there is no PriorityHigh here.
+// Priority levels for pub/sub delivery. DMs and direct mentions bypass PubSub
+// (Hub.SendToUserHigh -> Client.sendHighMsg), so there is no PriorityHigh.
 const (
 	PriorityNormal = 1 // chat messages, reactions, channel events
 	PriorityLow    = 2 // typing indicators — dropped on overflow
@@ -175,10 +161,10 @@ func (ps *PubSub) Publish(topic Topic, msg []byte, excludeUserID int64) int {
 	return ps.publishWithPriority(topic, msg, excludeUserID, PriorityNormal, nil)
 }
 
-// PublishFiltered is Publish narrowed to subscribers allow approves (the
-// NSFW gate): the subscriber list is read fresh, right here, under whatever
-// lock the caller already holds — never a list resolved earlier and handed
-// in, which is exactly what would go stale across a concurrent reconnect.
+// PublishFiltered is Publish narrowed to subscribers allow approves (the NSFW
+// gate). The subscriber list is read fresh here, under whatever lock the caller
+// holds, never resolved earlier and handed in: that would go stale across a
+// concurrent reconnect.
 func (ps *PubSub) PublishFiltered(topic Topic, msg []byte, allow func(userID int64) bool) int {
 	return ps.publishWithPriority(topic, msg, 0, PriorityNormal, allow)
 }
@@ -195,14 +181,12 @@ func (ps *PubSub) PublishGlobal(msg []byte) int {
 	return ps.Publish(TopicGlobal, msg, 0)
 }
 
-// publishWithPriority is the core publish method routing to the appropriate
-// client send method based on priority level. allow, when non-nil, drops any
-// subscriber it returns false for (PublishFiltered); nil means unfiltered.
+// publishWithPriority routes to the client send method for priority. allow, when
+// non-nil, drops any subscriber it returns false for (PublishFiltered).
 func (ps *PubSub) publishWithPriority(topic Topic, msg []byte, excludeUserID int64, priority int, allow func(userID int64) bool) int {
 	ps.mu.RLock()
 	subs := ps.topics[topic]
-	// Snapshot the subscriber slice under read lock to avoid holding the lock
-	// while calling sendMsg (which acquires the client's own mutex).
+	// Snapshot under the read lock: sendMsg takes the client's own mutex.
 	clients := make([]*Client, 0, len(subs))
 	for c := range subs {
 		if c.userID == excludeUserID {
@@ -252,9 +236,8 @@ func (ps *PubSub) SubscriberCount(topic Topic) int {
 	return len(ps.topics[topic])
 }
 
-// TopicsForUser returns the union of the topics every connection of userID is
-// subscribed to, each once. A scan over all subscriptions: for tests and
-// debugging, not a hot path.
+// TopicsForUser returns the union of topics every connection of userID is
+// subscribed to, each once. A scan over all subscriptions: tests and debugging only.
 func (ps *PubSub) TopicsForUser(userID int64) []Topic {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()

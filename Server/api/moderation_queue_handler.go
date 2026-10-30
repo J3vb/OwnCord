@@ -11,9 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// moderationQueueRowResponse is one row of GET /api/v1/moderation/queue. ID
-// is the PUBLIC id — the sequential internal id never reaches a
-// response, a route parameter or the mod_queue frame.
+// moderationQueueRowResponse is one row of GET /api/v1/moderation/queue. ID is
+// the PUBLIC id: the sequential internal id never reaches a response, a route
+// parameter or the mod_queue frame.
 type moderationQueueRowResponse struct {
 	ID           string  `json:"id"`
 	ReporterName string  `json:"reporter_name"`
@@ -30,7 +30,6 @@ type moderationQueueRowResponse struct {
 	ClosedAt     *string `json:"closed_at,omitempty"`
 }
 
-// moderationEvidenceResponse is one row of a report's evidence snapshot.
 type moderationEvidenceResponse struct {
 	Seq         int64  `json:"seq"`
 	AuthorID    int64  `json:"author_id"`
@@ -39,7 +38,6 @@ type moderationEvidenceResponse struct {
 	CapturedAt  string `json:"captured_at"`
 }
 
-// moderationNoteResponse is one internal note.
 type moderationNoteResponse struct {
 	ID        int64  `json:"id"`
 	AuthorID  int64  `json:"author_id"`
@@ -77,12 +75,10 @@ type moderationReportDetailResponse struct {
 	// EvidenceWithheld is set, and Evidence empty, when the caller may not
 	// read the snapshot: NSFW_ACKNOWLEDGEMENT_REQUIRED (acknowledge
 	// ChannelID first) or SOURCE_CHANNEL_UNAVAILABLE.
-	EvidenceWithheld string                    `json:"evidence_withheld,omitempty"`
-	Notes            []moderationNoteResponse  `json:"notes"`
-	Events           []moderationEventResponse `json:"events"`
-	// Actions is the immutable history of moderator actions taken against
-	// this report.
-	Actions []moderationActionResponse `json:"actions"`
+	EvidenceWithheld string                     `json:"evidence_withheld,omitempty"`
+	Notes            []moderationNoteResponse   `json:"notes"`
+	Events           []moderationEventResponse  `json:"events"`
+	Actions          []moderationActionResponse `json:"actions"`
 }
 
 type addNoteRequest struct {
@@ -103,20 +99,17 @@ type actOnReportRequest struct {
 	MessageID       string `json:"message_id,omitempty"`
 }
 
-// actOnReportResponse is POST .../act's success body for kind="timeout"
-// only (every other kind answers 204, unchanged): Voice is "applied" or
-// "skipped", mirroring the direct timeout route's own response (this outcome used to be
-// dropped entirely here).
+// actOnReportResponse is the success body for kind="timeout" only (every other
+// kind answers 204): Voice is "applied" or "skipped", mirroring the direct
+// timeout route's response.
 type actOnReportResponse struct {
 	Voice string `json:"voice"`
 }
 
-// MountModerationQueueRoutes registers the moderator queue: read, assign,
-// note, close. Authorization is enforced inside ReportService (CanModerate,
-// the canonical predicate) so these handlers carry no permission check of
-// their own. The {id} route parameter is the PUBLIC id; every
-// handler resolves it to the internal id via ResolveReportID before calling
-// into ReportService.
+// MountModerationQueueRoutes registers the moderator queue: read, assign, note,
+// close. Authorization is enforced inside ReportService (CanModerate), so these
+// handlers carry no permission check of their own. The {id} route parameter is
+// the PUBLIC id, resolved to the internal id via ResolveReportID.
 func MountModerationQueueRoutes(r chi.Router, svc *service.Services, hub ModQueueBroadcaster) {
 	r.Route("/api/v1/moderation/queue", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
@@ -137,14 +130,12 @@ func currentUserID(r *http.Request) (int64, bool) {
 	return user.ID, true
 }
 
-// resolveReportIDParam reads the {id} route parameter (the report's PUBLIC
-// id) and resolves it to the internal id ReportService's methods take.
-// Writes the response and returns ok=false on any failure. Callers MUST run
-// requireModerateOrWrite first: resolving a route
-// parameter before checking authorization turns "unknown id" (404) and
-// "real id, no permission" (403) into an existence oracle through the
-// handler's own order of operations, even though every ReportService method
-// itself checks CanModerate before touching a report.
+// resolveReportIDParam resolves the {id} route parameter (the report's PUBLIC
+// id) to the internal id ReportService takes. It writes the response and returns
+// ok=false on failure. Callers MUST run requireModerateOrWrite first: resolving
+// before authorizing turns "unknown id" (404) vs "real id, no permission" (403)
+// into an existence oracle, even though every ReportService method checks
+// CanModerate itself.
 func resolveReportIDParam(w http.ResponseWriter, r *http.Request, svc *service.Services) (int64, bool) {
 	publicID := chi.URLParam(r, "id")
 	id, err := svc.Reports.ResolveReportID(r.Context(), publicID)
@@ -356,11 +347,10 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 			writeReportServiceError(r.Context(), w, err)
 			return
 		}
-		// Get allows the report's own REPORTER to read it (it is their own
-		// filing, already visible via Mine()), but acting on it is the same
-		// conflict of interest Assign/Note/Close already refuse:
-		// without this a moderator could act on a report they
-		// themselves filed.
+		// Get allows the report's own REPORTER to read it (their own filing,
+		// visible via Mine()), but acting on it is the same conflict of interest
+		// Assign/Note/Close refuse: otherwise a moderator could act on a report
+		// they filed.
 		if err := service.GuardSelfReviewFor(actorID, &detail.Report); err != nil {
 			writeReportServiceError(r.Context(), w, err)
 			return
@@ -387,10 +377,9 @@ func handleModerationQueueAct(svc *service.Services, hub ModQueueBroadcaster) ht
 			return
 		}
 		// Dispatch the SAME transport broadcasts the direct routes send after
-		// their own commit (this used to be a bare 204,
-		// silently dropping chat_deleted for removal and member_ban/disconnect
-		// for ban — only Warn/Timeout's own ModActionNotifier reaches a live
-		// target through this path, since ModerationService owns that one).
+		// their own commit (chat_deleted for removal, member_ban/disconnect for
+		// ban). Only Warn/Timeout reach a live target through
+		// ModerationService's own ModActionNotifier.
 		if hub != nil {
 			switch result.Kind {
 			case "ban":

@@ -1,8 +1,6 @@
-// Phase C Step 9 — Plugin admin REST surface.
-//
-// All endpoints are mounted under the existing AdminIPRestrict group so they
-// inherit the same network ACL as the rest of the admin panel. Authentication
-// is handled by the admin handler's middleware before this handler runs.
+// Plugin admin REST surface, mounted under the AdminIPRestrict group so it
+// inherits the admin panel's network ACL; authentication is the admin handler's
+// middleware before this handler runs.
 
 package api
 
@@ -48,10 +46,9 @@ func NewPluginAdminHandler(registry *plugin.Registry, st plugin.PluginStore, aud
 	return r
 }
 
-// install accepts a multipart upload with a single "plugin" file part
-// containing a .zip. The zip is validated (zip-slip safe, no symlinks,
-// uncompressed total capped, manifest required at root) and installed via
-// Registry.InstallFromZip. Returns 201 with the new plugin name on success.
+// install accepts a multipart upload with one "plugin" .zip part, validated
+// (zip-slip safe, no symlinks, capped uncompressed total, manifest at root) and
+// installed via Registry.InstallFromZip. Returns 201 with the plugin name.
 func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
 		writeErr(w, http.StatusServiceUnavailable, httperr.CodePluginsDisabled, "plugin runtime disabled")
@@ -87,8 +84,6 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Read the entire zip into memory — InstallFromZip needs an io.ReaderAt
-	// for archive/zip and the cap is small enough to be safe.
 	body, err := io.ReadAll(io.LimitReader(file, maxPluginUploadBytes+1))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "failed to read upload")
@@ -98,9 +93,9 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "plugin upload too large")
 		return
 	}
-	// Magic-byte check: a real .zip starts with "PK\x03\x04" (local file
-	// header) or "PK\x05\x06" (empty archive). Anything else is definitively
-	// not a zip regardless of what the client labelled it.
+	// Magic-byte check: a real .zip starts with "PK\x03\x04" or "PK\x05\x06"
+	// (empty archive); anything else is not a zip whatever the client labelled
+	// it.
 	if !hasZipMagic(body) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "plugin upload is not a valid zip archive")
 		return
@@ -235,10 +230,9 @@ func pluginRuntimeState(registry *plugin.Registry) string {
 	return "enabled"
 }
 
-// isZipContentType reports whether ct looks like a zip MIME type. Both the
-// IANA-registered application/zip and the legacy application/x-zip-compressed
-// (used by some Windows clients) are accepted. The comparison is case-
-// insensitive and strips any parameters after a semicolon.
+// isZipContentType reports whether ct looks like a zip MIME type
+// (application/zip or the legacy application/x-zip-compressed some Windows
+// clients send), case-insensitively and ignoring parameters.
 func isZipContentType(ct string) bool {
 	for i := 0; i < len(ct); i++ {
 		if ct[i] == ';' {
@@ -253,9 +247,8 @@ func isZipContentType(ct string) bool {
 	return false
 }
 
-// hasZipMagic reports whether b begins with the PK signature used by every
-// .zip archive. Empty archives use 0x50,0x4b,0x05,0x06; non-empty archives
-// start with a local file header 0x50,0x4b,0x03,0x04. Both are accepted.
+// hasZipMagic reports whether b starts with the PK signature (local file header
+// 03 04, or the empty-archive marker 05 06).
 func hasZipMagic(b []byte) bool {
 	if len(b) < 4 {
 		return false

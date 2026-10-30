@@ -12,22 +12,20 @@ import (
 
 // NicknameStore is the one write the moderator nickname route needs.
 type NicknameStore interface {
-	// SetDisplayNameAsModerator writes a member's nickname for a moderator and
-	// returns the value it replaced. It re-reads the actor's MANAGE_NICKNAMES
-	// (or ADMINISTRATOR) bit across every held role and the actor-outranks-
-	// target rank live in its write transaction, and returns db.ErrOutranked
-	// when either fails.
+	// SetDisplayNameAsModerator writes a member's nickname for a moderator and returns
+	// the value it replaced. It re-reads the actor's MANAGE_NICKNAMES (or ADMINISTRATOR)
+	// bit across every held role and the actor-outranks-target rank live in its
+	// transaction, returning db.ErrOutranked when either fails.
 	SetDisplayNameAsModerator(ctx context.Context, actorID, targetID int64, name *string) (old *string, err error)
 }
 
-// setDisplayNameAsModerator is the moderator nickname write. It takes
-// the target's profile lock, the one UpdateProfile's read-merge-write holds, so
-// the two serialize and the later writer wins whole: neither can merge against
-// a row the other is about to replace. The write itself re-checks the actor's
-// authority in its transaction (db.SetDisplayNameAsModerator). The returned
-// user is the committed row, never the request. Lock order: profileLocks[target]
-// then the single writer connection, as in UpdateProfile; no hub lock is held,
-// the caller broadcasts after this returns.
+// setDisplayNameAsModerator is the moderator nickname write. It takes the target's
+// profile lock, the one UpdateProfile's read-merge-write holds, so the two
+// serialize and neither merges against a row the other is about to replace. The
+// write re-checks the actor's authority in its transaction. The returned user is
+// the committed row, never the request. Lock order: profileLocks[target], then the
+// single writer connection, as in UpdateProfile; no hub lock is held, the caller
+// broadcasts after.
 func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, targetID int64, name *string) (*db.User, error) {
 	unlock := s.profileLocks.lock(targetID)
 	defer unlock()
@@ -46,10 +44,9 @@ func (s *UserService) setDisplayNameAsModerator(ctx context.Context, actorID, ta
 		return nil, fmt.Errorf("set display name: %w", err)
 	}
 
-	// The write has committed: the re-read and the audit row must survive a
-	// request canceled after it, and a failed re-read must not be reported as
-	// a failed write, so fall back to the pre-write row with the
-	// one column this call changed.
+	// The write has committed: the re-read and audit row must survive a canceled
+	// request, and a failed re-read must not be reported as a failed write, so fall
+	// back to the pre-write row with the one column this call changed.
 	user, err := s.st.GetUserByID(context.WithoutCancel(ctx), targetID)
 	if err != nil || user == nil {
 		slog.Error("moderator nickname re-read failed; returning locally merged row",

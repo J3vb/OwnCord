@@ -1,4 +1,5 @@
 import { defineConfig } from "@playwright/test";
+import { fromClientRoot } from "./clientRoot";
 import fullstack from "./playwright.config.fullstack";
 
 // B7-11: the long-session soak's long run (`npm run test:e2e:soak`): the same
@@ -11,7 +12,7 @@ process.env.OWNCORD_SOAK_IDLE_MIN ??= "30";
 
 export default defineConfig({
   ...fullstack,
-  outputDir: "test-results/soak",
+  outputDir: fromClientRoot("test-results/soak"),
   testMatch: /long-session\.spec\.ts/,
   // One attempt: a retry would double an hour-long run, and a failure is a
   // finding to read, not to retry past.
@@ -25,7 +26,7 @@ export default defineConfig({
   use: { ...fullstack.use, trace: "off" },
   reporter: [
     ["list"],
-    ["html", { open: "never", outputFolder: "playwright-report/soak" }],
-    ["junit", { outputFile: "test-results/soak.xml" }],
+    ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/soak") }],
+    ["junit", { outputFile: fromClientRoot("test-results/soak.xml") }],
   ],
 });

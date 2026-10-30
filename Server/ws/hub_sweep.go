@@ -11,14 +11,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// staleClientTimeout is the maximum duration a client can go without sending
-// any message or answering a protocol Ping before being considered stale and
-// disconnected. pingPump refreshes activity on every Pong (25s) and closes a
-// peer that misses one itself, so this sweep is the backstop; the app-level
-// ping (every 30s) keeps old peers covered too.
+// staleClientTimeout is how long a client may go without sending any message or
+// answering a protocol Ping before being kicked. pingPump refreshes activity on
+// every Pong (25s) and closes a peer that misses one itself, so this is the
+// backstop; the app-level ping (every 30s) covers old peers.
 var staleClientTimeout = 90 * time.Second
 
-// onStaleTick runs the cheap in-memory maintenance driven by the stale ticker.
 func (h *Hub) onStaleTick() {
 	h.sweepStaleClients()
 	h.refreshTelemetryGauges()
@@ -26,11 +24,10 @@ func (h *Hub) onStaleTick() {
 }
 
 // refreshTelemetryGauges recomputes the connection and voice gauges from live
-// client state. Periodic (30s tick, driven by the ctx-less Run loop) rather
-// than event-driven: join/leave and register/unregister paths are spread
-// across handlers, sweeps, and webhooks — many of them request-scoped, where
-// a context.Background() instrumentation call would trip contextcheck — and a
-// gauge only needs to be right at scrape time.
+// client state. Periodic rather than event-driven: join/leave and
+// register/unregister are spread across request-scoped handlers where a
+// context.Background() instrumentation call would trip contextcheck, and a gauge
+// need only be right at scrape time.
 func (h *Hub) refreshTelemetryGauges() {
 	participants := 0
 	rooms := make(map[int64]struct{})
@@ -50,41 +47,37 @@ func (h *Hub) refreshTelemetryGauges() {
 	m.VoiceActiveSessions.Set(ctx, float64(len(rooms)))
 }
 
-// kickClient forcibly removes a client from the hub and closes its send channel,
-// which causes writePump to exit and the WebSocket connection to close.
-// It is safe to call from any goroutine.
+// kickClient removes a client from the hub and closes its send channel, so
+// writePump exits and the connection closes. Safe from any goroutine.
 func (h *Hub) kickClient(c *Client) {
 	h.mu.Lock()
 	h.removeClientLocked(c)
 	h.mu.Unlock()
-	// closeSend BEFORE UnsubscribeAll: Subscribe's only re-take guard is
-	// isSendClosed, so a Subscribe racing this kick either lands before the
-	// close (and UnsubscribeAll below removes it) or sees the closed channel
-	// and refuses. The reverse order leaves the dead client holding the topic.
+	// closeSend before UnsubscribeAll: Subscribe's only re-take guard is isSendClosed,
+	// so a racing Subscribe either lands before the close (and UnsubscribeAll removes
+	// it) or sees the closed channel and refuses. The reverse order leaves the dead
+	// client holding the topic.
 	c.closeSend()
 	h.pubsub.UnsubscribeAll(c)
 }
 
-// kickClientTerminal is kickClient for a disconnect that refuses
-// reconnection (ban, revoked or expired session): it marks c first, so the
-// read-loop teardown ends a voice call at once instead of parking it in the
-// grace window for a resume that can never come.
+// kickClientTerminal is kickClient for a disconnect that refuses reconnection
+// (ban, revoked or expired session): it marks c first so the read-loop teardown
+// ends a voice call at once instead of parking it for a resume that cannot come.
 func (h *Hub) kickClientTerminal(c *Client) {
 	c.markTerminalKick()
 	h.kickClient(c)
 }
 
-// sweepTimeout bounds one background sweep, so a wedged DB or LiveKit call
-// cannot hold a sweep (and its in-flight guard) forever; the next tick
-// retries. A var so tests can shorten it.
+// sweepTimeout bounds one background sweep so a wedged DB or LiveKit call cannot
+// hold a sweep (and its in-flight guard) forever. A var so tests can shorten it.
 var sweepTimeout = 30 * time.Second
 
 // sweepTailTimeout bounds the follow-up steps of a sweep action that already
-// committed (broadcast, key-holder re-election, SFU removal). They run
-// detached from the sweep's own timeout so a committed delete is still
-// announced, but end when the hub stops so they never outlast the shutdown
-// step. 15s keeps it above the DB busy_timeout (5s), so a delete that waits
-// out the lock still leaves budget to broadcast. A var so tests can shorten it.
+// committed (broadcast, key-holder re-election, SFU removal). They run detached
+// from the sweep's timeout so a committed delete is still announced, but end when
+// the hub stops. 15s keeps it above the DB busy_timeout (5s) so a delete that waits
+// out the lock still has budget to broadcast. A var so tests can shorten it.
 var sweepTailTimeout = 15 * time.Second
 
 func (h *Hub) sweepTailCtx(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -96,11 +89,9 @@ func (h *Hub) sweepTailCtx(ctx context.Context) (context.Context, context.Cancel
 	}
 }
 
-// startSweep runs sweep on its own goroutine so the hub dispatch loop never
-// blocks on the DB-heavy periodic sweeps (they already lock correctly for
-// concurrent execution with the hub). inFlight guarantees a sweep never runs
-// concurrently with itself: a tick arriving while the previous run is still
-// going is dropped, and the next tick retries. The sweep's ctx ends at
+// startSweep runs sweep on its own goroutine so the dispatch loop never blocks on
+// DB-heavy sweeps. inFlight guarantees a sweep never overlaps itself: a tick
+// arriving mid-run is dropped and the next retries. The sweep's ctx ends at
 // sweepTimeout or when the hub stops, and Run waits for it before Done closes.
 // Only Run calls this, so no Add can race the Wait in Run's exit.
 func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func(context.Context)) {
@@ -115,8 +106,7 @@ func (h *Hub) startSweep(inFlight *atomic.Bool, sweep func(context.Context)) {
 	})
 }
 
-// sweepStaleClients iterates over all connected clients and kicks any that
-// have not sent a message within staleClientTimeout.
+// sweepStaleClients kicks any client silent for staleClientTimeout.
 func (h *Hub) sweepStaleClients() {
 	now := time.Now()
 	h.mu.RLock()
@@ -135,10 +125,9 @@ func (h *Hub) sweepStaleClients() {
 	}
 }
 
-// sweepRevokedSessions iterates all connected clients and kicks any whose
-// session has been deleted, expired, or whose user has been banned. This
-// provides time-based session enforcement for idle WebSocket connections
-// that never trigger the message-count-based check.
+// sweepRevokedSessions kicks any client whose session was deleted or expired or
+// whose user was banned: time-based enforcement for idle sockets that never reach
+// the message-count check.
 func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 	h.mu.RLock()
 	snapshot := make([]*Client, 0, len(h.clients))
@@ -153,32 +142,29 @@ func (h *Hub) sweepRevokedSessions(ctx context.Context) {
 		return
 	}
 
-	// One batched lookup for every connected client instead of a query per
-	// client per sweep. The expiry and ban rules behind the verdicts are
-	// SessionService's — the same ones the handshake applies — so a live session
-	// and a resuming one cannot disagree about what "still valid" means.
+	// One batched lookup for every connected client. The expiry and ban rules are
+	// SessionService's, the same as the handshake's, so a live and a resuming session
+	// cannot disagree about validity.
 	hashes := make([]string, len(snapshot))
 	for i, c := range snapshot {
 		hashes[i] = c.tokenHash
 	}
 	verdicts, err := h.authn.SweepSessions(ctx, hashes)
 	if err != nil {
-		// A failed batch lookup says nothing about any individual session —
-		// kicking everyone on a transient DB error would be a mass disconnect.
-		// Skip this sweep; the next tick retries.
+		// A failed batch lookup says nothing about any session; kicking everyone on a
+		// transient DB error would be a mass disconnect. Skip; the next tick retries.
 		slog.Warn("session sweep: batch session lookup failed", "err", err)
 		return
 	}
 
 	for _, c := range snapshot {
-		// A hash the authenticator did not answer for reads as the map's
-		// zero value, which is SessionRevoked by design: fail closed.
+		// A hash the authenticator did not answer reads as the zero value, SessionRevoked
+		// by design: fail closed.
 		h.applySessionVerdict(c, verdicts[c.tokenHash])
 	}
 }
 
-// applySessionVerdict drops c when its session is revoked, expired or
-// banned, and leaves it when the session is live.
+// applySessionVerdict drops c when its session is revoked, expired or banned.
 func (h *Hub) applySessionVerdict(c *Client, verdict service.SessionVerdict) {
 	switch verdict {
 	case service.SessionRevoked:
@@ -194,11 +180,10 @@ func (h *Hub) applySessionVerdict(c *Client, verdict service.SessionVerdict) {
 	}
 }
 
-// DisconnectIfSessionRevoked is the revoked-session sweep for one account,
-// run now: after a password change or a single-session revoke, which remove
-// some of the account's sessions but perhaps not the ones its sockets ride,
-// each socket goes at once if its own session was among them. A failed
-// lookup leaves it to the sweep's next tick, as the sweep itself does.
+// DisconnectIfSessionRevoked is the revoked-session sweep for one account, run
+// now: after a password change or single-session revoke removes some sessions,
+// each socket goes at once if its own session was among them. A failed lookup
+// leaves it to the next sweep tick.
 func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
 	var conns []*Client
 	var hashes []string
@@ -216,17 +201,15 @@ func (h *Hub) DisconnectIfSessionRevoked(userID int64) {
 		slog.Warn("session sweep: batch session lookup failed", "user_id", userID, "err", err)
 		return
 	}
-	// Each device is judged by its own session: only connections whose token
-	// hash was revoked go; the account's other devices stay connected.
+	// Each device is judged by its own session; the account's other devices stay.
 	for _, c := range conns {
 		h.applySessionVerdict(c, verdicts[c.tokenHash])
 	}
 }
 
-// sweepStaleVoiceStates queries all voice_states rows and removes any that
-// don't match a connected client's voiceChID. This catches ghost users that
-// slip through the primary cleanup paths (registerNow, readPump defer,
-// LiveKit webhook).
+// sweepStaleVoiceStates removes voice_states rows that match no connected client's
+// voiceChID, catching ghosts that slip through the primary cleanup paths
+// (registerNow, readPump defer, LiveKit webhook).
 func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	h.sweepStaleVoiceEvictRevoked(ctx)
 
@@ -256,11 +239,10 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	}
 	h.mu.RUnlock()
 
-	// a membership parked in the grace window has no live client, so the
-	// scan above classified it as stale — but it is deliberately held for a
-	// resuming socket. Skip exactly the parked (user, channel) pairs; the
-	// grace timer owns their teardown. Snapshot the pairs first so this holds
-	// no grace lock while deleting rows.
+	// A membership parked in the grace window has no live client, so the scan
+	// classified it stale, but it is deliberately held for a resuming socket. Skip
+	// the parked (user, channel) pairs; the grace timer owns their teardown. Snapshot
+	// first so no grace lock is held while deleting rows.
 	parked := h.voiceReg.voiceGrace.snapshot()
 
 	for _, s := range stale {
@@ -282,26 +264,25 @@ func (h *Hub) sweepStaleVoiceStates(ctx context.Context) {
 	}
 }
 
-// sweepStaleVoiceEntry removes one stale voice_states row under the user's
-// voice lock, so a join between its row commit and c.voice.setState cannot
-// interleave with the recheck and delete. It reports whether the
-// row was removed; the caller does the SFU removal after the lock is released.
+// sweepStaleVoiceEntry removes one stale row under the user's voice lock, so a join
+// between its row commit and c.voice.setState cannot interleave with the recheck
+// and delete. It reports whether the row was removed; the caller does the SFU
+// removal after the lock is released.
 func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64, joinedAt string) (removed bool) {
 	txn := h.begin(userID)
 	defer txn.end()
 
-	// Re-check the live client immediately before deleting.
-	// voice_join.go commits the row before it calls c.voice.setState
-	// (the row-before-slot ordering), so a join can commit and get snapshotted as a
-	// ghost above. Under the voice lock that join has finished by now; if the
-	// client's state agrees with the row, it is no longer stale.
+	// Re-check the live client right before deleting. voice_join commits the row before
+	// c.voice.setState, so a join can commit and be snapshotted as a ghost. Under the
+	// voice lock that join has finished; if the client's state agrees with the row, it
+	// is not stale.
 	for _, liveClient := range h.clientsOf(userID) {
 		if liveChID, liveJoinedAt := liveClient.voice.state(); liveChID == channelID && liveJoinedAt == joinedAt {
 			return false
 		}
 	}
-	// A socket that dropped after the snapshot may have parked this exact
-	// membership in the grace window since; the grace timer owns it now.
+	// A socket that dropped after the snapshot may have parked this membership in the
+	// grace window; the grace timer owns it now.
 	if h.voiceReg.voiceGrace.has(userID, channelID) {
 		return false
 	}
@@ -310,9 +291,8 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 		sweepStaleVoicePreDeleteRaceHook(userID, channelID, joinedAt)
 	}
 
-	// Channel-conditional delete: only removes the row if it still points
-	// at the channel we snapshotted. If the user rejoined or moved between
-	// the snapshot and now, the delete is a no-op and we skip the broadcast.
+	// Channel-conditional delete: a no-op (and no broadcast) if the user rejoined or
+	// moved since the snapshot.
 	deleted, err := txn.deleteRow(ctx, channelID, joinedAt)
 	if err != nil {
 		slog.Error("sweepStaleVoiceStates: LeaveIfMatch failed",
@@ -328,36 +308,28 @@ func (h *Hub) sweepStaleVoiceEntry(ctx context.Context, userID, channelID int64,
 	defer cancelTail()
 	h.broadcastVoiceEvent(tailCtx, channelID, userID, buildVoiceLeave(channelID, userID))
 	// Re-elect the key holder now that this ghost row is gone, as every other
-	// path that removes a voice participant does (finishVoiceLeave, the
-	// LiveKit webhook, registerNow, handleVoiceJoin). Without it a departed
-	// key holder leaves the remaining participants' voice_e2ee_offers
-	// rejected with NOT_KEY_HOLDER until the next join or leave.
+	// participant-removal path does. Otherwise a departed key holder leaves
+	// voice_e2ee_offers rejected with NOT_KEY_HOLDER until the next join or leave.
 	h.updateKeyHolder(channelID)
 	return true
 }
 
-// sweepStaleVoiceJoinRaceHook, when non-nil, runs once per stale entry,
-// immediately before sweepStaleVoiceStates acts on it. Test-only (always nil
-// in production): it pins the follow-on window where a
-// voice_join's DB commit (voice_join.go's JoinVoiceChannelIfCapacity) and its
-// c.voice.setState call are not atomic — a join can commit its row, get
-// snapshotted as a ghost by the h.clients scan above (the joiner's client
-// still shows voiceChID 0 at that instant), and only call c.voice.setState
-// after the snapshot but before this loop deletes the row it just committed.
-// Too narrow a window to land reliably by staggering real goroutines, so
-// tests use this hook to reproduce it deterministically.
+// sweepStaleVoiceJoinRaceHook, when non-nil, runs once per stale entry before
+// sweepStaleVoiceStates acts on it. Test-only: it pins the window where a
+// voice_join's DB commit and its c.voice.setState are not atomic, so a join can
+// commit, be snapshotted as a ghost (the joiner's client still shows voiceChID 0)
+// and set state only before this loop deletes the row it just committed. Too
+// narrow to land with real goroutines.
 var sweepStaleVoiceJoinRaceHook func(userID, channelID int64, joinedAt string)
 
 // voiceStillAllowed is the sweep's error-aware re-run of the join gate: it
-// distinguishes a genuine refusal (permissions.CanStayInVoice over the live
-// subject — the join gate minus the timeout: the bit revoked, the channel
-// archived or deleted, DM membership or block state changed) from a DB read failure. sweepStaleVoiceStates
-// needs that distinction: unlike a handler answering one client's request,
-// it evicts a live voice session on "denied", so a transient read failure
-// must not be treated as a revocation. Deliberately read live, never through
-// the cached PermissionService: this is the last-line backstop, and staying
-// authoritative for a change that somehow bypassed the invalidation hooks is
-// worth the handful of reads a minute it costs for the clients in voice.
+// separates a genuine refusal (permissions.CanStayInVoice over the live subject:
+// the join gate minus the timeout; bit revoked, channel archived or deleted, DM
+// membership or block changed) from a DB read failure. The sweep evicts a live
+// session on "denied", so a transient read failure must not count as revocation.
+// Read live, never via the cached PermissionService: this is the last-line
+// backstop, and staying authoritative for a change that bypassed the invalidation
+// hooks is worth a handful of reads a minute.
 func (h *Hub) voiceStillAllowed(ctx context.Context, userID, channelID int64) (allowed bool, err error) {
 	ch, err := h.readers.Dispatch.GetChannel(ctx, channelID)
 	if err != nil {
@@ -373,20 +345,16 @@ func (h *Hub) voiceStillAllowed(ctx context.Context, userID, channelID int64) (a
 	return permissions.CanStayInVoice(sub) == nil, nil
 }
 
-// cleanupVoiceRaceClearHook, when non-nil, runs immediately before
-// CleanupVoiceForChannel clears a still-matching client's voice state.
-// Test-only (always nil in production): the window it pins is two separate
-// voiceMu acquisitions with no I/O between them, too narrow to land reliably
-// by staggering real goroutines, so tests use this hook to reproduce a
-// voice_join racing in at exactly that point deterministically.
+// cleanupVoiceRaceClearHook, when non-nil, runs right before CleanupVoiceForChannel
+// clears a still-matching client's voice state. Test-only: the window is two
+// voiceMu acquisitions with no I/O between them, too narrow to hit with real goroutines.
 var cleanupVoiceRaceClearHook func(*Client)
 
-// CleanupVoiceForChannel removes all voice participants from the given channel.
-// Called when a channel is deleted.
+// CleanupVoiceForChannel removes all voice participants from channelID (called
+// when a channel is deleted).
 func (h *Hub) CleanupVoiceForChannel(channelID int64) {
-	// Cleanup must complete even if the triggering request goes away.
+	// Must complete even if the triggering request goes away.
 	ctx := context.Background()
-	// Get all users in the channel's voice state from DB.
 	states, err := h.voice.ChannelStates(ctx, channelID)
 	if err != nil {
 		slog.Error("CleanupVoiceForChannel ChannelStates", "err", err, "channel_id", channelID)
@@ -396,27 +364,21 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		return
 	}
 
-	// Clean up DB state and LiveKit for each participant. Both the row delete
-	// and the client-state clear are conditional on the participant still
-	// being in THIS channel: a user who moved to another voice channel
-	// between the snapshot above and this loop must not be clobbered.
+	// Both the row delete and the client-state clear are conditional on the
+	// participant still being in this channel: a user who moved to another voice
+	// channel since the snapshot must not be clobbered.
 	for _, vs := range states {
 		txn := h.begin(vs.UserID)
-		// The channel is going away: whatever token a parked entry holds in
-		// it dies with the row.
+		// The channel is going away: a token held by a parked entry dies with the row.
 		txn.dropParked(channelID)
 		if _, err := txn.deleteRow(ctx, channelID, vs.JoinedAt); err != nil {
 			slog.Error("CleanupVoiceForChannel LeaveIfMatch", "err", err, "user_id", vs.UserID, "channel_id", channelID)
 		}
 
-		// Clear client voice state and its voice-topic subscription. The
-		// compare (still in this channel?) and the clear must be one atomic
-		// operation — a getVoiceChID() read followed by a separate
-		// unconditional clear leaves a window where a concurrent voice_join
-		// to another channel commits in between and gets silently wiped
-		// along with its own voice-topic subscription. Mirrors
-		// sweepStaleVoiceStates' handleVoiceLeaveIfStillIn and the LiveKit
-		// webhook's clearExact.
+		// Clear client voice state and its topic subscription. The compare and the clear
+		// must be one atomic operation: a getVoiceChID() read then an unconditional clear
+		// would wipe a concurrent voice_join to another channel and its subscription.
+		// Mirrors handleVoiceLeaveIfStillIn and the webhook's clearExact.
 		for _, client := range h.clientsOf(vs.UserID) {
 			if cleanupVoiceRaceClearHook != nil {
 				cleanupVoiceRaceClearHook(client)
@@ -425,29 +387,21 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		}
 		txn.end()
 
-		// Remove from LiveKit (best-effort), off this goroutine: the caller
-		// is the admin archive/delete request, and LiveKit can take seconds
-		// to answer. The DB row and client state above are already
-		// conditional on this exact join instance, and the identity carries
-		// the join token, so the removal is safe to detach exactly as
-		// finishVoiceLeave does it.
+		// Remove from LiveKit (best-effort) off this goroutine: the caller is the admin
+		// archive/delete request and LiveKit can take seconds. The row and client state
+		// are conditional on this exact join instance and the identity carries the join
+		// token, so detaching is safe, as in finishVoiceLeave.
 		h.removeLiveKitParticipantAsync(ctx, channelID, vs.UserID, vs.JoinedAt, "CleanupVoiceForChannel")
 	}
 
-	// Broadcast voice_leave for each participant. All leaves target the same
-	// channel, so resolve the READ audience once and reuse it per message.
-	// The evicted participants themselves must always be in it (their client
-	// state is already cleared, so broadcastVoiceEvent's participant union
-	// cannot see them): the voice_leave is what drives their own E2EE
-	// teardown, and voice membership can outlive READ_MESSAGES.
-	//
-	// Both callers of CleanupVoiceForChannel commit archived=1 to this
-	// channel before evicting — deliberately, so a concurrent
-	// voice_join sees the archived gate — which means plain
-	// channelReadAudience always finds the channel already archived and
-	// always returns nobody here. Use the ignoring-archived resolver so the
-	// bystanders who could see this channel and its voice roster a moment
-	// ago still learn the call ended, not just the evicted participants.
+	// Broadcast voice_leave for each participant, resolving the READ audience once.
+	// The evicted participants must always be in it (their client state is already
+	// cleared, so broadcastVoiceEvent's participant union cannot see them): the
+	// voice_leave drives their E2EE teardown, and voice membership can outlive
+	// READ_MESSAGES. Both callers commit archived=1 before evicting (so a concurrent
+	// voice_join sees the archived gate), so plain channelReadAudience would always
+	// return nobody; the ignoring-archived resolver lets bystanders who could see the
+	// call a moment ago learn it ended.
 	audience := h.channelReadAudienceIgnoringArchived(ctx, channelID)
 	seen := make(map[int64]struct{}, len(audience))
 	for _, uid := range audience {
@@ -463,12 +417,9 @@ func (h *Hub) CleanupVoiceForChannel(channelID int64) {
 		h.broadcastChannelScopedTo(channelID, buildVoiceLeave(channelID, vs.UserID), audience, "voice event")
 	}
 
-	// Re-elect the key holder now that the room is torn down — every other
-	// removal path does this (finishVoiceLeave, the LiveKit webhook,
-	// registerNow, rollbackVoiceJoin, sweepStaleVoiceStates). All client
-	// voice states for this channel were cleared above, so this deletes the
-	// voiceKeyHolders entry; without it a deleted channel's entry lived for
-	// the process lifetime. No locks are held here, as
-	// updateKeyHolder requires.
+	// Re-elect the key holder now that the room is torn down, as every removal path
+	// does. All client voice states for the channel were cleared, so this deletes the
+	// voiceKeyHolders entry (otherwise it lived for the process lifetime). No locks
+	// are held, as updateKeyHolder requires.
 	h.updateKeyHolder(channelID)
 }

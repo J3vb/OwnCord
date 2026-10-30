@@ -10,24 +10,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// role_refresh moves the fan-out of a role change off the admin
-// request goroutine. The handler commits, invalidates the permission cache and
-// makes ONE EnqueueRoleRefresh call; a hub-owned worker, modelled on the 2B-2
-// channel_activity coalescer, then refreshes each affected user in turn: held
-// topics first, then the sidebar and affordances, then a paced member_update,
-// the timeout views, and one roles_update for the round.
-//
-// The wire is unchanged. An affected user receives the same frames as before;
-// users whose role did not change stop receiving redundant channel and timeout
-// frames.
+// role_refresh moves the fan-out of a role change off the admin request goroutine.
+// The handler commits, invalidates the permission cache and makes ONE
+// EnqueueRoleRefresh call; a hub-owned worker (modelled on the channel_activity
+// coalescer) then refreshes each affected user in turn: held topics, the sidebar
+// and affordances, a paced member_update, the timeout views, and one roles_update
+// for the round. Users whose role did not change receive no redundant channel or
+// timeout frames.
 //
 // Lock order: roleRefreshState.mu is a leaf. It may be taken under seqMu (from
-// covers, via mustFullResyncAtRegister) and seqMu is never taken under it. It
-// is never held across I/O or a send, or while taking h.mu, timeoutView.mu or
-// any Client.mu. flushMu sits above everything a round takes (h.mu, ps.mu,
-// timeoutView.mu, Client.mu); EnqueueRoleRefresh never takes it, and a round
-// takes seqMu only inside bumpVisibilityWatermark's lock-free CAS, never
-// through MarkVisibilityChanged.
+// covers, via mustFullResyncAtRegister) and seqMu is never taken under it. It is
+// never held across I/O or a send, or while taking h.mu, timeoutView.mu or any
+// Client.mu. flushMu sits above everything a round takes (h.mu, ps.mu,
+// timeoutView.mu, Client.mu); EnqueueRoleRefresh never takes it, and a round takes
+// seqMu only inside bumpVisibilityWatermark's lock-free CAS, never through
+// MarkVisibilityChanged.
 
 // RoleRefresh is one role mutation's fan-out request. The caller has already
 // committed and invalidated the permission cache for every named user.
@@ -120,9 +117,9 @@ func (s *roleRefreshState) covers(userID int64) bool {
 	return pending || running
 }
 
-// EnqueueRoleRefresh records r for the worker and returns at once: no I/O, no
-// DB work, no channel send under a lock. Requests merge, so a user named a
-// hundred times before the worker wakes is refreshed once.
+// EnqueueRoleRefresh records r for the worker and returns at once (no I/O, no DB
+// work, no channel send under a lock). Requests merge, so a user named a hundred
+// times before the worker wakes is refreshed once.
 func (h *Hub) EnqueueRoleRefresh(r RoleRefresh) {
 	if len(r.Visibility) == 0 && !r.AllConnected && len(r.MemberUpdate) == 0 && !r.Roles {
 		return
@@ -146,9 +143,9 @@ func (h *Hub) EnqueueRoleRefresh(r RoleRefresh) {
 	s.roles = s.roles || r.Roles
 	s.mu.Unlock()
 
-	// After the merge, so covers is already true for an affected user who
-	// reconnects meanwhile. A user offline right now resumes from a seq at or
-	// before this watermark onto a full ready.
+	// After the merge, so covers is already true for an affected user who reconnects
+	// meanwhile. A user offline right now resumes from a seq at or before this
+	// watermark onto a full ready.
 	if len(r.Visibility) > 0 || r.AllConnected || len(r.MemberUpdate) > 0 {
 		h.MarkVisibilityChanged()
 	}
@@ -172,8 +169,8 @@ func (s *roleRefreshState) take() (roleBatch, bool) {
 	return b, true
 }
 
-// requeue merges a batch back into the pending work, for a round that
-// stopped before sending anything.
+// requeue merges a batch back into the pending work, for a round that stopped
+// before sending anything.
 func (s *roleRefreshState) requeue(b roleBatch) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -187,21 +184,19 @@ func (s *roleRefreshState) requeue(b roleBatch) {
 	s.roles = s.roles || b.roles
 }
 
-// done drops one user from the in-flight set.
 func (s *roleRefreshState) done(userID int64) {
 	s.mu.Lock()
 	delete(s.inFlight, userID)
 	s.mu.Unlock()
 }
 
-// finish ends the round.
 func (s *roleRefreshState) finish() {
 	s.mu.Lock()
 	s.inFlight, s.allInFlight = nil, false
 	s.mu.Unlock()
 }
 
-// users lists the batch's users carrying flag, sorted so rounds are repeatable.
+// usersWith lists the batch's users carrying flag, sorted so rounds are repeatable.
 func (b roleBatch) usersWith(flag roleRefreshFlags) []int64 {
 	var ids []int64
 	for uid, f := range b.users {
@@ -214,14 +209,14 @@ func (b roleBatch) usersWith(flag roleRefreshFlags) []int64 {
 }
 
 // runRoleRefreshLife runs the worker on the hub's lifecycle context. A method
-// value, not a closure in Run, so the closures Run already holds keep their
-// names (api's goleak filter names Run.func1).
+// value, not a closure in Run, so the closures Run holds keep their names (api's
+// goleak filter names Run.func1).
 func (h *Hub) runRoleRefreshLife() { h.runRoleRefresh(h.lifeCtx()) }
 
 // runRoleRefresh is the worker, started once by Run on h.sweeps and joined by
 // finishRun. Whatever is pending when it exits is discarded: Stop closes every
-// socket, and the boot-time watermark sends every pre-restart resume onto a
-// full ready built from committed state.
+// socket, and the boot-time watermark sends every pre-restart resume onto a full
+// ready built from committed state.
 func (h *Hub) runRoleRefresh(ctx context.Context) {
 	wake := h.roleRefresh.wakeChan()
 	for {
@@ -232,8 +227,8 @@ func (h *Hub) runRoleRefresh(ctx context.Context) {
 			return
 		case <-wake:
 		}
-		// A round that could not read the channel list asks to run again
-		// after a short backoff; its users stay pending meanwhile.
+		// A round that could not read the channel list asks to run again after a short
+		// backoff; its users stay pending meanwhile.
 		for {
 			retry := h.flushRoleRefresh(ctx)
 			if retry <= 0 {
@@ -253,9 +248,9 @@ func (h *Hub) runRoleRefresh(ctx context.Context) {
 	}
 }
 
-// flushRoleRefresh runs one round over whatever is pending. It runs on the
-// worker (and on a test barrier), never on the dispatch goroutine. It returns
-// how long to wait before running again when the round was put back, else 0.
+// flushRoleRefresh runs one round over whatever is pending, on the worker (or a
+// test barrier), never on the dispatch goroutine. It returns how long to wait
+// before running again when the round was put back, else 0.
 func (h *Hub) flushRoleRefresh(ctx context.Context) time.Duration {
 	s := &h.roleRefresh
 	s.flushMu.Lock()
@@ -271,8 +266,8 @@ func (h *Hub) flushRoleRefresh(ctx context.Context) time.Duration {
 	return h.runRoleRound(ctx, b)
 }
 
-// startSweepWorkers starts Run's long-lived workers on h.sweeps, which
-// finishRun joins. Kept out of Run so hub.go stays within its size ceiling.
+// startSweepWorkers starts Run's long-lived workers on h.sweeps, which finishRun
+// joins. Kept out of Run so hub.go stays within its size ceiling.
 func (h *Hub) startSweepWorkers() {
 	h.sweeps.Go(h.runRemovedVoiceWatch)
 	h.sweeps.Go(h.runChannelActivityLife)

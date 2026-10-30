@@ -27,12 +27,10 @@ const (
 	heicMaxAssoc = 64
 )
 
-// refuse is a HEIC the converter does not take, for the reason given.
 func refuse(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", errConvertRefused, fmt.Sprintf(format, args...))
 }
 
-// heicInfo is what validateHEIC learns about an accepted file.
 type heicInfo struct {
 	// quarterTurn is whether the primary image is shown a quarter turn from
 	// how it is stored (irot of 90 or 270 degrees).
@@ -136,7 +134,6 @@ func heicTopLevel(r io.ReaderAt, size int64) (meta []byte, err error) {
 	return meta, nil
 }
 
-// property is the first property of item id of box type typ.
 func (m *heicMeta) property(id uint32, typ string) (body []byte, ok bool) {
 	for _, idx := range m.assoc[id] {
 		if idx >= 1 && idx <= len(m.props) && m.props[idx-1].typ == typ {
@@ -146,13 +143,11 @@ func (m *heicMeta) property(id uint32, typ string) (body []byte, ok bool) {
 	return nil, false
 }
 
-// heicAllowedProps are the properties a coded image or grid may carry.
 var heicAllowedProps = map[string]bool{
 	"ispe": true, "hvcC": true, "pixi": true, "auxC": true,
 	"irot": true, "imir": true, "clap": true, "colr": true,
 }
 
-// ispe is the displayed size an item declares.
 func (m *heicMeta) ispe(id uint32) (w, h uint64, ok bool) {
 	body, found := m.property(id, "ispe")
 	r := byteReader{b: body}
@@ -261,7 +256,6 @@ func (m *heicMeta) decodedItems() []uint32 {
 	return out
 }
 
-// isAlpha reports an auxC property of one of the alpha auxiliary types.
 func (m *heicMeta) isAlpha(id uint32) bool {
 	body, ok := m.property(id, "auxC")
 	if !ok || len(body) < 5 {
@@ -275,7 +269,6 @@ func (m *heicMeta) isAlpha(id uint32) bool {
 	return false
 }
 
-// checkGrid reads a grid's descriptor and holds its tiles to it.
 func (m *heicMeta) checkGrid(r io.ReaderAt, id uint32) error {
 	rows, cols, gw, gh, err := m.gridDescriptor(r, id)
 	if err != nil {

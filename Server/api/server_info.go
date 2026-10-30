@@ -14,19 +14,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// serverInfoResponse is the JSON shape returned by GET /api/v1/server-info:
-// public identity, compatibility, registration mode and the
-// server-default message retention window.
-//
-// ProtocolEpoch is here because a client — a browser client above all — has to
-// know whether it can speak to this server BEFORE it opens a WebSocket; without
-// it the only way to find out is a rejected connection, which is the confusing
-// failure this endpoint exists to remove.
-//
-// There is deliberately no version field. Build identity stays off every
-// unauthenticated endpoint so a server cannot be matched against a CVE list;
-// an epoch does not leak that (every 1.2.x server reports epoch 1). Version
-// lives on the admin-gated diagnostics endpoint. See handleServerInfo.
+// serverInfoResponse is GET /api/v1/server-info: public identity, compatibility,
+// registration mode and the server-default message retention window.
+// ProtocolEpoch is here because a client (a browser above all) must know whether
+// it can speak to this server BEFORE opening a WebSocket; otherwise the only
+// signal is a rejected connection. There is deliberately no version field: build
+// identity stays off unauthenticated endpoints so a server cannot be matched
+// against a CVE list, and an epoch does not leak that. Version lives on the
+// admin-gated diagnostics endpoint.
 type serverInfoResponse struct {
 	Name                 string           `json:"name"`
 	ProtocolEpoch        int              `json:"protocol_epoch"`

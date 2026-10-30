@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
-import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
+import { fromClientRoot } from "./clientRoot";
+import { quarantineGrepInvert } from "../../../scripts/check-quarantine.mjs";
 
 // The browser portal suite (WP 6.13g1): a real Go server with
 // `server.browser_client_enabled: true` serves the web bundle at its own
@@ -13,8 +14,8 @@ import { quarantineGrepInvert } from "./scripts/check-quarantine.mjs";
 // (tests/e2e/scripts/build-server.mjs --web). A binary built any other way
 // carries only the placeholder and the suite's first test fails with a 404.
 export default defineConfig({
-  outputDir: "test-results/web",
-  testDir: "./tests/e2e/web",
+  outputDir: fromClientRoot("test-results/web"),
+  testDir: fromClientRoot("tests/e2e/web"),
   // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
   // docs/testing-behavior.md, scripts/check-quarantine.mjs.
@@ -29,8 +30,8 @@ export default defineConfig({
   globalTimeout: 12 * 60 * 1000,
   reporter: [
     ["list"],
-    ["html", { open: "never", outputFolder: "playwright-report/web" }],
-    ["junit", { outputFile: "test-results/web-junit.xml" }],
+    ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/web") }],
+    ["junit", { outputFile: fromClientRoot("test-results/web-junit.xml") }],
   ],
   use: {
     ignoreHTTPSErrors: true,

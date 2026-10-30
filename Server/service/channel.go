@@ -13,8 +13,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// ChannelService handles channel-related business logic including
-// listing, permission-filtered access, typing, presence, and read state.
+// ChannelService handles channel listing, permission-filtered access, typing,
+// presence and read state.
 type ChannelService struct {
 	st    Store
 	afk   AFKStore
@@ -23,20 +23,18 @@ type ChannelService struct {
 	forum ForumStore
 	perms *PermissionService
 	batch *ConnWrites
-	// notifier re-derives channel audiences after an override change.
-	// Set once before the server serves; nil is a no-op.
+	// notifier re-derives channel audiences after an override change; nil is a no-op.
 	notifier PermissionChangeNotifier
-	// wakeExpiry nudges the custom status expirer after a status with an
-	// expiry commits; nil when none is installed.
+	// wakeExpiry nudges the custom status expirer after an expiring status commits.
 	wakeExpiry func()
 	now        func() time.Time
 }
 
 // NewChannelService creates a ChannelService.
 func NewChannelService(st Store, perms *PermissionService) *ChannelService {
-	// The AFK pointer lives on a slice interface rather than on Store, which
-	// is ratcheted (datastore_ratchet_test.go). *db.DB satisfies it; a Store
-	// that does not leaves SetAFKChannel answering ErrInternal.
+	// AFK lives on a slice interface because Store is ratcheted
+	// (datastore_ratchet_test.go); a Store lacking it makes SetAFKChannel answer
+	// ErrInternal.
 	afk, _ := st.(AFKStore)
 	cats, _ := st.(CategoryStore)
 	cperm, _ := st.(CategoryPermStore)
@@ -52,19 +50,17 @@ func NewChannelService(st Store, perms *PermissionService) *ChannelService {
 	}
 }
 
-// SetExpiryWake installs the callback a committed custom status with an
-// expiry calls so the expirer re-reads its deadline. Call once at startup,
-// before the service is shared.
+// SetExpiryWake installs the callback an expiring custom status calls so the
+// expirer re-reads its deadline. Call once at startup.
 func (s *ChannelService) SetExpiryWake(wake func()) { s.wakeExpiry = wake }
 
 // SetConnWrites installs the batch whose pending connect stamp a committed
-// presence_update drops. Call once at startup, before the service is shared.
+// presence_update drops. Call once at startup.
 func (s *ChannelService) SetConnWrites(w *ConnWrites) { s.batch = w }
 
-// ListVisibleChannels returns channels the user has ReadMessages permission for.
-// DM channels are excluded (they are accessed via DMService).
+// ListVisibleChannels returns channels the user has ReadMessages permission for,
+// excluding DMs (DMService).
 func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) ([]db.Channel, error) {
-	// Phase B Step 8 — span the public service entrypoint.
 	ctx, done := traceCall(ctx, "service/channel", "ChannelService.ListVisibleChannels",
 		telemetry.Int64("user_id", userID),
 	)
@@ -81,14 +77,13 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 		return nil, fmt.Errorf("%w: failed to get role", ErrInternal)
 	}
 
-	// Admins skip the override fetch (they bypass all channel checks anyway).
-	// Non-admins get every held role's override and the per-user layer in one
-	// batched fetch.
+	// Admins skip the override fetch (they bypass all channel checks); others get
+	// every held role's override and the per-user layer in one batch.
 	grants := permissions.MemberGrants{Perms: role.Perms}
 	if !permissions.HasAdmin(role.Perms) {
 		grants, err = s.st.GetMemberGrants(ctx, userID)
 		if err != nil {
-			// Fail closed — an empty map would return every denied channel.
+			// Fail closed: an empty map would return every denied channel.
 			slog.Error("ChannelService.ListVisibleChannels GetMemberGrants", "err", err, "user_id", userID, "role_ids", role.IDs)
 			return nil, fmt.Errorf("%w: failed to fetch channel overrides", ErrInternal)
 		}
@@ -96,7 +91,7 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 	}
 
 	// Single visibility predicate shared with the ws ready payload and reconnect
-	// replay filtering, so REST and WS can never disagree on what a role sees.
+	// replay filtering, so REST and WS cannot disagree.
 	visibleIDs := s.perms.Checker().VisibleChannelIDs(grants, channelRefs(all))
 	visible := make([]db.Channel, 0, len(visibleIDs))
 	for i := range all {
@@ -107,7 +102,6 @@ func (s *ChannelService) ListVisibleChannels(ctx context.Context, userID int64) 
 	return visible, nil
 }
 
-// channelRefs maps db channels to the checker's db-agnostic ChannelRef.
 func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	refs := make([]permissions.ChannelRef, len(channels))
 	for i := range channels {
@@ -117,9 +111,8 @@ func channelRefs(channels []db.Channel) []permissions.ChannelRef {
 	return refs
 }
 
-// HandleTyping processes a typing start event for a channel.
-// Returns the channel so callers can build broadcast events.
-// Silent errors are returned as nil (typing indicators are best-effort).
+// HandleTyping processes a typing start for a channel and returns it for the
+// broadcast. Typing is best-effort: errors and refusals return nil silently.
 func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int64, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
 },
@@ -133,29 +126,24 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 		return nil, nil //nolint:nilerr // typing indicators are best-effort; errors silently dropped
 	}
 
-	// A forum holds no messages, so there is nothing to type into: silent
-	// like every other typing refusal (a send is refused in checkSendPermission).
+	// A forum holds no messages: nothing to type into, silent like every typing refusal.
 	if ch.Type == db.ForumTypeName {
 		return nil, nil
 	}
 
 	// A typing indicator announces a post, so it answers to the post policy
-	// (permissions.CanType is CanSendMessage): a read-only member, an
-	// announcement reader without MANAGE_MESSAGES, an archived channel, a
-	// blocked or non-participant DM user all emit nothing. Silent, because
-	// typing is best-effort.
+	// (permissions.CanType is CanSendMessage): read-only members, announcement
+	// readers without MANAGE_MESSAGES, archived channels and blocked or
+	// non-participant DM users emit nothing.
 	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, true)
 	if subErr != nil || permissions.CanType(sub) != nil {
 		return nil, nil //nolint:nilerr // best-effort: a denial or a DM lookup failure emits nothing
 	}
 
-	// Per-user-per-channel rate limit. Built only now that the channel is
-	// known to exist and the caller is authorized to read it: doing
-	// this before resolution let any caller-supplied channel id — including
-	// ids that don't exist or aren't readable — pin a new entry in the
-	// shared, process-wide RateLimiter. RateLimiter.Cleanup only evicts a key
-	// once every timestamp on it is stale, so a stream of forged channel ids
-	// could retain an unbounded number of dead map entries for hours.
+	// Per-user-per-channel rate limit, built only after the channel is known to exist
+	// and be readable: doing it earlier let forged channel ids pin dead entries in
+	// the shared RateLimiter, whose Cleanup only evicts a key once every timestamp is
+	// stale, retaining an unbounded number for hours.
 	ratKey := auth.Key(auth.Key("typing", userID), channelID)
 	if limiter != nil && !limiter.Allow(ratKey, 1, 3*time.Second) {
 		return nil, nil
@@ -164,8 +152,7 @@ func (s *ChannelService) HandleTyping(ctx context.Context, userID, channelID int
 	return ch, nil
 }
 
-// GetDMParticipantIDs returns the participant IDs for a DM channel.
-// Convenience method for handlers building DM events.
+// GetDMParticipantIDs returns a DM channel's participant IDs for event builders.
 func (s *ChannelService) GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error) {
 	return s.st.GetDMParticipantIDs(ctx, channelID)
 }
@@ -174,31 +161,24 @@ func (s *ChannelService) GetDMParticipantIDs(ctx context.Context, channelID int6
 type PresenceResult struct {
 	// CustomStatus is the sanitized line to publish (nil = none).
 	CustomStatus *string
-	// ExpiresAt is the stored expiry of CustomStatus in
-	// dbtime.ISOLayout, "" when it has none. For a bare status flip
-	// it is the expiry already stored with the text it carries.
+	// ExpiresAt is CustomStatus's stored expiry in dbtime.ISOLayout, "" when none; a
+	// bare status flip carries the expiry stored with its text.
 	ExpiresAt string
 }
 
-// HandlePresenceUpdate validates and persists a presence status change, and
-// (when customStatus is non-nil) the custom status line that came with it.
-//
-// expiresIn, in seconds (MinCustomStatusExpirySeconds to
-// MaxCustomStatusExpirySeconds), makes the line clear itself; it is valid only
-// with a non-empty customStatus. A new line without it has no expiry and
-// replaces any old one, a bare flip leaves text and expiry alone, and an empty
-// line clears both.
-//
-// The status is stored as chosen, invisible included; collapsing invisible to
-// offline is a broadcast-time concern (db.BroadcastStatus), not a storage one —
-// the server has to be able to tell "chose to look offline" from "is gone" on
-// the next connect. Returns the sanitized custom status the caller should put
-// on the wire, so the broadcast and the row can never disagree.
+// HandlePresenceUpdate validates and persists a status change and, when
+// customStatus is non-nil, its custom status line. expiresIn (seconds,
+// MinCustomStatusExpirySeconds..MaxCustomStatusExpirySeconds) makes the line
+// clear itself and needs a non-empty customStatus; a new line without it has no
+// expiry and replaces any old one, a bare flip leaves text and expiry alone, an
+// empty line clears both. The status is stored as chosen, invisible included:
+// collapsing it to offline is broadcast-time (db.BroadcastStatus), because the
+// next connect must tell "chose to look offline" from "is gone". Returns the
+// sanitized custom status for the wire, so broadcast and row cannot disagree.
 func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64, status string, customStatus *string, expiresIn *int64, limiter interface {
 	Allow(key string, limit int, window time.Duration) bool
 },
 ) (PresenceResult, error) {
-	// Rate limit.
 	ratKey := auth.Key("presence", userID)
 	if limiter != nil && !limiter.Allow(ratKey, 1, 10*time.Second) {
 		return PresenceResult{}, ErrRateLimited
@@ -214,11 +194,9 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 
 	var cleaned *string
 	if customStatus != nil {
-		// Bound the raw bytes before cleanText (sanitizeToFixpoint)
-		// runs — see cleanTextBounded's doc comment (user.go). This path is
-		// reachable over the WS presence_update frame, whose read limit is
-		// config.MaxMessageBytes (1 MiB), far larger than any REST body that
-		// reaches the equivalent guard on SetCustomStatus/UpdateProfile.
+		// Bound the raw bytes before cleanText; see cleanTextBounded (user.go). The WS
+		// presence_update frame's read limit is config.MaxMessageBytes (1 MiB), far above
+		// any REST body reaching the equivalent guard.
 		text, err := cleanVisibleBounded(*customStatus, MaxCustomStatusLen, "custom_status")
 		if err != nil {
 			return PresenceResult{}, err
@@ -228,9 +206,8 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 	if expiresIn != nil && cleaned == nil {
 		return PresenceResult{}, fmt.Errorf("%w: custom_status_expires_in needs a non-empty custom_status", ErrBadRequest)
 	}
-	// A custom status line is the user's own text shown to every member, so
-	// a timeout refuses setting one; a plain status change or clearing the
-	// line publishes nothing of theirs and stays allowed.
+	// A custom status is the user's own text shown to every member, so a timeout
+	// refuses setting one; a plain flip or clearing publishes nothing of theirs.
 	if cleaned != nil {
 		if err := requireNotTimedOut(ctx, s.perms, userID); err != nil {
 			return PresenceResult{}, err
@@ -246,8 +223,8 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 		at := s.now().UTC().Add(time.Duration(*expiresIn) * time.Second).Format(dbtime.ISOLayout)
 		expiresAt = &at
 	}
-	// Status and text commit together in one writer transaction (P5-O08), so
-	// a failure leaves both as they were and there is nothing to broadcast.
+	// Status and text commit together in one writer transaction, so a failure leaves
+	// both as they were and nothing to broadcast.
 	if err := s.st.UpdateUserPresence(ctx, userID, status, cleaned, expiresAt); err != nil {
 		slog.Error("ChannelService.HandlePresenceUpdate", "err", err, "user_id", userID)
 		return PresenceResult{}, fmt.Errorf("%w: failed to update status", ErrInternal)
@@ -263,14 +240,13 @@ func (s *ChannelService) HandlePresenceUpdate(ctx context.Context, userID int64,
 	return res, nil
 }
 
-// flipStatus is HandlePresenceUpdate's bare status flip (no custom_status
-// field): the stored text and expiry ride along on the broadcast, so a plain
-// online -> idle flip does not blank everyone else's copy.
+// flipStatus is the bare status flip (no custom_status): the stored text and
+// expiry ride along on the broadcast so an online-to-idle flip does not blank
+// others' copy.
 func (s *ChannelService) flipStatus(ctx context.Context, userID int64, status string) (PresenceResult, error) {
-	// Read it BEFORE writing: custom_status is *string with no omitempty
-	// on the wire (see presencePayload), so a nil for a value we merely
-	// failed to read would be wire-identical to "the user cleared it", and
-	// reading first means a read failure aborts before anything commits.
+	// Read BEFORE writing: custom_status is *string without omitempty on the wire
+	// (presencePayload), so a nil from a failed read would read as "the user cleared
+	// it", and reading first aborts before anything commits.
 	current, readErr := s.st.GetUserByID(ctx, userID)
 	if readErr != nil || current == nil {
 		slog.Error("ChannelService.HandlePresenceUpdate: could not read stored custom status",
@@ -290,17 +266,16 @@ func (s *ChannelService) flipStatus(ctx context.Context, userID int64, status st
 }
 
 // dropConnectStamp keeps a pending batched connect stamp from overwriting the
-// status a presence_update just committed: the stamp's SQL turns a legacy
-// "offline" choice into online.
+// status a presence_update just committed (the stamp's SQL turns a legacy
+// "offline" into online).
 func (s *ChannelService) dropConnectStamp(userID int64) {
 	if s.batch != nil {
 		s.batch.dropConnectStamp(userID)
 	}
 }
 
-// AdmitChannelFocus is channel_focus with read:false: it runs the same
-// admission as HandleChannelFocus and returns the channel without writing any
-// read state, so a client can focus and subscribe without marking anything read.
+// AdmitChannelFocus is channel_focus with read:false: the same admission as
+// HandleChannelFocus without writing read state.
 func (s *ChannelService) AdmitChannelFocus(ctx context.Context, userID, channelID int64) (*db.Channel, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -308,9 +283,8 @@ func (s *ChannelService) AdmitChannelFocus(ctx context.Context, userID, channelI
 	return admitReadState(ctx, s.st, s.perms, userID, channelID)
 }
 
-// HandleChannelFocus processes a channel focus event and updates read state to
-// the channel's latest message. Returns the channel for callers to set client
-// state.
+// HandleChannelFocus processes a channel focus and moves read state to the latest
+// message, returning the channel.
 func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channelID int64) (*db.Channel, error) {
 	if channelID <= 0 {
 		return nil, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -320,8 +294,7 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	if err != nil {
 		return nil, err
 	}
-	// A forum holds no messages, so it has no read state to keep: focusing it
-	// only subscribes the socket (its posts' changes arrive on that topic).
+	// A forum holds no messages, so no read state: focusing only subscribes the socket.
 	if ch.Type == db.ForumTypeName {
 		return ch, nil
 	}
@@ -330,19 +303,15 @@ func (s *ChannelService) HandleChannelFocus(ctx context.Context, userID, channel
 	return ch, nil
 }
 
-// markFocusedRead marks channelID read at its latest message for userID, the
-// write half of channel_focus and thread_focus.
+// markFocusedRead marks channelID read at its latest message (the write half of
+// channel_focus and thread_focus).
 func (s *ChannelService) markFocusedRead(ctx context.Context, userID, channelID int64) {
-	// Mark channel as read. latestID == 0 (no undeleted messages) still
-	// writes: the upsert is what zeroes mention_count, and a last_read of 0 is
-	// correct then — any future message id is larger, so unread counts hold.
-	//
+	// latestID == 0 (no undeleted messages) still writes: the upsert zeroes
+	// mention_count and a last_read of 0 is right since any future id is larger.
 	// Skip the UPSERT when the stored row already says exactly this (same
-	// last_message_id, no mentions to clear): channel_focus/mark_read fire on
-	// every refocus at up to 10/s/user, and even a no-op write occupies the
-	// single writer connection and opens a transaction. The extra read runs on
-	// the reader pool, which doesn't serialize. Same problem-shape as the
-	// session-touch throttle (api/middleware.go).
+	// last_message_id, no mentions): focus/mark_read fire up to 10/s/user and even a
+	// no-op write occupies the single writer. The extra read runs on the reader pool
+	// (same shape as the session-touch throttle, api/middleware.go).
 	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
 	if err == nil {
 		lastRead, mentions, found, rsErr := s.st.GetReadState(ctx, userID, channelID)
@@ -352,38 +321,32 @@ func (s *ChannelService) markFocusedRead(ctx context.Context, userID, channelID 
 			return
 		}
 	}
-	// The write recomputes the watermark itself rather than taking latestID:
-	// that snapshot is two round trips old by now, and a mention raised for a
-	// newer message in the meantime would be cleared while last_message_id
-	// still pointed behind it — a badge that vanishes with nothing to
-	// recompute it. latestID is only ever used for the skip
-	// decision above, which is a read, not a write — so a failed
-	// GetLatestMessageID (or GetReadState) must fall through to this write
-	// rather than skip it: the write is the load-bearing half, and
-	// only the optimisation above it is allowed to depend on a successful read.
+	// The write recomputes the watermark itself rather than taking latestID, which is
+	// two round trips stale: a mention raised for a newer message meanwhile would be
+	// cleared while last_message_id pointed behind it, a badge that vanishes. latestID
+	// only drives the skip decision, so a failed read must fall through to this
+	// write; only the optimisation may depend on a successful read.
 	if wErr := s.st.MarkChannelReadAtLatest(ctx, userID, channelID); wErr != nil {
-		// Self-heals on the next focus, but a persistently failing write
-		// means unread badges never clear — it must not be invisible.
+		// Self-heals on the next focus, but a persistently failing write means badges
+		// never clear, so it must be visible.
 		slog.Warn("channel_focus: read-state write failed",
 			"user_id", userID, "channel_id", channelID, "err", wErr)
 	}
 }
 
 // admitReadState is the gate every read-state operation shares (channel_focus,
-// mark_read, mark_unread): the channel must exist, and the caller must pass
-// permissions.CanAdmitSession, which is visibility, the same predicate behind
-// ListVisibleChannels, the ready payload and reconnect replay. A socket that
-// still holds an id it can no longer see (or an archived channel)
-// cannot resubscribe to the live topic or move its read state.
+// mark_read, mark_unread): the channel must exist and the caller must pass
+// permissions.CanAdmitSession (visibility, the predicate behind
+// ListVisibleChannels, ready and replay), so a socket holding an id it can no
+// longer see, or an archived channel, cannot resubscribe or move read state.
 func admitReadState(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	if ch.IsThread() {
-		// A thread is never a socket's focused channel: it rides the
-		// second slot (thread_focus, AdmitThreadFocus), which a parent's
-		// visibility refresh also revokes.
+		// A thread is never a socket's focused channel: it rides the second slot
+		// (thread_focus, AdmitThreadFocus), which a parent's visibility refresh also revokes.
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
 	sub, subErr := channelSubject(ctx, st, perms, userID, ch, false)
@@ -396,10 +359,9 @@ func admitReadState(ctx context.Context, st Store, perms *PermissionService, use
 	return ch, nil
 }
 
-// CheckActivityAllowed reports whether userID may publish a game activity
-// name. The name is text every member sees, so a timeout refuses
-// it with ErrTimedOut, like a custom status line; clearing one stays allowed
-// and needs no check.
+// CheckActivityAllowed reports whether userID may publish a game activity name.
+// Every member sees it, so a timeout refuses it (ErrTimedOut) like a custom
+// status; clearing needs no check.
 func (s *ChannelService) CheckActivityAllowed(ctx context.Context, userID int64) error {
 	return requireNotTimedOut(ctx, s.perms, userID)
 }

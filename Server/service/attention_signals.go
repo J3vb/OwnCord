@@ -7,13 +7,12 @@ import (
 	"time"
 )
 
-// The per-signal evaluators behind AttentionService.Evaluate. Each
-// runs under the service's lock and ends in settle.
+// The per-signal evaluators behind AttentionService.Evaluate; each runs under the
+// service's lock and ends in settle.
 
-// attentionLevel commits the first measured level immediately, so a reading
-// is never shown as healthy before one is established, and every later new
-// level only after it repeats attentionSustain samples (sustain 1 commits
-// immediately).
+// attentionLevel commits the first measured level immediately, so a reading is
+// never shown healthy before one is established, and every later new level only
+// after attentionSustain repeats (sustain 1 commits immediately).
 type attentionLevel struct {
 	status, pending string
 	streak          int
@@ -114,14 +113,13 @@ func (s *AttentionService) evalRate(st *attentionRate, total *float64, now time.
 	}
 	rate := (*total - st.last) / now.Sub(st.lastAt).Minutes()
 	st.last, st.lastAt = *total, now
-	// The first measured interval holds the post-restart resume burst and is
-	// never learned. During warm-up a quietWarmup signal learns every later
-	// sample and raises nothing; any other signal learns only samples at or
-	// below its floor and raises at the floor, so pressure present at boot is
-	// raised rather than learned. After warm-up only healthy samples are
-	// learned, so sustained pressure never becomes the normal. A stopped
-	// dispatch loop commits as soon as it is seen; any other rate level
-	// starts healthy and needs attentionSustain samples to change.
+	// The first measured interval holds the post-restart resume burst and is never
+	// learned. During warm-up a quietWarmup signal learns every later sample and
+	// raises nothing; any other signal learns only samples at or below its floor and
+	// raises at the floor, so pressure present at boot is raised, not learned. After
+	// warm-up only healthy samples are learned, so sustained pressure never becomes
+	// the normal. A stopped dispatch loop commits at once; any other rate level starts
+	// healthy and needs attentionSustain samples to change.
 	first := st.level.status == ""
 	if first {
 		st.level.status = AttentionStatusOK
@@ -237,12 +235,11 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalVoice reports the LiveKit voice path's health and restart state.
-// A managed companion that is not running — a crash loop that gave
-// up, or a start that never succeeded — is the failure class users report
-// most, so it warns, and a companion whose restarts exhausted the backoff is
-// critical. An externally managed LiveKit is health-probed and warns when it
-// does not answer; an unconfigured voice path is unknown, never healthy.
+// evalVoice reports the LiveKit voice path's health and restart state. A managed
+// companion that is not running (crash loop gave up, or never started) is the
+// failure users report most, so it warns, and critical once restarts exhausted the
+// backoff. An external LiveKit is health-probed and warns when it does not answer;
+// an unconfigured voice path is unknown, never healthy.
 func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "voice", Label: "Voice (LiveKit)", ObservedAt: now}
 	title := "Voice is unavailable"
@@ -276,9 +273,9 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 		s.settle(sig, title, action)
 		return
 	}
-	// Hysteresis like the disk signal: the first measured level commits at
-	// once, every later change needs attentionSustain samples, so one
-	// noisy minute neither raises nor clears.
+	// Hysteresis like the disk signal: the first level commits at once, every later
+	// change needs attentionSustain samples, so one noisy minute neither raises nor
+	// clears.
 	raw := AttentionStatusOK
 	switch {
 	case v.GaveUp:
@@ -303,15 +300,13 @@ func (s *AttentionService) evalVoice(r attentionReadings, now time.Time) {
 	s.settle(sig, title, action)
 }
 
-// evalCertificate reports how long the served TLS certificate has left.
-// Nothing here renews a self-signed or manual certificate, and an ACME
-// renewal that keeps failing is silent until handshakes fail, so the panel
-// warns ahead of the date. autocert renews an ACME certificate
-// min(lifetime/3, 30 days) before expiry, so ACME warns once a third of that
-// renewal window has passed unrenewed and is critical two thirds in; a
-// fixed window would flag every healthy short-lived certificate. TLS off (a
-// reverse proxy serves the certificate) and ACME before its first handshake
-// have nothing to read: unknown.
+// evalCertificate reports how long the served TLS certificate has left. Nothing
+// renews a self-signed or manual certificate, and a failing ACME renewal is silent
+// until handshakes fail, so the panel warns ahead of the date. autocert renews
+// min(lifetime/3, 30 days) before expiry, so ACME warns once a third of that window
+// has passed unrenewed and is critical two thirds in; a fixed window would flag
+// every healthy short-lived certificate. TLS off (a reverse proxy serves it) and
+// ACME before its first handshake are unknown.
 func (s *AttentionService) evalCertificate(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: "certificate", Label: "TLS certificate", ObservedAt: now}
 	title := "The TLS certificate expires soon"
