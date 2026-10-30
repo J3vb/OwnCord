@@ -100,6 +100,7 @@ func newCRSWAF(paranoiaLevel int, block bool, onMatch func(types.MatchedRule)) (
 				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:1002,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:1003,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/banner" "id:1005,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
+				SecRule REQUEST_URI "@beginsWith /admin/api/discord-imports/upload" "id:1006,phase:1,pass,nolog,ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 				SecRule REQUEST_METHOD "@streq POST" "id:1004,phase:1,pass,nolog,chain"
 					SecRule REQUEST_URI "@rx ^/api/v1/dms/[0-9]+/icon([?]|$)" "ctl:requestBodyAccess=Off,ctl:ruleRemoveById=920420"
 
@@ -270,6 +271,7 @@ func wafInlineEngine(paranoiaLevel int) (coraza.WAF, error) {
 				SecRule REQUEST_URI "@beginsWith /api/v1/admin/plugins/install" "id:900004,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/avatar" "id:900005,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_URI "@beginsWith /api/v1/users/me/banner" "id:900007,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
+				SecRule REQUEST_URI "@beginsWith /admin/api/discord-imports/upload" "id:900008,phase:1,pass,nolog,ctl:requestBodyAccess=Off"
 				SecRule REQUEST_METHOD "@streq POST" "id:900006,phase:1,pass,nolog,chain"
 					SecRule REQUEST_URI "@rx ^/api/v1/dms/[0-9]+/icon([?]|$)" "ctl:requestBodyAccess=Off"
 			`, paranoiaLevel)),

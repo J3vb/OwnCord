@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), and `/api/v1/users/me/banner` (5 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), `/api/v1/users/me/banner` (5 MiB envelope), and `/admin/api/discord-imports/upload` (`upload.import_max_mb`, 500 MiB by default).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 239 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 245 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -83,6 +83,10 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/config`                                                  |
 | GET     | `/admin/api/config/settings`                                         |
 | PATCH   | `/admin/api/config/settings`                                         |
+| GET     | `/admin/api/discord-imports/latest`                                  |
+| POST    | `/admin/api/discord-imports/upload`                                  |
+| GET     | `/admin/api/discord-imports/{id}`                                    |
+| POST    | `/admin/api/discord-imports/{id}/cancel`                             |
 | DELETE  | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/level`                                              |
 | PATCH   | `/admin/api/logs/level`                                              |
@@ -351,7 +355,7 @@ body. Any other status, including a 2xx written after the deadline and a
 specific 5xx such as 502 or 507, is never rewritten. Exempt, with no deadline of their own beyond the transfer and
 archive progress deadlines: the WebSocket upgrade, the LiveKit proxy, file
 uploads and downloads, avatar, banner, emoji and group-icon uploads, client-update, the admin
-log stream, archive, backup, restore, update-apply and restart routes, plugin
+log stream, archive, backup, restore, update-apply and restart routes, the Discord import upload, plugin
 install, enable and disable, and account erasure.
 
 ---
@@ -4275,6 +4279,7 @@ Authorization is two-layered:
 | `DELETE /admin/api/users/{id}`                                                                                                                       | `ERASE_ACCOUNTS` (`ADMINISTRATOR` passes); the actor must outrank the target (checked in the service) — B4-9, WP 8.4d                                                                                                                                                                                        |
 | `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role **or** `ISSUE_RECOVERY` (`permissions.CanIssueRecovery`; `ADMINISTRATOR` does not pass); a holder who is not the owner can only issue to a member ranked strictly below them, never the owner — B4-6, WP 8.4d                                                                                     |
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                                                                                                                                                                                                                                            |
+| `/admin/api/discord-imports…`                                                                                                                        | `MANAGE_CHANNELS`                                                                                                                                                                                                                                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                                                                                                                                                                                                                                               |
 | `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                                                                                                                                                                                                                                             |
 | `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
@@ -6235,6 +6240,82 @@ Audited as `permission_preview`, target `channel`.
 | 400    | `BAD_REQUEST` | Bad `user_id`, missing or unknown `action`, or not exactly one of the ids |
 | 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`, or the member or role ranks at or above you    |
 | 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                               |
+
+### Discord import
+
+Import one Discord channel's history from a DiscordChatExporter JSON export
+(a `.json` file, or a `.zip` of it with its `_Files` folder) as a new text
+channel. All routes require `MANAGE_CHANNELS` and answer `503
+SERVICE_UNAVAILABLE` on a server with no upload storage. One import runs at a
+time, server-wide.
+
+The channel is built hidden and published in one step when the job ends, with
+every member's read state past the last message and a single `channel_create`
+event; no message events, pings or unread badges are sent. Mentions are stored
+as plain text. Reactions, embeds, stickers, polls, threads and system messages
+are skipped and counted. Attachments are copied only from the zip, under the
+normal file-type and size rules; remote links are never fetched. PNG and GIF
+attachments get their width and height recorded; other images are sized by the
+client when they load.
+
+#### POST /admin/api/discord-imports/upload?filename={name}&category_id={id}
+
+The request body is the export file itself (`application/octet-stream`),
+streamed to a temp file under `data/import-tmp`, never held in memory, and
+removed when the job ends. `filename` must end in `.json` or `.zip`.
+`category_id` is optional; `0` or absent means no category. The body is capped
+by `upload.import_max_mb` (default 500) and runs under the same progress
+deadline as file uploads. Answers `202 Accepted`:
+
+```json
+{ "id": 12, "status": "running" }
+```
+
+| Status | Code                  | When                                                                                     |
+| ------ | --------------------- | ---------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`         | Wrong extension, bad `category_id`, unknown category, empty body, or not a usable export |
+| 409    | `CONFLICT`            | Another import is running (checked before the body is read)                              |
+| 413    | `PAYLOAD_TOO_LARGE`   | The file is over `upload.import_max_mb`                                                  |
+| 503    | `SERVICE_UNAVAILABLE` | No upload storage, or the server is shutting down                                        |
+
+Audited as `discord_import_start`, and `discord_import_publish` when the job
+finishes (target `channel`).
+
+#### GET /admin/api/discord-imports/latest
+
+The newest job (`null` when none ran) plus what the panel's form shows:
+`retention_days` is the server-wide message window (`0` keeps everything), and
+`max_upload_bytes` the largest file the upload takes. A panel that is reopened
+mid-import finds the running job here.
+
+#### GET /admin/api/discord-imports/{id}
+
+One job, for progress polling. `status` is `running`, `done`, `failed` or
+`cancelled`. `imported` rises after each chunk of about 500 messages; `total`
+is known only once the job finishes. `error` is set on `failed`. `404
+NOT_FOUND` for an unknown id.
+
+```json
+{
+  "id": 12,
+  "status": "done",
+  "source_name": "general.zip",
+  "imported": 4210,
+  "skipped": 36,
+  "skipped_attachments": 2,
+  "total": 4246,
+  "error": null,
+  "created_at": "2026-10-30T09:15:02Z",
+  "finished_at": "2026-10-30T09:15:41Z"
+}
+```
+
+#### POST /admin/api/discord-imports/{id}/cancel
+
+Asks a running job to stop. Answers `202` with `{"id": 12, "status":
+"cancelling"}`; the job then ends as `cancelled`, its channel and files are
+removed, and the status route reports it. `409 CONFLICT` when the job is not
+running, `404 NOT_FOUND` for an unknown id. Audited as `discord_import_cancel`.
 
 ---
 

@@ -21,7 +21,7 @@ type Lifecycle struct {
 // config, the setup token, the log-level controller and the app's lifecycle
 // handles (the background group and the shutdown signal) the update apply
 // tail needs.
-func adminSetupOptions(cfg *config.Config, rt Runtime) admin.SetupOptions {
+func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImporter) admin.SetupOptions {
 	return admin.SetupOptions{
 		ConfigPath: config.DefaultPath,
 		RunningCfg: cfg,
@@ -32,5 +32,10 @@ func adminSetupOptions(cfg *config.Config, rt Runtime) admin.SetupOptions {
 		LogLevel:     rt.LogLevel,
 		Background:   rt.Background,
 		Shutdown:     rt.Shutdown,
+
+		DiscordImport:  importer,
+		ImportDir:      importTempDir(cfg),
+		ImportMaxBytes: cfg.Upload.ImportMaxBytes(),
+		BeginTransfer:  beginImportTransfer,
 	}
 }
