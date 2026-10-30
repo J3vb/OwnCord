@@ -370,7 +370,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "7e22fe7",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/mountAndScroll.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -951,7 +951,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "a50a9d3",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/mountAndScroll.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -1913,7 +1913,7 @@
       "fix": {
         "commit": "c3837fa",
         "branchCommit": "a910975",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/liveUpdatesAndBreakers.test.ts",
         "revertProof": "self-reported",
         "pr": 1367
       },
@@ -5223,7 +5223,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "8f6b22708d2a17f349b117f74817174c1a349faf",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/mountAndScroll.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Drop the per-call registration: hoist one factory-scoped `let flashTimer = 0; let flashEl: HTMLElement | null = null;`, and in scrollToMessage do `if (flashTimer !== 0) { clearTimeout(flashTimer); flashEl?.classList.remove(\"highlight-flash\"); } flashEl = el; flashTimer = window.setTimeout(() => { el.classList.remove(\"highlight-flash\"); flashTimer = 0; flashEl = null; }, 1500);`, then clear the same pair inside the existing destroy() (next to `ac.abort()`), so no abort listener is registered at all.",
