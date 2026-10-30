@@ -1,0 +1,148 @@
+{
+  "guild": {
+    "id": "900",
+    "name": "Test Guild",
+    "iconUrl": "https://cdn.discordapp.com/icons/900/x.png"
+  },
+  "channel": {
+    "id": "111",
+    "type": "GuildTextChat",
+    "categoryId": "5",
+    "category": "Text",
+    "name": "general",
+    "topic": "Where we talk"
+  },
+  "dateRange": { "after": null, "before": null },
+  "exportedAt": "2026-10-01T10:00:00.000000+00:00",
+  "messages": [
+    {
+      "id": "1001",
+      "type": "Default",
+      "timestamp": "2020-03-01T10:00:00.000+00:00",
+      "timestampEdited": null,
+      "callEndedTimestamp": null,
+      "isPinned": true,
+      "content": "Hello <b>world</b>",
+      "author": {
+        "id": "42",
+        "name": "ann",
+        "discriminator": "0000",
+        "nickname": "Ann N.",
+        "color": "#FF0000",
+        "isBot": false,
+        "avatarUrl": "https://cdn.discordapp.com/avatars/42/a.png"
+      },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [{ "emoji": { "name": "x" }, "count": 2 }],
+      "mentions": []
+    },
+    {
+      "id": "1002",
+      "type": "Reply",
+      "timestamp": "2020-03-01T10:05:00.000+00:00",
+      "timestampEdited": "2020-03-01T11:00:00.000+00:00",
+      "isPinned": false,
+      "content": "Hi back",
+      "author": { "id": "43", "name": "bob", "nickname": "bob", "color": null, "isBot": false },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [{ "id": "42", "name": "ann" }],
+      "reference": { "messageId": "1001", "channelId": "111", "guildId": "900" }
+    },
+    {
+      "id": "1003",
+      "type": "GuildMemberJoin",
+      "timestamp": "2020-03-01T10:06:00.000+00:00",
+      "timestampEdited": null,
+      "isPinned": false,
+      "content": "Joined the server.",
+      "author": { "id": "44", "name": "cy", "nickname": "cy", "isBot": false },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": []
+    },
+    {
+      "id": "1004",
+      "type": "Reply",
+      "timestamp": "2020-03-01T10:07:00.000+00:00",
+      "timestampEdited": null,
+      "isPinned": false,
+      "content": "Replying to something not exported",
+      "author": { "id": "43", "name": "bob", "nickname": "", "isBot": false },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": [],
+      "reference": { "messageId": "9999", "channelId": "111" }
+    },
+    {
+      "id": "1005",
+      "type": "Default",
+      "timestamp": "2020-03-01T10:08:00.000+00:00",
+      "timestampEdited": null,
+      "isPinned": false,
+      "content": "Two pictures and a link",
+      "author": {
+        "id": "42",
+        "name": "ann",
+        "nickname": "Ann N.",
+        "color": "#FF0000",
+        "isBot": false
+      },
+      "attachments": [
+        {
+          "id": "a1",
+          "url": "channel.json_Files/pic one.png",
+          "fileName": "pic one.png",
+          "fileSizeBytes": 67
+        },
+        {
+          "id": "a2",
+          "url": "https://cdn.discordapp.com/attachments/1/2/remote.png",
+          "fileName": "remote.png",
+          "fileSizeBytes": 10
+        }
+      ],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": []
+    },
+    {
+      "id": "1006",
+      "type": "Default",
+      "timestamp": "2020-03-01T10:09:00.000+00:00",
+      "timestampEdited": null,
+      "isPinned": false,
+      "content": "",
+      "author": { "id": "44", "name": "cy", "nickname": "cy", "isBot": true },
+      "attachments": [],
+      "embeds": [{ "title": "only an embed" }],
+      "stickers": [],
+      "reactions": [],
+      "mentions": []
+    },
+    {
+      "id": "1007",
+      "type": "Default",
+      "timestamp": "not a time",
+      "timestampEdited": null,
+      "isPinned": false,
+      "content": "bad timestamp",
+      "author": { "id": "44", "name": "cy", "nickname": "cy", "isBot": false },
+      "attachments": [],
+      "embeds": [],
+      "stickers": [],
+      "reactions": [],
+      "mentions": []
+    }
+  ],
+  "messageCount": 7
+}

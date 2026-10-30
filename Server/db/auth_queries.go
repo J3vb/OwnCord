@@ -83,7 +83,7 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	}
 
 	var count int64
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE registration_status <> 'system'`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty count: %w", err)
 	}
 	if count > 0 {

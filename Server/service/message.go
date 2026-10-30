@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"strings"
 	"sync/atomic"
 	"unicode/utf8"
 
@@ -328,6 +329,23 @@ func sanitizeToFixpoint(raw string) string {
 // package, e.g. registration's username, which must canonicalize as lookups do.
 func SanitizeText(raw string) string {
 	return sanitizeToFixpoint(raw)
+}
+
+// SanitizeImportedContent applies a sent message's sanitizer and length limit,
+// cutting over-long text with an ellipsis instead of refusing it.
+func SanitizeImportedContent(raw string) string {
+	// The raw-byte guard in front of the quadratic sanitizer: cut first.
+	cut := len(raw) > maxMessageLen*4
+	if cut {
+		raw = strings.ToValidUTF8(raw[:maxMessageLen*4], "")
+	}
+	content := sanitizeToFixpoint(raw)
+	if n := utf8.RuneCountInString(content); n > maxMessageLen {
+		content = string([]rune(content)[:maxMessageLen-1]) + "…"
+	} else if cut && n > 0 {
+		content = string([]rune(content)[:min(n, maxMessageLen-1)]) + "…"
+	}
+	return content
 }
 
 func sanitizeContent(raw string, allowEmpty bool) (string, error) {

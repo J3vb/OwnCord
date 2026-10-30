@@ -34,7 +34,7 @@ FROM attachments WHERE id = ?;
 -- 074), whose own nsfw is always 0; the gate reads either one being set.
 SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
        a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw,
-       p.nsfw AS parent_nsfw
+       p.nsfw AS parent_nsfw, c.import_pending
 FROM attachments a
 LEFT JOIN messages m ON m.id = a.message_id
 LEFT JOIN channels c ON c.id = m.channel_id

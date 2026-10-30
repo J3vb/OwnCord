@@ -34,6 +34,9 @@ const maxMentionsPerMessage = 20
 // already treats as lapsed.
 const notBannedClause = `(banned = 0 OR (ban_expires IS NOT NULL AND replace(ban_expires, ' ', 'T') <= strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))`
 
+// notSystemClause keeps the hidden import account out of every mention lookup.
+const notSystemClause = `registration_status <> 'system'`
+
 // MentionTarget is a candidate recipient of a mention fan-out: the user id, the
 // presence status @here filters on, and the held roles so the caller can apply
 // the ADMINISTRATOR bypass when a per-user channel override would drop them.
@@ -253,8 +256,8 @@ func (d *DB) GetUserIDsByUsernames(ctx context.Context, usernames []string) (map
 
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id, username FROM users WHERE %s AND username IN (%s)`,
-			notBannedClause, strings.Join(placeholders, ",")),
+			`SELECT id, username FROM users WHERE %s AND %s AND username IN (%s)`,
+			notBannedClause, notSystemClause, strings.Join(placeholders, ",")),
 		args...,
 	)
 	if err != nil {
@@ -316,8 +319,8 @@ func (d *DB) listMentionTargets(ctx context.Context, column mentionTargetColumn,
 		fmt.Sprintf( //nolint:gosec // G201: placeholders plus a closed filter chosen by a named-type constant, not user input
 			`SELECT u.id, u.status, u.role_id,
 			        COALESCE((SELECT group_concat(ur2.role_id) FROM user_roles ur2 WHERE ur2.user_id = u.id), '')
-			 FROM users u WHERE %s AND %s`,
-			notBannedClause, mentionTargetFilter(column, strings.Join(placeholders, ","))),
+			 FROM users u WHERE %s AND %s AND %s`,
+			notBannedClause, notSystemClause, mentionTargetFilter(column, strings.Join(placeholders, ","))),
 		args...,
 	)
 	if err != nil {

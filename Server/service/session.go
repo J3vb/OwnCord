@@ -91,7 +91,8 @@ func (s *SessionService) ResolveSocketPrincipal(ctx context.Context, tokenHash s
 	if err != nil {
 		return nil, fmt.Errorf("%w: user lookup failed: %w", ErrInternal, err)
 	}
-	if user == nil {
+	if user == nil || user.IsSystemAccount() {
+		// The hidden import account owns no session; one that names it is gone.
 		return nil, ErrPrincipalGone
 	}
 	if auth.IsEffectivelyBanned(user) {

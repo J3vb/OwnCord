@@ -60,3 +60,16 @@ func saveReserved(ctx context.Context, res *service.StorageReservation, store Fi
 	res.Landed()
 	return written, nil
 }
+
+// ReservedStore lets other packages write through a FileStore via saveReserved,
+// keeping the one Save call site.
+type ReservedStore struct{ Store FileStore }
+
+// SaveReserved writes r under name, handing the reservation back on failure and
+// landing it on success.
+func (s ReservedStore) SaveReserved(ctx context.Context, res *service.StorageReservation, name string, r io.Reader) (int64, error) {
+	return saveReserved(ctx, res, s.Store, name, r)
+}
+
+// Delete removes the stored file named name.
+func (s ReservedStore) Delete(name string) error { return s.Store.Delete(name) }

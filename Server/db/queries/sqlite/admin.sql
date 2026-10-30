@@ -1,11 +1,13 @@
 -- name: UserCount :one
-SELECT COUNT(*) FROM users;
+-- The hidden import account (registration_status 'system') is not a member: it must
+-- not make a fresh server look set up, nor count in the member totals.
+SELECT COUNT(*) FROM users WHERE registration_status <> 'system';
 
 -- name: CountActiveMessages :one
 SELECT COUNT(*) FROM messages WHERE deleted = 0;
 
 -- name: CountChannels :one
-SELECT COUNT(*) FROM channels;
+SELECT COUNT(*) FROM channels WHERE import_pending = 0;
 
 -- name: CountActiveInvites :one
 SELECT COUNT(*) FROM invites WHERE revoked = 0;

@@ -94,7 +94,7 @@ func (d *DB) GetReachableUserIDs(ctx context.Context, ids []int64) ([]int64, err
 	placeholders, args := inPlaceholders(ids)
 	rows, err := d.reader.QueryContext(ctx,
 		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT id FROM users WHERE %s AND id IN (%s) ORDER BY id`, notBannedClause, placeholders),
+			`SELECT id FROM users WHERE %s AND %s AND id IN (%s) ORDER BY id`, notBannedClause, notSystemClause, placeholders),
 		args...,
 	)
 	if err != nil {

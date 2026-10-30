@@ -490,6 +490,9 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 			"banned user attempted login from "+in.IP)
 		return nil, ErrBanned
 	}
+	if err := refuseSystemAccount(user, in.IP); err != nil {
+		return nil, err
+	}
 	// An approval-mode application is not an account until an admin approves it.
 	if user.PendingApproval() {
 		slog.Info("pending application login attempt", "user_id", user.ID, "ip", in.IP)

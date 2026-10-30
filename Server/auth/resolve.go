@@ -61,7 +61,9 @@ func ResolveTokenHash(ctx context.Context, store tokenStore, hash string) (*db.U
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if user == nil {
+	if user == nil || user.IsSystemAccount() {
+		// The hidden import account owns no session or token; a row that
+		// somehow names it resolves to no principal.
 		return nil, nil, nil, ErrUserNotFound
 	}
 

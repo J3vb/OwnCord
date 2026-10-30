@@ -90,9 +90,10 @@ SELECT c.id,
        COALESCE((SELECT rs.last_message_id FROM read_states rs
                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
 FROM channels c
-WHERE c.type IN ('text', 'announcement', 'voice')
-   OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
-                                  WHERE dp.channel_id = c.id AND dp.user_id = ?));
+WHERE c.import_pending = 0
+  AND (c.type IN ('text', 'announcement', 'voice')
+       OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
+                                      WHERE dp.channel_id = c.id AND dp.user_id = ?)));
 
 -- SearchMessages and SearchMessagesInChannel use the messages_fts FTS5 virtual
 -- table which sqlc cannot introspect. Those queries remain as hand-written Go
