@@ -112,6 +112,13 @@ describe("app sounds volume prefs", () => {
     expect(loadAppSoundsGain()).toBe(1);
   });
 
+  it("reads a stored value too large to be a number as 100%, never as silence", () => {
+    localStorage.setItem("owncord:settings:appSoundsVolume", "-1e999");
+    expect(loadAppSoundsGain()).toBe(1);
+    localStorage.setItem("owncord:settings:appSoundsVolume", "1e999");
+    expect(loadAppSoundsGain()).toBe(1);
+  });
+
   it("has every per-sound switch on until the user turns it off", () => {
     expect(soundSwitchOn("message")).toBe(true);
     savePref("soundMessage", false);

@@ -6,6 +6,7 @@ import {
   DEFAULT_GLOBAL_MUTE_VK,
   GLOBAL_DEAFEN_VK_PREF,
   GLOBAL_MUTE_VK_PREF,
+  isBindableVk,
   keyEventToVk,
   loadGlobalShortcutVks,
   saveGlobalShortcutVk,
@@ -163,5 +164,130 @@ describe("shortcut conflict", () => {
     const set = inAppCtrlShiftVks(parseKeybinds(undefined, current));
     expect(shortcutConflict(0x56, "mute", current, set)).toBe("reserved");
     expect(shortcutConflict(0x55, "deafen", current, set)).toBe("reserved");
+  });
+});
+
+describe("global voice shortcut preference keys", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("stores each action under its own key", () => {
+    expect(GLOBAL_MUTE_VK_PREF).toBe("globalMuteVk");
+    expect(GLOBAL_DEAFEN_VK_PREF).toBe("globalDeafenVk");
+    saveGlobalShortcutVk("deafen", 0x71);
+    expect(localStorage.getItem("owncord:settings:globalMuteVk")).toBeNull();
+    expect(loadGlobalShortcutVks()).toEqual({ mute: 0x4d, deafen: 0x71 });
+    saveGlobalShortcutVk("mute", 0x72);
+    expect(loadGlobalShortcutVks()).toEqual({ mute: 0x72, deafen: 0x71 });
+  });
+
+  it("falls back to the shipped default for a stored value of the wrong type", () => {
+    localStorage.setItem("owncord:settings:globalMuteVk", '"M"');
+    localStorage.setItem("owncord:settings:globalDeafenVk", "not json");
+    expect(loadGlobalShortcutVks()).toEqual({ mute: 0x4d, deafen: 0x44 });
+  });
+});
+
+describe("bindable key set", () => {
+  const BINDABLE = new Set([
+    ...Array.from({ length: 26 }, (_, i) => 0x41 + i),
+    ...Array.from({ length: 10 }, (_, i) => 0x30 + i),
+    ...Array.from({ length: 12 }, (_, i) => 0x70 + i),
+    0x20,
+    0x21,
+    0x22,
+    0x23,
+    0x24,
+    0x25,
+    0x26,
+    0x27,
+    0x28,
+    0x2d,
+    0x2e,
+  ]);
+
+  it("accepts exactly letters, digits, F1-F12 and the navigation keys", () => {
+    for (let vk = 0; vk < 256; vk++) {
+      expect(isBindableVk(vk), `vk ${vk}`).toBe(BINDABLE.has(vk));
+    }
+  });
+});
+
+describe("webview key capture by physical key", () => {
+  it("maps every letter, digit and function key", () => {
+    for (let i = 0; i < 26; i++) {
+      const letter = String.fromCharCode(0x41 + i);
+      expect(keyEventToVk(key(`Key${letter}`)), letter).toBe(0x41 + i);
+    }
+    for (let i = 0; i < 10; i++) expect(keyEventToVk(key(`Digit${i}`))).toBe(0x30 + i);
+    for (let i = 1; i <= 12; i++) expect(keyEventToVk(key(`F${i}`))).toBe(0x6f + i);
+  });
+
+  it("maps the navigation keys", () => {
+    const expected: Array<[string, number]> = [
+      ["Space", 0x20],
+      ["PageUp", 0x21],
+      ["PageDown", 0x22],
+      ["End", 0x23],
+      ["Home", 0x24],
+      ["ArrowLeft", 0x25],
+      ["ArrowUp", 0x26],
+      ["ArrowRight", 0x27],
+      ["ArrowDown", 0x28],
+      ["Insert", 0x2d],
+      ["Delete", 0x2e],
+    ];
+    for (const [code, vk] of expected) expect(keyEventToVk(key(code)), code).toBe(vk);
+  });
+
+  it("leaves the keys past the table unbound", () => {
+    for (const code of ["F13", "F0", "KeyAA", "Digit10", "Minus", "Comma", "NumpadEnter", ""]) {
+      expect(keyEventToVk(key(code)), code).toBeNull();
+    }
+  });
+
+  it("ignores the layout keyCode off Windows", () => {
+    expect(keyEventToVk(key("Comma", { keyCode: 0x41 }))).toBeNull();
+    expect(keyEventToVk(key("KeyA", { keyCode: 0x42 }))).toBe(0x41);
+  });
+});
+
+describe("webview key capture on Windows by layout key", () => {
+  beforeEach(() => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Windows NT 10.0)");
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("binds the edge keys of each bindable range", () => {
+    for (const vk of [0x20, 0x28, 0x2d, 0x2e, 0x30, 0x39, 0x41, 0x5a, 0x70, 0x7b]) {
+      expect(keyEventToVk(key("Whatever", { keyCode: vk })), `vk ${vk}`).toBe(vk);
+    }
+  });
+
+  it("rejects a VK just outside each range", () => {
+    for (const vk of [0, 0x1f, 0x29, 0x2c, 0x2f, 0x3a, 0x40, 0x5b, 0x6f, 0x7c, 0xe5]) {
+      expect(keyEventToVk(key("KeyA", { keyCode: vk })), `vk ${vk}`).toBeNull();
+    }
+  });
+});
+
+describe("shortcut conflict order", () => {
+  const current = { mute: 0x4d, deafen: 0x44 };
+
+  it("calls a key that is both the other action's and an app key a duplicate", () => {
+    expect(shortcutConflict(0x44, "mute", current, new Set([0x44]))).toBe("duplicate");
+    expect(shortcutConflict(0x4d, "deafen", current, new Set([0x4d]))).toBe("duplicate");
+  });
+
+  it("compares against the other action's key, never the action's own", () => {
+    expect(shortcutConflict(0x4d, "mute", current, new Set())).toBeNull();
+    expect(shortcutConflict(0x44, "deafen", current, new Set())).toBeNull();
+  });
+
+  it("reserves exactly the keys in the in-app set", () => {
+    const set = new Set([0x50]);
+    expect(shortcutConflict(0x50, "mute", current, set)).toBe("reserved");
+    expect(shortcutConflict(0x51, "mute", current, set)).toBeNull();
+    expect(shortcutConflict(0x50, "deafen", current, new Set())).toBeNull();
   });
 });
