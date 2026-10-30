@@ -4,6 +4,7 @@
  * Extracted from MainPage to reduce god-object coupling and enable unit testing.
  */
 
+import { channelMediaEnabled } from "@lib/serverCapabilities";
 import { clearChildren, createElement, setText } from "@lib/dom";
 import { isServerRowKind } from "@lib/text/messageKind";
 import { createConfirmModal } from "../../features/dialogs/confirmModal";
@@ -92,7 +93,7 @@ import { requestsText } from "../../i18n/requests";
 import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
-import { channelMediaEnabled, readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
+import { readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,
