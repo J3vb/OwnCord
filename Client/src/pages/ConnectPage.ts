@@ -121,6 +121,8 @@ export function createConnectPage(
 
   // --- Create sub-components ---
 
+  let knownProfiles: readonly SimpleProfile[] = initialProfiles;
+
   const loginForm = createLoginForm({
     signal,
     onLogin: callbacks.onLogin,
@@ -137,9 +139,9 @@ export function createConnectPage(
     // an opted-out profile is not overridden by the defaults. Applied once per
     // match so later edits to the boxes are the user's own.
     onHostInput: (host) => applySavedFlags(host),
+    getSavedHosts: () => knownProfiles.map((p) => p.host),
     ...(__OWNCORD_WEB__ ? { fixedHost } : {}),
   });
-  let knownProfiles: readonly SimpleProfile[] = initialProfiles;
   let appliedProfileHost = "";
   function applySavedFlags(host: string): void {
     if (host === appliedProfileHost) return;

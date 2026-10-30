@@ -339,6 +339,9 @@ export const settingsText = defineCatalog("settings", {
   "advanced.developerMode.label": "Developer Mode",
   "advanced.developerMode.desc":
     "Add Copy Message ID, Copy User ID and Copy Channel ID to right-click menus",
+  "advanced.confirmServerSwitch.label": "Ask before switching servers",
+  "advanced.confirmServerSwitch.desc":
+    "Show a confirmation when you pick a different server from the server list.",
   "advanced.debug": "Debug",
   "advanced.devtools.label": "Open DevTools",
   "advanced.devtools.desc": "Open the browser developer tools for debugging",

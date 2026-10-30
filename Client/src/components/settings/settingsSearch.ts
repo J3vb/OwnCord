@@ -235,6 +235,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
   Advanced: () => [
     s("advanced.developerMode.label"),
     s("advanced.developerMode.desc"),
+    s("advanced.confirmServerSwitch.label"),
+    s("advanced.confirmServerSwitch.desc"),
     s("advanced.launchOnLogin.label"),
     s("advanced.launchOnLogin.desc"),
     s("advanced.minimizeToTray.label"),

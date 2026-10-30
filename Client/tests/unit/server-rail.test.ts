@@ -170,7 +170,8 @@ describe("ServerRail", () => {
     expect(uiStore.getState().sidebarMode).toBe("dms");
   });
 
-  it("switches once even on a double click, and ignores add afterwards", async () => {
+  it("without the question, switches once even on a double click, and ignores add afterwards", async () => {
+    localStorage.setItem("owncord:settings:confirmServerSwitch", "false");
     const { switchServer, addServer } = await mountRail({
       profiles: [profile("Beta", "b.example"), profile("Alpha", "a.example")],
     });
@@ -181,6 +182,78 @@ describe("ServerRail", () => {
     expect(switchServer).toHaveBeenCalledWith("b.example");
     document.querySelector<HTMLElement>('[data-testid="server-rail-add"]')?.click();
     expect(addServer).not.toHaveBeenCalled();
+  });
+
+  describe("switch question", () => {
+    const dialog = () => document.querySelector('[data-testid="server-switch-dialog"]');
+    const click = (testId: string) =>
+      document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.click();
+    const mountTwo = () =>
+      mountRail({ profiles: [profile("Beta", "b.example"), profile("Alpha", "a.example")] });
+    const beta = () => servers().find((b) => b.dataset["host"] === "b.example")!;
+
+    it("asks before switching and switches on Switch", async () => {
+      const { switchServer } = await mountTwo();
+      beta().click();
+      expect(dialog()?.textContent).toContain("Switch to Beta?");
+      expect(switchServer).not.toHaveBeenCalled();
+      click("server-switch-confirm");
+      expect(switchServer).toHaveBeenCalledExactlyOnceWith("b.example");
+      expect(dialog()).toBeNull();
+    });
+
+    it("Cancel stays, and leaves the setting alone even with the box ticked", async () => {
+      const { switchServer } = await mountTwo();
+      beta().click();
+      click("server-switch-dont-ask");
+      click("server-switch-cancel");
+      expect(dialog()).toBeNull();
+      expect(switchServer).not.toHaveBeenCalled();
+      expect(localStorage.getItem("owncord:settings:confirmServerSwitch")).toBeNull();
+    });
+
+    it("a double click opens one question and switches once", async () => {
+      const { switchServer } = await mountTwo();
+      beta().click();
+      beta().click();
+      expect(document.querySelectorAll('[data-testid="server-switch-dialog"]')).toHaveLength(1);
+      const confirm = document.querySelector<HTMLElement>('[data-testid="server-switch-confirm"]')!;
+      confirm.click();
+      confirm.click();
+      expect(switchServer).toHaveBeenCalledTimes(1);
+    });
+
+    it("Don't ask again is saved on Switch and the next click switches straight away", async () => {
+      const first = await mountTwo();
+      beta().click();
+      click("server-switch-dont-ask");
+      click("server-switch-confirm");
+      expect(localStorage.getItem("owncord:settings:confirmServerSwitch")).toBe("false");
+      first.rail.destroy?.();
+
+      const second = await mountTwo();
+      beta().click();
+      expect(dialog()).toBeNull();
+      expect(second.switchServer).toHaveBeenCalledExactlyOnceWith("b.example");
+    });
+
+    it("closes without switching when the rail goes away with the question open", async () => {
+      const { rail, switchServer } = await mountTwo();
+      beta().click();
+      const confirm = document.querySelector<HTMLElement>('[data-testid="server-switch-confirm"]')!;
+      rail.destroy?.();
+      expect(dialog()).toBeNull();
+      confirm.click();
+      expect(switchServer).not.toHaveBeenCalled();
+    });
+
+    it("asks again after Cancel", async () => {
+      await mountTwo();
+      beta().click();
+      click("server-switch-cancel");
+      beta().click();
+      expect(dialog()).not.toBeNull();
+    });
   });
 
   it("+ calls add-server", async () => {
