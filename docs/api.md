@@ -6264,8 +6264,10 @@ The request body is the export file itself (`application/octet-stream`),
 streamed to a temp file under `data/import-tmp`, never held in memory, and
 removed when the job ends. `filename` must end in `.json` or `.zip`.
 `category_id` is optional; `0` or absent means no category. The body is capped
-by `upload.import_max_mb` (default 500) and runs under the same progress
-deadline as file uploads. Answers `202 Accepted`:
+by `upload.import_max_mb` (default 500) and runs under the file-upload progress
+deadline with a total time sized for the cap at 2 Mbit/s (never under 10
+minutes). The category is checked and the free disk space (plus
+`server.min_free_disk_mb`) is confirmed before the body is read. Answers `202 Accepted`:
 
 ```json
 { "id": 12, "status": "running" }
@@ -6276,6 +6278,7 @@ deadline as file uploads. Answers `202 Accepted`:
 | 400    | `BAD_REQUEST`         | Wrong extension, bad `category_id`, unknown category, empty body, or not a usable export |
 | 409    | `CONFLICT`            | Another import is running (checked before the body is read)                              |
 | 413    | `PAYLOAD_TOO_LARGE`   | The file is over `upload.import_max_mb`                                                  |
+| 507    | `STORAGE_LOW_DISK`    | Not enough free disk space for the upload                                                |
 | 503    | `SERVICE_UNAVAILABLE` | No upload storage, or the server is shutting down                                        |
 
 Audited as `discord_import_start`, and `discord_import_publish` when the job

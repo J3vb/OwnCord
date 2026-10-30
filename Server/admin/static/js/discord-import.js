@@ -29,6 +29,12 @@ function importResultText(job){
   return'';
 }
 
+/* The sentence for a failure that carried no JSON message. */
+function importHttpError(status){
+  if(status===413)return'The file is larger than this server or a reverse proxy in front of it allows.';
+  return'The import could not be started (the server answered '+status+').';
+}
+
 function importRunning(){return !!(importUI.job&&importUI.job.status==='running')}
 
 /* Redraws the card from importUI. Safe to call whenever the card is on the
@@ -178,9 +184,11 @@ async function startDiscordImport(){
       {method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},body:file});
     if(state.token!==token)return;
     if(res.status===401){handleSessionExpired();return}
-    const data=await res.json();
+    /* A proxy in front of the server answers with a page, not JSON. */
+    const isJson=/json/i.test((res.headers&&res.headers.get('content-type'))||'');
+    const data=isJson?await res.json():{};
     if(state.token!==token)return;
-    if(!res.ok)throw new Error(data.message||'The import could not be started');
+    if(!res.ok)throw new Error(data.message||importHttpError(res.status));
     importUI.job={id:data.id,status:'running',source_name:file.name,imported:0,skipped:0,skipped_attachments:0,error:null};
     importUI.cancelling=false;importUI.token=token;
     scheduleImportPoll();

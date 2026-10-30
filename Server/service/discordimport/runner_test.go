@@ -602,3 +602,21 @@ func TestRun_RecordsPNGSizeAndLeavesUnreadableImagesUnmeasured(t *testing.T) {
 		t.Errorf("a broken png got a size: %d unmeasured rows, want 1", n)
 	}
 }
+
+func TestCategoryExists_ZeroIsFreeAndUnknownIsNo(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	if ok, err := h.runner.CategoryExists(ctx, 0); !ok || err != nil {
+		t.Errorf("id 0 = %v, %v, want true", ok, err)
+	}
+	if ok, err := h.runner.CategoryExists(ctx, 4242); ok || err != nil {
+		t.Errorf("unknown id = %v, %v, want false", ok, err)
+	}
+	cat, err := h.database.CreateChannelCategory(ctx, "Archive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := h.runner.CategoryExists(ctx, cat.ID); !ok || err != nil {
+		t.Errorf("real category = %v, %v, want true", ok, err)
+	}
+}

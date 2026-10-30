@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unicode"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -31,6 +32,23 @@ const DefaultImportMaxBytes = 500 << 20
 // exports while they import. The archive leaves it out.
 const ImportDirName = "import-tmp"
 
+const (
+	// importMinUploadRate is the slowest uplink an upload is sized for, in
+	// bytes per second (2 Mbit/s).
+	importMinUploadRate = 250 << 10
+	// importMinLifetime is the shortest total time an upload gets, the same
+	// 10 minutes the file routes allow.
+	importMinLifetime = 10 * time.Minute
+)
+
+// importTransferLifetime is how long an upload of up to maxBytes may take: long
+// enough for the cap at importMinUploadRate, and never under importMinLifetime.
+// The stall deadline still ends a peer that stops sending.
+func importTransferLifetime(maxBytes int64) time.Duration {
+	secs := min(maxBytes/importMinUploadRate, 1<<30)
+	return max(importMinLifetime, time.Duration(secs)*time.Second)
+}
+
 // maxAuditSourceRunes bounds the file name an audit row carries.
 const maxAuditSourceRunes = 100
 
@@ -41,12 +59,15 @@ type DiscordImporter interface {
 	Running(id int64) *discordimport.Job
 	Status(ctx context.Context, id int64) (*db.ImportJob, error)
 	Latest(ctx context.Context) (*db.ImportJob, error)
+	CategoryExists(ctx context.Context, id int64) (bool, error)
 }
 
 // TransferBegin starts the long-transfer deadline for one request and returns
-// the body wrapped to renew it as bytes arrive, plus the release to defer. Nil
+// the body wrapped to renew it as bytes arrive, plus the release to defer.
+// lifetime is how long the whole transfer may take however steadily it
+// progresses (see importTransferLifetime). Nil
 // in SetupOptions leaves a plain size-capped body.
-type TransferBegin func(w http.ResponseWriter, r *http.Request, maxBytes int64) (body io.ReadCloser, release func())
+type TransferBegin func(w http.ResponseWriter, r *http.Request, maxBytes int64, lifetime time.Duration) (body io.ReadCloser, release func())
 
 // discordImportAPI holds what the Discord import routes share.
 type discordImportAPI struct {
@@ -57,20 +78,32 @@ type discordImportAPI struct {
 	begin     TransferBegin
 	dir       string
 	maxBytes  int64
+	// minFree is the free space kept in reserve on the import volume.
+	minFree uint64
+	// cancelledBy remembers who asked to cancel a job, for the audit row
+	// written once the job really ended cancelled.
+	cancelMu    syncutil.Mutex
+	cancelledBy map[int64]int64
 	// uploading is set while an upload is being received or started, so two
 	// large uploads never spool at once.
 	uploading atomic.Bool
 }
 
 func newDiscordImportAPI(audit db.Auditor, retention *service.RetentionService, opts SetupOptions) *discordImportAPI {
+	var minFree uint64
+	if opts.RunningCfg != nil {
+		minFree = opts.RunningCfg.Server.MinFreeDiskBytes()
+	}
 	return &discordImportAPI{
-		importer:  opts.DiscordImport,
-		audit:     audit,
-		retention: retention,
-		group:     opts.Background,
-		begin:     opts.BeginTransfer,
-		dir:       cmp.Or(opts.ImportDir, os.TempDir()),
-		maxBytes:  cmp.Or(opts.ImportMaxBytes, DefaultImportMaxBytes),
+		minFree:     minFree,
+		cancelledBy: map[int64]int64{},
+		importer:    opts.DiscordImport,
+		audit:       audit,
+		retention:   retention,
+		group:       opts.Background,
+		begin:       opts.BeginTransfer,
+		dir:         cmp.Or(opts.ImportDir, os.TempDir()),
+		maxBytes:    cmp.Or(opts.ImportMaxBytes, DefaultImportMaxBytes),
 	}
 }
 
@@ -180,6 +213,13 @@ func (a *discordImportAPI) handleCancel(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	job := a.importer.Running(id)
+	if job != nil {
+		select {
+		case <-job.Done():
+			job = nil
+		default:
+		}
+	}
 	if job == nil {
 		if _, err := a.importer.Status(r.Context(), id); errors.Is(err, db.ErrNotFound) {
 			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "import not found")
@@ -188,8 +228,10 @@ func (a *discordImportAPI) handleCancel(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusConflict, httperr.CodeConflict, "that import is not running")
 		return
 	}
+	a.cancelMu.Lock()
+	a.cancelledBy[id] = actorFromContext(r)
+	a.cancelMu.Unlock()
 	job.Cancel()
-	db.WriteAudit(context.WithoutCancel(r.Context()), a.audit, actorFromContext(r), "discord_import_cancel", "channel", job.ChannelID, "cancelled an import")
 	writeJSON(w, http.StatusAccepted, map[string]any{"id": id, "status": "cancelling"})
 }
 
@@ -234,6 +276,15 @@ func (a *discordImportAPI) handleUpload(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusConflict, httperr.CodeConflict, "another import is already running")
 		return
 	}
+	// A bad category is refused before gigabytes are stored for it.
+	if ok, err := a.importer.CategoryExists(r.Context(), categoryID); err != nil {
+		slog.Error("discord import: starting failed", "error", err)
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to start the import")
+		return
+	} else if !ok {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "that category does not exist")
+		return
+	}
 	if r.ContentLength > a.maxBytes {
 		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, tooLargeMessage(a.maxBytes))
 		return
@@ -268,7 +319,7 @@ func (a *discordImportAPI) spool(w http.ResponseWriter, r *http.Request, ext str
 	var body io.ReadCloser
 	if a.begin != nil {
 		var release func()
-		body, release = a.begin(w, r, a.maxBytes)
+		body, release = a.begin(w, r, a.maxBytes, importTransferLifetime(a.maxBytes))
 		defer release()
 	} else {
 		body = http.MaxBytesReader(w, r.Body, a.maxBytes)
@@ -276,6 +327,14 @@ func (a *discordImportAPI) spool(w http.ResponseWriter, r *http.Request, ext str
 	if err := os.MkdirAll(a.dir, 0o700); err != nil {
 		slog.Error("discord import: creating the upload directory failed", "error", err)
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not store the upload")
+		return "", false
+	}
+	need := uint64(a.maxBytes) //nolint:gosec // G115: maxBytes is positive
+	if r.ContentLength > 0 {
+		need = uint64(r.ContentLength)
+	}
+	if err := checkArchiveSpace(a.dir, need, a.minFree); err != nil {
+		writeErr(w, http.StatusInsufficientStorage, httperr.CodeStorageLowDisk, strings.Replace(err.Error(), errArchiveNoSpace.Error(), "not enough free disk space to hold the upload", 1))
 		return "", false
 	}
 	f, err := os.CreateTemp(a.dir, "discord-import-*"+ext)
@@ -328,19 +387,36 @@ func (a *discordImportAPI) discard(path string, ex discordimport.Export) {
 }
 
 // finishInBackground closes the export and removes the upload once the job
-// ends, and audits a published import. The group joins it at shutdown. It
-// waits on the job, which stops on the same group's context, so it ends with it.
+// ends, and audits a published or cancelled import. The group joins it at
+// shutdown, when it leaves without waiting and the start-up sweep removes the
+// file.
 func (a *discordImportAPI) finishInBackground(ctx context.Context, job *discordimport.Job, ex discordimport.Export, path string, actor int64, source string) {
 	finish := func(ctx context.Context) {
+		select {
+		case <-job.Done():
+		case <-ctx.Done():
+			return
+		}
 		res := job.Wait()
 		a.discard(path, ex)
-		if res.Status == db.ImportDone {
-			db.WriteAudit(context.WithoutCancel(ctx), a.audit, actor, "discord_import_publish", "channel", job.ChannelID,
+		tail := context.WithoutCancel(ctx)
+		a.cancelMu.Lock()
+		by, asked := a.cancelledBy[job.ID]
+		delete(a.cancelledBy, job.ID)
+		a.cancelMu.Unlock()
+		switch res.Status {
+		case db.ImportDone:
+			db.WriteAudit(tail, a.audit, actor, "discord_import_publish", "channel", job.ChannelID,
 				fmt.Sprintf("published %s: %d messages imported, %d skipped", source, res.Imported, res.Skipped))
+		case db.ImportCancelled:
+			if asked {
+				db.WriteAudit(tail, a.audit, by, "discord_import_cancel", "channel", job.ChannelID, "cancelled importing "+source)
+			}
 		}
 	}
 	if !a.group.Go(ctx, finish) {
 		job.Cancel()
+		<-job.Done()
 		finish(ctx)
 	}
 }

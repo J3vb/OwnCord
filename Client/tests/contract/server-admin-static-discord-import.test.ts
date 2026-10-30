@@ -15,6 +15,7 @@ window.__test = {
   initDiscordImport: initDiscordImport,
   pollDiscordImport: pollDiscordImport,
   cancelDiscordImport: cancelDiscordImport,
+  startDiscordImport: startDiscordImport,
   importUI: importUI,
   state: state
 };
@@ -42,6 +43,7 @@ interface Bridge {
   initDiscordImport: () => Promise<void>;
   pollDiscordImport: () => Promise<void>;
   cancelDiscordImport: () => Promise<void>;
+  startDiscordImport: () => Promise<void>;
   importUI: { pollTimer: unknown };
   state: { categoryList: unknown[] };
 }
@@ -217,5 +219,30 @@ describe("Server/admin/static — Import from Discord card", () => {
     expect(calls.at(-1)).toEqual({ method: "POST", path: "/discord-imports/7/cancel" });
     expect(b.doc.getElementById("discordImportProgress")?.textContent).toBe("Cancelling…");
     expect(b.bridge.importUI.pollTimer).not.toBeNull();
+  });
+
+  it("explains a non-JSON failure from a proxy by its status", async () => {
+    const calls: FetchCall[] = [];
+    const b = await boot(calls, () => latest(null));
+    dom = b.dom;
+    await b.bridge.initDiscordImport();
+    const win = b.dom.window as unknown as { fetch: unknown };
+    win.fetch = async () =>
+      ({
+        ok: false,
+        status: 413,
+        headers: new Headers({ "content-type": "text/html" }),
+        json: async () => {
+          throw new Error("not json");
+        },
+      }) as unknown as Response;
+    const input = b.doc.getElementById("discordImportFile") as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      value: [new b.dom.window.File(["{}"], "export.json")],
+    });
+    await b.bridge.startDiscordImport();
+    expect(b.doc.querySelector('#discordImportCard [role="alert"]')?.textContent).toContain(
+      "larger than this server or a reverse proxy",
+    );
   });
 });

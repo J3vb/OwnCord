@@ -46,6 +46,7 @@ type Store interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	GetImportJob(ctx context.Context, id int64) (*db.ImportJob, error)
 	GetLatestImportJob(ctx context.Context) (*db.ImportJob, error)
+	GetChannelCategory(ctx context.Context, id int64) (*db.ChannelCategory, error)
 }
 
 // Files is the storage the media is copied into; api.ReservedStore implements it.
@@ -160,6 +161,9 @@ type Job struct {
 // cancelled; messages already inserted go with the channel.
 func (j *Job) Cancel() { j.cancel() }
 
+// Done is closed when the job has ended.
+func (j *Job) Done() <-chan struct{} { return j.done }
+
 // Wait blocks until the job has ended and returns how.
 func (j *Job) Wait() Result {
 	<-j.done
@@ -225,41 +229,6 @@ func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 		return nil, ErrShuttingDown
 	}
 	return job, nil
-}
-
-func (r *Runner) track(j *Job, on bool) {
-	r.jobsMu.Lock()
-	defer r.jobsMu.Unlock()
-	if on {
-		r.jobs[j.ID] = j
-	} else {
-		delete(r.jobs, j.ID)
-	}
-}
-
-// Running returns the job with that id while it is running here, else nil.
-func (r *Runner) Running(id int64) *Job {
-	r.jobsMu.Lock()
-	defer r.jobsMu.Unlock()
-	return r.jobs[id]
-}
-
-// Status returns a job's stored state, db.ErrNotFound when there is none.
-func (r *Runner) Status(ctx context.Context, id int64) (*db.ImportJob, error) {
-	j, err := r.cfg.Store.GetImportJob(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("import status: %w", err)
-	}
-	return j, nil
-}
-
-// Latest returns the newest job's stored state, db.ErrNotFound when none ran.
-func (r *Runner) Latest(ctx context.Context) (*db.ImportJob, error) {
-	j, err := r.cfg.Store.GetLatestImportJob(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("latest import: %w", err)
-	}
-	return j, nil
 }
 
 var errHeaderDone = errors.New("header read")

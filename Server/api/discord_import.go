@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
@@ -67,9 +68,15 @@ func importTempDir(cfg *config.Config) string {
 }
 
 // beginImportTransfer gives the export upload the long-transfer deadline: a
-// body that keeps arriving is not cut at the global 30 s timeout.
-func beginImportTransfer(w http.ResponseWriter, r *http.Request, maxBytes int64) (io.ReadCloser, func()) {
-	d := newTransferDeadline(w, r)
+// body that keeps arriving is not cut at the global 30 s timeout, for a
+// lifetime sized to the upload cap.
+func beginImportTransfer(w http.ResponseWriter, r *http.Request, maxBytes int64, lifetime time.Duration) (io.ReadCloser, func()) {
+	// The margin keeps the 202 that answers the upload from landing on the
+	// instant the lifetime ends; release re-arms the deadlines for it.
+	d := startTransfer(w, r, transferProgressTimeout, lifetime+transferProgressTimeout)
 	d.touch()
-	return progressReader{r: http.MaxBytesReader(w, r.Body, maxBytes), d: d}, d.release
+	return progressReader{r: http.MaxBytesReader(w, r.Body, maxBytes), d: d}, func() {
+		d.touch()
+		d.release()
+	}
 }

@@ -30,7 +30,7 @@ FROM import_jobs WHERE id = ?;
 -- name: GetLatestImportJob :one
 SELECT id, channel_id, created_by, source_name, discord_channel_id, status,
        total, imported, skipped, skipped_attachments, error, created_at, finished_at
-FROM import_jobs ORDER BY id DESC;
+FROM import_jobs ORDER BY id DESC LIMIT 1;
 
 -- name: ListRunningImportJobs :many
 SELECT id, channel_id FROM import_jobs WHERE status = 'running' ORDER BY id ASC;

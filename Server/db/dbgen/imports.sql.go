@@ -198,7 +198,7 @@ func (q *Queries) GetImportJob(ctx context.Context, id int64) (ImportJob, error)
 const getLatestImportJob = `-- name: GetLatestImportJob :one
 SELECT id, channel_id, created_by, source_name, discord_channel_id, status,
        total, imported, skipped, skipped_attachments, error, created_at, finished_at
-FROM import_jobs ORDER BY id DESC
+FROM import_jobs ORDER BY id DESC LIMIT 1
 `
 
 func (q *Queries) GetLatestImportJob(ctx context.Context) (ImportJob, error) {

@@ -3,6 +3,7 @@ package discordimport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -91,4 +92,52 @@ func (r *Runner) now() time.Time {
 		return r.cfg.Now()
 	}
 	return time.Now()
+}
+
+func (r *Runner) track(j *Job, on bool) {
+	r.jobsMu.Lock()
+	defer r.jobsMu.Unlock()
+	if on {
+		r.jobs[j.ID] = j
+	} else {
+		delete(r.jobs, j.ID)
+	}
+}
+
+// Running returns the job with that id while it is running here, else nil.
+func (r *Runner) Running(id int64) *Job {
+	r.jobsMu.Lock()
+	defer r.jobsMu.Unlock()
+	return r.jobs[id]
+}
+
+// CategoryExists reports whether a category can hold the import's channel;
+// id 0 means no category and always can.
+func (r *Runner) CategoryExists(ctx context.Context, id int64) (bool, error) {
+	if id == 0 {
+		return true, nil
+	}
+	c, err := r.cfg.Store.GetChannelCategory(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("looking up the category: %w", err)
+	}
+	return c != nil, nil
+}
+
+// Status returns a job's stored state, db.ErrNotFound when there is none.
+func (r *Runner) Status(ctx context.Context, id int64) (*db.ImportJob, error) {
+	j, err := r.cfg.Store.GetImportJob(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("import status: %w", err)
+	}
+	return j, nil
+}
+
+// Latest returns the newest job's stored state, db.ErrNotFound when none ran.
+func (r *Runner) Latest(ctx context.Context) (*db.ImportJob, error) {
+	j, err := r.cfg.Store.GetLatestImportJob(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest import: %w", err)
+	}
+	return j, nil
 }

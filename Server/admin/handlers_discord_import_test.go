@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -428,7 +429,8 @@ func (*stubImporter) Running(int64) *discordimport.Job { return nil }
 func (*stubImporter) Status(context.Context, int64) (*db.ImportJob, error) {
 	return nil, db.ErrNotFound
 }
-func (*stubImporter) Latest(context.Context) (*db.ImportJob, error) { return nil, db.ErrNotFound }
+func (*stubImporter) Latest(context.Context) (*db.ImportJob, error)       { return nil, db.ErrNotFound }
+func (*stubImporter) CategoryExists(context.Context, int64) (bool, error) { return true, nil }
 
 func TestDiscordImport_StartRefusalsMapToStatuses(t *testing.T) {
 	database := openAdminTestDB(t)
@@ -505,5 +507,63 @@ func TestDiscordImport_RoutesRequireManageChannels(t *testing.T) {
 	_, other := createRoleUser(t, f.database, 91, "Muter", 0x100000, 49, "muter")
 	if w := f.do(t, http.MethodGet, "/discord-imports/latest", other, nil); w.Code != http.StatusForbidden {
 		t.Errorf("a role without MANAGE_CHANNELS = %d, want 403", w.Code)
+	}
+}
+
+func TestDiscordImport_BadCategoryIsRefusedBeforeTheBodyIsRead(t *testing.T) {
+	// The cap is below the body, so reading it would have answered 413.
+	f := newImportFixture(t, 64)
+	if w := f.upload(t, "filename=a.json&category_id=9999", readFixture(t)); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	f.waitEmptyDir(t)
+}
+
+func TestDiscordImport_RefusesAnUploadTheDiskCannotHold(t *testing.T) {
+	database := openAdminTestDB(t)
+	token := createAdminUser(t, database)
+	dir := t.TempDir()
+	h := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, &mockPermInvalidator{},
+		newTestServices(database), admin.SetupOptions{DiscordImport: &stubImporter{}, ImportDir: dir, ImportMaxBytes: 1 << 60})
+	// No declared length, so the whole cap is what must fit.
+	req := httptest.NewRequest(http.MethodPost, "/discord-imports/upload?filename=a.json", bytes.NewReader(readFixture(t)))
+	req.ContentLength = -1
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusInsufficientStorage || !strings.Contains(w.Body.String(), "STORAGE_LOW_DISK") {
+		t.Fatalf("status = %d, want 507 STORAGE_LOW_DISK: %s", w.Code, w.Body.String())
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("a refused upload left %d file(s)", len(entries))
+	}
+}
+
+func TestDiscordImport_TransferLifetimeScalesWithTheCap(t *testing.T) {
+	database := openAdminTestDB(t)
+	token := createAdminUser(t, database)
+	for _, tc := range []struct {
+		max  int64
+		want time.Duration
+	}{
+		{1 << 20, 10 * time.Minute},
+		{500 << 20, 2048 * time.Second},
+	} {
+		var got time.Duration
+		released := false
+		h := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, &mockPermInvalidator{},
+			newTestServices(database), admin.SetupOptions{
+				DiscordImport: &stubImporter{startErr: errors.New("stop")}, ImportDir: t.TempDir(), ImportMaxBytes: tc.max,
+				BeginTransfer: func(w http.ResponseWriter, r *http.Request, maxBytes int64, lifetime time.Duration) (io.ReadCloser, func()) {
+					got = lifetime
+					return http.MaxBytesReader(w, r.Body, maxBytes), func() { released = true }
+				},
+			})
+		req := httptest.NewRequest(http.MethodPost, "/discord-imports/upload?filename=a.json", bytes.NewReader([]byte("{}")))
+		req.Header.Set("Authorization", "Bearer "+token)
+		h.ServeHTTP(httptest.NewRecorder(), req)
+		if got != tc.want || !released {
+			t.Errorf("cap %d: lifetime = %v released = %v, want %v released", tc.max, got, released, tc.want)
+		}
 	}
 }
