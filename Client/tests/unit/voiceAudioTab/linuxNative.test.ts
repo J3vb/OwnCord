@@ -988,10 +988,15 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(stopCameraPreview).not.toHaveBeenCalled();
 
     // A close after the tab is gone starts nothing.
-    ac.abort();
-    renderers[1]!.onClosed?.();
-    await new Promise((r) => setTimeout(r, 600));
-    expect(startCameraPreview).toHaveBeenCalledTimes(2);
+    vi.useFakeTimers();
+    try {
+      ac.abort();
+      renderers[1]!.onClosed?.();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(startCameraPreview).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not let a superseded native preview stop the newer capture", async () => {
