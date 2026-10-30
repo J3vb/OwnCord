@@ -195,3 +195,35 @@ func (d *DB) AttachmentStoredNameInUse(ctx context.Context, storedAs string) (bo
 	}
 	return n == 1, nil
 }
+
+// ErrMessageNotEmpty means DeleteEmptyOwnMessage found the message live but no
+// longer empty: text or a file arrived after the caller looked.
+var ErrMessageNotEmpty = errors.New("message is not empty")
+
+// DeleteEmptyOwnMessage soft-deletes userID's ordinary message when, in the same
+// statement, it still has no text and no attached file: the author branch of
+// DeleteMessage plus that guard, so an edit or upload landing between the
+// caller's read and this write keeps the message. It returns ErrNotFound when the
+// message is missing, already deleted or someone else's, and ErrMessageNotEmpty
+// when the guard refused.
+func (d *DB) DeleteEmptyOwnMessage(ctx context.Context, id, userID int64) error {
+	res, err := d.writer.ExecContext(ctx,
+		`UPDATE messages SET deleted = 1
+		 WHERE id = ? AND user_id = ? AND deleted = 0 AND kind = 0
+		   AND TRIM(content) = ''
+		   AND NOT EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = messages.id)`, id, userID)
+	if err != nil {
+		return fmt.Errorf("DeleteEmptyOwnMessage: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return nil
+	}
+	msg, err := d.GetMessage(ctx, id)
+	if err != nil {
+		return fmt.Errorf("DeleteEmptyOwnMessage: %w", err)
+	}
+	if msg == nil || msg.Deleted || msg.UserID != userID || msg.Kind != MessageKindUser {
+		return fmt.Errorf("DeleteEmptyOwnMessage: message %d: %w", id, ErrNotFound)
+	}
+	return fmt.Errorf("DeleteEmptyOwnMessage: message %d: %w", id, ErrMessageNotEmpty)
+}

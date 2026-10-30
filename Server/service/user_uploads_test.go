@@ -200,6 +200,53 @@ func TestAfterAttachmentRemoved_LastFileWithTextAnnouncesEmptyListAndKeepsMentio
 	}
 }
 
+func TestAfterAttachmentRemoved_RenamedMentionIsStillAnnouncedAndStored(t *testing.T) {
+	f := newForwardFixture(t, nil)
+	ctx := context.Background()
+	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "hi @carol", "0123456789")
+	if _, err := f.database.ExecContext(ctx, `UPDATE users SET username = 'carol_renamed' WHERE id = ?`, fwdCarol); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
+		t.Fatal(err)
+	}
+	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
+	if err != nil || deleted != nil || changed == nil {
+		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
+	}
+	if len(changed.Mentions) != 1 || changed.Mentions[0] != fwdCarol {
+		t.Errorf("mentions = %v, want the stored [%d] despite the rename", changed.Mentions, fwdCarol)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM message_mentions WHERE message_id = ? AND mentioned_user_id = ?`, msgID, fwdCarol); n != 1 {
+		t.Errorf("stored mention rows = %d, want 1 (a removal must not rewrite them)", n)
+	}
+}
+
+func TestAfterAttachmentRemoved_TextAddedBeforeTheDeleteKeepsTheMessage(t *testing.T) {
+	f := newForwardFixture(t, nil)
+	ctx := context.Background()
+	msgID, fileID := f.sendWithFile(t, fwdBob, fwdDstChan, "", "0123456789")
+	if _, err := f.uploads.RemoveOwnUpload(ctx, fileID, fwdBob); err != nil {
+		t.Fatal(err)
+	}
+	// Another device edits in text between the read and the delete.
+	f.svc.afterRemovalRead = func() {
+		if _, err := f.svc.EditMessage(ctx, fwdBob, msgID, "late text"); err != nil {
+			t.Errorf("edit in the window: %v", err)
+		}
+	}
+	changed, deleted, err := f.svc.AfterAttachmentRemoved(ctx, fwdBob, msgID)
+	if err != nil || deleted != nil || changed == nil {
+		t.Fatalf("after = %v %v %v, want a changed result", changed, deleted, err)
+	}
+	if changed.Content != "late text" || changed.EditedAt == nil || len(changed.Attachments) != 0 {
+		t.Errorf("changed = %+v, want the fresh text, its edited_at and no files", changed)
+	}
+	if n := f.count(t, `SELECT COUNT(*) FROM messages WHERE id = ? AND deleted = 0`, msgID); n != 1 {
+		t.Errorf("the edited message was deleted, live rows = %d", n)
+	}
+}
+
 func TestAfterAttachmentRemoved_KeepsTheOtherFiles(t *testing.T) {
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()

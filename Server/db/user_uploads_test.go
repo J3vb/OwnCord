@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -268,5 +269,32 @@ func TestAttachmentStoredNameShared(t *testing.T) {
 	}
 	if ok, err := f.database.AttachmentStoredNameInUse(ctx, "zzz.bin"); err != nil || ok {
 		t.Errorf("absent = %v %v, want false", ok, err)
+	}
+}
+
+func TestDeleteEmptyOwnMessage_OnlyWhileStillEmpty(t *testing.T) {
+	f := newUploadsFixture(t)
+	ctx := context.Background()
+	blank, _ := f.database.CreateMessage(ctx, f.ch, f.alice, "  ", nil)
+	texted, _ := f.database.CreateMessage(ctx, f.ch, f.alice, "words", nil)
+	withFile, _ := f.database.CreateMessage(ctx, f.ch, f.alice, "", nil)
+	f.file(t, "held", f.alice, "held.txt", 1, "2026-01-01 10:00:00")
+	if _, err := f.database.ExecContext(ctx, `UPDATE attachments SET message_id = ? WHERE id = 'held'`, withFile); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, id := range map[string]int64{"text": texted, "file": withFile} {
+		if err := f.database.DeleteEmptyOwnMessage(ctx, id, f.alice); !errors.Is(err, db.ErrMessageNotEmpty) {
+			t.Errorf("%s: err = %v, want ErrMessageNotEmpty", name, err)
+		}
+	}
+	if err := f.database.DeleteEmptyOwnMessage(ctx, blank, f.bob); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("someone else's message: err = %v, want ErrNotFound", err)
+	}
+	if err := f.database.DeleteEmptyOwnMessage(ctx, blank, f.alice); err != nil {
+		t.Fatalf("blank delete: %v", err)
+	}
+	if err := f.database.DeleteEmptyOwnMessage(ctx, blank, f.alice); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("second delete: err = %v, want ErrNotFound", err)
 	}
 }
