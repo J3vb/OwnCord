@@ -180,6 +180,10 @@ var erasureStatements = []struct {
 	{"category_user_overrides", `DELETE FROM category_user_overrides WHERE user_id = ?`},
 	// Thread follows (class 18d): the subject's membership rows.
 	{"thread_members", `DELETE FROM thread_members WHERE user_id = ?`},
+	// Voice channel password grants (class 18e). The users delete below would
+	// cascade them, but this is the explicit statement the inventory's zero is
+	// proved against.
+	{"channel_password_grants", `DELETE FROM channel_password_grants WHERE user_id = ?`},
 	// Message requests and trusted senders (classes 14c, 14d): both tables name a
 	// sender and a recipient, so both columns are needed. A surviving row across
 	// the cascade boundary is the silent-pass shape

@@ -106,6 +106,8 @@ type Channel struct {
 	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
 	ThreadPostMessageID            *int64  `json:"threadPostMessageId"`
 	PermissionsSynced              int64   `json:"permissionsSynced"`
+	PasswordHash                   *string `json:"passwordHash"`
+	PasswordVersion                int64   `json:"passwordVersion"`
 }
 
 type ChannelCategory struct {
@@ -121,6 +123,13 @@ type ChannelOverride struct {
 	RoleID    int64 `json:"roleId"`
 	Allow     int64 `json:"allow"`
 	Deny      int64 `json:"deny"`
+}
+
+type ChannelPasswordGrant struct {
+	ChannelID       int64  `json:"channelId"`
+	UserID          int64  `json:"userId"`
+	PasswordVersion int64  `json:"passwordVersion"`
+	GrantedAt       string `json:"grantedAt"`
 }
 
 type ChannelRetention struct {

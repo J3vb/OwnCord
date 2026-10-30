@@ -131,6 +131,25 @@ export function privateIndicator(channelId: number): HTMLSpanElement {
   return badge;
 }
 
+/**
+ * The lock beside a voice channel's name when joining asks for a password.
+ * Unlike the private-channel lock it is a flow-positioned marker, so a private
+ * channel with a password shows both. The icon alone carries no meaning for a
+ * screen reader, so the span is the labelled image.
+ */
+export function passwordIndicator(channelId: number): HTMLSpanElement {
+  const label = shellText("channel.passwordProtected");
+  const badge = createElement("span", {
+    class: "ch-password",
+    "data-testid": `channel-password-${channelId}`,
+    role: "img",
+    "aria-label": label,
+  });
+  badge.title = label;
+  badge.appendChild(createIcon("lock", 12));
+  return badge;
+}
+
 /** The mention badge: it counts the mentions, not the messages. Shared by the
  *  text row and the voice row, so both draw the same markup. */
 export function mentionBadge(channelId: number, count: number): HTMLSpanElement {

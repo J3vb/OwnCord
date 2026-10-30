@@ -95,6 +95,7 @@ import {
   handleVoiceWatchError,
   handleVoiceE2eeOffer,
   handleVoiceError,
+  handleVoicePasswordRefusal,
   handleVoiceJoinRollback,
   handleVoiceLeave,
   handleVoiceMoved,
@@ -450,6 +451,7 @@ export function wireDispatcher(
       if (handleMarkUnreadError(payload, id)) return;
       if (handleMessagingError(payload, id)) return;
       handleVoiceJoinRollback(payload, id);
+      if (handleVoicePasswordRefusal(ws, payload, id)) return;
       if (handleVoiceError(payload, id)) return;
       // Every remaining code has no dedicated handler above (not a pending
       // send/reaction rollback, not a capacity refusal) — this is the one

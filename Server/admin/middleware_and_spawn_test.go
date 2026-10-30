@@ -171,6 +171,8 @@ CREATE TABLE IF NOT EXISTS channels (
     thread_last_activity_at TEXT,
     forum_require_tag INTEGER NOT NULL DEFAULT 0,
     forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
+    password_hash TEXT,
+    password_version INTEGER NOT NULL DEFAULT 0,
     is_group         INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS messages (

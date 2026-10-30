@@ -121,6 +121,9 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 	// refuses a denied channel.
 	var intent struct {
 		UserInitiated bool `json:"user_initiated"`
+		// Password is the channel password, sent when the member joins a
+		// password-protected channel they have not unlocked yet.
+		Password string `json:"password"`
 	}
 	_ = json.Unmarshal(payload, &intent) // parseCallChannelID already accepted it; a non-bool reads as false
 	if intent.UserInitiated {
@@ -153,6 +156,13 @@ func (h *Hub) voiceJoinPrecheck(ctx context.Context, c *Client, payload json.Raw
 		slog.Warn("ws voice_join refused", "user_id", c.userID, "channel_id", channelID, "reason", joinErr)
 		refusal := joinDenial(joinErr)
 		c.sendMsg(buildErrorMsgWithID(refusal.Code, refusal.Message, reqID))
+		return 0, nil, 0, false
+	}
+
+	// The password is the user's own join only: CanJoinVoice above also gates
+	// a moderator's move, the AFK move and the token refresh, and those must
+	// keep working without it.
+	if !h.voiceJoinPasswordGate(ctx, c, sub, channelID, ch.JoinLocked, intent.Password, reqID) {
 		return 0, nil, 0, false
 	}
 

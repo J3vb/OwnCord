@@ -275,6 +275,13 @@ export const WsErrorCode = {
   RATE_LIMITED: "RATE_LIMITED",
   ALREADY_JOINED: "ALREADY_JOINED",
   CHANNEL_FULL: "CHANNEL_FULL",
+  // Refines FORBIDDEN: a voice_join into a password-protected channel the
+  // caller has not unlocked, sent without a password. Nothing was joined.
+  PASSWORD_REQUIRED: "PASSWORD_REQUIRED",
+  // Refines FORBIDDEN: a voice_join into a password-protected channel with a
+  // password that does not match (or that changed while the join ran). Nothing
+  // was joined.
+  WRONG_PASSWORD: "WRONG_PASSWORD",
   VOICE_ERROR: "VOICE_ERROR",
   VIDEO_LIMIT: "VIDEO_LIMIT",
   BANNED: "BANNED",

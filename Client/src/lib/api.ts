@@ -1863,6 +1863,12 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
          */
         voice_max_users?: number;
         voice_max_video?: number;
+        /**
+         * A voice channel's join password: omitted keeps it, "" removes it,
+         * anything else (1 to 64 characters) sets or changes it. Never read
+         * back: responses carry only `password_protected`.
+         */
+        password?: string;
       },
       signal?: AbortSignal,
     ): Promise<ChannelResponse> {

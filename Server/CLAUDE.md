@@ -68,7 +68,7 @@ coraza WAF, prometheus.
   `EffectiveChannelPerms`). Everywhere else resolves a `permissions.Subject`
   and asks the predicate that owns the property (`CanViewChannel`,
   `CanAdmitSession`, `CanSendMessage`, `CanType`, `CanJoinVoice`,
-  `CanModerateVoice`) — one predicate per security property, so a call site
+  `CanPassChannelPassword`, `CanModerateVoice`) — one predicate per security property, so a call site
   cannot re-derive half a rule. The residue that predates B2-5 is listed by
   symbol in `invariants/authz_chokepoint.go` (`AuthzResidueAllow`) with a
   class, a reason, and the exact helper calls it is frozen at — a row is an

@@ -3,7 +3,7 @@
  * `ready`, the `read_state` frame, a refused `mark_unread`, and the focus
  * frame's `read` flag. Server events reach the stores only here.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -140,6 +140,14 @@ const dmRow = (over: Partial<DmChannel> = {}): DmChannel => ({
 });
 
 const chan = (id: number) => channelsStore.getState().channels.get(id);
+
+// A refused frame makes the voice handlers load screenShare lazily and
+// fire-and-forget. If that load is still in flight when the file's environment
+// is torn down, vitest throws an unhandled EnvironmentTeardownError even though
+// every test passed. Loading it once up front makes the later import a cache hit.
+beforeAll(async () => {
+  await import("../../src/lib/voice/screenShare");
+});
 
 describe("read pointer through the dispatcher", () => {
   let mock: ReturnType<typeof createMockWsClient>;

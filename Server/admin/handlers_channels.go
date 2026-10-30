@@ -149,6 +149,11 @@ type updateChannelRequest struct {
 	// category it ends up in and marks it synced. Without it, moving
 	// a channel to another category keeps its overrides and unsyncs it.
 	SyncPermissions bool `json:"sync_permissions"`
+	// Password sets, changes or removes a voice channel's password: absent
+	// leaves it alone, "" removes it, anything else becomes the password. Any
+	// value on a channel that is not a voice channel answers 400. It is never
+	// returned by any response.
+	Password *string `json:"password"`
 }
 
 // patchChannelPostCommitHook mirrors createChannelPostCommitHook for the
@@ -202,6 +207,7 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 
 			SyncPermissions: req.SyncPermissions,
 			ActorRole:       actorRoleFromContext(r),
+			Password:        req.Password,
 		}, patchChannelPostCommitHook)
 		if err != nil {
 			writeChannelErr(w, err)
