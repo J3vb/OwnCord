@@ -79,6 +79,10 @@ export async function nativeLogin(page: Page): Promise<void> {
       .toMatch(/^[0-9A-Fa-f:]+$/);
     confirmed.add(SERVER_URL);
     confirmedHosts.set(page, confirmed);
+    // Trusting the certificate resubmits the refused sign-in by itself, so a
+    // second click would race it against a busy or already-removed button.
+    await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
+    return;
   }
   await submit.click();
   await expect(page.getByTestId("app-layout")).toBeVisible({ timeout: 30_000 });
