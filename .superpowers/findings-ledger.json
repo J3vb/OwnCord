@@ -10489,7 +10489,7 @@
       "finder": "b7-11c",
       "fix": {
         "commit": "505e7ec7",
-        "test": "Client/tests/unit/room-event-handlers.test.ts",
+        "test": "Client/tests/unit/roomEventHandlers/encryptionAndConnection.test.ts",
         "revertProof": "pass"
       }
     },
