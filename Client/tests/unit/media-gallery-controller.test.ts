@@ -8,7 +8,7 @@ const panel = vi.hoisted(() => ({
 const createChannelMediaGallery = vi.hoisted(() => vi.fn((_opts: unknown) => panel));
 
 vi.mock("@components/ChannelMediaGallery", () => ({ createChannelMediaGallery }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
