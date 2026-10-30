@@ -6,17 +6,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// AuthService is the consumer-owned interface behind the auth routes: every
-// call auth_handler.go and totp_handler.go make below the transport layer, and
-// nothing more (layout-refactor supplement, "interface beside the consumer").
+// AuthService is the consumer-owned interface behind the auth routes: every call
+// auth_handler.go and totp_handler.go make below the transport layer.
 // service.AuthService implements it. A handler decodes and validates the
-// request, calls one method, and encodes either the result or the returned
-// service.Err* value; every lockout, password compare, sentinel mapping,
-// audit write and broadcast lives behind these nine methods.
-//
-// Nine methods stand in for the ten *db.DB methods, two db functions and two
-// db sentinels the two handlers called directly at 71d867cb
-// (docs/architecture/server-boundaries.md, "Auth slice").
+// request, calls one method, and encodes the result or the service.Err* value;
+// every lockout, password compare, sentinel mapping, audit write and broadcast
+// lives behind these methods.
 type AuthService interface {
 	// RegistrationPolicy reports whether registration is permitted right now.
 	// It is the one gate that runs before the body is read: two
@@ -51,11 +46,9 @@ type AuthService interface {
 	// DisableTOTP confirms the password, refuses while the server requires
 	// 2FA, clears the secret and revokes the caller's other sessions.
 	DisableTOTP(ctx context.Context, p service.Principal, password string) (*service.TOTPChangeResult, error)
-	// The recovery kit.
 	EnrolRecoveryKit(ctx context.Context, p service.Principal, password, clientSecret string) (*service.RecoveryKitIssue, error)
 	RecoveryKitStatus(ctx context.Context, p service.Principal) (*service.RecoveryKitStatus, error)
 	RecoverWithKit(ctx context.Context, in service.RecoverInput) (*service.AuthResult, error)
 }
 
-// The production implementation satisfies the interface it was extracted for.
 var _ AuthService = (*service.AuthService)(nil)

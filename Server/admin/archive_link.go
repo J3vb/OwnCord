@@ -23,9 +23,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// archiveLinkTTL is how long a single-use archive link stays valid. It is
-// short by design: the owner asks for it and the browser opens it immediately,
-// so a minute is generous and a leaked link is near-useless.
+// archiveLinkTTL is how long a single-use archive link stays valid. Short by
+// design: the browser opens it immediately, and a leaked link is near-useless.
 var archiveLinkTTL = 60 * time.Second
 
 // archiveLink is one issued, not-yet-used link token. tokenHash is the hash
@@ -92,10 +91,9 @@ func (s *archiveLinks) redeem(token string) (archiveLink, bool) {
 
 // handleArchiveLink issues POST /admin/api/archive/link: a short-lived
 // single-use token the panel opens as a plain browser link, so the archive is
-// streamed to disk by the browser instead of being buffered in the page. It is
-// for the owner or a RESTORE_BACKUPS holder (the archive holds
-// password hashes and the key files), and the issue is audited as
-// archive_link.
+// streamed to disk instead of buffered in the page. For the owner or a
+// RESTORE_BACKUPS holder (the archive holds password hashes and the key
+// files); the issue is audited as archive_link.
 func handleArchiveLink(database *db.DB) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hash, ok := linkCredentialHash(w, r)
@@ -120,13 +118,13 @@ func handleArchiveLink(database *db.DB) http.HandlerFunc {
 	})
 }
 
-// handleArchiveDownload serves GET /admin/api/archive/download?token=…: the
+// handleArchiveDownload serves GET /admin/api/archive/download?token=...: the
 // single-use link's redemption. It carries no Authorization header (a plain
 // <a href> cannot send one), so the token stands in for it: random,
-// single-use and short-lived, and the credential that asked for it must
-// still resolve to a non-banned Owner or RESTORE_BACKUPS holder
-// (linkRestoreStillValid). Any failure to redeem is a uniform
-// 403, so a probe cannot tell unknown from expired from consumed from revoked.
+// single-use and short-lived, and the credential that asked for it must still
+// resolve to a non-banned Owner or RESTORE_BACKUPS holder
+// (linkRestoreStillValid). Any failure to redeem is a uniform 403, so a probe
+// cannot tell unknown from expired from consumed from revoked.
 func handleArchiveDownload(database *db.DB, opts SetupOptions, paths backupPaths) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		link, ok := linkStore.redeem(r.URL.Query().Get("token"))
@@ -151,23 +149,19 @@ func linkCredentialHash(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 // linkRestoreStillValid re-resolves the credential a link was issued to: it
 // must still be a live session or token of a non-banned principal who is the
-// Owner or whose roles still hold RESTORE_BACKUPS, judged on the
-// effective permissions at redemption. A holder who lost the bit, was banned
-// or was signed out since the link was issued gets nothing; an Administrator
-// without the bit never did. The full archive's redemption uses it.
+// Owner or whose roles still hold RESTORE_BACKUPS, judged on effective
+// permissions at redemption. A holder who lost the bit, was banned or was
+// signed out since issue gets nothing; an Administrator without the bit never
+// did. The full archive's redemption uses it.
 func linkRestoreStillValid(r *http.Request, database *db.DB, link archiveLink) bool {
 	return linkPrincipalStillValid(r, database, link, func(role *db.Role) bool {
 		return permissions.CanRestoreBackups(role.Permissions, role.ID, role.Position)
 	})
 }
 
-// linkBackupStillValid is linkRestoreStillValid for a single backup's link:
-// the credential must still be a live session or token of a
-// non-banned principal who is the Owner or whose roles still hold
-// MANAGE_BACKUPS. The role ResolveTokenHash returns carries the OR of every
-// held role's permissions, the same resolution the admin perimeter uses, so a
-// holder who lost the bit, was banned or was signed out since the link was
-// issued gets nothing.
+// linkBackupStillValid is linkRestoreStillValid for a single backup's link,
+// with MANAGE_BACKUPS. The role ResolveTokenHash returns carries the OR of
+// every held role's permissions, the same resolution the admin perimeter uses.
 func linkBackupStillValid(r *http.Request, database *db.DB, link archiveLink) bool {
 	return linkPrincipalStillValid(r, database, link, func(role *db.Role) bool {
 		return permissions.CanManageBackups(role.Permissions, role.ID, role.Position)
@@ -188,9 +182,9 @@ func writeLinkInvalid(w http.ResponseWriter) {
 }
 
 // handleBackupLink issues POST /admin/api/backups/{name}/link: a single-use
-// link to download that one backup, on the archive link's pattern — random,
-// bound to the credential that asked, expiring after archiveLinkTTL, never
-// logged. For the owner or a MANAGE_BACKUPS holder (a backup holds every
+// link to download that one backup, on the archive link's pattern (random,
+// bound to the asking credential, expiring after archiveLinkTTL, never
+// logged). For the owner or a MANAGE_BACKUPS holder (a backup holds every
 // account's password hash, so only the owner can grant the bit); the issue is
 // audited as backup_link.
 func handleBackupLink(database *db.DB, paths backupPaths) http.HandlerFunc {
@@ -244,10 +238,9 @@ func handleBackupDownload(database *db.DB, paths backupPaths) http.HandlerFunc {
 		}
 
 		// Armed before the headers go out and before the audit write, so the
-		// whole response is under the progress deadline, not the server's
-		// 30 s WriteTimeout. The token is already spent by now: a transfer
-		// that fails partway leaves the link spent, and the owner asks for a
-		// new one (unchanged behaviour).
+		// whole response is under the progress deadline, not the server's 30 s
+		// WriteTimeout. The token is already spent: a transfer that fails
+		// partway leaves the link spent and the owner asks for a new one.
 		deadline := startArchive(w, r, func() {}, archiveProgressTimeout, archiveMaxLifetime)
 		defer deadline.release()
 		deadline.touch()

@@ -14,17 +14,15 @@ type RingReopen struct {
 	Summary db.DMChannelInfo
 }
 
-// OpenForRing reopens the DM for every ring target who had closed it and
-// returns each reopen with its dm_channel_open payload, so the caller can
-// announce it ahead of the call_incoming. Without it a callee who closed the
-// DM accepts a call into a channel their client does not have.
-// OpenDM is idempotent and reports a genuine (re)open, so an already-open DM
-// returns nothing — see the note in SendMessage.
-//
+// OpenForRing reopens the DM for every ring target who had closed it and returns
+// each reopen with its dm_channel_open payload, for the caller to announce ahead of
+// call_incoming: otherwise a callee who closed the DM accepts a call into a channel
+// their client does not have. OpenDM is idempotent and reports a genuine (re)open,
+// so an already-open DM returns nothing (see SendMessage).
 // The payload is built before the row is written: a reopen that could not be
-// announced would be persisted, and every later ring would see the DM as open
-// and never announce it. A failure on either step skips that target (logged);
-// the ring itself must still go out.
+// announced would persist, and every later ring would see the DM open and never
+// announce it. A failure on either step skips that target (logged); the ring must
+// still go out.
 func (s *DMService) OpenForRing(ctx context.Context, channelID int64, targets []int64) []RingReopen {
 	var reopened []RingReopen
 	for _, pid := range targets {
@@ -46,10 +44,10 @@ func (s *DMService) OpenForRing(ctx context.Context, channelID int64, targets []
 	return reopened
 }
 
-// withHistory fills in what DMSummaryFor leaves at zero — last message, unread
-// and mention counts — from the user's open-DM list, which now includes this
-// channel. A ring sends no chat frame to repair a bare row, so the reopen
-// carries it. On a failed read the bare summary still announces the DM.
+// withHistory fills in what DMSummaryFor leaves at zero (last message, unread and
+// mention counts) from the user's open-DM list. A ring sends no chat frame to
+// repair a bare row, so the reopen carries it. On a failed read the bare summary
+// still announces the DM.
 func (s *DMService) withHistory(ctx context.Context, userID, channelID int64, summary db.DMChannelInfo) db.DMChannelInfo {
 	open, err := s.st.GetUserDMChannels(ctx, userID)
 	if err != nil {

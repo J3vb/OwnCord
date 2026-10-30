@@ -100,7 +100,7 @@ export function jobSummary({
 function main() {
   const clientDir = fileURLToPath(new URL("..", import.meta.url));
   const reportsDir = join(clientDir, "reports/mutation");
-  return import(join(clientDir, "stryker.shard.config.mjs")).then((config) => {
+  return import(join(clientDir, "tests/mutation/stryker.shard.config.mjs")).then((config) => {
     const artifacts = process.argv[2];
     const reportPath = (n) =>
       artifacts

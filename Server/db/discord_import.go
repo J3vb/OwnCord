@@ -12,19 +12,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// The Discord import writes a whole channel of history that must look like it
-// was always there. Everything here is the db half: the service package
-// parses the export and drives these calls. A channel is built with
-// import_pending = 1, which every client-facing channel read skips, filled
-// chunk by chunk, and published in one transaction.
+// The db half of the Discord import: a channel is built with import_pending = 1
+// (which client-facing reads skip), filled chunk by chunk and published in one
+// transaction.
 
 // ErrImportNameTaken is returned by EnsureImportAccount when an ordinary
-// account already holds the name the hidden import account needs. The name is
-// reserved at registration, so only a row older than the reservation can.
+// account already holds the hidden account's name.
 var ErrImportNameTaken = errors.New("an existing account holds the name reserved for the import account")
 
-// ErrImportRunning is returned by StartImport when another import is still
-// running. One import runs at a time.
+// ErrImportRunning is returned by StartImport while another import runs.
 var ErrImportRunning = errors.New("another import is already running")
 
 // Import job states, as stored in import_jobs.status.
@@ -90,10 +86,8 @@ type StartImportParams struct {
 	LiveJobIDs []int64
 }
 
-// EnsureImportAccount returns the id of the hidden import account, creating it
-// on first use. The account is a users row whose registration_status is
-// 'system': it has a password no check can match, no role row, no session, and
-// it is not listed, mentioned or reachable by direct message.
+// EnsureImportAccount returns the hidden import account's id, creating it on
+// first use as a 'system' users row with an unmatchable password and no role.
 func (d *DB) EnsureImportAccount(ctx context.Context) (int64, error) {
 	if id, err := d.q.GetImportAccountID(ctx); err == nil {
 		return id, nil
@@ -220,10 +214,9 @@ type ImportChunkParams struct {
 	Progress ImportProgress
 }
 
-// ImportChunk inserts the messages, their author rows and attachment links, and
-// the job's progress in one transaction. It returns the row id of each message
-// by Discord id. A reply to a message that is not in KnownIDs or earlier in the
-// chunk becomes a plain message.
+// ImportChunk inserts the messages, author rows, attachment links and job
+// progress in one transaction and returns each message's row id by Discord id.
+// A reply to an unknown message becomes a plain message.
 func (d *DB) ImportChunk(ctx context.Context, p ImportChunkParams) (map[string]int64, error) {
 	ids := make(map[string]int64, len(p.Messages))
 	err := d.inWriteTx(ctx, "ImportChunk", func(q *dbgen.Queries) error {
@@ -306,11 +299,10 @@ func updateImportProgress(ctx context.Context, q *dbgen.Queries, jobID int64, pr
 	return nil
 }
 
-// PublishImport makes the finished channel visible. In one transaction it
-// clears import_pending, moves every active member's read pointer past
-// lastMessageID with no mention count, and marks the job done. It reports
-// ErrNotFound when the job is no longer running or the channel is no longer
-// pending, in which case nothing is written.
+// PublishImport makes the finished channel visible in one transaction: it
+// clears import_pending, moves read pointers past lastMessageID and marks the
+// job done. It returns ErrNotFound, writing nothing, if the job is no longer
+// running or the channel no longer pending.
 func (d *DB) PublishImport(ctx context.Context, jobID, channelID, lastMessageID int64, pr ImportProgress) error {
 	err := d.inWriteTx(ctx, "PublishImport", func(q *dbgen.Queries) error {
 		n, err := q.PublishImportChannel(ctx, channelID)
@@ -350,10 +342,9 @@ func finishImportJob(ctx context.Context, q *dbgen.Queries, jobID int64, status,
 	return nil
 }
 
-// FailInterruptedImports runs at boot. A job still marked running belongs to a
-// process that no longer exists, and so does any channel still pending: both
-// are cleaned up, so a half import never shows. It returns how many jobs it
-// failed.
+// FailInterruptedImports runs at boot: a job still running, and any channel
+// still pending, belong to a dead process, so both are cleaned up. It returns
+// how many jobs it failed.
 func (d *DB) FailInterruptedImports(ctx context.Context) (int, error) {
 	failed := 0
 	err := d.inWriteTx(ctx, "FailInterruptedImports", func(q *dbgen.Queries) error {

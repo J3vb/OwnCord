@@ -114,7 +114,7 @@ test("capture", async ({ alice, server }) => {
 });
 ```
 
-run with `npx playwright test --config playwright.config.fullstack.ts capture`
+run with `npx playwright test --config tests/e2e/config/playwright.config.fullstack.ts capture`
 after `npm run test:e2e:build-server && npm run build`. The cold open made **no
 image fetches** (the seeded channel is empty and the users have no avatars);
 each image attachment that comes into view later costs one fetch, and so one

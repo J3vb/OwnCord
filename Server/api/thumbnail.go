@@ -160,7 +160,6 @@ func endsSegmentWalk(marker byte) bool {
 	return marker == 0xDA || marker == 0xFF || marker == 0x00 || (marker >= 0xD0 && marker <= 0xD7)
 }
 
-// exifOrientation finds tag 0x0112 in IFD0 of a TIFF block.
 func exifOrientation(tiff []byte) int {
 	if len(tiff) < 8 {
 		return 1

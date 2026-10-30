@@ -14,13 +14,11 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 )
 
-// sanitizer is the shared HTML sanitization policy (strips all tags).
+// sanitizer is the shared HTML policy (strips all tags).
 var sanitizer = bluemonday.StrictPolicy()
 
-// maxMessageLen is the maximum message length in runes.
 const maxMessageLen = 4000
 
-// Common service-layer errors.
 var (
 	ErrRateLimited    = errors.New("rate limited")
 	ErrBadRequest     = errors.New("bad request")
@@ -31,55 +29,48 @@ var (
 	ErrConflict       = errors.New("conflict")
 	ErrBlocked        = errors.New("blocked")
 	ErrDeletedMessage = errors.New("message is deleted")
-	// ErrAttachmentsUnavailable means a send had no text and none of its
-	// requested attachments could be linked (swept, foreign, already linked or
-	// missing). It is always wrapped together with ErrBadRequest, which it
-	// refines into the ATTACHMENTS_UNAVAILABLE wire code.
+	// ErrAttachmentsUnavailable means a send had no text and none of its attachments
+	// could be linked. Always wrapped with ErrBadRequest, refining it into the
+	// ATTACHMENTS_UNAVAILABLE wire code.
 	ErrAttachmentsUnavailable = errors.New("attachments unavailable")
-	// ErrReactionLimit means a new emoji was refused because the message already
-	// holds db.MaxDistinctReactions different ones. It is always wrapped together
-	// with ErrBadRequest, which it refines into the REACTION_LIMIT wire code.
+	// ErrReactionLimit means the message already holds db.MaxDistinctReactions emoji.
+	// Wrapped with ErrBadRequest; wire code REACTION_LIMIT.
 	ErrReactionLimit = errors.New("reaction limit reached")
-	// ErrPollEnded means a vote or an end reached a poll that was already ended
-	// or whose time ran out. It is always wrapped together with ErrBadRequest,
-	// which it refines into the POLL_ENDED wire code.
+	// ErrPollEnded means a vote or end reached an ended or expired poll. Wrapped
+	// with ErrBadRequest; wire code POLL_ENDED.
 	ErrPollEnded = errors.New("poll ended")
-	// ErrStickerNotFound means a sticker send named a sticker that does not
-	// exist (or no longer does). It is always wrapped together with
-	// ErrNotFound, which it refines into the STICKER_NOT_FOUND wire code.
+	// ErrStickerNotFound means a sticker send named a missing sticker. Wrapped with
+	// ErrNotFound; wire code STICKER_NOT_FOUND.
 	ErrStickerNotFound = errors.New("sticker not found")
-	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator
-	// timeout row and cannot send or edit messages, add reactions,
-	// join voice, start a new DM, create or rename a group DM, ring a DM
-	// call, pin in a DM, or set a custom status.
+	// ErrTimedOut is a 403 TIMED_OUT: the actor has an active moderator timeout and
+	// cannot send, edit, react, join voice, start a DM, create or rename a group DM,
+	// ring a DM call, pin in a DM, or set a custom status.
 	ErrTimedOut = errors.New("timed out")
-	// ErrCallNeedsAcceptance refuses a 1:1 call_ring whose recipient has not
-	// accepted the caller (pending, ignored or deleted request alike: one
-	// answer for every untrusted state). The ring is never delivered.
+	// ErrCallNeedsAcceptance refuses a 1:1 call_ring whose recipient has not accepted
+	// the caller (pending, ignored or deleted alike: one answer for every untrusted
+	// state). The ring is never delivered.
 	ErrCallNeedsAcceptance = errors.New("calls work after the other person accepts your message request")
 )
 
-// DMRequestPreview is the message preview a dm_request frame carries on
-// creation (docs/protocol.md's dm_request section).
+// DMRequestPreview is the message preview a dm_request frame carries
+// (docs/protocol.md).
 type DMRequestPreview struct {
 	MessageID int64
 	Content   string
 	Timestamp string
 }
 
-// EditMessageResult contains the output of a successful message edit.
+// EditMessageResult is the output of a successful edit.
 type EditMessageResult struct {
-	MessageID int64
-	ChannelID int64
-	Content   string
-	EditedAt  string
-	IsDM      bool
-	// DM-specific.
+	MessageID      int64
+	ChannelID      int64
+	Content        string
+	EditedAt       string
+	IsDM           bool
 	ParticipantIDs []int64
 
-	// Mentions/MentionsEveryone are re-resolved from the edited content.
-	// MentionRoles lists the roles whose @role token cleared the gate; an edit
-	// never raises a badge for them or anyone else.
+	// Mentions/MentionsEveryone are re-resolved from the edited content; an edit
+	// never raises a badge.
 	Mentions         []int64
 	MentionRoles     []int64
 	MentionsEveryone bool
@@ -89,153 +80,120 @@ type EditMessageResult struct {
 	PostOpening bool
 }
 
-// DeleteMessageResult contains the output of a successful message delete.
+// DeleteMessageResult is the output of a successful delete.
 type DeleteMessageResult struct {
-	MessageID int64
-	ChannelID int64
-	IsDM      bool
-	IsMod     bool
-	IsThread  bool // the message lived in a thread (its count moved)
-	// DM-specific.
+	MessageID      int64
+	ChannelID      int64
+	IsDM           bool
+	IsMod          bool
+	IsThread       bool // the message lived in a thread (its count moved)
 	ParticipantIDs []int64
 }
 
-// PurgeMessagesResult contains the output of a successful bulk delete.
-// MessageIDs is newest-first and is empty (never nil) when nothing matched.
+// PurgeMessagesResult is the output of a bulk delete. MessageIDs is newest-first
+// and empty (never nil) when nothing matched.
 type PurgeMessagesResult struct {
 	ChannelID  int64
 	MessageIDs []int64
 }
 
-// ReactionResult contains the output of a reaction add/remove.
+// ReactionResult is the output of a reaction add/remove.
 type ReactionResult struct {
-	MessageID int64
-	ChannelID int64
-	UserID    int64
-	Emoji     string
-	Action    string // "add" or "remove"
-	IsDM      bool
-	// DM-specific.
+	MessageID      int64
+	ChannelID      int64
+	UserID         int64
+	Emoji          string
+	Action         string // "add" or "remove"
+	IsDM           bool
 	ParticipantIDs []int64
 }
 
-// MessageService handles message-related business logic including
-// send, edit, delete, reactions, pins, and search.
+// MessageService handles message business logic: send, edit, delete, reactions,
+// pins and search.
 type MessageService struct {
 	st      Store
 	perms   *PermissionService
 	limiter *auth.RateLimiter
-	// mentionIDs backs the <@id> and <@&id> mention forms; nil when the store
-	// lacks it, which leaves those tokens as plain text.
+	// mentionIDs backs the <@id> and <@&id> forms; nil leaves those as plain text.
 	mentionIDs MentionIDStore
-	// bg runs the deferred bookkeeping that has no dedicated worker off the send
-	// path: Web Push dispatch, and the fallback mention write used when no
-	// mention worker is running. It runs on bg, the lifecycle-owned group the
-	// composition root installs with SetBackground so shutdown joins it before
-	// the database closes; a nil bg runs each job on a fresh
-	// unowned group (the old `go fn()`). Tests switch to inline via
-	// RunBackgroundInlineForTest so they can read the results
-	// deterministically right after a send.
+	// bg runs deferred bookkeeping with no dedicated worker (Web Push, the fallback
+	// mention write). The composition root installs a lifecycle-owned group via
+	// SetBackground so shutdown joins it before the database closes; nil runs each
+	// job on a fresh unowned group. Tests use RunBackgroundInlineForTest.
 	bg       *syncutil.Group
 	bgInline bool
-	// mentionWorker is the single bounded worker that owns every mention-badge
-	// write (P5-O05). It is nil until the composition root starts it
-	// (app.startHub); with no worker, SendMessage resolves and writes mentions
-	// inline through bg, so a directly-constructed service (every test) behaves
-	// as before. An atomic pointer because the composition root starts it while
-	// other goroutines may already be sending.
+	// mentionWorker is the single bounded worker owning every mention-badge write.
+	// Nil until the composition root starts it (app.startHub); then SendMessage
+	// resolves inline through bg. Atomic because it is started while other
+	// goroutines may already be sending.
 	mentionWorker atomic.Pointer[mentionWorker]
-	// mentionEmitMu serializes each mention_count write with the frame it emits,
-	// so frame order matches commit order across the coalesced worker flush and
-	// the removal paths. Held across the write, the
-	// notify and the visibility check inside it; job resolution stays outside.
+	// mentionEmitMu serializes each mention_count write with the frame it emits, so
+	// frame order matches commit order across the worker flush and the removal paths.
+	// Held across write, notify and visibility check; job resolution stays outside.
 	// See mentionWorker.emitMu and reverseMentionCounts.
 	mentionEmitMu syncutil.Mutex
-	// readStateNotifier delivers the read_state frame MoveReadPointer sends
-	// under mentionEmitMu. nil leaves it off (see SetReadStateNotifier).
+	// readStateNotifier delivers the read_state frame MoveReadPointer sends under
+	// mentionEmitMu; nil leaves it off.
 	readStateNotifier ReadStateNotifier
-	// liveStatus returns userID's live status, "" when they hold no live
-	// connection. It is wired by the ws layer (Hub.LiveStatus) after both are
-	// constructed, so @here reads the same status the member list overlays
-	// (ws/serve_ready.go presentableMembers) instead of users.status, which
-	// keeps a *chosen* idle/dnd/invisible across a disconnect by design
-	// (StampDisconnect only ever rewrites "online" -> "offline") and lags a
-	// connect by up to one batched stamp flush (StampFlushInterval). nil (the
-	// zero value, e.g. in tests and any caller with no hub) falls back to the
-	// row.
+	// liveStatus returns userID's live status, "" with no live connection. The ws
+	// layer wires it (Hub.LiveStatus) so @here reads the status the member list
+	// overlays (ws/serve_ready.go presentableMembers), not users.status, which keeps
+	// a chosen idle/dnd/invisible across a disconnect and lags a connect by up to one
+	// StampFlushInterval. Nil falls back to the row.
 	liveStatus func(userID int64) string
-	// messageRequests is the first-contact gate and delivery-audience
-	// filter (service/message_request.go), wired by service.New(). nil (the
-	// zero value — every test and any caller built via NewMessageService
-	// directly instead of service.New()) disables the gate entirely: every
-	// one-to-one DM behaves exactly as it did before the gate existed, which is what
-	// keeps the large existing body of DM tests that construct
-	// *MessageService directly green without themselves wiring it.
+	// messageRequests is the first-contact gate and delivery-audience filter, wired
+	// by service.New(). Nil (tests and NewMessageService callers) disables the gate,
+	// so 1:1 DMs behave as before it existed.
 	messageRequests *MessageRequestService
-	// afterFirstContactTrustCheck is a test seam:
-	// called from dmFirstContactGate once the recipient's trust of the
-	// sender (read by GetDMDeliveryTargets) is false, before firstContact's
-	// insert — same package as its test,
-	// no exported setter, mirroring storage_quota.go's afterRecount. Nil in
-	// production.
+	// afterFirstContactTrustCheck is a test seam called from dmFirstContactGate once
+	// the recipient's trust is read false, before firstContact's insert (no exported
+	// setter, like storage_quota.go's afterRecount). Nil in production.
 	afterFirstContactTrustCheck func()
-	// beforeRequestPreviewLookup is a test seam:
-	// called from dmFirstContactGate right before canonicalRequestPreview's
-	// DB read, with the message id about to be looked up, so a test can
-	// delete the held message in that exact window and confirm the frame's
-	// preview comes back nil rather than the deleted content. Nil in
-	// production.
+	// beforeRequestPreviewLookup is a test seam called right before
+	// canonicalRequestPreview's DB read so a test can delete the held message in
+	// that window and confirm the preview comes back nil. Nil in production.
 	beforeRequestPreviewLookup func(messageID int64)
-	// pushNotifier is the Web Push dispatch hook. nil
-	// (the zero value) means dispatch is off — either push.enabled or
-	// push.dispatch_enabled is false — and SendMessage's hook call is
-	// skipped entirely. The composition root installs a *PushDispatcher
-	// here only when both keys are true.
+	// pushNotifier is the Web Push dispatch hook. Nil means dispatch is off
+	// (push.enabled or push.dispatch_enabled false); the root installs a
+	// *PushDispatcher only when both are true.
 	pushNotifier PushNotifier
-	// mentionNotifier is the live taskbar/tray unread-badge hook: it
-	// delivers one per-user mention_count frame per reader whose badge a
-	// mention actually raised. nil (the zero value — every test and any caller
-	// with no hub) means no frame is pushed, exactly the behaviour before the badge hook existed.
-	// The ws layer installs the hub-backed implementation in NewHub.
+	// mentionNotifier delivers the per-user mention_count frame (taskbar/tray badge)
+	// for each reader whose badge a mention raised. Nil (tests, no hub) pushes
+	// nothing; NewHub installs the hub-backed one.
 	mentionNotifier MentionCountNotifier
-	// forward backs ForwardMessage; see message_forward.go.
+	// forward backs ForwardMessage (message_forward.go).
 	forward forwardDeps
-	// poll backs CreatePoll; see message_poll.go.
+	// poll backs CreatePoll (message_poll.go).
 	poll pollDeps
-	// sticker reads a message's sticker block and a sticker's row;
-	// nil disables sticker sends.
+	// sticker reads a message's sticker block and a sticker's row; nil disables
+	// sticker sends.
 	sticker StickerStore
-	// threads reads a forum post's thread for a retry; nil disables
-	// forum posts. It is the ThreadStore slice, not a Store method.
+	// threads reads a forum post's thread for a retry; nil disables forum posts.
 	threads ThreadStore
 }
 
-// SetMessageRequests wires the first-contact gate and delivery-audience
-// filter (service.New() calls this once at startup). See messageRequests'
-// doc comment for what leaving it nil means.
+// SetMessageRequests wires the first-contact gate (service.New() calls it once);
+// see messageRequests for what nil means.
 func (s *MessageService) SetMessageRequests(mr *MessageRequestService) {
 	s.messageRequests = mr
 }
 
 // SetLiveStatusLookup wires the live-status lookup @here's offline narrowing
-// reads in place of users.status. Passing nil clears it. Safe to call once at
-// startup (the ws layer, after constructing both the Hub and the Services) or
-// from a test.
+// reads in place of users.status; nil clears it. Call once at startup or from a
+// test.
 func (s *MessageService) SetLiveStatusLookup(liveStatus func(userID int64) string) {
 	s.liveStatus = liveStatus
 }
 
-// SetPushNotifier installs the Web Push dispatch hook. The composition root
-// calls this once, only when both push.enabled and push.dispatch_enabled
-// are true; passing nil (or never calling it) leaves dispatch off, which is
-// the compiled default (TestPushDispatch_OffByDefaultSendsNothing).
+// SetPushNotifier installs the Web Push dispatch hook. The root calls it once,
+// only when both push.enabled and push.dispatch_enabled are true; nil leaves
+// dispatch off (the compiled default).
 func (s *MessageService) SetPushNotifier(n PushNotifier) {
 	s.pushNotifier = n
 }
 
-// backgroundJobTimeout bounds each job SendMessage hands to bg (the
-// no-worker mention write and Web Push dispatch), so a wedged store or push
-// service cannot hold its goroutine forever. It matches Notify's own cap. A
+// backgroundJobTimeout bounds each job SendMessage hands to bg so a wedged store
+// or push service cannot hold its goroutine forever. Matches Notify's own cap; a
 // var so tests can shorten it.
 var backgroundJobTimeout = pushDispatchTimeout
 
@@ -255,44 +213,35 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 }
 
 // SetUploads gives the service the upload service a forward clones files
-// through. service.New calls it; without it a forward that carries files is
-// refused.
+// through; without it a forward carrying files is refused.
 func (s *MessageService) SetUploads(u *UploadService) { s.forward.uploads = u }
 
-// RunBackgroundInlineForTest makes the fallback mention write (used when no
-// mention worker is running) and Web Push dispatch run synchronously on the
-// calling goroutine, so tests can assert on the results right after
-// SendMessage returns. Test-only.
+// RunBackgroundInlineForTest runs the fallback mention write and Web Push
+// dispatch synchronously so tests can assert right after SendMessage. Test-only.
 func (s *MessageService) RunBackgroundInlineForTest() {
 	s.bgInline = true
 }
 
-// StartMentionWorker creates and starts the single bounded mention-badge
-// worker and routes SendMessage's mention bookkeeping through it (P5-O05).
-// The composition root calls it once at start-up (app.startHub); tests
-// normally leave it uncalled so SendMessage resolves and writes mentions
-// inline and stays deterministic. ctx bounds the worker's loop; the returned
-// func drains and stops it, and is the caller's (App.Close) job.
+// StartMentionWorker creates and starts the bounded mention-badge worker and
+// routes SendMessage's bookkeeping through it. The root calls it once
+// (app.startHub); tests leave it uncalled for deterministic inline writes. ctx
+// bounds the loop; the returned func drains and stops it (App.Close's job).
 func (s *MessageService) StartMentionWorker(ctx context.Context) func(context.Context) {
 	w := newMentionWorker(s.st)
 	// Share the write+emit lock with the removal paths so a coalesced increment
-	// flush can never be overtaken by an older decrement frame, or vice versa.
-	// The worker's own newMentionWorker lock is discarded.
+	// flush cannot be overtaken by an older decrement frame, or vice versa.
 	w.emitMu = &s.mentionEmitMu
-	// The live unread-badge hook is installed by NewHub before this runs, so
-	// capturing it here is enough; a nil hook means no hub and no pushes.
+	// NewHub installed the hook before this runs; nil means no hub and no pushes.
 	if s.mentionNotifier != nil {
 		w.notify = s.mentionNotifier.NotifyMentionCount
 	}
-	// Start before publishing: run sets started synchronously, so a sender that
-	// sees the worker through mentionWorkerForSend never observes it as
-	// not-started and drops a job.
+	// Start before publishing: run sets started synchronously, so a sender seeing
+	// the worker never observes it as not-started and drops a job.
 	w.run(ctx)
 	s.mentionWorker.Store(w)
 	return w.stopAndDrain
 }
 
-// mentionWorkerForSend returns the active worker, or nil when none is running.
 func (s *MessageService) mentionWorkerForSend() *mentionWorker {
 	if s == nil {
 		return nil
@@ -300,18 +249,14 @@ func (s *MessageService) mentionWorkerForSend() *mentionWorker {
 	return s.mentionWorker.Load()
 }
 
-// FlushPendingMentionCounts applies any still-queued mention-badge job for
-// msgIDs before the caller reverses those messages' increments. A removal path
-// (DeleteMessage, PurgeMessages, erasure) must call this first so the
-// increment and its reversal stay symmetric: a message removed inside the
-// worker's coalesce window would otherwise be reversed before its increment
-// landed, and the later flush would either raise a phantom badge or (with the
-// liveness guard) be skipped and take a pre-existing genuine badge with it.
-//
-// A no-op when no worker is running: the inline fallback writes the increment
-// on the send path, so it is already on disk before any removal runs. ctx only
-// bounds the wait; the worker applies the jobs against its own loop context, so
-// a cancelled caller context cannot drop the flush.
+// FlushPendingMentionCounts applies any still-queued mention-badge job for msgIDs
+// before the caller reverses them. Removal paths (DeleteMessage, PurgeMessages,
+// erasure) must call it first: a message removed inside the coalesce window would
+// be reversed before its increment landed, and the later flush would raise a
+// phantom badge or, with the liveness guard, be skipped and take a genuine badge
+// with it. A no-op without a worker (the inline fallback already wrote the
+// increment). ctx only bounds the wait; the worker applies jobs on its own loop
+// context, so a canceled caller cannot drop the flush.
 func (s *MessageService) FlushPendingMentionCounts(ctx context.Context, msgIDs []int64) {
 	w := s.mentionWorkerForSend()
 	if w == nil {
@@ -320,9 +265,8 @@ func (s *MessageService) FlushPendingMentionCounts(ctx context.Context, msgIDs [
 	w.flushMessages(ctx, msgIDs)
 }
 
-// flushChannelMentionCounts is FlushPendingMentionCounts for every queued job
-// on one channel — PurgeMessages' pre-purge flush, which cannot name the ids
-// until after the purge has run.
+// flushChannelMentionCounts is FlushPendingMentionCounts for every queued job on
+// a channel (PurgeMessages cannot name the ids until after the purge).
 func (s *MessageService) flushChannelMentionCounts(ctx context.Context, channelID int64) {
 	w := s.mentionWorkerForSend()
 	if w == nil {
@@ -331,11 +275,9 @@ func (s *MessageService) flushChannelMentionCounts(ctx context.Context, channelI
 	w.flushChannel(ctx, channelID)
 }
 
-// FlushAllPendingMentionCounts applies every queued mention-badge job,
-// ignoring the coalesce window. The erasure path calls it before its own
-// reversal and message deletion, since the erasure deletes all of a user's
-// messages and cannot cheaply name them first (P5-O05; see
-// FlushPendingMentionCounts). A no-op without a worker.
+// FlushAllPendingMentionCounts applies every queued job, ignoring the coalesce
+// window. Erasure calls it first since it deletes all of a user's messages and
+// cannot cheaply name them. A no-op without a worker.
 func (s *MessageService) FlushAllPendingMentionCounts(ctx context.Context) {
 	w := s.mentionWorkerForSend()
 	if w == nil {
@@ -344,45 +286,31 @@ func (s *MessageService) FlushAllPendingMentionCounts(ctx context.Context) {
 	w.flushNow(ctx)
 }
 
-// sanitizePass is one unescape-sanitize-unescape cycle. Both unescapes are
-// load-bearing; do not drop either.
-//   - Inner: bluemonday's StrictPolicy treats "&lt;img ...&gt;" as inert
-//     escaped text and lets it through unchanged. Unescaping first turns
-//     smuggled entity-encoded markup into real markup *before* bluemonday
-//     sees it, so StrictPolicy actually strips it.
-//   - Outer: bluemonday writes surviving text tokens through
-//     html.EscapeString (Sanitize output is always HTML-escaped), so
-//     without this, plain punctuation like don't/>/"/& would be persisted
-//     and rendered as literal &#39;/&gt;/&#34;/&amp; entities.
+// sanitizePass is one unescape-sanitize-unescape cycle; both unescapes are
+// load-bearing.
+//   - Inner: StrictPolicy lets "&lt;img ...&gt;" through as inert escaped text, so
+//     unescaping first turns smuggled entity-encoded markup into real markup
+//     that it then strips.
+//   - Outer: Sanitize output is always HTML-escaped, so without this plain
+//     punctuation like don't/>/"/& would be stored as literal &#39;/&gt;/&#34;/&amp;.
 func sanitizePass(s string) string {
 	return html.UnescapeString(sanitizer.Sanitize(html.UnescapeString(s)))
 }
 
-// sanitizeToFixpoint repeats sanitizePass until it stops changing the
-// string. One pass is not enough on its own, for two reasons:
-//   - A multiply-encoded payload like "&amp;lt;script&amp;gt;" only has its
-//     outermost layer peeled by a single inner unescape, so it survives the
-//     first pass as still-escaped inert text and the *outer* unescape then
-//     turns the one remaining layer into a live "<script>". A second pass
-//     unescapes and strips it for real.
-//   - bluemonday's StrictPolicy is only self-stable in *escaped* space (its
-//     tokenizer decodes entities internally while reading a text node, then
-//     re-escapes uniformly on write, so Sanitize(Sanitize(x)) == Sanitize(x)
-//     always held, which is why the pre-fix code's fuzz idempotency check
-//     never caught this). Emitting a literal outer-unescaped "<" breaks
-//     that self-stability: e.g. bluemonday tag-strips the adversarial input
-//     "<<script>script>alert(1)<</script>/script>" down to escaped text
-//     "&lt;/script&gt;", and one outer unescape turns that into the literal
-//     substring "</script>" — inert as *this* pass's output, but a real end
-//     tag if it were ever sanitized again. Looping to a fixpoint here means
-//     sanitizeContent's own output is always already stable, so re-running
-//     it (which the edit path effectively does, on separately-submitted
-//     content) is a true no-op instead of merely "safe once".
+// sanitizeToFixpoint repeats sanitizePass until the string stops changing. One
+// pass is not enough:
+//   - A multiply-encoded payload like "&amp;lt;script&amp;gt;" has only its
+//     outermost layer peeled by the inner unescape, and the outer unescape then
+//     turns the remaining layer into a live "<script>". A second pass strips it.
+//   - StrictPolicy is self-stable only in escaped space, and emitting a literal
+//     outer-unescaped "<" breaks that: it tag-strips
+//     "<<script>script>alert(1)<</script>/script>" to escaped "&lt;/script&gt;",
+//     which one outer unescape turns into a literal "</script>", inert now but a
+//     real end tag if sanitized again. Looping to a fixpoint makes
+//     sanitizeContent's output stable, so re-sanitizing on edit is a true no-op.
 //
-// It always terminates: bluemonday only ever removes characters or shortens
-// escaped entities back down, so each pass's output length is
-// non-increasing. The iteration bound is a defensive backstop pathological
-// input can't actually reach, not what makes this safe.
+// It always terminates: each pass's output length is non-increasing. The
+// iteration bound is a backstop pathological input cannot reach.
 func sanitizeToFixpoint(raw string) string {
 	s := raw
 	for i := 0; i <= len(raw); i++ {
@@ -395,20 +323,16 @@ func sanitizeToFixpoint(raw string) string {
 	return s
 }
 
-// SanitizeText runs raw through the same unescape-sanitize-fixpoint pipeline
-// as message content and profile free-text fields (see sanitizeToFixpoint):
-// it strips HTML but leaves survivors as typed instead of persisting them as
-// literal &#39;/&gt;/&amp; entities the way a bare bluemonday sanitizer.Sanitize
-// call would. Exported for call sites outside this package that sanitize a
-// single free-text field before storage — e.g. the username field on
-// registration, which must canonicalize identically to how lookups treat it.
+// SanitizeText runs raw through the message-content pipeline (see
+// sanitizeToFixpoint): it strips HTML but leaves survivors as typed rather than
+// as literal &#39;/&gt;/&amp; entities. Exported for call sites outside this
+// package, e.g. registration's username, which must canonicalize as lookups do.
 func SanitizeText(raw string) string {
 	return sanitizeToFixpoint(raw)
 }
 
-// SanitizeImportedContent runs imported history through the sanitizer and
-// length limit a sent message gets. Text over the limit is cut and ends in an
-// ellipsis rather than refused, since an import must not drop a message.
+// SanitizeImportedContent applies a sent message's sanitizer and length limit,
+// cutting over-long text with an ellipsis instead of refusing it.
 func SanitizeImportedContent(raw string) string {
 	// The raw-byte guard in front of the quadratic sanitizer: cut first.
 	cut := len(raw) > maxMessageLen*4
@@ -424,7 +348,6 @@ func SanitizeImportedContent(raw string) string {
 	return content
 }
 
-// sanitizeContent validates and sanitizes message content.
 func sanitizeContent(raw string, allowEmpty bool) (string, error) {
 	if len(raw) > maxMessageLen*4 {
 		return "", fmt.Errorf("%w: message content exceeds maximum length", ErrBadRequest)

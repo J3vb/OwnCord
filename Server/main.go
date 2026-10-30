@@ -44,8 +44,7 @@ Usage:
 
 // infoOutput returns the text `args[0]` asks for and true when it is an
 // informational flag, or "" and false otherwise. Kept out of main so the
-// dispatch is testable without a subprocess, and so main()'s only job is to
-// print it and return before any server or logging setup.
+// dispatch is testable without a subprocess.
 func infoOutput(args []string) (string, bool) {
 	if len(args) == 0 {
 		return "", false
@@ -60,17 +59,17 @@ func infoOutput(args []string) (string, bool) {
 }
 
 func main() {
-	// `--version`/`--help` print and exit before any server or logging setup.
-	// Without this they were treated as no argument at all: the server started and config.Load wrote a config.yaml
-	// into the cwd, so asking a build what it was had a side effect.
+	// `--version`/`--help` print and exit before any server or logging setup;
+	// otherwise config.Load would write a config.yaml into the cwd as a side
+	// effect of asking what a build is.
 	if out, ok := infoOutput(os.Args[1:]); ok {
 		fmt.Print(out)
 		return
 	}
 
 	// `server healthcheck` probes the running instance's /health and exits
-	// 0/1. It exists for container healthchecks: the distroless image has no
-	// shell or curl, so the binary is its own probe.
+	// 0/1, for container healthchecks: the distroless image has no shell or
+	// curl, so the binary is its own probe.
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(app.RunHealthcheckCLI())
 	}
@@ -80,8 +79,7 @@ func main() {
 		os.Exit(runTokenCLI(os.Args[2:]))
 	}
 	// `server restore <file>` is the offline counterpart to the admin restore
-	// endpoint: put a database backup back on a server that will not
-	// boot. Handled before logging setup so it stays quiet and standalone, and
+	// endpoint. Handled before logging setup so it stays quiet and standalone;
 	// it takes the database's process lock so a running server stops it.
 	if len(os.Args) > 1 && os.Args[1] == "restore" {
 		os.Exit(runRestoreCLI(config.DefaultPath, os.Args[2:]))
@@ -96,13 +94,11 @@ func main() {
 	// Create ring buffer for admin log viewer, then build a multi-handler
 	// that tees log records to both stdout and the ring buffer.
 	logBuf := admin.NewRingBuffer(2000)
-	// levelVar controls both handlers' thresholds. It starts at INFO (the
-	// zero value) so early-startup logs are captured, then app.LoadConfig
-	// raises or lowers it once config.yaml / OWNCORD_LOGGING_LEVEL is loaded.
-	// The ring buffer shares it rather than hard-wiring DEBUG: with both
-	// sinks gated, Enabled returns false for suppressed levels and every
-	// gated Debug call across the server becomes a no-op instead of
-	// formatting a ring entry.
+	// levelVar controls both handlers' thresholds. It starts at INFO so
+	// early-startup logs are captured, then app.LoadConfig adjusts it once
+	// config.yaml / OWNCORD_LOGGING_LEVEL is loaded. The ring buffer shares it
+	// rather than hard-wiring DEBUG, so every gated Debug call becomes a no-op
+	// instead of formatting a ring entry.
 	levelVar := new(slog.LevelVar)
 	stdoutHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: levelVar})
 	multiHandler := admin.NewMultiHandler(stdoutHandler, logBuf, levelVar)
@@ -112,12 +108,12 @@ func main() {
 	slog.SetDefault(log)
 
 	// The restart coordinator carries a self-restart request (update apply,
-	// backup restore, setup wizard) across the lifecycle's teardown — see
-	// internal/app/restart.go. main owns it and hands it in; the handoff
-	// below is the last thing this process does. The backstop closure fires
-	// only if a requested restart's drain wedges past RestartBackstopDelay:
-	// it performs the handoff without staying behind for the replacement and
-	// force-exits, releasing whatever the wedged teardown still holds.
+	// backup restore, setup wizard) across the lifecycle's teardown (see
+	// internal/app/restart.go); the handoff below is the last thing this
+	// process does. The backstop closure fires only if a requested restart's
+	// drain wedges past RestartBackstopDelay: it performs the handoff without
+	// staying behind for the replacement and force-exits, releasing whatever
+	// the wedged teardown holds.
 	var rc *app.RestartCoordinator
 	rc = app.NewRestartCoordinator(app.RestartBackstopDelay, func() {
 		slog.Error("restart backstop fired — teardown exceeded its budget, exiting for handoff")
@@ -133,11 +129,10 @@ func main() {
 		log.Error("server exited with error", "error", err)
 	}
 
-	// Perform the handoff even when the lifecycle returned an error: a
-	// restart is only ever requested after a committed binary swap or a
-	// restore that closed the database, so not restarting is strictly worse
-	// than restarting into whatever the error was. A process that stayed
-	// behind for its replacement exits with the replacement's code.
+	// Perform the handoff even when the lifecycle returned an error: a restart
+	// is requested only after a committed binary swap or a restore that closed
+	// the database, so not restarting is worse. A process that stayed behind
+	// for its replacement exits with the replacement's code.
 	if code, waited := rc.PerformHandoff(log); waited {
 		os.Exit(code)
 	}

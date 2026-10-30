@@ -44,12 +44,11 @@ func (rb *EventRingBuffer) EventsSince(afterSeq uint64) [][]byte {
 	return rb.eventsSince(afterSeq, nil, nil, true)
 }
 
-// RemoveWhere drops the data of every buffered event drop reports true for
-// and returns how many it dropped. The entry keeps its seq so the buffer's
-// coverage window (OldestSeq/NewestSeq) is unchanged; a replay whose range
-// crosses an emptied slot returns nil, so the client takes the full ready
-// instead of acking past a frame it never received. Used by the account
-// erasure to take an erased user's frames out of hot replay (O5).
+// RemoveWhere drops the data of every buffered event drop reports true for and
+// returns how many. The entry keeps its seq so the coverage window
+// (OldestSeq/NewestSeq) is unchanged; a replay crossing an emptied slot returns nil,
+// so the client takes the full ready instead of acking past a frame it never
+// received. Used by account erasure to take an erased user's frames out of hot replay.
 func (rb *EventRingBuffer) RemoveWhere(drop func(data []byte) bool) int {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -77,29 +76,23 @@ func (rb *EventRingBuffer) EventsSinceFiltered(afterSeq uint64, allowedChannelID
 	return rb.EventsSinceFilteredContent(afterSeq, allowedChannelIDs, allowedChannelIDs)
 }
 
-// EventsSinceFilteredContent is EventsSinceFiltered plus the NSFW content gate:
-// a buffered event whose channelID is allowed is included as before UNLESS
-// it is a content-bearing kind (contentBearingKinds) for a channel that is
-// NOT in readableChannelIDs, in which case it is silently dropped — a
-// labelled channel a caller has not acknowledged replays no content, even
-// though the channel itself (metadata frames) still replays normally.
-// EventsSinceFiltered is this with readableChannelIDs == allowedChannelIDs,
-// i.e. no extra narrowing, for every caller that predates the content/
-// metadata distinction (voice-only replay, most reconnect paths before an
-// NSFW channel is involved).
+// EventsSinceFilteredContent is EventsSinceFiltered plus the NSFW content gate: a
+// buffered event whose channelID is allowed is included UNLESS it is a
+// content-bearing kind (contentBearingKinds) for a channel not in readableChannelIDs,
+// which is silently dropped, so a labelled channel a caller has not acknowledged
+// replays no content though its metadata frames still replay. EventsSinceFiltered is
+// this with readableChannelIDs == allowedChannelIDs.
 func (rb *EventRingBuffer) EventsSinceFilteredContent(afterSeq uint64, allowedChannelIDs, readableChannelIDs map[int64]bool) [][]byte {
 	return rb.eventsSince(afterSeq, allowedChannelIDs, readableChannelIDs, false)
 }
 
-// eventsSince is the one ring walk behind EventsSince and
-// EventsSinceFilteredContent. unfiltered admits every buffered frame; the
-// filtered path includes channelID 0 (a global broadcast) unconditionally and
-// a channel-scoped frame only when allowed admits it and it is either not
-// content-bearing or readable admits its channel. There is deliberately no
-// nil-means-everything sentinel on the maps: computeAllowedChannels only ever
-// returns a made map and is fail-closed, so a nil map must deny, not admit —
-// otherwise a future nil-map bug on the replay path would read as a
-// cross-channel replay leak.
+// eventsSince is the one ring walk behind EventsSince and EventsSinceFilteredContent.
+// unfiltered admits every buffered frame; the filtered path includes channelID 0
+// (a global broadcast) unconditionally and a channel-scoped frame only when allowed
+// admits it and it is either not content-bearing or readable admits its channel.
+// There is deliberately no nil-means-everything sentinel on the maps:
+// computeAllowedChannels only returns a made map and is fail-closed, so a nil map
+// must deny, or a future nil-map bug would read as a cross-channel replay leak.
 func (rb *EventRingBuffer) eventsSince(afterSeq uint64, allowed, readable map[int64]bool, unfiltered bool) [][]byte {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
@@ -108,7 +101,6 @@ func (rb *EventRingBuffer) eventsSince(afterSeq uint64, allowed, readable map[in
 		return nil
 	}
 
-	// Find the oldest entry in the buffer.
 	oldestIdx := (rb.pos - rb.count + rb.size) % rb.size
 	oldestSeq := rb.entries[oldestIdx].seq
 

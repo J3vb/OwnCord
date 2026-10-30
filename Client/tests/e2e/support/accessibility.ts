@@ -3,7 +3,7 @@
  * docs/architecture/ui-contract.md).
  *
  * Everything here reads the running page, so it works the same against the
- * Vite dev server and the production bundle (`playwright.config.prod.ts`).
+ * Vite dev server and the production bundle (`tests/e2e/config/playwright.config.prod.ts`).
  * The contrast math is the app's own (`src/lib/color-contrast.ts`), so a test
  * and the Q8 accent fallback can never disagree about a ratio.
  *

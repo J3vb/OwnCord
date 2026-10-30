@@ -234,7 +234,7 @@ whose Tauri build step leaves them out.
 **Mutation testing in CI.**
 
 - **On a PR:** CI runs a narrow mutation check on `src/lib/permissions.ts`
-  (`Client/stryker.ci.config.mjs`). It is a step in Client Static Checks. It
+  (`Client/tests/mutation/stryker.ci.config.mjs`). It is a step in Client Static Checks. It
   runs only when a PR touches that file, its unit test or the Stryker configs.
 - **Nightly:** the full client baseline is the sharded `mutation` job in
   `.github/workflows/nightly-test-depth.yml`. It covers the base config's
@@ -243,7 +243,7 @@ whose Tauri build step leaves them out.
   ```bash
   cd Client
   STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores|safety-moderation> \
-    npx stryker run stryker.shard.config.mjs
+    npx stryker run tests/mutation/stryker.shard.config.mjs
   ```
 
 - `Client/scripts/check-mutation-shards.mjs` proves the shards together still
@@ -417,7 +417,7 @@ Three things to know before you open a PR:
   | `webclient`   | Client E2E (web portal, non-blocking)                                                      | In `Client/`: `npm run test:e2e:web`                                     | No                                                               |
   | `workflows`   | Workflow Security Lint                                                                     | `zizmor --offline .github/workflows/`                                    | No. `actionlint` runs in `check:hygiene` if installed            |
   | `deps`        | Supply-chain Scan                                                                          | `osv-scanner` and `cargo deny`; see `osv-scanner.toml`                   | No                                                               |
-  | `permissions` | The "Permissions mutation hotspot" step of Client Static Checks                            | In `Client/`: `npx stryker run stryker.ci.config.mjs`                    | No                                                               |
+  | `permissions` | The "Permissions mutation hotspot" step of Client Static Checks                            | In `Client/`: `npx stryker run tests/mutation/stryker.ci.config.mjs`     | No                                                               |
   | `changelog`   | The "Changelog gate" step of Server Build & Test (ubuntu-latest); Server Lint & Invariants | In `Server/`: `go test -count=1 -run TestBundledChangelog ./admin/`      | Yes, as part of `check:server`                                   |
 
   Docs & Ledger Consistency and Repository Hygiene always run. A skipped

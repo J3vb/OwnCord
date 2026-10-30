@@ -37,10 +37,9 @@ type customStatusExpiryStore interface {
 	ClearCustomStatusIfExpiry(ctx context.Context, userID int64, expiresAt string) (bool, error)
 }
 
-// CustomStatusNotifier is told when the expirer cleared a user's custom
-// status, so live clients can drop it. expiresAt is the expiry the cleared row
-// carried: the hub only acts on a connection whose live status still carries
-// that same tag.
+// CustomStatusNotifier is told when the expirer cleared a user's custom status.
+// expiresAt is the expiry the cleared row carried: the hub acts only on a
+// connection whose live status still carries that same tag.
 type CustomStatusNotifier interface {
 	CustomStatusExpired(userID int64, expiresAt string)
 }
@@ -116,13 +115,11 @@ func (e *CustomStatusExpirer) Sweep(ctx context.Context) error {
 				notifier.CustomStatusExpired(r.UserID, r.ExpiresAt)
 			}
 		}
-		// A full batch with progress may have more behind it; anything else
-		// is done. Rows that did not clear were changed by a concurrent set
-		// and are re-evaluated by the next read.
-		// Returning when a full batch clears nothing is correct, not a stall:
-		// every row in it was re-set with a future expiry between the list and
-		// the clear, so it no longer matches ListExpiredCustomStatuses, and the
-		// next nextSleep re-reads the soonest pending expiry.
+		// A full batch with progress may have more behind it; anything else is done. Rows
+		// that did not clear were changed by a concurrent set and are re-evaluated by the
+		// next read. Returning when a full batch clears nothing is correct, not a stall:
+		// every row was re-set with a future expiry between list and clear, so it no longer
+		// matches ListExpiredCustomStatuses, and nextSleep re-reads the soonest expiry.
 		if len(rows) < expirerBatch || cleared == 0 {
 			return nil
 		}

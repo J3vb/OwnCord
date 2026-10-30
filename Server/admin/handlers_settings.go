@@ -13,7 +13,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Settings Handlers ──────────────────────────────────────────────────────
 //
 // Thin adapters over service.SettingsService:
 // the whitelist, boolean normalization, require_2fa preconditions, atomic

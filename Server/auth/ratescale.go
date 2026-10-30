@@ -6,12 +6,10 @@ import (
 )
 
 // rateScaleBits holds security.auth_rate_limit_multiplier as float bits. It
-// scales the per-IP auth request caps and failure thresholds for deployments
-// where many users share one IP (office/school NAT) — the compiled-in limits
-// assume roughly one person per address. Atomic because tests construct
-// multiple routers concurrently. Installed by api.NewRouter via SetRateScale;
-// read at route-mount time and on the login failure-count path
-// (service.AuthService).
+// scales per-IP auth caps and failure thresholds for deployments where many
+// users share one IP (the compiled-in limits assume about one person per
+// address). Atomic because tests build routers concurrently. Installed by
+// api.NewRouter via SetRateScale.
 var rateScaleBits atomic.Uint64
 
 func init() { rateScaleBits.Store(math.Float64bits(1.0)) }

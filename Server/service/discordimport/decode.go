@@ -16,19 +16,16 @@ type Visitor struct {
 	Message func(Message) error
 }
 
-// Summary is what the decode saw. MessageCount is the export's own
-// "messageCount", which DiscordChatExporter writes after the messages, so it is
-// 0 until the end.
+// Summary is what the decode saw; MessageCount is 0 until the end because the
+// exporter writes it after the messages.
 type Summary struct {
 	MessageCount int
 	Seen         int
 }
 
-// Decode streams a DiscordChatExporter JSON document: the top-level keys are
-// walked with a token reader and the messages array is decoded one element at a
-// time, so memory stays at one message however large the export is. The channel
-// block must come before the messages, as the exporter writes it. ctx is
-// checked between messages.
+// Decode streams a DiscordChatExporter JSON document one message at a time, so
+// memory stays flat for any export size. The channel block must precede the
+// messages, as the exporter writes it. ctx is checked between messages.
 func Decode(ctx context.Context, r io.Reader, v Visitor) (Summary, error) {
 	var sum Summary
 	dec := json.NewDecoder(r)

@@ -9,13 +9,12 @@ import (
 	"strings"
 )
 
-// leafKeys maps every dotted config key to the reflect.Kind of the field it
-// names, walked from the `yaml` tags exactly the way yaml.v3 unmarshals them.
-// It is the single enumeration of the configuration surface: the environment
-// layer coerces a value by the kind it finds here, unknownKeys treats it as
-// the allowlist, and isKnownSection reads it to recognise a bare section
-// header. A key that exists in the struct but not here is invisible to all
-// three, so the walk is tested against a fixed count (parity_test.go).
+// leafKeys maps every dotted config key to the reflect.Kind of its field, walked
+// from the `yaml` tags the way yaml.v3 unmarshals them. It is the single
+// enumeration of the configuration surface: the environment layer coerces by it,
+// unknownKeys uses it as the allowlist and isKnownSection reads it. A key
+// missing here is invisible to all three, so the walk is tested against a fixed
+// count (parity_test.go).
 var leafKeys = walkLeafKeys()
 
 func walkLeafKeys() map[string]reflect.Kind {
@@ -52,14 +51,11 @@ func walkLeafKeys() map[string]reflect.Kind {
 	return out
 }
 
-// envOverrides returns the OWNCORD_* environment as a nested map ready to be
-// marshalled and unmarshalled over the file layer. A name the config struct
-// does not define is dropped silently: the environment has no typo warning of
-// its own, and the file layer already owns that job.
-//
-// The OWNCORD_ prefix must match exactly, as before the swap: a case-variant
-// name such as Owncord_Server_Port is silently dropped. Only the remainder is
-// lower-cased, because the config keys are lower-case.
+// envOverrides returns the OWNCORD_* environment as a nested map to overlay on
+// the file layer. A name the struct does not define is dropped silently: the
+// file layer owns typo warnings.
+// The OWNCORD_ prefix must match exactly (Owncord_Server_Port is dropped); only
+// the remainder is lower-cased, because config keys are.
 func envOverrides() (map[string]any, error) {
 	out := make(map[string]any)
 	for _, entry := range os.Environ() {
@@ -105,9 +101,9 @@ func coerceEnv(value string, kind reflect.Kind) (any, error) {
 		}
 		return b, nil
 	case reflect.Int:
-		// Base 0 so 0x10 and 0o17 work, matching what mapstructure accepted.
-		// Parsed at the platform's int width, so an out-of-range value is
-		// rejected rather than silently truncated by the conversion below.
+		// Base 0 so 0x10 and 0o17 work (as mapstructure accepted). Parsed at the
+		// platform's int width so an out-of-range value is rejected, not
+		// truncated by the conversion below.
 		n, err := strconv.ParseInt(value, 0, strconv.IntSize)
 		if err != nil {
 			return nil, fmt.Errorf("want an integer, got %q", value)
@@ -122,8 +118,6 @@ func coerceEnv(value string, kind reflect.Kind) (any, error) {
 	case reflect.String:
 		return value, nil
 	case reflect.Slice:
-		// One env var holds a comma-separated list:
-		// OWNCORD_SERVER_TRUSTED_PROXIES=10.0.0.2/32,10.0.0.3/32
 		parts := strings.Split(value, ",")
 		out := make([]string, 0, len(parts))
 		for _, p := range parts {
@@ -135,11 +129,10 @@ func coerceEnv(value string, kind reflect.Kind) (any, error) {
 	}
 }
 
-// unknownKeys returns every dotted key in a parsed config document that the
-// Config struct does not define, sorted. A section header whose children are
-// all commented out (or omitted) parses to a nil value or an empty map, and is
-// a real section rather than a typo as long as the struct nests something
-// under it.
+// unknownKeys returns every dotted key in a parsed document that Config does not
+// define, sorted. A section header whose children are all commented out parses
+// to nil or an empty map and is a real section, not a typo, if the struct nests
+// something under it.
 func unknownKeys(tree map[string]any) []string {
 	var unknown []string
 	var walk func(m map[string]any, prefix string)
@@ -167,8 +160,6 @@ func unknownKeys(tree map[string]any) []string {
 	return unknown
 }
 
-// isKnownSection reports whether prefix names a known config section, i.e.
-// some leaf key is prefix followed by ".".
 func isKnownSection(prefix string) bool {
 	want := prefix + "."
 	for key := range leafKeys {
@@ -179,19 +170,9 @@ func isKnownSection(prefix string) bool {
 	return false
 }
 
-// envKeyToPath converts a lower-case env key (without the OWNCORD_ prefix) to
-// a dotted config path. The first segment (up to the first underscore) is the
-// section; the remainder is the key (with underscores preserved).
-//
-// Examples:
-//
-//	server_port        -> server.port
-//	server_name        -> server.name
-//	server_data_dir    -> server.data_dir
-//	database_path      -> database.path
-//	tls_mode           -> tls.mode
-//	tls_cert_file      -> tls.cert_file
-//	upload_max_size_mb -> upload.max_size_mb
+// envKeyToPath converts a lower-case env key (without the OWNCORD_ prefix) to a
+// dotted path: the first segment (up to the first underscore) is the section,
+// the rest the key, e.g. server_data_dir -> server.data_dir.
 func envKeyToPath(s string) string {
 	// event_persistence is the only multi-word section; cutting at the first
 	// underscore would produce the dead path event.persistence_* and every

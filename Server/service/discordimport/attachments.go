@@ -17,11 +17,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// copyAttachment stores one local file and records it as an unlinked
-// attachment of the import account. It returns "" when the file is skipped
-// (remote, missing, refused by the type policy or the size cap) and an error
-// only for a failure that should stop the import (disk full, storage error,
-// database error).
+// copyAttachment stores one local file as an unlinked attachment of the import
+// account. It returns "" for a skipped file and an error only for a failure that
+// should stop the import.
 func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a *Attachment) (string, error) {
 	media, err := ex.OpenMedia(a.URL)
 	if errors.Is(err, ErrRemoteMedia) || errors.Is(err, ErrMediaMissing) {

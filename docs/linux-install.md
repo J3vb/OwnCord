@@ -89,10 +89,12 @@ On Ubuntu 22.04 and Debian the package is called `libfuse2`. On Fedora it is
 
 ### What the AppImage does not include
 
-The AppImage uses your system's fonts and its own bundled GStreamer plugins.
-Installing GStreamer packages on your system does not help it. H264/AAC video
-and PipeWire cameras do not work in the AppImage. The `.deb` has none of these
-limits. See [Known Limitations](known-limitations.md).
+The AppImage uses your system's fonts and its own bundled GStreamer plugins,
+which include H264/AAC video and PipeWire cameras. Installing GStreamer
+packages on your system does not change what it can play. Hardware video
+decoding and PipeWire cameras use your system's `libva`, `libvdpau` and
+`libpipewire`; without them those parts are off and the rest still works. See
+[Known Limitations](known-limitations.md).
 
 ## Recommended extras
 

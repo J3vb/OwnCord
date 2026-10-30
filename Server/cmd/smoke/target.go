@@ -17,22 +17,14 @@ type target interface {
 	drain() error               // graceful stop, exit 0 inside drainBudget
 	baseURL() string
 	// installDir is the local directory captureState reads: config.yaml at its
-	// root, data/ beneath. Part of the seam rather than a field the phases
-	// reach into, because the container leg's install is not this harness's
-	// own temp directory.
-	//
-	// It returns an error because for the container leg it is not a getter:
-	// it copies the live state out of the container, and a copy that failed
-	// would hand back the PREVIOUS phase's state. Every assertion would then
-	// pass over bytes the phase never read, which is the one failure mode
-	// worth failing the run for.
+	// root, data/ beneath. It returns an error because for the container leg it
+	// copies the live state out, and a failed copy would hand back the previous
+	// phase's state, so every assertion would pass over bytes never read.
 	installDir() (string, error)
 	archive(dir string) error // copy the live data dir out, as an owner would
 	restore(dir string) error // put it back
-	// annotate attaches the running server's log tail to a phase failure, the
-	// way server.annotate does for the plain smoke. Phases assert through the
-	// API, so without this a failed assertion arrives with no sight of what
-	// the server said while failing it.
+	// annotate attaches the running server's log tail to a phase failure, as
+	// server.annotate does for the plain smoke.
 	annotate(phase string, cause error) error
 	// log is everything the running server has printed so far.
 	log() (string, error)
@@ -45,31 +37,27 @@ var (
 )
 
 // defaultBaseURL is where the default config.yaml puts the server: port 8443,
-// self-signed TLS, and admin_allowed_cidrs already covering 127.0.0.0/8, so
-// loopback is both reachable and admin-authorised without editing the file
-// whose hash the rehearsal compares.
+// self-signed TLS, and admin_allowed_cidrs covering 127.0.0.0/8, so loopback is
+// reachable and admin-authorised without editing the file the rehearsal hashes.
 const defaultBaseURL = "https://127.0.0.1:8443"
 
 // noLiveKitDownload goes into the environment of every server this rehearsal
-// launches. A cold boot otherwise fetches the ~40 MB LiveKit server into the
-// data directory, which would land inside the archive and turn the
-// byte-for-byte state comparison into a race against a download.
-// OWNCORD_<SECTION>_<KEY> overrides a config key without rewriting config.yaml,
-// so the file under test is untouched.
+// launches: a cold boot otherwise fetches the ~40 MB LiveKit server into the
+// data directory, turning the byte-for-byte comparison into a race against a
+// download. OWNCORD_<SECTION>_<KEY> overrides a key without rewriting
+// config.yaml.
 const noLiveKitDownload = "OWNCORD_VOICE_AUTO_DOWNLOAD_LIVEKIT=false"
 
 // spawnRestart pins the standalone server's self-restart (backup restore,
-// update, setup) to spawning its own replacement, which is what an owner who
-// starts the binary by hand gets and what the drills wait for. Auto-detection
-// reads INVOCATION_ID as "systemd will relaunch me", and a GitHub-hosted
-// runner's agent is itself a systemd service, so every job inherits that
-// variable: left to detect, the server exits for a supervisor that never
-// comes. The container leg stays supervised; its engine does relaunch it.
+// update, setup) to spawning its own replacement, which is what the drills wait
+// for. Auto-detection reads INVOCATION_ID as "systemd will relaunch me", and a
+// GitHub-hosted runner's agent is a systemd service, so every job inherits it
+// and the server would exit for a supervisor that never comes. The container
+// leg stays supervised; its engine does relaunch it.
 const spawnRestart = "OWNCORD_SERVER_RESTART_MODE=spawn"
 
-// setupTokenLine matches the first-run setup token the server prints in its
-// start-up output. A release older than the token prints none, and ignores
-// the request field.
+// setupTokenLine matches the first-run setup token in the server's start-up
+// output; an older release prints none.
 var setupTokenLine = regexp.MustCompile(`Setup token\s+(\S+)`)
 
 // setupTokenIn returns the last setup token in a server's output, or "" when
@@ -98,9 +86,8 @@ func newTarget(oldRef, newRef string, useDocker bool) (target, error) {
 	return t, nil
 }
 
-// serverBinary resolves a binary argument absolutely. The server runs with its
-// install directory as the working directory, so a relative path would resolve
-// against that instead of against the caller's.
+// serverBinary resolves a binary argument absolutely: the server runs with its
+// install directory as the working directory.
 func serverBinary(arg string) (string, error) {
 	bin, err := filepath.Abs(arg)
 	if err != nil {
@@ -168,9 +155,8 @@ func (t *standaloneTarget) drain() error {
 	if err := t.running.drain(phase); err != nil {
 		return err
 	}
-	// Mirrors run()'s phase 3. Without this, a listener that outlived the drain
-	// — or a stray server from an earlier phase still holding 8443 — would let
-	// every later phase measure the wrong process and still pass.
+	// Mirrors run()'s phase 3: a listener that outlived the drain, or a stray
+	// server holding 8443, would let later phases measure the wrong process.
 	if healthy(t.running.bin, t.dir) {
 		return t.running.annotate(phase, errors.New("healthcheck still passes after shutdown"))
 	}
@@ -180,16 +166,12 @@ func (t *standaloneTarget) drain() error {
 
 func (t *standaloneTarget) baseURL() string { return defaultBaseURL }
 
-// installDir is the one directory both versions serve from: the upgrade is a
-// binary swap underneath it, so it is also what the state captures read. The
-// error is always nil here — nothing has to be copied to answer — and it
-// exists for the container leg, which does.
+// installDir is the one directory both versions serve from. The error is always
+// nil; it exists for the container leg, which copies.
 func (t *standaloneTarget) installDir() (string, error) { return t.dir, nil }
 
-// annotate delegates to the running server. Between a drain and the next
-// start there is no log to attach, so the phase and cause are returned alone
-// rather than dereferencing a nil server inside the harness that is already
-// reporting a failure.
+// annotate delegates to the running server; between a drain and the next start
+// there is no log, so the phase and cause are returned alone.
 func (t *standaloneTarget) annotate(phase string, cause error) error {
 	if t.running == nil {
 		return fmt.Errorf("%s: %w", phase, cause)
@@ -204,11 +186,10 @@ func (t *standaloneTarget) log() (string, error) {
 	return t.running.log()
 }
 
-// archive copies out exactly what the rollback documentation will tell an owner
-// to keep: the whole data directory (database, uploads, backups, the three
-// on-disk key files) plus config.yaml. The database is copied as files rather
-// than through the backup API, so THE SERVER MUST BE STOPPED — a hot copy of a
-// live SQLite database and its WAL is not a consistent snapshot.
+// archive copies out what the rollback documentation tells an owner to keep:
+// the whole data directory plus config.yaml. The database is copied as files,
+// so the server must be stopped (a hot copy of SQLite and its WAL is not
+// consistent).
 func (t *standaloneTarget) archive(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -226,9 +207,8 @@ func (t *standaloneTarget) archive(dir string) error {
 }
 
 // restore puts the archive back, replacing the live data directory rather than
-// merging into it: a rollback that left post-upgrade files behind would not be
-// the pre-upgrade state. Same precondition as archive — THE SERVER MUST BE
-// STOPPED, or this is deleting files out from under a running process.
+// merging (post-upgrade files left behind would not be the pre-upgrade state).
+// The server must be stopped, as for archive.
 func (t *standaloneTarget) restore(dir string) error {
 	live := filepath.Join(t.dir, "data")
 	if err := os.RemoveAll(live); err != nil {
@@ -247,11 +227,9 @@ func (t *standaloneTarget) restore(dir string) error {
 }
 
 // tightenModes narrows a freshly copied tree to owner-only. os.CopyFS creates
-// files 0666&^umask and directories 0777&^umask regardless of the source, so on
-// Linux a copied data/totp.key comes back 0644 — and a data directory is a
-// bundle of credentials (totp.key, erasure.key, push_vapid.key, the database,
-// every upload). The rollback recipe the docs will give owners is this copy, so
-// it must not be the step that world-reads their keys.
+// files 0666&^umask and directories 0777&^umask regardless of the source, so a
+// copied data/totp.key would come back 0644, and a data directory is a bundle
+// of credentials.
 func tightenModes(root string) error {
 	return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -266,12 +244,10 @@ func tightenModes(root string) error {
 }
 
 func (t *standaloneTarget) cleanup() {
-	// A failed phase leaves a server running; kill it before removing the
-	// directory it has open, or Windows refuses the removal. Kill returns
-	// before the process is reaped and its handles released, so wait for the
-	// exit as well — otherwise this is the very race the kill is here to avoid.
-	// waitErr is buffered and nobody has consumed it on this branch (exited is
-	// false), so the receive cannot deadlock against the goroutine in start().
+	// Kill a server a failed phase left running before removing the directory
+	// it has open (Windows refuses otherwise), and wait for the exit since Kill
+	// returns before handles are released. waitErr is buffered and unconsumed
+	// here, so the receive cannot deadlock against start()'s goroutine.
 	if t.running != nil && !t.running.exited {
 		_ = t.running.cmd.Process.Kill()
 		select {
@@ -284,9 +260,8 @@ func (t *standaloneTarget) cleanup() {
 	}
 }
 
-// pickVersion resolves the "old"/"new" label the phases speak to the artefact
-// that label names on this leg — a binary for the standalone target, an image
-// for the container one.
+// pickVersion resolves the "old"/"new" label to the artefact it names on this
+// leg: a binary for standalone, an image for the container.
 func pickVersion(version, old, next string) (string, error) {
 	switch version {
 	case "old":

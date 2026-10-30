@@ -44,8 +44,6 @@ const (
 // it is too large to decode within thumbMaxDecodeBytes, or its decoder gave up.
 var errConvertRefused = errors.New("image not converted")
 
-// convertedFormat is the image.Decode format name of a stored MIME type the
-// server previews as a JPEG, or "" for any other type.
 func convertedFormat(mimeType string) string {
 	switch mimeType {
 	case mimeHEIC, mimeHEIF:
@@ -90,7 +88,6 @@ func sniffISOBMFFImage(header []byte) string {
 	return ""
 }
 
-// sniffTIFF reports a TIFF (classic, either byte order) by its header.
 func sniffTIFF(header []byte) bool {
 	return bytes.HasPrefix(header, []byte("II*\x00")) || bytes.HasPrefix(header, []byte("MM\x00*"))
 }
@@ -102,7 +99,6 @@ type readerAt interface {
 	io.ReaderAt
 }
 
-// seekReadAt gives a reader that only seeks a ReadAt, for one reader at a time.
 type seekReadAt struct{ io.ReadSeeker }
 
 func (s seekReadAt) ReadAt(p []byte, off int64) (int, error) {

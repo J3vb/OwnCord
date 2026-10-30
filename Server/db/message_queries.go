@@ -29,28 +29,18 @@ func messageFromGen(m dbgen.Message) *Message {
 }
 
 // sanitizeFTSQuery strips FTS5 operator characters from user input to prevent
-// query injection. Letters, digits and spaces pass through unchanged; every
-// other rune is folded to a space rather than dropped.
+// query injection. Letters, digits and spaces pass through; every other rune
+// folds to a space.
 //
-// Folding, not dropping, is what makes punctuation searchable at all.
-// messages_fts uses FTS5's default unicode61 tokenizer, in which
-// every non-alphanumeric rune is a token separator: "user_id" is INDEXED as
-// the two tokens `user` and `id`. Dropping the underscore asks for the single
-// term `userid`, which exists nowhere in the index, so the search returned
-// nothing at all — silently, for any query containing '_', '.', '@', '/', an
-// apostrophe or a colon. Folding it to a space asks for `user id`, which is
-// exactly how the row was indexed. '-' was folded from the start, for the
-// narrower reason that it introduces a column filter ("-col: expr") and would
-// otherwise make SQLite error; its comment already named the general rule.
+// Folding, not dropping, is what makes punctuation searchable: messages_fts
+// uses the unicode61 tokenizer, so "user_id" is indexed as `user` and `id`,
+// and dropping the underscore would ask for the single term `userid`, which
+// matches nothing. '-' would otherwise introduce a column filter and make
+// SQLite error.
 //
-// Filtering characters alone is not enough: FTS5's MATCH grammar also
-// recognizes bareword keywords -- AND, OR, NOT (uppercase only) -- as
-// boolean operators rather than search terms. Those are ordinary letters, so
-// the character filter lets them through unchanged, and a query that places
-// one in an invalid position (e.g. the whole query is "AND", or it starts or
-// ends with one) makes SQLite raise "fts5: syntax error" instead of running
-// the search. Any such token is dropped below so the result is always a
-// plain sequence of bareword terms.
+// FTS5 also treats bareword AND, OR and NOT (uppercase) as operators, and a
+// query that starts or ends with one raises "fts5: syntax error". Such tokens
+// are dropped so the result is always plain barewords.
 func sanitizeFTSQuery(q string) string {
 	var sb strings.Builder
 	sb.Grow(len(q))
@@ -59,22 +49,19 @@ func sanitizeFTSQuery(q string) string {
 			sb.WriteRune(r)
 			continue
 		}
-		// unicode61 keeps the combining diacritics block (U+0300-U+036F) inside
-		// the token and strips it, so splitting on one would turn NFD "résumé"
-		// into "re sume". Other marks (Indic vowel signs and so on) are
-		// separators there, and stay separators here.
+		// unicode61 keeps the combining diacritics block (U+0300-U+036F) inside the
+		// token and strips it, so splitting on one would turn NFD "résumé" into
+		// "re sume". Other marks are separators there and stay separators here.
 		if r >= 0x0300 && r <= 0x036F {
 			continue
 		}
-		// Everything else -- the separators unicode61 tokenizes on, and every
-		// character of FTS5's own grammar (quotes, parens, '*', '^', ':') --
-		// becomes a separator here too, which is both what the index expects
-		// and what keeps the operator syntax inert.
+		// Everything else (unicode61 separators and FTS5 grammar characters such as
+		// quotes, parens, '*', '^', ':') becomes a separator, which keeps the
+		// operator syntax inert.
 		sb.WriteRune(' ')
 	}
 	result := strings.TrimSpace(sb.String())
-	// Enforce a maximum query length to bound FTS processing.
-	// Use rune count to avoid splitting multi-byte characters.
+	// Bound FTS processing by rune count, not bytes, to avoid splitting runes.
 	if runes := []rune(result); len(runes) > 200 {
 		result = string(runes[:200])
 	}
@@ -90,8 +77,8 @@ func sanitizeFTSQuery(q string) string {
 	return strings.Join(kept, " ")
 }
 
-// CreateMessage inserts a new message and returns the assigned ID.
-// Content should already be sanitized before calling this function.
+// CreateMessage inserts a new message and returns its ID; content must already
+// be sanitized.
 func (d *DB) CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error) {
 	m, err := d.CreateMessageReturning(ctx, channelID, userID, content, replyTo)
 	if err != nil {
@@ -100,9 +87,9 @@ func (d *DB) CreateMessage(ctx context.Context, channelID, userID int64, content
 	return m.ID, nil
 }
 
-// CreateMessageReturning inserts a new message and returns the full inserted
-// row via RETURNING, so hot paths (the send fan-out needs the DB-assigned
-// timestamp) don't re-read the row they just wrote.
+// CreateMessageReturning inserts a message and returns the full row via
+// RETURNING, so the send fan-out gets the DB-assigned timestamp without a
+// re-read.
 func (d *DB) CreateMessageReturning(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (*Message, error) {
 	m, err := d.q.CreateMessage(ctx, dbgen.CreateMessageParams{
 		ChannelID: channelID,
@@ -117,7 +104,7 @@ func (d *DB) CreateMessageReturning(ctx context.Context, channelID, userID int64
 }
 
 // GetMessage returns the message with the given ID, or nil if not found.
-// Soft-deleted messages are returned so callers can broadcast the deletion event.
+// Soft-deleted messages are returned so callers can broadcast the deletion.
 func (d *DB) GetMessage(ctx context.Context, id int64) (*Message, error) {
 	m, err := d.q.GetMessage(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -129,15 +116,10 @@ func (d *DB) GetMessage(ctx context.Context, id int64) (*Message, error) {
 	return messageFromGen(m), nil
 }
 
-// IsMessageDeleted reports the soft-delete flag of one message, and whether the
-// row exists at all. found=false is not an error: the attachment-access path
-// that asks this treats a missing message as "no tombstone to enforce" and
-// leaves the decision to its own ACL.
-//
-// Deliberately not GetMessage: that wrapper's SELECT list carries every message
-// column, and `deleted` is the only one this question needs. Hand-written for
-// the same reason the file's other narrow reads are — one column, one row, no
-// generated struct to map.
+// IsMessageDeleted reports the soft-delete flag of one message and whether the
+// row exists. found=false is not an error: the attachment-access path treats a
+// missing message as "no tombstone to enforce" and leaves the decision to its
+// own ACL. It is a one-column read rather than GetMessage on purpose.
 func (d *DB) IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error) {
 	var flag bool
 	scanErr := d.reader.QueryRowContext(ctx, `SELECT deleted FROM messages WHERE id = ?`, id).Scan(&flag)
@@ -150,8 +132,8 @@ func (d *DB) IsMessageDeleted(ctx context.Context, id int64) (deleted, found boo
 	return flag, true, nil
 }
 
-// GetMessages returns up to limit messages in a channel, ordered newest-first.
-// When before > 0 only messages with id < before are returned (pagination).
+// GetMessages returns up to limit messages in a channel, newest first; before
+// > 0 restricts to id < before.
 func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int) ([]MessageWithUser, error) {
 	var (
 		rows *sql.Rows
@@ -200,17 +182,14 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 	return msgs, nil
 }
 
-// EditMessage updates the content and sets edited_at on the message, and
-// returns the updated row via RETURNING so callers don't re-read it.
-// Returns an error if the message does not exist or userID does not match the owner.
+// EditMessage updates the content, sets edited_at and returns the updated row
+// via RETURNING. It returns ErrNotFound if the message does not exist, is
+// deleted, or userID is not the owner.
 //
-// The ownership read above is taken before the write, so a delete
-// committing in that window would otherwise have its tombstone rewritten and
-// reported as a successful edit — the caller then broadcasts chat_edited for a
-// message every client has already replaced with "message deleted". The UPDATE
-// carries `AND deleted = 0` (the guard SoftDeleteMessage and SetMessagePinned
-// carry), so the losing edit matches no row and surfaces here
-// as ErrNotFound, the same answer an already-deleted message gets.
+// The UPDATE carries `AND deleted = 0` (like SoftDeleteMessage and
+// SetMessagePinned) because a delete can commit between the ownership read and
+// the write; without it the tombstone would be rewritten and chat_edited
+// broadcast for a message clients already replaced.
 func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
@@ -236,15 +215,13 @@ func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) 
 	return messageFromGen(updated), nil
 }
 
-// DeleteMessage performs a soft delete (sets deleted=1) on the message.
-// The calling user must be the message owner or ismod must be true.
+// DeleteMessage soft-deletes (deleted=1) the message; the caller must be the
+// owner or ismod must be true.
 //
-// The UPDATE is guarded with `AND deleted = 0` (mirroring
-// SetMessagePinned) and RowsAffected is checked, so a message already
-// soft-deleted — by a prior call, or by one that raced this one to the
-// writer — reports ErrNotFound instead of silently succeeding a second time.
-// A caller-visible no-op here is what let a repeated delete run the
-// mention_count reversal twice upstream in MessageService.DeleteMessage.
+// The UPDATE is guarded with `AND deleted = 0` and RowsAffected is checked, so
+// an already-deleted message (including one that raced to the writer) returns
+// ErrNotFound instead of succeeding twice, which would run
+// MessageService.DeleteMessage's mention_count reversal twice.
 func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) error {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
@@ -268,14 +245,11 @@ func (d *DB) DeleteMessage(ctx context.Context, id, userID int64, ismod bool) er
 }
 
 // PurgeChannelMessages soft-deletes the newest limit non-deleted messages in a
-// channel and returns their IDs, newest first. When before > 0 only messages
-// with id < before are considered.
-//
-// Rows are marked deleted=1 and otherwise left intact, so the tombstones every
-// reader already renders (and the reply_to targets pointing at them) survive a
-// purge exactly as they do a single delete. Selection and update run in one
-// writer transaction so a concurrent single delete cannot make the reported id
-// set diverge from what was actually written.
+// channel and returns their IDs, newest first; before > 0 restricts to id <
+// before. Rows keep their data (only deleted=1) so tombstones and reply_to
+// targets survive as with a single delete. Selection and update share one
+// writer transaction so a concurrent delete cannot make the id set diverge
+// from what was written.
 func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, limit int) ([]int64, error) {
 	if limit < 1 {
 		return []int64{}, nil
@@ -299,9 +273,8 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 }
 
 // PurgeChannelMessagesWithAction is PurgeChannelMessages plus one removal
-// ledger row per purge — not one per message — in the
-// same transaction: a failure recording the row rolls the purge back too.
-// reportID links a report-linked removal.
+// ledger row per purge (not per message) in the same transaction, so a failure
+// recording it rolls the purge back. reportID links a report-linked removal.
 func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error) {
 	if limit < 1 {
 		return []int64{}, nil
@@ -318,10 +291,8 @@ func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, befo
 		return nil, err
 	}
 	if len(ids) > 0 {
-		// The ledger row's target is the acting moderator: a purge is a
-		// bulk, channel-scoped action that can span many authors, and
-		// moderation_actions.target_id must reference exactly one user
-		// (schema FK).
+		// The ledger row's target is the acting moderator: a purge can span many
+		// authors, and moderation_actions.target_id must reference exactly one user.
 		reason := fmt.Sprintf("%d messages purged", len(ids))
 		if err := recordLedgerRow(ctx, tx, "removal", actorID, actorID, reportID, reason); err != nil {
 			return nil, err
@@ -334,9 +305,8 @@ func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, befo
 	return ids, nil
 }
 
-// purgeChannelMessagesTx is PurgeChannelMessages' body, taking an
-// already-open tx so callers can extend the same transaction (the ledger
-// row PurgeChannelMessagesWithAction adds).
+// purgeChannelMessagesTx is PurgeChannelMessages' body on an open tx, so
+// callers can extend the same transaction.
 func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before int64, limit int) ([]int64, error) {
 	sel := `SELECT id FROM messages WHERE channel_id = ? AND deleted = 0 AND kind IN (0, 7, 8) ORDER BY id DESC LIMIT ?`
 	args := []any{channelID, limit}
@@ -382,14 +352,11 @@ func purgeChannelMessagesTx(ctx context.Context, tx *sql.Tx, channelID, before i
 	return ids, nil
 }
 
-// DeleteMessageWithRemoval is DeleteMessage plus a removal ledger row, in
-// one transaction, when the deleter is not the message's author:
-// a self-delete or a non-moderator delete writes no row,
-// exactly as DeleteMessage always has. authorID is the message's author,
-// already resolved by the caller. reportID links a report-linked removal.
-// reason is the ledger row's text; empty falls back to the fixed phrase
-// "message removed" (every caller but the report-linked one; a direct
-// moderator delete carries no reason of its own to store).
+// DeleteMessageWithRemoval is DeleteMessage plus a removal ledger row in one
+// transaction when the deleter is not the author; a self-delete or
+// non-moderator delete writes no row. authorID is resolved by the caller.
+// reportID links a report-linked removal. An empty reason falls back to
+// "message removed".
 func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error {
 	if !isMod || deleterID == authorID {
 		return d.DeleteMessage(ctx, msgID, deleterID, isMod)
@@ -438,8 +405,8 @@ func (d *DB) RemoveReaction(ctx context.Context, messageID, userID int64, emoji 
 	return nil
 }
 
-// GetReactions returns aggregated reaction counts for a message.
-// MeReacted is always false here (caller passes requesting userID if needed).
+// GetReactions returns aggregated reaction counts for a message; MeReacted is
+// always false here.
 func (d *DB) GetReactions(ctx context.Context, messageID int64) ([]ReactionCount, error) {
 	rows, err := d.q.GetReactionCounts(ctx, messageID)
 	if err != nil {
@@ -452,9 +419,8 @@ func (d *DB) GetReactions(ctx context.Context, messageID int64) ([]ReactionCount
 	return counts, nil
 }
 
-// MaxReactionUsers bounds the who-reacted list. A reaction pill can carry
-// thousands of reactors; the tooltip only ever names a handful, so the query is
-// capped rather than paginated.
+// MaxReactionUsers bounds the who-reacted list; the tooltip names only a
+// handful, so the query is capped rather than paginated.
 const MaxReactionUsers = 100
 
 // GetReactionUsers returns up to limit reactors for one (message, emoji) pair,
@@ -478,10 +444,9 @@ func (d *DB) GetReactionUsers(ctx context.Context, messageID int64, emoji string
 	return users, nil
 }
 
-// SearchMessages performs a full-text search against the messages_fts virtual table.
-// When channelID is non-nil the search is scoped to that channel; nil searches
-// every channel. Deleted messages are excluded from results. It is a thin
-// wrapper over SearchMessagesFiltered, which owns the SQL.
+// SearchMessages runs a full-text search over messages_fts, scoped to
+// channelID when non-nil and excluding deleted messages. It wraps
+// SearchMessagesFiltered, which owns the SQL.
 func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64, page SearchPage) ([]MessageSearchResult, error) {
 	if !HasSearchTerms(query) {
 		return []MessageSearchResult{}, nil
@@ -502,9 +467,8 @@ func (d *DB) SearchMessages(ctx context.Context, query string, channelID *int64,
 	return d.SearchMessagesFiltered(ctx, SearchQuery{Text: query, ChannelIDs: channelIDs}, page)
 }
 
-// SearchMessagesInChannels performs a full-text search scoped to the given
-// channel IDs. This prevents information leakage by filtering at the DB level
-// rather than post-filtering in application code. It is a thin wrapper over
+// SearchMessagesInChannels is a full-text search scoped to channelIDs,
+// filtering at the DB level so results never leak across channels. It wraps
 // SearchMessagesFiltered.
 func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channelIDs []int64, page SearchPage) ([]MessageSearchResult, error) {
 	if len(channelIDs) == 0 || !HasSearchTerms(query) {
@@ -513,8 +477,8 @@ func (d *DB) SearchMessagesInChannels(ctx context.Context, query string, channel
 	return d.SearchMessagesFiltered(ctx, SearchQuery{Text: query, ChannelIDs: channelIDs}, page)
 }
 
-// GetMessagesForAPI returns messages in the docs/api.md response shape, including
-// user object, reactions (with me flag), and attachments.
+// GetMessagesForAPI returns messages in the docs/api.md response shape
+// (user, reactions with me flag, attachments).
 func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var (
 		rows *sql.Rows
@@ -550,9 +514,8 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 }
 
 // GetMessagesAfterForAPI returns up to limit messages with id > after in the
-// API response shape, ordered OLDEST-first (the mirror of GetMessagesForAPI's
-// newest-first before-pages): the page continues a window downward toward the
-// live tail. Callers that need has_more ask for limit+1 and trim.
+// API shape, oldest first (the mirror of GetMessagesForAPI's before-pages).
+// Callers needing has_more ask for limit+1 and trim.
 func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64, limit int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
@@ -572,12 +535,9 @@ func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64,
 }
 
 // GetMessagesAroundForAPI returns a window of messages centred on centerID in
-// the API response shape, ordered oldest-first: up to beforeCount messages
-// older than the centre, the centre itself, and up to afterCount newer ones.
-//
-// Callers that need to know whether the channel holds more history on either
-// side pass one extra on each count and inspect the returned slice — this
-// query does no probing of its own.
+// the API shape, oldest first: up to beforeCount older, the centre, and up to
+// afterCount newer. It does no has_more probing; callers pass one extra on
+// each count.
 func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]MessageAPIResponse, error) {
 	if beforeCount < 0 {
 		beforeCount = 0
@@ -624,7 +584,6 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 		return map[int64][]ReactionInfo{}, nil
 	}
 
-	// Build placeholders for IN clause.
 	args := make([]any, 0, len(msgIDs)+1)
 	var sb strings.Builder
 	for i, id := range msgIDs {
@@ -636,7 +595,6 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 	}
 	placeholders := sb.String()
 
-	// Query: aggregate count + check if requesting user reacted.
 	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
 		`SELECT r.message_id, r.emoji, COUNT(*) as cnt,
 		        MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) as me
@@ -670,10 +628,9 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 	return result, nil
 }
 
-// GetReadState returns the stored read-state row for (userID, channelID).
-// found is false when the user has never focused the channel. Runs on the
-// reader pool — it exists so HandleChannelFocus can skip the UpdateReadState
-// write when the row is already correct.
+// GetReadState returns the stored read-state row for (userID, channelID);
+// found is false when the user never focused the channel. It runs on the
+// reader so HandleChannelFocus can skip a redundant write.
 func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error) {
 	row, err := d.q.GetReadState(ctx, dbgen.GetReadStateParams{UserID: userID, ChannelID: channelID})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -685,19 +642,14 @@ func (d *DB) GetReadState(ctx context.Context, userID, channelID int64) (lastMes
 	return row.LastMessageID, row.MentionCount, true, nil
 }
 
-// MarkChannelReadAtLatest marks the channel read at whatever its newest
-// message is when the statement runs, rather than at an id the caller read
-// moments earlier.
+// MarkChannelReadAtLatest marks the channel read at its newest message as of
+// the statement, not at an id the caller read earlier. Use it for "mark this
+// channel read"; UpdateReadState is for a caller that already holds the exact
+// id (the send path advancing the sender past their own message).
 //
-// Use it for "mark this channel read" (channel_focus, mark_read).
-// UpdateReadState stays for the caller that already holds the exact id it
-// means — the send path advancing the sender's own read state past their own
-// message (advanceAuthorReadState) — where there is no snapshot to go stale.
-//
-// A mark-read computed from a stale snapshot cleared mention_count
-// while last_message_id still pointed behind a message that had just raised a
-// mention, so the badge vanished with nothing to recompute it. Both halves of
-// the pair are single-writer statements, so computing the watermark here makes
+// A mark-read from a stale snapshot cleared mention_count while
+// last_message_id still pointed behind a newly mentioned message, so the badge
+// vanished with nothing to recompute it. Computing the watermark here makes
 // the read and the clear atomic with respect to IncrementMentionCounts.
 func (d *DB) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error {
 	if err := d.q.MarkChannelReadAtLatest(ctx, dbgen.MarkChannelReadAtLatestParams{
@@ -710,16 +662,11 @@ func (d *DB) MarkChannelReadAtLatest(ctx context.Context, userID, channelID int6
 	return nil
 }
 
-// UpdateReadState upserts the read state for a user in a channel at the id the
-// caller names, and clears its mention badge — marking a channel read consumes
-// its mentions.
-//
-// It is for a caller that already holds the exact id it means, which today
-// means the send path advancing the sender past their own message;
-// that path runs the statement inside its own transaction through
-// advanceAuthorReadState. A "mark this channel read" caller must use MarkChannelReadAtLatest instead:
-// the id it would pass here is a snapshot, and clearing mentions against a
-// stale one destroys any raised in the meantime.
+// UpdateReadState upserts the read state at the id the caller names and
+// clears its mention badge. Only a caller that already holds the exact id may
+// use it (the send path, inside its own transaction via
+// advanceAuthorReadState); "mark read" callers must use MarkChannelReadAtLatest,
+// because clearing mentions against a stale id destroys ones raised since.
 func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMessageID int64) error {
 	if err := d.q.UpdateReadState(ctx, dbgen.UpdateReadStateParams{
 		UserID:        userID,
@@ -731,14 +678,13 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 	return nil
 }
 
-// GetChannelUnreadCounts returns per-channel unread counts and last message IDs
-// for a given user. Text, announcement and voice channels are included, with 0,0 for
-// channels that have no messages. DM channels are included too, but only the
-// ones this user participates in; the ready payload's dm_channels[] takes its
-// mention_count from GetUserDMChannels instead, the same source as GET /dms.
-// Correlated subqueries range-scan idx_messages_channel per channel
-// instead of the old LEFT JOIN fan-out that touched every message row on every
-// WS connect; the DM predicate hits idx_dm_participants_user.
+// GetChannelUnreadCounts returns per-channel unread counts and last message
+// IDs for a user, with 0,0 for empty channels. Text, announcement and voice
+// channels are included, and DM channels only for this user's participation;
+// the ready payload's dm_channels[] takes its mention_count from
+// GetUserDMChannels instead. Correlated subqueries range-scan
+// idx_messages_channel per channel, and the DM predicate hits
+// idx_dm_participants_user.
 func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]ChannelUnread, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT c.id,
@@ -793,19 +739,14 @@ func (d *DB) GetLatestMessageID(ctx context.Context, channelID int64) (int64, er
 	return id, nil
 }
 
-// MaxPinnedMessages bounds how many pinned messages a single channel query
-// returns. Without a cap, scanAndEnrichMessages feeds every pinned message ID
-// into several `IN (?,?,...)` batch lookups (reactions, attachments,
-// mentions); past SQLite's ~32766 bound-parameter limit that fails outright
-// ("too many SQL variables"), and the pins endpoint then 500s on every call
-// for that channel forever. The cap sits far below that ceiling, with room to
-// spare across all three batch queries.
+// MaxPinnedMessages bounds the pinned messages one query returns. Without a
+// cap, scanAndEnrichMessages' IN (?,?,...) batch lookups would exceed SQLite's
+// ~32766 bound-parameter limit and the pins endpoint would 500 forever for that
+// channel.
 const MaxPinnedMessages = 1000
 
-// GetPinnedMessages returns up to MaxPinnedMessages+1 pinned messages in a
-// channel — the extra row only tells the caller the list was truncated —
-// most-recently-pinned first, in the API response shape, including
-// user object, reactions (with me flag), and attachments.
+// GetPinnedMessages returns up to MaxPinnedMessages+1 pinned messages (the
+// extra row signals truncation), most recently pinned first, in the API shape.
 func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingUserID int64) ([]MessageAPIResponse, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
@@ -824,8 +765,8 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
 }
 
-// scanAndEnrichMessages scans rows into MessageAPIResponse slice and
-// batch-fetches reactions and attachments. Caller must defer rows.Close().
+// scanAndEnrichMessages scans rows into MessageAPIResponse and batch-fetches
+// reactions, attachments and mentions. The caller must defer rows.Close().
 func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var msgs []MessageAPIResponse
 	var msgIDs []int64
@@ -857,7 +798,6 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		return []MessageAPIResponse{}, nil
 	}
 
-	// Batch-fetch reactions for all message IDs.
 	reactMap, err := d.getReactionsBatch(ctx, msgIDs, requestingUserID)
 	if err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages reactions: %w", err)
@@ -868,7 +808,6 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		}
 	}
 
-	// Batch-fetch attachments for all message IDs.
 	attMap, err := d.GetAttachmentsByMessageIDs(ctx, msgIDs)
 	if err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages attachments: %w", err)
@@ -879,7 +818,6 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 		}
 	}
 
-	// Batch-fetch resolved user and role mentions for all message IDs.
 	if err := d.attachMentions(ctx, msgs, msgIDs); err != nil {
 		return nil, fmt.Errorf("scanAndEnrichMessages mentions: %w", err)
 	}
@@ -908,8 +846,6 @@ func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requesti
 
 	return d.attachReferencedMessages(ctx, msgs)
 }
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
 
 // scanSearchResults scans FTS search rows. label names the calling query in
 // error messages. Never returns a nil slice.

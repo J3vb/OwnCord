@@ -12,9 +12,9 @@ import (
 const statusExpiryJoinBudget = 5 * time.Second
 
 // startStatusExpiry installs the hub as the expirer's notifier, runs one
-// synchronous sweep so statuses that expired while the server was down are
-// gone before the http stage opens the listener, then runs the expirer loop on
-// the background context. Its close step cancels the loop and joins it within
+// synchronous sweep so statuses that expired while the server was down are gone
+// before the http stage opens the listener, then runs the expirer loop on the
+// background context. Its close step cancels and joins it within
 // statusExpiryJoinBudget.
 func (a *App) startStatusExpiry() error {
 	svc := a.runtime.Services
@@ -25,9 +25,8 @@ func (a *App) startStatusExpiry() error {
 	if a.hub != nil {
 		expirer.SetNotifier(a.hub)
 	}
-	// The loop context is a child of bgCtx, so the event-persistence close
-	// step cancelling bgCtx also stops it; this step's own cancel stops it
-	// earlier and joins.
+	// The loop context is a child of bgCtx, so the event-persistence step
+	// cancelling bgCtx also stops it; this step's own cancel stops it earlier.
 	if err := expirer.Sweep(a.bgCtx); err != nil {
 		// Not fatal: the loop's first pass retries, and a status that lingers
 		// a little longer is the only cost.
@@ -46,7 +45,7 @@ func runStatusExpirer(parent context.Context, expirer *service.CustomStatusExpir
 
 // runExpirerLoop starts run on a child of parent and returns the close step
 // that cancels it and waits for it to exit. what names the loop in the error a
-// close step that ran out of time reports. The status and poll expirers share it.
+// timed-out close step reports. The status and poll expirers share it.
 func runExpirerLoop(parent context.Context, what string, run func(context.Context)) func(context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})

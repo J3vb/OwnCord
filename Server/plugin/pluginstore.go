@@ -6,9 +6,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// PluginStore manages installed plugins and per-plugin KV namespaces.
-// *db.DB satisfies it (the methods moved into the db package when the store
-// abstraction was removed in D3).
+// PluginStore manages installed plugins and per-plugin KV namespaces; *db.DB
+// satisfies it.
 type PluginStore interface {
 	InstallPlugin(ctx context.Context, name, version, manifestJSON string) (int64, error)
 	EnablePlugin(ctx context.Context, id int64) error

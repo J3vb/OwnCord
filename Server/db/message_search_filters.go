@@ -9,8 +9,7 @@ import (
 )
 
 // ErrSearchUnscoped is returned by SearchMessagesFiltered when the query names
-// no channel. A search never falls back to "every channel": the caller always
-// states the set it is allowed to read.
+// no channel; a search never falls back to "every channel".
 var ErrSearchUnscoped = errors.New("search query has no channel scope")
 
 // SearchQuery is one filtered full-text search. Every value reaches SQL as a
@@ -46,17 +45,16 @@ func HasSearchTerms(text string) bool {
 // rankCandidateCap bounds how many matches a relevance search ranks. FTS5
 // computes BM25 for every match in the corpus (channel_id is not an FTS
 // column) when it consumes ORDER BY rank, so relevance ranks only the newest
-// rankCandidateCap in-scope hits. A var so a test can lower it. The number is
+// rankCandidateCap in-scope hits. A var so a test can lower it; the number is
 // also quoted in SearchPage.Recent (models.go) and docs/api.md.
 var rankCandidateCap = 2000
 
-// SearchMessagesFiltered runs the one search query builder. Deleted messages
-// are excluded. With searchable words the order is rank (or newest first when
-// page.Recent); without words it is always newest first, paged by page.Before.
-//
-// Relevance is "best of the newest rankCandidateCap (2,000) matching messages
-// in scope": older matches never appear in a relevance search, only in
-// sort=recent. Below that many hits every match is ranked.
+// SearchMessagesFiltered runs the one search query builder, excluding deleted
+// messages. With searchable words the order is rank (or newest first when
+// page.Recent); without words it is newest first, paged by page.Before.
+// Relevance is "best of the newest rankCandidateCap matching messages in
+// scope": older matches appear only with sort=recent. Below that many hits
+// every match is ranked.
 func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page SearchPage) ([]MessageSearchResult, error) {
 	if len(q.ChannelIDs) == 0 {
 		return nil, fmt.Errorf("SearchMessagesFiltered: %w", ErrSearchUnscoped)
@@ -134,11 +132,10 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 }
 
 // searchFilters renders the channel, author, date, has:, mentions: and pinned:
-// predicates as " AND ..." fragments over alias m (and f when ranked), with
+// predicates as " AND ..." fragments over alias m (and f when ranked) with
 // their bound arguments. It runs once per search so the date bounds probe the
-// id range once, and the result serves both the cutoff and the main query.
-// With an FTS driver (ranked) the date bounds go on f.rowid, which FTS5 takes
-// as a rowid range; SQLite does not carry an m.id bound across the join.
+// id range once. With an FTS driver the date bounds go on f.rowid, which FTS5
+// takes as a rowid range; SQLite does not carry an m.id bound across the join.
 func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (string, []any, error) {
 	idCol := "m.id"
 	if ranked {
@@ -187,10 +184,9 @@ func (d *DB) searchFilters(ctx context.Context, q SearchQuery, ranked bool) (str
 	return sb.String(), append(args, extraArgs...), nil
 }
 
-// rankCutoff returns the rowid of the rankCandidateCap-th newest in-scope hit.
-// ok is false when fewer hits exist, meaning every match is ranked. The query
-// needs no channels or users join: filter references only m and its own
-// subquery aliases.
+// rankCutoff returns the rowid of the rankCandidateCap-th newest in-scope hit;
+// ok is false when fewer exist, meaning every match is ranked. No channels or
+// users join is needed: filter references only m and its own subquery aliases.
 func (d *DB) rankCutoff(ctx context.Context, match, filter string, filterArgs []any) (cutoff int64, ok bool, err error) {
 	query := `SELECT f.rowid FROM messages_fts f CROSS JOIN messages m ON f.rowid = m.id
 		 WHERE m.deleted = 0 AND m.kind = 0 AND messages_fts MATCH ?` + filter +
@@ -208,11 +204,9 @@ func (d *DB) rankCutoff(ctx context.Context, match, filter string, filterArgs []
 	return cutoff, true, nil
 }
 
-// importedChannelIDs lists the channels a Discord import built or is building,
-// whatever the state of the job. Their messages keep the dates they were sent
-// on, and every committed chunk of a running import already breaks the order of
-// ids and times, so an id says nothing about when a row was written there;
-// every other channel's ids still follow time.
+// importedChannelIDs lists every channel an import built or is building,
+// whatever the job's state: even a running import's committed chunks carry old
+// dates under new ids, so ids there do not follow time.
 func (d *DB) importedChannelIDs(ctx context.Context) ([]int64, error) {
 	rows, err := d.reader.QueryContext(ctx, `SELECT channel_id FROM import_jobs WHERE channel_id IS NOT NULL`)
 	if err != nil {
@@ -233,9 +227,8 @@ func (d *DB) importedChannelIDs(ctx context.Context) ([]int64, error) {
 	return ids, nil
 }
 
-// splitImportedScope divides the searched channels into those whose ids follow
-// time and those an import built. With no imported channel in scope native is
-// the whole scope and imported is nil.
+// splitImportedScope divides the scope into channels whose ids follow time and
+// channels an import built; with none imported, native is the whole scope.
 func splitImportedScope(scope, imported []int64) (native, importedInScope []int64) {
 	if len(imported) == 0 {
 		return scope, nil
@@ -254,10 +247,9 @@ func splitImportedScope(scope, imported []int64) (native, importedInScope []int6
 	return native, importedInScope
 }
 
-// idBound renders one side of a date bound as an id range. A channel an import
-// built is exempt from the range (its rows are judged by timestamp alone), so
-// that a native channel keeps its id range scan; with no imported channel in
-// scope the fragment is the plain range.
+// idBound renders one side of a date bound as an id range. Imported channels
+// skip the range (their rows are judged by timestamp alone) so native channels
+// keep their id range scan; with none in scope it is the plain range.
 func idBound(cmp string, bound int64, native, importedInScope []int64) (string, []any) {
 	if len(importedInScope) == 0 {
 		return " AND " + cmp + " ?", []any{bound}
@@ -273,15 +265,15 @@ func idBound(cmp string, bound int64, native, importedInScope []int64) (string, 
 	return " AND ((m.channel_id IN (" + placeholders(len(native)) + ") AND " + cmp + " ?) OR " + imports + ")", args
 }
 
-// firstIDAtOrAfter returns a message id b such that every message with id < b
-// has a timestamp before ts and every message with id >= b may qualify. It
+// firstIDAtOrAfter returns an id b such that every message with id < b has a
+// timestamp before ts and every message with id >= b may qualify. It
 // binary-searches messages.id (monotonic with timestamp on every native insert
-// path; the channels an import built are left out, see importedChannelIDs) in
-// about 2x20 rowid probes, so a date bound becomes an id range scan with no
-// timestamp index. The caller still applies the exact timestamp predicate, so
-// there are no false positives; a backward clock step can hide rows near a
-// bound (accepted in the 3A-14 design, D7). Hard-deleted id gaps are
-// skipped by probing for the first existing id at or above each midpoint.
+// path; imported channels are left out) in about 2x20 rowid probes, turning a
+// date bound into an id range scan with no timestamp index. The caller still
+// applies the exact timestamp predicate, so there are no false positives; a
+// backward clock step can hide rows near a bound (accepted). Hard-deleted id
+// gaps are skipped by probing for the first existing id at or above each
+// midpoint.
 func (d *DB) firstIDAtOrAfter(ctx context.Context, ts string) (int64, error) {
 	imported, err := d.importedChannelIDs(ctx)
 	if err != nil {

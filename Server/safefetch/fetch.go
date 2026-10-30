@@ -19,24 +19,19 @@ type Request struct {
 	Body   []byte
 	Header map[string]string
 
-	// AllowHost, when set, is consulted for the "host:port" of every hop,
-	// the first one included, and the fetch is refused if it says no. It is
-	// how a caller layers its own destination rule on top of the address
-	// policy — the plugin `http` capability's operator host allowlist is the
-	// one caller that has one.
-	//
-	// It is per-request rather than per-Policy so that one process-wide
-	// Fetcher, and therefore one process-wide concurrency cap, can serve
-	// callers whose host rules differ.
+	// AllowHost, when set, is consulted for the "host:port" of every hop, the
+	// first included, and the fetch is refused if it says no. It layers a
+	// caller's own destination rule (the plugin `http` capability's operator
+	// host allowlist) on top of the address policy. It is per-request so one
+	// process-wide Fetcher, and its concurrency cap, can serve callers with
+	// different host rules.
 	AllowHost func(hostport string) bool
 }
 
 // Response is a bounded, type-checked reply.
-//
-// Body is already inflated and already inside both ceilings, so Header's
+// Body is already inflated and inside both ceilings, so Header's
 // Content-Encoding is removed and its Content-Length restated to match what
-// Body actually holds — a caller that trusted the upstream values would be
-// describing a body that no longer exists.
+// Body holds.
 type Response struct {
 	StatusCode  int
 	Header      http.Header
@@ -99,8 +94,7 @@ func (f *Fetcher) follow(ctx context.Context, req Request) (*Response, error) {
 		}
 		if next == nil {
 			// Unreachable: step returns a response, an error, or a next hop.
-			// Spelled out because the alternative is a nil dereference inside
-			// an unbounded loop.
+			// Spelled out to avoid a nil dereference in an unbounded loop.
 			return nil, fmt.Errorf("safefetch: no response and no next hop for %s", dest.url.Redacted())
 		}
 		prev, cur = dest.url, *next
@@ -225,9 +219,9 @@ func portOf(u *url.URL) string {
 }
 
 // wrapContext reports a cancelled or expired context as such. The transport
-// wraps its own error around the context error inconsistently between the
-// connect, the header read and the body read; a caller that wants to tell
-// "we ran out of time" from "upstream misbehaved" needs one answer.
+// wraps its error around the context error inconsistently across the connect,
+// header read and body read; callers need one answer to tell "ran out of time"
+// from "upstream misbehaved".
 func wrapContext(ctx context.Context, err error) error {
 	if cause := ctx.Err(); cause != nil && !errors.Is(err, cause) {
 		return fmt.Errorf("safefetch: %w (%w)", cause, err)

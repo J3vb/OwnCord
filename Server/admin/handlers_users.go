@@ -14,8 +14,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── User Handlers ───────────────────────────────────────────────────────────
-
 // statsResponse is the dashboard payload: the database stats flattened with
 // the TLS mode and the served certificate (see SetServedCertificate). The
 // fingerprint is the value users compare out of band before accepting the
@@ -105,14 +103,10 @@ const maxBanDurationHours = 24 * 365
 
 // memberUnbanBroadcaster is an optional capability of HubBroadcaster: tell
 // every connected client a user is back in the roster after an unban, the
-// mirror of BroadcastMemberBan. It is checked with a type assertion instead
-// of being added to HubBroadcaster directly (admin/types.go, not owned by
-// this change) so this fix does not force every HubBroadcaster
-// implementation — production and test doubles alike — to gain the method
-// before it compiles. See the batch report's cross_batch note: *ws.Hub needs
-// BroadcastMemberUnban(userID int64) wired up for this to take effect at
-// runtime; until then the assertion below simply misses and the handler's
-// existing (pre-fix) behavior is unchanged.
+// mirror of BroadcastMemberBan. It is checked with a type assertion so
+// HubBroadcaster implementations (including test doubles) need not gain the
+// method; *ws.Hub implements it, and an implementation without it sends
+// nothing.
 type memberUnbanBroadcaster interface {
 	BroadcastMemberUnban(userID int64)
 }
@@ -211,10 +205,10 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	case *req.Banned && hub != nil:
 		hub.BroadcastMemberBan(id)
 	case !*req.Banned && hub != nil:
-		// Ban had no WS event on the way out (member_ban hard-deletes
-		// the row client-side); unban needs one on the way back in, or
-		// every already-connected client keeps the user missing from
-		// its member store while a freshly connecting client sees them.
+		// Ban had no WS event on the way out (member_ban hard-deletes the row
+		// client-side); unban needs one on the way back in, or connected
+		// clients keep the user missing from their member store while a freshly
+		// connecting client sees them.
 		if mub, ok := hub.(memberUnbanBroadcaster); ok {
 			mub.BroadcastMemberUnban(id)
 		}
@@ -231,12 +225,11 @@ func patchUserApplyRole(w http.ResponseWriter, r *http.Request, mod *service.Mod
 	if req.RoleID == nil {
 		return true
 	}
-	// Routed through ModerationService, which re-runs the same
-	// MANAGE_ROLES, actor-outranks-target, and assign-below-own-rank
-	// checks the AuthorizeRoleChange pre-flight above already passed
-	// (a second pass, not a redundant one: it catches anything that
-	// changed in the window between the pre-flight and here, e.g. a
-	// concurrent role delete), then commits and writes the audit row.
+	// Routed through ModerationService, which re-runs the same MANAGE_ROLES,
+	// actor-outranks-target and assign-below-own-rank checks the
+	// AuthorizeRoleChange pre-flight passed (a second pass catches anything that
+	// changed in between, e.g. a concurrent role delete), then commits and
+	// writes the audit row.
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
@@ -262,16 +255,12 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 			return
 		}
 
-		// Authorize the role change before applying anything else. Without
-		// this pre-flight, a PATCH combining banned + role_id would commit
-		// and broadcast the ban first and only then attempt the role change:
-		// if that role change was then refused (missing MANAGE_ROLES, or the
-		// new role outranks the actor), the handler reported the whole
-		// request as failed while the target was in fact banned, audited,
-		// and already dropped from every connected client's member list.
-		// Running every ChangeUserRole precondition up front,
-		// before either mutation lands, keeps the PATCH all-or-nothing from
-		// the caller's perspective.
+		// Authorize the role change before applying anything else. Otherwise a
+		// PATCH combining banned + role_id would commit and broadcast the ban
+		// first, and a then-refused role change (missing MANAGE_ROLES, or the
+		// new role outranks the actor) would report the request as failed while
+		// the target was in fact banned. Running every ChangeUserRole
+		// precondition up front keeps the PATCH all-or-nothing.
 		if !patchUserAuthorizeRole(w, r, mod, actor, id, req) {
 			return
 		}
@@ -292,10 +281,8 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 
 		// Ban/unban first: it routes through ModerationService, which enforces
 		// BAN_MEMBERS + role hierarchy (the admin-auth perimeter alone does
-		// not — any admin-panel actor could previously ban the owner). The
-		// role change, if requested, was already authorized above, so a ban
-		// committing here cannot be followed by a refused role change leaving
-		// a half-applied PATCH behind.
+		// not). The role change was already authorized above, so a committed ban
+		// cannot be followed by a refused role change.
 		if !retry && !patchUserApplyBan(w, r, hub, mod, actor, id, req, banExpires) {
 			return
 		}

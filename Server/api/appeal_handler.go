@@ -11,13 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// fileAppealRequest is POST /api/v1/appeals' body.
 type fileAppealRequest struct {
 	ActionID int64  `json:"action_id"`
 	Body     string `json:"body"`
 }
 
-// appealMineResponse is one row of GET /api/v1/appeals/mine.
 type appealMineResponse struct {
 	ID           string  `json:"id"`
 	ActionKind   string  `json:"action_kind"`
@@ -29,7 +27,6 @@ type appealMineResponse struct {
 	DecidedAt    *string `json:"decided_at"`
 }
 
-// appealQueueRowResponse is one row of GET /api/v1/moderation/appeals.
 type appealQueueRowResponse struct {
 	ID           string  `json:"id"`
 	ActionID     int64   `json:"action_id"`
@@ -43,7 +40,6 @@ type appealQueueRowResponse struct {
 	DecidedAt    *string `json:"decided_at"`
 }
 
-// appealDetailResponse is GET /api/v1/moderation/appeals/{id}.
 type appealDetailResponse struct {
 	ID           string                   `json:"id"`
 	ActionID     int64                    `json:"action_id"`
@@ -90,10 +86,8 @@ func MountModerationAppealRoutes(r chi.Router, svc *service.Services) {
 }
 
 // handleFileAppeal: the mod_queue "open" broadcast is issued by
-// AppealService.Submit itself, under the same per-appeal
-// lock the other three transitions already use — it used to run here,
-// after Submit returned, so it could arrive after a withdraw/assign frame
-// for the same appeal filed moments later.
+// AppealService.Submit under the per-appeal lock the other transitions use, so
+// it cannot arrive after a later withdraw/assign frame for the same appeal.
 func handleFileAppeal(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -138,12 +132,10 @@ func handleMyAppeals(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleWithdrawAppeal: N3's mod_queue "withdrawn" broadcast (a connected
-// moderator should see a withdrawn appeal leave the queue without needing
-// to re-poll GET /api/v1/moderation/appeals) is issued by AppealService.
-// Withdraw itself now (F4 review) — under the same per-appeal lock as the
-// appellant's own appeal_status frame, so the two can never race each
-// other out of order. This handler carries no broadcast of its own.
+// handleWithdrawAppeal: AppealService.Withdraw issues the mod_queue "withdrawn"
+// broadcast (so a connected moderator sees the appeal leave the queue without
+// re-polling) under the same per-appeal lock as the appellant's appeal_status
+// frame, so the two cannot race out of order. This handler broadcasts nothing.
 func handleWithdrawAppeal(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -213,9 +205,9 @@ func handleAppealQueueGet(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleAppealQueueAssign: the mod_queue "assigned" broadcast is issued by
-// AppealService.Assign itself (F4 review), under the same per-appeal lock
-// as the appellant's own appeal_status frame.
+// handleAppealQueueAssign: AppealService.Assign issues the mod_queue "assigned"
+// broadcast under the per-appeal lock shared with the appellant's appeal_status
+// frame.
 func handleAppealQueueAssign(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
@@ -233,9 +225,9 @@ func handleAppealQueueAssign(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleAppealQueueDecide: the mod_queue outcome broadcast is issued by
-// AppealService.Decide itself (F4 review), under the same per-appeal lock
-// as the appellant's own appeal_status frame.
+// handleAppealQueueDecide: AppealService.Decide issues the mod_queue outcome
+// broadcast under the per-appeal lock shared with the appellant's appeal_status
+// frame.
 func handleAppealQueueDecide(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
@@ -269,8 +261,8 @@ func writeAppealServiceError(ctx context.Context, w http.ResponseWriter, err err
 	case errors.Is(err, service.ErrSelfReview):
 		writeErr(w, http.StatusForbidden, httperr.CodeSelfReview, err.Error())
 	case errors.Is(err, service.ErrReversalFailed):
-		// F1 review: the decision's effect could not be applied, so neither
-		// it nor the decision itself committed.
+		// The decision's effect could not be applied, so neither it nor the
+		// decision committed.
 		writeErr(w, http.StatusConflict, httperr.CodeReversalFailed, err.Error())
 	default:
 		writeServiceError(ctx, w, err)

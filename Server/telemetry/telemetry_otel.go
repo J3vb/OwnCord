@@ -1,9 +1,8 @@
 //go:build otel
 
-// Phase B Step 8 — Real OpenTelemetry-backed implementation. Compiled only
-// with `-tags otel`, matching the wazero build-tag pattern used
-// elsewhere in the repo. The default build ships telemetry_default.go with a
-// no-op provider so sqlite-only binaries do not pull the OTel SDK in.
+// Real OpenTelemetry-backed implementation, compiled only with `-tags otel`.
+// The default build ships telemetry_default.go with a no-op provider so
+// sqlite-only binaries do not pull the OTel SDK in.
 //
 // Exporter modes (config.TelemetryConfig.Exporter):
 //
@@ -11,11 +10,10 @@
 //	"prometheus" — pull-based metrics via a /metrics handler, spans are still
 //	               processed by a tracer provider with no exporter.
 //	"otlp"       — push-based traces over OTLP/gRPC to cfg.OTLPEndpoint AND
-//	               pull-based metrics via the Prometheus exporter (operators
-//	               typically want both).
+//	               pull-based metrics via the Prometheus exporter.
 //
-// The concrete Provider adapts our tiny telemetry.* API onto the upstream
-// OTel SDK so the rest of the codebase never depends on the SDK directly.
+// The concrete Provider adapts our tiny telemetry.* API onto the upstream OTel
+// SDK so the rest of the codebase never depends on the SDK directly.
 package telemetry
 
 import (
@@ -82,7 +80,6 @@ func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error)
 
 	provider := &otelProvider{cfg: cfg, serviceName: svcName}
 
-	// ── Tracing ────────────────────────────────────────────────────────────
 	tpOpts := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
 	if cfg.Exporter == "otlp" {
 		endpoint := cfg.OTLPEndpoint
@@ -92,9 +89,8 @@ func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error)
 		otlpOpts := []otlptracegrpc.Option{
 			otlptracegrpc.WithEndpoint(endpoint),
 		}
-		// OTLPInsecure honours the explicit operator opt-in for plaintext
-		// gRPC; production deployments should leave it false and provide
-		// a TLS endpoint.
+		// OTLPInsecure is the explicit operator opt-in for plaintext gRPC;
+		// production should leave it false and provide a TLS endpoint.
 		if cfg.OTLPInsecure {
 			otlpOpts = append(otlpOpts, otlptracegrpc.WithInsecure())
 		}
@@ -107,17 +103,13 @@ func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error)
 	provider.tp = sdktrace.NewTracerProvider(tpOpts...)
 	otel.SetTracerProvider(provider.tp)
 
-	// ── Metrics ────────────────────────────────────────────────────────────
-	// Both prometheus and otlp modes surface metrics via a pull-based
-	// Prometheus endpoint. OTLP tracing does not preclude Prometheus metrics
-	// — operators usually want both — so we wire the exporter unconditionally
-	// for the two real modes.
+	// Both real modes surface metrics via the pull-based Prometheus endpoint
+	// (OTLP tracing does not preclude it), so wire the exporter unconditionally.
 	reg := promclient.NewRegistry()
 	promExp, err := otelprom.New(otelprom.WithRegisterer(reg))
 	if err != nil {
-		// Shut the trace provider down so the OTLP exporter's gRPC
-		// connection (if any) is torn down. Init returning an error must
-		// not leak resources.
+		// Shut the trace provider down so an OTLP gRPC connection is torn down;
+		// Init returning an error must not leak resources.
 		_ = provider.tp.Shutdown(ctx)
 		return nil, fmt.Errorf("telemetry: prometheus exporter: %w", err)
 	}
@@ -129,10 +121,9 @@ func Init(ctx context.Context, cfg config.TelemetryConfig) (ShutdownFunc, error)
 	provider.promHandler = promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 
 	// Drop the cached AppMetrics bundle BEFORE publishing the new global
-	// provider. A concurrent NewAppMetrics() caller that observes the old
-	// no-op provider and the stale cache is harmless (it just re-populates
-	// once); the failure mode we avoid is a caller seeing the new provider
-	// but still reading the old cached (no-op) instruments.
+	// provider, so a caller never sees the new provider but reads the old
+	// cached (no-op) instruments. A caller seeing the old provider and stale
+	// cache is harmless (it just re-populates once).
 	resetAppMetricsForInit()
 	SetGlobal(provider)
 
@@ -192,8 +183,6 @@ func TraceIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-// ── Tracer / Span adapters ─────────────────────────────────────────────────
-
 type otelTracer struct{ inner trace.Tracer }
 
 func (t *otelTracer) Start(ctx context.Context, name string, attrs ...Attr) (context.Context, Span) {
@@ -211,8 +200,6 @@ func (s *otelSpan) RecordError(err error) {
 	}
 	s.inner.RecordError(err)
 }
-
-// ── Meter / instrument adapters ────────────────────────────────────────────
 
 type otelMeter struct{ inner metric.Meter }
 
@@ -262,11 +249,10 @@ func (g *otelGauge) Set(ctx context.Context, value float64, attrs ...Attr) {
 	g.inner.Record(ctx, value, metric.WithAttributes(convertAttrs(attrs)...))
 }
 
-// convertAttrs maps telemetry.Attr values to attribute.KeyValue. Unknown
-// types are rendered via fmt.Sprint so callers never panic on exotic values.
-// The uint64 / uint32 / uint cases matter: sequence numbers and ID fields
-// in OwnCord are unsigned, and routing them through the default fmt.Sprint
-// path would encode them as string attributes and break metric aggregation.
+// convertAttrs maps telemetry.Attr values to attribute.KeyValue. Unknown types
+// are rendered via fmt.Sprint so callers never panic. The unsigned cases
+// matter: sequence numbers and IDs are unsigned, and the default fmt.Sprint
+// path would encode them as string attributes and break aggregation.
 func convertAttrs(in []Attr) []attribute.KeyValue {
 	if len(in) == 0 {
 		return nil
@@ -287,10 +273,9 @@ func convertAttrs(in []Attr) []attribute.KeyValue {
 		case uint32:
 			out = append(out, attribute.Int64(a.Key, int64(v)))
 		case uint64:
-			// Most uint64 values in OwnCord (ids, seqs) fit comfortably
-			// within int64 range. A wrapped negative would corrupt
-			// metric aggregation, so we fall back to a string for the
-			// pathological case rather than silently misreporting.
+			// Most uint64 values (ids, seqs) fit in int64. A wrapped negative
+			// would corrupt aggregation, so fall back to a string for the
+			// pathological case rather than misreport.
 			if v <= math.MaxInt64 {
 				out = append(out, attribute.Int64(a.Key, int64(v)))
 			} else {

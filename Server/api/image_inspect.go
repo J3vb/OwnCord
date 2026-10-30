@@ -20,7 +20,6 @@ func inspectStoredImage(store FileStore, fileID, mime string) (outMime string, w
 	return mime, width, height
 }
 
-// storedCameraRAW reports whether the stored TIFF-structured file is a camera RAW.
 func storedCameraRAW(store FileStore, fileID string) bool {
 	f, err := store.Open(fileID)
 	if err != nil {

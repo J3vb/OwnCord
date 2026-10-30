@@ -6,9 +6,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// refuseSystemAccount keeps the hidden import account from ever signing in. Its
-// stored password matches nothing, so this is a second lock on the same door,
-// answered like a wrong password so the account's existence is not confirmed.
+// refuseSystemAccount refuses a sign-in to the hidden import account, answered
+// like a wrong password.
 func refuseSystemAccount(user *db.User, ip string) error {
 	if !user.IsSystemAccount() {
 		return nil

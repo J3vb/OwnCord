@@ -15,8 +15,6 @@ type Command interface {
 	UserID() int64
 }
 
-// ── Concrete command structs ────────────────────────────────────────────────
-
 // PingCmd represents a client ping (heartbeat).
 type PingCmd struct {
 	userID int64
@@ -220,10 +218,10 @@ type VoiceModKickCmd struct {
 func (c VoiceModKickCmd) Type() string  { return MsgTypeVoiceModKick }
 func (c VoiceModKickCmd) UserID() int64 { return c.userID }
 
-// VoiceE2EEAnnounceCmd represents a voice_e2ee_announce message.
-// signature is the ECDSA identity-key signature over the ephemeral public key
-// (F3 TOFU); optional at the protocol level — legacy clients omit it and the
-// receiving client enforces the fail-closed posture.
+// VoiceE2EEAnnounceCmd represents a voice_e2ee_announce message. signature is the
+// ECDSA identity-key signature over the ephemeral public key; optional at the
+// protocol level (legacy clients omit it and the receiving client enforces the
+// fail-closed posture).
 type VoiceE2EEAnnounceCmd struct {
 	userID    int64
 	PublicKey string
@@ -296,8 +294,6 @@ type CallDeclineCmd struct {
 func (c CallDeclineCmd) Type() string  { return MsgTypeCallDecline }
 func (c CallDeclineCmd) UserID() int64 { return c.userID }
 
-// ── Command constructors ────────────────────────────────────────────────────
-
 // parseModTarget parses the (channel, target user) pair every voice moderation
 // payload carries; channelField names the channel key in the error. Both must
 // be positive: a non-positive id can only come from a malformed client, and
@@ -327,10 +323,9 @@ func parseCallChannelID(msgType string, raw json.RawMessage) (int64, error) {
 	return positiveID(p.ChannelID, "channel_id")
 }
 
-// commandConstructors maps message types to functions that parse payloads
-// into typed Commands. The userID and reqID come from the envelope and
-// authenticated client; raw is the JSON payload body.
-// Unexported to prevent accidental mutation; use getCommandConstructor for lookups.
+// commandConstructors maps message types to functions that parse payloads into typed
+// Commands (userID and reqID come from the envelope and authenticated client; raw is
+// the JSON payload body). Unexported to prevent mutation; use getCommandConstructor.
 var commandConstructors = map[string]func(userID int64, reqID string, raw json.RawMessage) (Command, error){
 	MsgTypePing: func(userID int64, _ string, _ json.RawMessage) (Command, error) { //nolint:unparam // error always nil; signature dictated by map type
 		return PingCmd{userID: userID}, nil

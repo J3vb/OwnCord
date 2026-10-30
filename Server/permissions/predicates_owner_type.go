@@ -1,22 +1,20 @@
 package permissions
 
-// The owner-type predicates. They sit apart from predicates.go (file
-// size) and follow the same rule: one predicate per security property, so a
-// call site cannot re-derive half of it. The tiers are described on
-// OwnerTierBits and AdministratorTierBits in permissions.go.
+// The owner-type predicates sit apart from predicates.go (file size) and
+// follow the same rule: one predicate per security property. The tiers are
+// described on OwnerTierBits and AdministratorTierBits in permissions.go.
 
 // CanChangeOwnerOnlyGrant reports whether a principal may add or remove the
-// bits in OwnerOnlyGrant (the owner-tier bits) on a role or an
-// override, or hand them out by assigning a role that carries them: the owner
-// only, by role identity (see IsOwner). Neither ADMINISTRATOR nor MANAGE_ROLES
-// nor the bit itself is enough.
+// bits in OwnerOnlyGrant on a role or an override, or hand them out by
+// assigning a role that carries them: the owner only, by role identity (see
+// IsOwner). Neither ADMINISTRATOR nor MANAGE_ROLES nor the bit itself is enough.
 func CanChangeOwnerOnlyGrant(topRoleID int64, topRolePosition int) bool {
 	return IsOwner(topRoleID, topRolePosition)
 }
 
 // ownerOrExplicit is the owner-tier gate: the owner by role identity, or the
-// bit held explicitly. It uses HasPerm, never HasServerPerm, so
-// ADMINISTRATOR does not stand in for the bit (see OwnerTierBits).
+// bit held explicitly. It uses HasPerm, never HasServerPerm, so ADMINISTRATOR
+// does not stand in for the bit (see OwnerTierBits).
 func ownerOrExplicit(rolePerms int64, bit int64, topRoleID int64, topRolePosition int) bool {
 	return IsOwner(topRoleID, topRolePosition) || HasPerm(rolePerms, bit)
 }

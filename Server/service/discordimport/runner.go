@@ -46,28 +46,23 @@ type Store interface {
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 }
 
-// Files is the storage the media is copied into. SaveReserved is the one write
-// path every stored byte goes through: it takes a reservation, refuses
-// executables by content, enforces the size limit and lands the reservation.
-// api.ReservedStore is the production implementation.
+// Files is the storage the media is copied into; api.ReservedStore implements it.
 type Files interface {
 	SaveReserved(ctx context.Context, res *service.StorageReservation, name string, r io.Reader) (int64, error)
 	Delete(name string) error
 }
 
-// Uploads supplies the rules a normal upload follows: the owner's file-type
-// policy, the per-file cap and the free-space floor. *service.UploadService
-// satisfies it. The per-user quota does not apply: the hidden account is not a
-// person with a quota.
+// Uploads supplies the rules a normal upload follows (file-type policy, per-file
+// cap, free-space floor) but not the per-user quota; *service.UploadService
+// satisfies it.
 type Uploads interface {
 	FileTypePolicy(ctx context.Context) (storage.FileTypePolicy, error)
 	ReserveHeadroom(ctx context.Context, n int64) (*service.StorageReservation, error)
 	MaxUploadBytes() int64
 }
 
-// Announcer is told once when the finished channel becomes visible. The
-// composition root sends the same channel-created event the admin channel
-// create sends. No other event is ever sent for an import.
+// Announcer is told once when the finished channel becomes visible; no other
+// event is sent for an import.
 type Announcer interface {
 	ChannelCreated(ctx context.Context, ch *db.Channel)
 }
@@ -83,10 +78,9 @@ type Config struct {
 	Group *syncutil.Group
 	// ChunkSize is messages per transaction; DefaultChunkSize when zero.
 	ChunkSize int
-	// ChunkBytes and ChunkAge write a chunk early once the files copied for it
-	// pass that many bytes or have been waiting that long. Those files are
-	// unlinked attachment rows until the chunk commits, and the orphan sweep
-	// reclaims unlinked rows after an hour. Zero takes the defaults.
+	// ChunkBytes and ChunkAge flush a chunk early once its copied files pass
+	// that size or wait that long, so the orphan sweep (which takes unlinked
+	// rows after an hour) cannot reclaim them. Zero takes the defaults.
 	ChunkBytes int64
 	ChunkAge   time.Duration
 	// Now is the clock the chunk age is measured on; time.Now when nil.
@@ -99,12 +93,10 @@ const (
 	DefaultChunkAge   = 10 * time.Minute
 )
 
-// abandon attempts: the clean-up of a dead import is retried this often, with a
-// doubling wait, before the job is left for the next start to take over.
+// abandonAttempts is how often a dead import's clean-up is tried.
 const abandonAttempts = 4
 
-// Runner runs imports. Only one import can run at a time, server-wide: the
-// database refuses a second running job, whichever Runner starts it.
+// Runner runs imports, one at a time server-wide.
 type Runner struct {
 	cfg Config
 
@@ -171,11 +163,9 @@ func (j *Job) Wait() Result {
 // ErrShuttingDown is returned by Start once the server is draining.
 var ErrShuttingDown = errors.New("the server is shutting down")
 
-// Start reads the export's header, creates the hidden channel and its job, and
-// runs the import in the background. The job outlives ctx (a request context
-// ends when the response is written); it ends when it finishes, when Cancel is
-// called, or when the Group is stopped. It returns ErrImportRunning when
-// another import is running.
+// Start creates the hidden channel and its job and runs the import in the
+// background; the job outlives ctx and ends on completion, Cancel or Group
+// stop. It returns ErrImportRunning while another import runs.
 func (r *Runner) Start(ctx context.Context, req Request) (*Job, error) {
 	header, err := readHeader(ctx, req.Export)
 	if err != nil {

@@ -53,6 +53,11 @@ const { mockExportSupportBundle } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mockExportSupportBundle: vi.fn<any>(),
 }));
+const linuxDesktop = vi.hoisted(() => ({ on: false }));
+vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+  isLinuxDesktop: () => linuxDesktop.on,
+}));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
 import { getSessionDebugInfo, getShareDiagnostics } from "@lib/livekitSession";
@@ -597,6 +602,17 @@ describe("LogsTab", () => {
         ["motion-framerate", "Smooth motion, keep frame rate"],
       ]);
       expect(shareSelect(el).value).toBe("legacy");
+    });
+
+    it("leaves out the test mode on Linux, whose native capture never applies it", () => {
+      linuxDesktop.on = true;
+      try {
+        const el = buildLogsPane(controller.signal);
+        expect(shareCard(el).textContent).toContain("Record screen-share details");
+        expect(el.querySelector("[data-testid='share-motion-policy']")).toBeNull();
+      } finally {
+        linuxDesktop.on = false;
+      }
     });
 
     it("persists the recording toggle", () => {

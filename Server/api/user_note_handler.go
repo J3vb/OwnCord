@@ -21,7 +21,6 @@ type userNoteJSON struct {
 	Note   string `json:"note"`
 }
 
-// parseNoteTarget reads the {userId} path parameter.
 func parseNoteTarget(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, ok := pathID(r, "userId")
 	if !ok {

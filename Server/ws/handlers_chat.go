@@ -55,7 +55,6 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 // the participant-addressed chat_message. Sharing it is what makes a forward's
 // fan-out literally the send path's.
 func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, channelID int64, replyTo *int64, reply []byte, result *service.SendMessageResult) Result {
-	// Build attachment data for broadcast.
 	attData := make([]map[string]any, 0, len(result.Attachments))
 	for _, ai := range result.Attachments {
 		attData = append(attData, map[string]any{
@@ -94,7 +93,6 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		return channelSendResult(reply, broadcast, channelID, info.UserID, result)
 	}
 
-	// DM path: build dm_channel_open events + sequenced message.
 	var events []Event
 	if len(result.OpenedDMFor) > 0 {
 		// One payload per recipient, not one for all of them: `recipient` and
@@ -273,11 +271,10 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 	return Result{Events: events}
 }
 
-// dmEventOrFallback returns the participant-targeted DM event, falling back
-// to the channel-topic broadcast when the participant list is empty — the
-// degraded shape a failed post-commit participant lookup leaves behind. A
-// sequenced frame addressed to nobody would consume a seq and reach no one;
-// the topic fallback still reaches whoever has the DM focused.
+// dmEventOrFallback returns the participant-targeted DM event, falling back to the
+// channel-topic broadcast when the participant list is empty (the shape a failed
+// post-commit participant lookup leaves). A sequenced frame addressed to nobody would
+// consume a seq and reach no one; the fallback still reaches whoever has the DM focused.
 func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {
 	if len(participantIDs) == 0 {
 		return fallback

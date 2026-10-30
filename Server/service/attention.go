@@ -14,9 +14,8 @@ import (
 )
 
 // Signal statuses. Unknown is a measurement the server could not take (an
-// unsupported platform, a failed read, a rate with only one sample, a job
-// that has not run yet) and is never reported as healthy: it neither raises
-// a warning nor recovers one.
+// unsupported platform, a failed read, a one-sample rate, a job that has not run)
+// and is never reported as healthy: it neither raises nor recovers a warning.
 const (
 	AttentionStatusUnknown  = "unknown"
 	AttentionStatusOK       = "ok"
@@ -24,51 +23,48 @@ const (
 	AttentionStatusCritical = "critical"
 )
 
-// AttentionBackupJob is the maintenance step whose runs decide whether a
-// server that has never produced a backup is merely waiting for its first
-// scheduled run (unknown) or failing to produce one (warning).
+// AttentionBackupJob is the maintenance step whose runs decide whether a server
+// that never produced a backup is waiting for its first run (unknown) or failing
+// (warning).
 const AttentionBackupJob = "Backups"
 
 // AttentionInterval is how often Run samples the sources.
 const AttentionInterval = time.Minute
 
 const (
-	// attentionSustain is how many consecutive samples a new disk or rate
-	// level must repeat before it is committed (the first disk level commits
-	// at once, and a stopped dispatch loop as soon as it is seen), so one
-	// noisy minute neither raises nor clears a warning.
+	// attentionSustain is how many consecutive samples a new disk or rate level must
+	// repeat before it commits (the first disk level commits at once, as does a
+	// stopped dispatch loop), so one noisy minute neither raises nor clears a warning.
 	attentionSustain = 2
-	// Rate signals learn a baseline (an exponentially weighted mean of their
-	// healthy samples, skipping the first measured interval) and raise at the
-	// configured floor or attentionBaselineFactor times that baseline,
-	// whichever is higher, once attentionBaselineWarmup samples have been
-	// folded in. Until then reconnects raise nothing and the other rates
-	// raise at the floor, learning only samples at or below it.
+	// Rate signals learn a baseline (an exponentially weighted mean of healthy
+	// samples, skipping the first measured interval) and raise at the configured floor
+	// or attentionBaselineFactor times the baseline, whichever is higher, once
+	// attentionBaselineWarmup samples are in. Until then reconnects raise nothing and
+	// other rates raise at the floor, learning only samples at or below it.
 	attentionBaselineFactor = 3.0
 	attentionBaselineAlpha  = 0.1
 	attentionBaselineWarmup = 10
-	// A raised rate clears only below this fraction of its raise threshold,
-	// and a disk level only above this multiple of its floor.
+	// A raised rate clears only below this fraction of its threshold, a disk level
+	// only above this multiple of its floor.
 	attentionRateClearRatio  = 0.5
 	attentionDiskClearMargin = 1.1
-	// attentionJobFailures consecutive failed runs raise a job warning; one
-	// successful run clears it.
+	// attentionJobFailures consecutive failed runs raise a job warning; one success
+	// clears it.
 	attentionJobFailures = 2
-	// A self-signed or manual certificate warns inside attentionCertWarn of
-	// its expiry and is critical inside attentionCertCritical. An ACME
-	// certificate is instead measured against its renewal point, which
-	// autocert sets min(lifetime/3, attentionACMERenewMax) before expiry (see
-	// evalCertificate).
+	// A self-signed or manual certificate warns inside attentionCertWarn of expiry
+	// and is critical inside attentionCertCritical. An ACME certificate is measured
+	// against its renewal point, min(lifetime/3, attentionACMERenewMax) before expiry
+	// (see evalCertificate).
 	attentionCertWarn     = 21 * 24 * time.Hour
 	attentionCertCritical = 7 * 24 * time.Hour
 	attentionACMERenewMax = 30 * 24 * time.Hour
-	// attentionRecoveredKeep is how long a recovered warning stays listed so
-	// an operator who was away still sees what happened.
+	// attentionRecoveredKeep is how long a recovered warning stays listed for an
+	// operator who was away.
 	attentionRecoveredKeep = 24 * time.Hour
 )
 
-// AttentionThresholds are the operator's configured floors (config
-// attention.* plus server.min_free_disk_mb).
+// AttentionThresholds are the operator's configured floors (attention.* plus
+// server.min_free_disk_mb).
 type AttentionThresholds struct {
 	DiskWarnFreeBytes     uint64
 	DiskCriticalFreeBytes uint64 // 0 disables the critical level
@@ -77,23 +73,21 @@ type AttentionThresholds struct {
 	DeliveryDropsPerMin   float64
 }
 
-// VoiceHealth is the LiveKit voice path's state, as the attention panel reads
-// it. A managed companion reports its supervisor state (Running/Restarts/
-// GaveUp); externally managed LiveKit reports Reachable from a health probe.
-// Reading it never invents a value: an unconfigured voice path is Managed
-// false with no probe, which the panel reports as unknown.
+// VoiceHealth is the LiveKit voice path's state for the attention panel. A
+// managed companion reports its supervisor state (Running/Restarts/GaveUp);
+// external LiveKit reports Reachable from a health probe. An unconfigured path is
+// Managed false with no probe, reported unknown.
 type VoiceHealth struct {
 	Managed  bool
 	Running  bool
 	Restarts int
 	GaveUp   bool
-	// Reachable is the external LiveKit health probe's answer. Nil when not
-	// probed (managed, or unconfigured).
+	// Reachable is the external probe's answer; nil when not probed.
 	Reachable *bool
 }
 
-// AttentionSources are the in-process readings the panel reuses. Every
-// counter is cumulative since start; a nil source reports unknown.
+// AttentionSources are the in-process readings the panel reuses. Counters are
+// cumulative since start; a nil source reports unknown.
 type AttentionSources struct {
 	DiskFree       func() (uint64, error)
 	WriterWait     func() time.Duration
@@ -102,35 +96,33 @@ type AttentionSources struct {
 	DispatchAlive  func() bool
 	BackupSchedule func(context.Context) (string, error)
 	LastBackup     func() (time.Time, error)
-	// VoiceHealth reports the LiveKit voice path's state. It receives the
-	// sample context so an external LiveKit can be probed with a bounded
-	// timeout. Nil (no voice, or a bare test service) reports unknown, never
+	// VoiceHealth reports the voice path's state; it gets the sample context so an
+	// external LiveKit is probed with a bounded timeout. Nil reports unknown, never
 	// healthy.
 	VoiceHealth func(context.Context) VoiceHealth
-	// Certificate reports tls.mode and the served leaf certificate, zero when
-	// none is known (TLS off, or ACME before its first handshake).
+	// Certificate reports tls.mode and the served leaf, zero when none is known (TLS
+	// off, or ACME before its first handshake).
 	Certificate func() (mode string, cert auth.ServedCert)
 }
 
-// BootStatus is what the previous run left in the boot marker:
-// whether the marker was readable, whether the last shutdown was clean, when
-// the previous run started and when it last recovered a panic.
+// BootStatus is what the previous run left in the boot marker: whether it was
+// readable, whether the last shutdown was clean, when it started and last
+// recovered a panic.
 type BootStatus struct {
-	// Recorded is whether a boot marker was found and read. False on a first
-	// start, which is reported unknown, never a false warning.
+	// Recorded: a marker was found and read. False on a first start, reported unknown,
+	// never a false warning.
 	Recorded bool
-	// Unclean is whether the previous run ended without clearing its marker —
-	// a kill, a crash, or a hardware exit.
+	// Unclean: the previous run ended without clearing its marker (kill, crash,
+	// hardware exit).
 	Unclean bool
-	// StartedAt is when the previous run started, and LastPanicAt the last
-	// panic it recovered (zero if none).
+	// StartedAt is when the previous run started; LastPanicAt its last recovered
+	// panic (zero if none).
 	StartedAt   time.Time
 	LastPanicAt time.Time
 }
 
-// RestoreOutcome is what the boot-time apply of a staged backup restore left
-// for this start to report. Recorded is false when no restore was
-// pending, which adds no signal.
+// RestoreOutcome is what the boot-time apply of a staged restore left for this
+// start to report; Recorded is false when none was pending.
 type RestoreOutcome struct {
 	Recorded bool
 	// Status is "applied", "rolled_back" or "refused".
@@ -152,8 +144,8 @@ type AttentionSignal struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
-// AttentionWarning is one deduplicated warning: a signal that keeps or
-// resumes failing updates this entry rather than adding another.
+// AttentionWarning is one deduplicated warning: a signal that keeps or resumes
+// failing updates this entry rather than adding another.
 type AttentionWarning struct {
 	ID            string     `json:"id"`
 	Severity      string     `json:"severity"`
@@ -173,15 +165,12 @@ type AttentionReport struct {
 	Warnings    []AttentionWarning `json:"warnings"`
 }
 
-// AttentionService is the admin attention panel's state. It samples
-// the existing disk, writer-wait, reconnect and delivery counters, the newest
-// backup and the maintenance jobs' outcomes, and keeps deduplicated warnings
-// with hysteresis. The state is in memory and served only to the admin API;
-// nothing here is exported off the host.
-//
-// ponytail: in-memory only, so a restart forgets recovered-warning history;
-// active conditions are re-raised by the next samples. Persist when history
-// across restarts matters.
+// AttentionService is the admin attention panel's state. It samples the disk,
+// writer-wait, reconnect and delivery counters, the newest backup and the
+// maintenance jobs' outcomes, and keeps deduplicated warnings with hysteresis. The
+// state is in memory, served only to the admin API and exported nowhere. A restart
+// forgets recovered-warning history; active conditions re-raise on the next
+// samples. Persist if cross-restart history matters.
 type AttentionService struct {
 	thresholds AttentionThresholds
 	src        AttentionSources
@@ -196,11 +185,9 @@ type AttentionService struct {
 	delivery    attentionRate
 	voice       attentionLevel
 	jobs        []*attentionJob
-	// boot is the previous run's marker, set once at start-up and constant
-	// for this process.
+	// boot is the previous run's marker, set once at start-up.
 	boot BootStatus
-	// restore is the staged restore this start applied or refused, if any;
-	// like boot it is set once at start-up and constant for the process.
+	// restore is the staged restore this start applied or refused, set once at start-up.
 	restore RestoreOutcome
 }
 
@@ -211,15 +198,13 @@ type attentionJob struct {
 	consecutiveFailures  int
 }
 
-// WriterWaitSource reads the SQLite writer pool's cumulative queueing time,
-// the attention panel's writer-wait source.
+// WriterWaitSource reads the SQLite writer pool's cumulative queueing time.
 func WriterWaitSource(database *db.DB) func() time.Duration {
 	return func() time.Duration { return database.SQLDb().Stats().WaitDuration }
 }
 
-// PoolStatsSources returns the writer and reader pools' Stats readers, for the
-// windowed metrics sampler. It lives here so the composition root
-// names no raw pool.
+// PoolStatsSources returns the writer and reader pools' Stats readers for the
+// windowed metrics sampler, so the root names no raw pool.
 func PoolStatsSources(database *db.DB) (writer, reader func() sql.DBStats) {
 	return func() sql.DBStats { return database.SQLDb().Stats() },
 		func() sql.DBStats { return database.SQLReaderDB().Stats() }
@@ -230,8 +215,8 @@ func NewAttentionService(t AttentionThresholds, src AttentionSources) *Attention
 	return &AttentionService{thresholds: t, src: src, warnings: map[string]*AttentionWarning{}}
 }
 
-// RegisterJob declares a maintenance job so it is listed (as unknown) before
-// its first run. logHint is the message its failure is logged under.
+// RegisterJob declares a maintenance job so it is listed (unknown) before its
+// first run; logHint is the message its failure is logged under.
 func (s *AttentionService) RegisterJob(label, logHint string) {
 	if s == nil {
 		return
@@ -243,8 +228,7 @@ func (s *AttentionService) RegisterJob(label, logHint string) {
 	}
 }
 
-// RecordJob records one run of a maintenance job. Nil-safe, so partial
-// wirings skip it.
+// RecordJob records one run of a maintenance job. Nil-safe for partial wirings.
 func (s *AttentionService) RecordJob(label string, err error, at time.Time) {
 	if s == nil {
 		return
@@ -274,8 +258,8 @@ func (s *AttentionService) job(label string) *attentionJob {
 	return nil
 }
 
-// RecordBootStatus records the previous run's marker for the attention panel.
-// It is set once at start-up, before Run samples.
+// RecordBootStatus records the previous run's marker; set once at start-up, before
+// Run samples.
 func (s *AttentionService) RecordBootStatus(b BootStatus) {
 	if s == nil {
 		return
@@ -285,8 +269,8 @@ func (s *AttentionService) RecordBootStatus(b BootStatus) {
 	s.boot = b
 }
 
-// RecordRestoreOutcome records the staged restore the boot-time apply handled,
-// for the attention panel. It is set once at start-up, before Run samples.
+// RecordRestoreOutcome records the staged restore the boot-time apply handled; set
+// once at start-up, before Run samples.
 func (s *AttentionService) RecordRestoreOutcome(r RestoreOutcome) {
 	if s == nil {
 		return
@@ -410,8 +394,8 @@ func (s *AttentionService) Evaluate(ctx context.Context, now time.Time) {
 	}
 }
 
-// Report returns a copy of the current state: active warnings first, most
-// severe first, then recovered ones, newest first.
+// Report returns a copy of the state: active warnings first (most severe first),
+// then recovered ones, newest first.
 func (s *AttentionService) Report() AttentionReport {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -449,8 +433,8 @@ func (s *AttentionService) Report() AttentionReport {
 	return rep
 }
 
-// settle records sig and raises, keeps or recovers its warning. Unknown
-// leaves any existing warning exactly as it was.
+// settle records sig and raises, keeps or recovers its warning; unknown leaves an
+// existing warning as it was.
 func (s *AttentionService) settle(sig AttentionSignal, title, action string) {
 	s.signals = append(s.signals, sig)
 	now := sig.ObservedAt

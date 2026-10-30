@@ -11,9 +11,8 @@ import (
 	"strconv"
 )
 
-// ensureImportedCutoffColumn adds deletion_markers.imported_cutoff to a marker
-// file created before it existed. Markers already in such a file keep a NULL
-// there, which replays as "imported messages spared".
+// ensureImportedCutoffColumn adds imported_cutoff to a marker file created
+// without it; existing markers keep NULL, which replays as "imported spared".
 func ensureImportedCutoffColumn(sqlDB *sql.DB) error {
 	var n int
 	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('deletion_markers') WHERE name = 'imported_cutoff'`).Scan(&n); err != nil {
@@ -38,16 +37,14 @@ func (m *MarkerStore) MessagesToken(channelID int64) string {
 }
 
 // RecordMessagesSweep records that retention removed everything older than
-// cutoff in channelID: one marker per channel, its cutoff only ever
-// moving forward, so a restore of an older backup re-sweeps to the newest
-// cutoff the policy reached. cutoff is stored in SQLite's UTC layout. The
-// includeImported records that the sweep ran under the channel's own window and
-// so reached Discord-imported messages; the marker keeps the newest such cutoff
-// apart from the general one, because a later server-wide sweep has a newer
-// cutoff that never touched them. The
-// channels sequence goes down with it as a floor (channelsSeq is
-// DB.SequenceValue for the channels table), so a restore cannot hand the
-// channel's id — and with it this marker — to a new channel.
+// cutoff in channelID: one marker per channel, its cutoff only moving forward,
+// so restoring an older backup re-sweeps to the newest cutoff. cutoff is in
+// SQLite's UTC layout. includeImported marks a sweep under the channel's own
+// window, which reaches imported messages; that cutoff is kept apart in
+// imported_cutoff because a later server-wide sweep, with a newer cutoff,
+// spared them. The channels sequence is recorded as a floor (channelsSeq is
+// DB.SequenceValue for channels) so a restore cannot hand the channel's id, and
+// this marker, to a new channel.
 func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, cutoff string, channelsSeq int64, includeImported bool) error {
 	var importedCutoff *string
 	if includeImported {
@@ -77,14 +74,11 @@ func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, 
 	return nil
 }
 
-// ReplayMessages re-applies every messages marker: sweep is called with the
-// channel and the marker's cutoff and must remove everything older than it
-// (the retention sweep, pinned exempt), returning how many rows went. It runs
-// once with includeImported false for the marker's cutoff, then, for a marker
-// that recorded a sweep under the channel's own window, once more with
-// includeImported true for that newer-or-equal imported cutoff. A
-// marker for a channel that no longer exists is skipped. Returns the number
-// of messages removed across all markers.
+// ReplayMessages re-applies every messages marker: sweep removes everything in
+// the channel older than the cutoff (the retention sweep, pinned exempt) and
+// returns how many rows went. It runs with includeImported false for the
+// marker's cutoff, then with true for imported_cutoff when one is recorded. A
+// marker for a vanished channel is skipped. It returns the total removed.
 func (m *MarkerStore) ReplayMessages(ctx context.Context, sweep func(ctx context.Context, channelID int64, cutoff string, includeImported bool) (int, error)) (int, error) {
 	markers, err := m.Markers(ctx)
 	if err != nil {

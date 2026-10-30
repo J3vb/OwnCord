@@ -3,8 +3,8 @@ package plugin
 import "errors"
 
 // ErrRuntimeUnavailable is returned when the plugin runtime cannot start
-// because the wazero build tag was not enabled. Default builds surface this
-// error from Registry.LoadAll so the rest of the server can keep running.
+// because the wazero build tag was not enabled; Registry.LoadAll surfaces it in
+// default builds so the rest of the server keeps running.
 var ErrRuntimeUnavailable = errors.New("plugin runtime: wazero build tag not enabled (build with -tags wazero to load .wasm plugins)")
 
 // ErrPluginNotFound is returned when an operation references an unknown
@@ -15,8 +15,7 @@ var ErrPluginNotFound = errors.New("plugin not found")
 // capability the plugin's manifest did not declare.
 var ErrCapabilityNotGranted = errors.New("plugin capability not granted")
 
-// ErrCommandNotDeclared is returned when a plugin tries to bind a slash
-// command its manifest did not list in `commands`. The manifest — not the
-// guest module — is the authority on which commands a plugin may own, so an
-// admin can see the full command surface before enabling the plugin.
+// ErrCommandNotDeclared is returned when a plugin tries to bind a slash command
+// its manifest did not list in `commands`. The manifest, not the guest module,
+// is the authority, so an admin sees the full command surface before enabling.
 var ErrCommandNotDeclared = errors.New("plugin command not declared in manifest")

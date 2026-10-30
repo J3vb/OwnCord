@@ -1,8 +1,7 @@
 package admin
 
-// support_event_codes_import.go — the event codes for the Discord import's
-// warnings and errors. Split out of support_event_codes.go so that file stays
-// under the file-size limit; merged into the same table at init.
+// Event codes for the Discord import's warnings and errors, merged into the
+// main table at init.
 
 import "maps"
 

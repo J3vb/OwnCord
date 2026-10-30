@@ -11,17 +11,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// EraseAccountFinish is the finish stage: the single transaction that used
-// to be the whole erasure, run over tables the drain left nearly empty. Every
-// statement is idempotent, so it also sweeps whatever a send that passed auth
-// before the lock wrote since. It ends by turning the subject's queued job
-// into db_done with the union of the files every stage collected. After the
-// commit it unlinks the audit history and truncates the WAL, once.
+// EraseAccountFinish is the finish stage: one transaction over tables the
+// drain left nearly empty. Every statement is idempotent, so it also sweeps
+// whatever a send that passed auth before the lock wrote since. It ends by
+// turning the subject's queued job into db_done with the union of the files
+// every stage collected; after the commit it unlinks the audit history and
+// truncates the WAL once.
 //
-// subjectToken is the deletion marker's token for the subject: the
-// audit rows the subject appears in keep their action, time and order but
-// lose the id — actor_id / target_id become 0, detail is cleared — and carry
-// the token instead. An empty token unlinks the rows without one.
+// subjectToken is the deletion marker's token: see EraseAccount. A subject
+// whose users row is already gone (a restore or an operator can cause that)
+// only has its job closed.
 //
 // A subject whose users row is already gone (a stage interrupted after the
 // delete would leave none, but a restore or an operator can) only has its job

@@ -5,8 +5,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// ─── Context keys ─────────────────────────────────────────────────────────────
-
 // adminContextKey is an unexported type for context keys in the admin package.
 type adminContextKey int
 
@@ -24,8 +22,6 @@ const (
 	// token. Unlike adminSessionKey it is set for both principal kinds.
 	adminTokenHashKey
 )
-
-// ─── HubBroadcaster ──────────────────────────────────────────────────────────
 
 // HubBroadcaster is the subset of ws.Hub needed by the admin package.
 type HubBroadcaster interface {
@@ -59,20 +55,15 @@ type HubBroadcaster interface {
 	UserCount() int
 }
 
-// ─── PermissionInvalidator ───────────────────────────────────────────────────
-
-// PermissionInvalidator was how admin handlers invalidated the permission cache
-// when roles or permissions changed. The services now do that
-// themselves (service.PermissionChangeNotifier's callers invalidate first), so
-// the admin constructors accept the value but no longer use it; it is kept so
-// their signatures, and every caller, stay unchanged. Satisfied by
+// PermissionInvalidator is accepted by the admin constructors but unused: the
+// services invalidate the permission cache themselves
+// (service.PermissionChangeNotifier's callers invalidate first). Kept so
+// constructor signatures, and every caller, stay unchanged. Satisfied by
 // *service.PermissionService.
 type PermissionInvalidator interface {
 	InvalidateUser(userID int64)
 	InvalidateAll()
 }
-
-// ─── adminUserResponse ──────────────────────────────────────────────────────
 
 // adminUserResponse is the safe public shape returned by user-listing and
 // user-patch endpoints. It deliberately excludes PasswordHash and TOTPSecret.
@@ -97,8 +88,6 @@ type adminUserResponse struct {
 	BanReason  *string `json:"ban_reason,omitempty"`
 	BanExpires *string `json:"ban_expires,omitempty"`
 }
-
-// ─── adminMeResponse ────────────────────────────────────────────────────────
 
 // adminMeResponse describes the calling principal to the admin panel so it can
 // hide the surfaces the principal's role cannot use. It is an affordance hint

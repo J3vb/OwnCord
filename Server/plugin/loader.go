@@ -1,4 +1,4 @@
-// Phase C Step 9 — On-disk plugin discovery.
+// On-disk plugin discovery.
 //
 // Each plugin lives in its own subdirectory under PluginsConfig.Directory:
 //
@@ -11,9 +11,8 @@
 //	    detector.wasm
 //	    assets/...
 //
-// Loader walks the directory, parses every plugin.json manifest via
-// loadManifestFromDir, and returns a slice of foundPlugin records. The
-// Registry then persists each into the store.
+// The loader walks the directory, parses every plugin.json via
+// loadManifestFromDir, and returns foundPlugin records the Registry persists.
 
 package plugin
 
@@ -31,15 +30,11 @@ type foundPlugin struct {
 	WASMPath string
 }
 
-// loadManifestFromDir resolves the manifest that governs one plugin
-// directory. Every caller that resolves a plugin manifest from a directory
-// must route through here, so the manifest a zip install validates is
-// byte-for-byte the one the next restart loads.
-//
-// Returns an error satisfying os.IsNotExist when plugin.json is absent, so
-// callers that treat "not a plugin directory" as non-fatal
-// (scanPluginDirectory, walking arbitrary subdirectories) can tell that
-// apart from a real parse failure.
+// loadManifestFromDir resolves the manifest that governs one plugin directory.
+// Every caller must route through here, so the manifest a zip install validates
+// is byte-for-byte the one the next restart loads. It returns an error
+// satisfying os.IsNotExist when plugin.json is absent, so callers treating "not
+// a plugin directory" as non-fatal can tell that from a parse failure.
 func loadManifestFromDir(dir string) (*Manifest, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "plugin.json"))
 	if err != nil {
@@ -48,17 +43,13 @@ func loadManifestFromDir(dir string) (*Manifest, error) {
 	return ParseManifest(raw)
 }
 
-// scanPluginDirectory walks dir non-recursively and parses a manifest
-// (plugin.json, via loadManifestFromDir) from every immediate
-// subdirectory. A per-plugin failure (malformed manifest, missing or
-// symlinked entrypoint, a stray symlink anywhere in that plugin's tree) is
-// recorded and that one subdirectory is skipped — it does not stop the
-// scan. The returned error is non-nil whenever at least one subdirectory
-// was skipped, joining every such failure, but `found` still holds every
-// plugin that scanned cleanly. Callers that need the scan to be all-or-
-// nothing should check the returned error before using `found`; LoadAll
-// deliberately does not, so one bad plugin directory cannot disable every
-// other plugin.
+// scanPluginDirectory walks dir non-recursively and parses a manifest from every
+// immediate subdirectory. A per-plugin failure (malformed manifest, missing or
+// symlinked entrypoint, a stray symlink anywhere in the tree) skips that
+// subdirectory without stopping the scan. The returned error is non-nil
+// whenever one was skipped, joining every failure, but `found` still holds
+// every plugin that scanned cleanly. LoadAll deliberately does not abort on it,
+// so one bad directory cannot disable every other plugin.
 func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 	if dir == "" {
 		return nil, nil
@@ -82,20 +73,18 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 		manifest, manifestErr := loadManifestFromDir(pluginDir)
 		if manifestErr != nil {
 			if os.IsNotExist(manifestErr) {
-				// No plugin.json present — not a plugin directory, skip
-				// silently.
+				// No plugin.json: not a plugin directory, skip silently.
 				continue
 			}
 			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), manifestErr))
 			continue
 		}
-		// Reject any symlinks anywhere in the plugin directory tree. The asset
-		// handler enforces that resolved paths stay rooted at pluginDir, but
-		// http.ServeFile / os.Open follow symlinks transparently — a malicious
-		// plugin .zip containing `assets/index.html -> /etc/passwd` would
-		// otherwise serve host files. os.Lstat is used for the entrypoint
-		// check below so a symlink is detected instead of followed, even
-		// when its target is a valid .wasm file.
+		// Reject any symlinks anywhere in the plugin tree. The asset handler
+		// keeps resolved paths rooted at pluginDir, but http.ServeFile / os.Open
+		// follow symlinks, so a plugin .zip containing `assets/index.html ->
+		// /etc/passwd` would serve host files. os.Lstat is used for the
+		// entrypoint check below so a symlink is detected even when its target is
+		// a valid .wasm file.
 		if err := rejectSymlinksUnder(pluginDir); err != nil {
 			scanErr = errors.Join(scanErr, fmt.Errorf("plugin %q: %w", e.Name(), err))
 			continue
@@ -118,8 +107,7 @@ func scanPluginDirectory(dir string) ([]foundPlugin, error) {
 }
 
 // rejectSymlinksUnder walks root and returns an error if any entry is a
-// symlink. Defends against malicious plugin packages that ship symlinks to
-// host filesystem paths.
+// symlink, defending against plugin packages shipping symlinks to host paths.
 func rejectSymlinksUnder(root string) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

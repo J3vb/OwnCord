@@ -10,14 +10,12 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Forum settings and tags ───────────────────────────────────
-//
-// A forum's settings are the require-tag flag, the default auto-archive period
-// its posts start with, and its tag list. They are written as one whole value
-// (a full replace, like Discord's available_tags): a tag without an id is
-// created, a listed id is renamed, re-emojied and repositioned, and a tag of
-// the forum that the list leaves out is deleted along with its links to
-// posts. One transaction, one audit row, one channel_update.
+// Forum settings and tags: a forum's settings are the require-tag flag, the default
+// auto-archive period its posts start with, and its tag list. They are written as
+// one whole value (a full replace, like Discord's available_tags): a tag without an
+// id is created, a listed id is renamed, re-emojied and repositioned, and a tag the
+// list leaves out is deleted along with its post links. One transaction, one audit
+// row, one channel_update.
 
 const (
 	// MaxForumTagNameLen bounds a forum tag's name in runes.
@@ -30,10 +28,9 @@ const (
 // same four a thread takes (migration 074).
 var forumAutoArchiveMinutes = []int{60, 1440, 4320, 10080}
 
-// ForumStore is the persistence slice behind forum settings. *db.DB satisfies
-// it; a Store that does not leaves the operations answering ErrInternal. It
-// sits beside Store rather than on it because Store's surface is ratcheted
-// (datastore_ratchet_test.go).
+// ForumStore is the persistence behind forum settings. *db.DB satisfies it; a Store
+// that does not makes the operations answer ErrInternal. Kept beside Store because
+// Store's surface is ratcheted (datastore_ratchet_test.go).
 type ForumStore interface {
 	ReplaceForumSettings(ctx context.Context, forumID int64, in db.ForumSettingsWrite) ([]db.ForumTag, error)
 }

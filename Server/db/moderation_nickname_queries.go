@@ -14,17 +14,15 @@ import (
 const manageNicknamesOrAdmin = int64(8388608 | 1073741824)
 
 // SetDisplayNameAsModerator writes targetID's display_name (nil clears it) on
-// behalf of actorID and returns the value it replaced. It is the moderator
-// nickname route's one write. The authority is re-read live, in the
-// same write transaction, never trusted from the caller's earlier (cached)
-// check: the actor must hold MANAGE_NICKNAMES or ADMINISTRATOR in the OR of
-// every role they hold, and must strictly outrank the target by top role
-// position. Either failing, or an actor that is not a real account, returns
-// ErrOutranked with nothing written, and so does a target that no longer exists
-// (it has no rank to beat). ErrNotFound is only the narrow case of the row
-// vanishing between the rank read and the read of its nickname.
-//
-// The writer pool is one connection, so no other write transaction (a role
+// behalf of actorID and returns the replaced value; it is the moderator
+// nickname route's one write. Authority is re-read live in the same write
+// transaction, not trusted from the caller's cached check: the actor must hold
+// MANAGE_NICKNAMES or ADMINISTRATOR in the OR of their roles and strictly
+// outrank the target by top role position. Failing either, an actor that is
+// not a real account, or a target that no longer exists returns ErrOutranked
+// with nothing written. ErrNotFound is only the row vanishing between the rank
+// read and the nickname read. The single writer connection means no other
+// write can interleave between the checks and the UPDATE.
 // change, the target's own profile edit) can interleave between the checks
 // and the UPDATE.
 func (d *DB) SetDisplayNameAsModerator(ctx context.Context, actorID, targetID int64, name *string) (old *string, err error) {

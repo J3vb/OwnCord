@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
-import base from "./playwright.config";
+import { clientRoot, fromClientRoot } from "./clientRoot";
+import base from "../../../playwright.config";
 
 /**
  * Playwright config for the DEVELOPMENT-server smoke run.
@@ -25,15 +26,27 @@ import base from "./playwright.config";
  * specs written for dev-versus-production differences, which is exactly what a
  * dev-server run can catch that the production run cannot.
  */
+if (base.webServer === undefined || Array.isArray(base.webServer)) {
+  throw new Error("playwright.config.ts must declare exactly one webServer");
+}
+
 export default defineConfig({
   ...base,
-  outputDir: "test-results/smoke",
+  // The base config's relative paths resolve against Client/; from this folder
+  // they would not, so the ones this run inherits are pinned to Client/.
+  testDir: fromClientRoot("tests/e2e"),
+  globalTeardown: fromClientRoot("tests/e2e/global-teardown.ts"),
+  webServer: { ...base.webServer, cwd: clientRoot },
+  outputDir: fromClientRoot("test-results/smoke"),
   reporter: process.env.CI
     ? [
-        ["html", { open: "never", outputFolder: "playwright-report/smoke" }],
-        ["junit", { outputFile: "test-results/smoke-junit.xml" }],
+        ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/smoke") }],
+        ["junit", { outputFile: fromClientRoot("test-results/smoke-junit.xml") }],
       ]
-    : [["list"], ["html", { open: "never", outputFolder: "playwright-report/smoke" }]],
+    : [
+        ["list"],
+        ["html", { open: "never", outputFolder: fromClientRoot("playwright-report/smoke") }],
+      ],
   testMatch: [
     // Boot and identity: nothing else can pass if these break.
     "connect-page.spec.ts",

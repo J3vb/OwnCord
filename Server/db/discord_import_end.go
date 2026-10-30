@@ -9,10 +9,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// AbandonImport ends a job that did not finish: it deletes the pending channel
-// (its messages go with it) and marks the job failed or cancelled with the
-// reason. The files already copied stay as unlinked attachment rows, which the
-// orphan sweep reclaims.
+// AbandonImport deletes the pending channel and its messages and marks the job
+// failed or cancelled; copied files stay as unlinked rows for the orphan sweep.
 func (d *DB) AbandonImport(ctx context.Context, jobID, channelID int64, status, reason string, pr ImportProgress) error {
 	if status != ImportFailed && status != ImportCancelled {
 		return fmt.Errorf("AbandonImport: status %q is not an ending for an unfinished import", status)
@@ -66,10 +64,9 @@ func failStaleImports(ctx context.Context, q *dbgen.Queries, live []int64) error
 // maxChannelNameRunes mirrors the channel name cap the admin routes enforce.
 const maxChannelNameRunes = 100
 
-// uniquifyImportChannelName keeps the published channel's name unique among the
-// visible text channels of its category, which the admin create route also
-// insists on: it appends " (imported)", then " (imported 2)" and so on. It runs
-// in the publishing transaction so the check and the flip cannot be split.
+// uniquifyImportChannelName appends " (imported)", then " (imported 2)" and so
+// on until the name is unique among the category's visible text channels. It
+// runs inside the publishing transaction.
 func uniquifyImportChannelName(ctx context.Context, q *dbgen.Queries, channelID int64) error {
 	place, err := q.GetImportChannelPlacement(ctx, channelID)
 	if err != nil {

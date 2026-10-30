@@ -15,9 +15,8 @@ import (
 
 // Reasons an attachment is not copied. Both are counted as skipped.
 var (
-	// ErrRemoteMedia is a link to somewhere else (http, https or any other
-	// scheme). The importer never fetches it: the server would be calling out to
-	// an address the file chose.
+	// ErrRemoteMedia is a link with a scheme; it is never fetched, since the
+	// server would call out to an address the file chose.
 	ErrRemoteMedia = errors.New("attachment is a remote link")
 	// ErrMediaMissing is a local path the export does not contain.
 	ErrMediaMissing = errors.New("attachment file is not in the export")
@@ -32,8 +31,7 @@ var (
 	ErrZipTooLarge = errors.New("the zip is larger than the import allows")
 )
 
-// Defaults for ZipLimits. The size cap is far above a realistic export and far
-// below what a zip bomb claims.
+// Defaults for ZipLimits.
 const (
 	DefaultMaxZipEntries = 100_000
 	DefaultMaxZipBytes   = 32 << 30
@@ -120,9 +118,8 @@ type ZipExport struct {
 	closer io.Closer
 }
 
-// byteBudget is the total uncompressed bytes the zip may still yield. It is
-// checked on every read, so a header that understates an entry cannot slip
-// past the cap checked at open.
+// byteBudget is the uncompressed bytes the zip may still yield, checked on every
+// read so an understated header cannot slip past the cap.
 type byteBudget struct{ remaining int64 }
 
 // NewZipExport validates every entry of the zip and indexes it. It refuses the
@@ -169,9 +166,8 @@ func NewZipExport(ra io.ReaderAt, size int64, lim ZipLimits) (*ZipExport, error)
 			}
 		}
 	}
-	// The export document is the .json at the archive root; a .json inside a
-	// folder is a downloaded attachment. Only when nothing sits at the root (a
-	// zipped folder) is the single nested .json taken as the document.
+	// A .json inside a folder is a downloaded attachment, unless nothing sits at
+	// the root (a zipped folder), when the single nested one is the document.
 	candidates := roots
 	if len(candidates) == 0 {
 		candidates = nested

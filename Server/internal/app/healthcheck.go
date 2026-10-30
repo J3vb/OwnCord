@@ -18,9 +18,9 @@ import (
 )
 
 // RunHealthcheckCLI probes the local server's /health endpoint and returns a
-// process exit code: 0 healthy, 1 degraded or unreachable. /health answers
-// 503 with a subsystem reason when the hub, database, or disk is unhealthy,
-// so a container orchestrator's healthcheck surfaces those too.
+// process exit code: 0 healthy, 1 degraded or unreachable. /health answers 503
+// with a subsystem reason when the hub, database or disk is unhealthy, so a
+// container orchestrator's healthcheck surfaces those too.
 func RunHealthcheckCLI() int {
 	p := resolveHealthcheckProbe(config.DefaultPath)
 	client := &http.Client{
@@ -54,10 +54,9 @@ type healthcheckProbe struct {
 
 // resolveHealthcheckProbe reads the values that shape the probe: config.yaml,
 // then the panel's overrides file (on the data dir from the file or the
-// environment), then the OWNCORD_* environment. It is deliberately NOT
-// config.Load, which writes a default config.yaml when none exists; a probe
-// must have no side effects, so it peeks at the file and reuses
-// config.ReadOverrides rather than building a whole config.
+// environment), then the OWNCORD_* environment. It is not config.Load, which
+// writes a default config.yaml when none exists: a probe must have no side
+// effects, so it peeks at the file and reuses config.ReadOverrides.
 func resolveHealthcheckProbe(cfgPath string) healthcheckProbe {
 	p := healthcheckProbe{port: 8443, scheme: "https", certFile: "data/cert.pem"}
 	dataDir := "data"
@@ -117,7 +116,7 @@ func resolveHealthcheckProbe(cfgPath string) healthcheckProbe {
 }
 
 // applyHealthcheckOverrides copies the four probe-shaping keys a panel override
-// may hold. config.ReadOverrides has already normalised and validated them.
+// may hold; config.ReadOverrides has already validated them.
 func applyHealthcheckOverrides(p *healthcheckProbe, overrides map[string]any) {
 	if v, ok := overrides["server.port"].(int); ok && v > 0 {
 		p.port = v
@@ -135,15 +134,14 @@ func applyHealthcheckOverrides(p *healthcheckProbe, overrides map[string]any) {
 
 // healthcheckTLSConfig builds the probe's TLS config, per TLS mode:
 //
-//   - acme: the served cert is CA-issued for the configured domain, so
-//     standard WebPKI verification works — but the probe dials 127.0.0.1, so
-//     ServerName must be overridden to the domain or hostname verification
-//     fails unconditionally and the probe reports a healthy server as down.
-//     A stale pre-ACME data/cert.pem must NOT be pinned in this mode either;
-//     the pin would mismatch the served ACME leaf forever.
+//   - acme: the served cert is CA-issued for the configured domain, so WebPKI
+//     verification works, but the probe dials 127.0.0.1, so ServerName must be
+//     overridden to the domain or hostname verification fails and a healthy
+//     server reads as down. A stale pre-ACME data/cert.pem must not be pinned
+//     here: it would mismatch the served ACME leaf forever.
 //   - self_signed / manual: the cert can never pass WebPKI (the generated one
-//     has no SANs and IsCA=false), so hostname/chain checks are replaced (not
-//     skipped) by pinning: the presented leaf must be byte-identical to the
+//     has no SANs and IsCA=false), so hostname/chain checks are replaced, not
+//     skipped, by pinning: the presented leaf must be byte-identical to the
 //     local cert file.
 //   - anything else with no readable local cert: plain WebPKI.
 func healthcheckTLSConfig(tlsMode, certFile, acmeDomain string) *tls.Config {
@@ -157,9 +155,9 @@ func healthcheckTLSConfig(tlsMode, certFile, acmeDomain string) *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		// Chain/hostname verification is replaced by the exact-match pin
-		// below, which is strictly stronger for a cert we hold on disk.
-		// VerifyConnection (not VerifyPeerCertificate) so the pin also runs
-		// on resumed sessions (gosec G123).
+		// below, strictly stronger for a cert held on disk. VerifyConnection
+		// (not VerifyPeerCertificate) so the pin also runs on resumed sessions
+		// (gosec G123).
 		InsecureSkipVerify: true, //nolint:gosec // G402: VerifyConnection below pins the exact local certificate
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			if len(cs.PeerCertificates) == 0 {
@@ -173,7 +171,7 @@ func healthcheckTLSConfig(tlsMode, certFile, acmeDomain string) *tls.Config {
 	}
 }
 
-// loadPinnedCert reads the first PEM certificate block from path, returning
+// loadPinnedCert reads the first PEM certificate block from path and returns
 // its DER bytes, or nil when unavailable.
 func loadPinnedCert(path string) []byte {
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the operator's own configured cert file
