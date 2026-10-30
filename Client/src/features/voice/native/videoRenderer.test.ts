@@ -251,33 +251,41 @@ describe("NativeVideoRenderer", () => {
     renderer.dispose();
   });
 
-  it("reopens the loopback socket after the host closes it (voice #13)", async () => {
-    const renderer = new NativeVideoRenderer("ws://x/remote/sid");
-    const first = FakeSocket.last;
-    first.emitClose();
-    await vi.waitFor(
-      () => {
-        expect(FakeSocket.instances).toHaveLength(2);
-      },
-      { timeout: 3000 },
-    );
-    expect(FakeSocket.last).not.toBe(first);
-    // The new socket draws again.
-    FakeSocket.last.deliver!({ data: message(4, 2) });
-    expect(gl.draws).toBe(1);
-    renderer.dispose();
+  it("reopens the loopback socket after the host closes it (voice #13)", () => {
+    vi.useFakeTimers();
+    try {
+      const renderer = new NativeVideoRenderer("ws://x/remote/sid");
+      const first = FakeSocket.last;
+      first.emitClose();
+      vi.advanceTimersByTime(999);
+      expect(FakeSocket.instances).toHaveLength(1);
+      vi.advanceTimersByTime(1);
+      expect(FakeSocket.instances).toHaveLength(2);
+      expect(FakeSocket.last).not.toBe(first);
+      // The new socket draws again.
+      FakeSocket.last.deliver!({ data: message(4, 2) });
+      expect(gl.draws).toBe(1);
+      renderer.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("hands a host close to its owner instead of reopening, until disposed", async () => {
-    const onClosed = vi.fn();
-    const renderer = new NativeVideoRenderer("ws://x/camera", onClosed);
-    FakeSocket.last.emitClose();
-    expect(onClosed).toHaveBeenCalledTimes(1);
-    renderer.dispose();
-    FakeSocket.last.emitClose();
-    await new Promise((r) => setTimeout(r, 1100));
-    expect(onClosed).toHaveBeenCalledTimes(1);
-    expect(FakeSocket.instances).toHaveLength(1);
+  it("hands a host close to its owner instead of reopening, until disposed", () => {
+    vi.useFakeTimers();
+    try {
+      const onClosed = vi.fn();
+      const renderer = new NativeVideoRenderer("ws://x/camera", onClosed);
+      FakeSocket.last.emitClose();
+      expect(onClosed).toHaveBeenCalledTimes(1);
+      renderer.dispose();
+      FakeSocket.last.emitClose();
+      vi.advanceTimersByTime(1100);
+      expect(onClosed).toHaveBeenCalledTimes(1);
+      expect(FakeSocket.instances).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sets the context up with its program, shaders and three bound textures", () => {
