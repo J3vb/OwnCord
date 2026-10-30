@@ -455,6 +455,34 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(toggle.classList.contains("on")).toBe(false);
   });
 
+  it("asks before switching servers by default, and turning it off is stored", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const row = Array.from(container.querySelectorAll(".setting-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Ask before switching servers",
+    );
+    const toggle = row?.querySelector(".toggle") as HTMLElement;
+    expect(toggle.classList.contains("on")).toBe(true);
+
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:confirmServerSwitch")).toBe("false");
+  });
+
+  it("shows the switch question as off after Don't ask again", () => {
+    localStorage.setItem("owncord:settings:confirmServerSwitch", "false");
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const row = Array.from(container.querySelectorAll(".setting-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Ask before switching servers",
+    );
+    const toggle = row?.querySelector(".toggle") as HTMLElement;
+    expect(toggle.classList.contains("on")).toBe(false);
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:confirmServerSwitch")).toBe("true");
+  });
+
   it("renders DevTools button in Debug section", () => {
     const section = buildAdvancedTab(ac.signal);
     container.appendChild(section);

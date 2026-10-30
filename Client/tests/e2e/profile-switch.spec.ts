@@ -5,6 +5,7 @@
  * rather than DOM timing.
  */
 import type { Page } from "@playwright/test";
+import { devices } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, MOCK_MESSAGES } from "./helpers";
 
@@ -80,6 +81,9 @@ test.describe("Profile switch", () => {
     await page
       .locator("[data-testid='server-rail-server'][data-host='other.example:8443']")
       .click();
+    const question = page.getByTestId("server-switch-dialog");
+    await expect(question).toContainText("Switch to Server B?");
+    await page.getByTestId("server-switch-confirm").click();
 
     // Back on the connect page with B selected and both profiles kept.
     await expect(page.locator(".connect-form, .login-form")).toBeVisible({ timeout: 5000 });
@@ -104,5 +108,38 @@ test.describe("Profile switch", () => {
     expect(log[connects[0]!]).toContain("localhost");
     expect(log[connects[1]!]).toContain("other.example");
     expect(log.slice(connects[0]! + 1, connects[1]!)).toContain("ws_disconnect");
+  });
+
+  test.describe("on a phone", () => {
+    const { defaultBrowserType: _pixelBrowser, ...pixel7 } = devices["Pixel 7"];
+    test.use(pixel7);
+
+    test("the switch list asks first; Cancel stays and Switch leaves", async ({ page }) => {
+      await login(page, A);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      const pickB = async () => {
+        await page.getByTestId("disconnect-btn").tap();
+        await page
+          .getByTestId("quick-switch-overlay")
+          .locator("[data-testid='server-item']", { hasText: "Server B" })
+          .tap();
+      };
+
+      await pickB();
+      const question = page.getByTestId("server-switch-dialog");
+      await expect(question).toContainText("Switch to Server B?");
+      await page.getByTestId("server-switch-cancel").tap();
+      await expect(question).toBeHidden();
+      await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
+
+      await pickB();
+      await page.getByTestId("server-switch-dont-ask").tap();
+      await page.getByTestId("server-switch-confirm").tap();
+      await expect(page.locator(".connect-form, .login-form")).toBeVisible({ timeout: 5000 });
+      await expect(page.locator("#host")).toHaveValue(B);
+      expect(
+        await page.evaluate(() => localStorage.getItem("owncord:settings:confirmServerSwitch")),
+      ).toBe("false");
+    });
   });
 });

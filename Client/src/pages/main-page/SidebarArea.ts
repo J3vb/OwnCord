@@ -67,6 +67,7 @@ import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { addServer, switchToServer } from "../../features/server-rail/switchServer";
+import { shouldConfirmServerSwitch } from "../../features/server-rail/switchConfirmPref";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import {
   channelsStore,
@@ -1394,9 +1395,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         quickSwitchInstance = createQuickSwitchOverlay({
           profiles,
           currentHost,
-          onSwitch: (host, _name) => {
+          onSwitch: (host, name) => {
             closeQuickSwitch();
-            switchToServer(host);
+            requestServerSwitch(host, name !== "" ? name : host);
           },
           onAddServer: () => {
             closeQuickSwitch();
@@ -1409,6 +1410,41 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         openingQuickSwitch = false;
       }
     })();
+  }
+
+  // The question loads on demand; this owner closes it with the page.
+  const switchConfirmOwner = new Disposable();
+  let confirmingSwitch = false;
+
+  function requestServerSwitch(host: string, name: string): void {
+    if (!shouldConfirmServerSwitch()) {
+      switchToServer(host);
+      return;
+    }
+    if (confirmingSwitch) return;
+    confirmingSwitch = true;
+    void import("../../features/server-rail/switchConfirmDialog")
+      .then(({ openServerSwitchConfirm }) => {
+        if (tornDown) {
+          confirmingSwitch = false;
+          return;
+        }
+        openServerSwitchConfirm({
+          name,
+          onConfirm: () => switchToServer(host),
+          onClose: () => {
+            confirmingSwitch = false;
+          },
+          signal: switchConfirmOwner.signal,
+        });
+        return;
+      })
+      .catch((err: unknown) => {
+        confirmingSwitch = false;
+        // Better a switch without the question than a button that does nothing.
+        log.warn("Server switch confirm failed to load", err);
+        if (!tornDown) switchToServer(host);
+      });
   }
 
   function closeQuickSwitch(): void {
@@ -1476,6 +1512,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   unsubscribers.push(() => {
     tornDown = true;
+    switchConfirmOwner.destroy();
     voiceWidget?.destroy?.();
     voiceWidget = null;
     closeQuickSwitch();
