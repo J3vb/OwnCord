@@ -63,6 +63,12 @@ vi.mock("@lib/ui/toast", () => ({
 vi.mock("@lib/net/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
+// A refused mark_unread carries an envelope id, so the voice handlers try a
+// video rollback through a lazy import of screenShare. Mocked so that import
+// resolves at once instead of loading the media stack after teardown.
+vi.mock("@lib/voice/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined),
+}));
 
 function ch(id: number, unread: number, mentions: number, pointer?: number): ReadyChannel {
   return {
