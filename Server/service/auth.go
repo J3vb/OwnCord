@@ -233,6 +233,9 @@ var (
 // authStore is what AuthService reads and writes. *db.DB satisfies it.
 type authStore interface {
 	ErasureStore
+	// Second-factor state: the durable backend behind the auth service's
+	// partial-auth, pending-enrolment and used-code stores, plus the recovery-code
+	// rows. Stdlib types only, because auth cannot import db.
 	auth.SecondFactorPersister
 	db.Auditor
 	sessionCreator

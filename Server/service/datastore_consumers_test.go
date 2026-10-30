@@ -20,42 +20,39 @@ var storeConsumersAllowed = map[string]bool{
 }
 
 // serviceStoreBaselines pins how many methods a standalone fake for each
-// service needs: the method count of the interface it takes, promoted
-// methods included. Exact pins, like the ratchets in datastore_ratchet_test.go:
-// a shrink lowers the number in the same change, and a growth is argued for in
+// service needs: the method count of the type of its st field, promoted methods
+// included. Exact pins, like the ratchets in datastore_ratchet_test.go: a
+// shrink lowers the number in the same change, and a growth is argued for in
 // review. Lower one when a service stops calling a method; never raise one to
 // fit a new feature without asking whether the call belongs in another service.
-var serviceStoreBaselines = map[string]struct {
-	typ  reflect.Type
-	want int
-}{
-	"AppealService":         {reflect.TypeFor[appealStore](), 11},
-	"AuthService":           {reflect.TypeFor[authStore](), 55},
-	"BlockService":          {reflect.TypeFor[blockStore](), 4},
-	"CallLogService":        {reflect.TypeFor[callLogServiceStore](), 13},
-	"ChannelService":        {reflect.TypeFor[channelStore](), 32},
-	"ConnWrites":            {reflect.TypeFor[connWritesStore](), 4},
-	"DMService":             {reflect.TypeFor[dmStore](), 23},
-	"GIFFavoriteService":    {reflect.TypeFor[gifFavoriteStore](), 3},
-	"InviteService":         {reflect.TypeFor[inviteStore](), 6},
-	"MessageRequestService": {reflect.TypeFor[messageRequestStore](), 7},
-	"MessageService":        {reflect.TypeFor[messageStore](), 54},
-	"ModerationService":     {reflect.TypeFor[moderationStore](), 24},
-	"NSFWService":           {reflect.TypeFor[nsfwStore](), 8},
-	"PermissionService":     {reflect.TypeFor[permissionStore](), 4},
-	"PushDispatcher":        {reflect.TypeFor[pushDispatchStore](), 11},
-	"PushService":           {reflect.TypeFor[pushStore](), 4},
-	"ReportService":         {reflect.TypeFor[reportStore](), 18},
-	"RoleService":           {reflect.TypeFor[roleStore](), 11},
-	"SessionService":        {reflect.TypeFor[sessionStore](), 9},
-	"SettingsService":       {reflect.TypeFor[settingsStore](), 9},
-	"SetupService":          {reflect.TypeFor[setupStore](), 9},
-	"ThreadService":         {reflect.TypeFor[threadServiceStore](), 7},
-	"TokenService":          {reflect.TypeFor[tokenStore](), 7},
-	"UploadService":         {reflect.TypeFor[uploadStore](), 15},
-	"UserService":           {reflect.TypeFor[userStore](), 23},
-	"VoiceService":          {reflect.TypeFor[voiceStore](), 18},
-	"WelcomeService":        {reflect.TypeFor[welcomeServiceStore](), 4},
+var serviceStoreBaselines = map[reflect.Type]int{
+	reflect.TypeFor[AppealService]():         11,
+	reflect.TypeFor[AuthService]():           55,
+	reflect.TypeFor[BlockService]():          4,
+	reflect.TypeFor[CallLogService]():        13,
+	reflect.TypeFor[ChannelService]():        32,
+	reflect.TypeFor[ConnWrites]():            4,
+	reflect.TypeFor[DMService]():             23,
+	reflect.TypeFor[GIFFavoriteService]():    3,
+	reflect.TypeFor[InviteService]():         6,
+	reflect.TypeFor[MessageRequestService](): 7,
+	reflect.TypeFor[MessageService]():        54,
+	reflect.TypeFor[ModerationService]():     24,
+	reflect.TypeFor[NSFWService]():           8,
+	reflect.TypeFor[PermissionService]():     4,
+	reflect.TypeFor[PushDispatcher]():        11,
+	reflect.TypeFor[PushService]():           4,
+	reflect.TypeFor[ReportService]():         18,
+	reflect.TypeFor[RoleService]():           11,
+	reflect.TypeFor[SessionService]():        9,
+	reflect.TypeFor[SettingsService]():       9,
+	reflect.TypeFor[SetupService]():          9,
+	reflect.TypeFor[ThreadService]():         7,
+	reflect.TypeFor[TokenService]():          7,
+	reflect.TypeFor[UploadService]():         15,
+	reflect.TypeFor[UserService]():           23,
+	reflect.TypeFor[VoiceService]():          18,
+	reflect.TypeFor[WelcomeService]():        4,
 }
 
 // findStoreConsumers returns every parameter, result, struct field and
@@ -93,11 +90,11 @@ func findStoreConsumers(sources map[string]string) ([]string, error) {
 						if spec.Name.Name == "Store" {
 							continue
 						}
-						if isStore(spec.Type) || consumes(spec.Type, isStore) {
+						if consumes(spec.Type, isStore) {
 							found["type "+spec.Name.Name] = true
 						}
 					case *ast.ValueSpec:
-						if spec.Type != nil && (isStore(spec.Type) || consumes(spec.Type, isStore)) {
+						if spec.Type != nil && consumes(spec.Type, isStore) {
 							found["var "+spec.Names[0].Name] = true
 						}
 					}
@@ -117,20 +114,58 @@ func findStoreConsumers(sources map[string]string) ([]string, error) {
 	return out, nil
 }
 
-// consumes reports whether n declares a field, parameter, result or variable
-// whose type is Store, at any depth (function literals and nested structs
-// included). A type assertion or conversion to Store is not a declaration and
-// does not count.
+// consumes reports whether n mentions this package's Store anywhere a type can
+// appear: a field, parameter, result or variable type at any depth ([]Store,
+// *Store, map[int]Store, Box[Store]), a type assertion or conversion to Store,
+// or a composite literal of it. Declared names and other packages' Store
+// (other.Store) do not count.
 func consumes(n ast.Node, isStore func(ast.Expr) bool) bool {
-	hit := false
+	names := map[*ast.Ident]bool{}
 	ast.Inspect(n, func(node ast.Node) bool {
 		switch x := node.(type) {
 		case *ast.Field:
-			if isStore(x.Type) {
-				hit = true
+			for _, id := range x.Names {
+				names[id] = true
 			}
 		case *ast.ValueSpec:
-			if x.Type != nil && isStore(x.Type) {
+			for _, id := range x.Names {
+				names[id] = true
+			}
+		case *ast.FuncDecl:
+			names[x.Name] = true
+		case *ast.TypeSpec:
+			names[x.Name] = true
+		case *ast.AssignStmt:
+			if x.Tok == token.DEFINE {
+				for _, l := range x.Lhs {
+					if id, ok := l.(*ast.Ident); ok {
+						names[id] = true
+					}
+				}
+			}
+		case *ast.KeyValueExpr:
+			if id, ok := x.Key.(*ast.Ident); ok {
+				names[id] = true
+			}
+		}
+		return true
+	})
+	hit := false
+	ast.Inspect(n, func(node ast.Node) bool {
+		if hit {
+			return false
+		}
+		switch x := node.(type) {
+		case *ast.SelectorExpr:
+			ast.Inspect(x.X, func(inner ast.Node) bool {
+				if id, ok := inner.(*ast.Ident); ok && !names[id] && isStore(id) {
+					hit = true
+				}
+				return !hit
+			})
+			return false
+		case *ast.Ident:
+			if !names[x] && isStore(x) {
 				hit = true
 			}
 		}
@@ -187,17 +222,22 @@ func TestStoreConsumers(t *testing.T) {
 }
 
 func TestServiceStoreSizes(t *testing.T) {
-	names := make([]string, 0, len(serviceStoreBaselines))
-	for name := range serviceStoreBaselines {
-		names = append(names, name)
+	services := make([]reflect.Type, 0, len(serviceStoreBaselines))
+	for svc := range serviceStoreBaselines {
+		services = append(services, svc)
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		b := serviceStoreBaselines[name]
-		got := b.typ.NumMethod()
-		t.Logf("%s: a fake needs %d methods (%s)", name, got, b.typ.Name())
-		if got != b.want {
-			t.Errorf("%s takes %s with %d methods, pinned at %d. If it shrank, set the pin to %d; if it grew, say why in review", name, b.typ.Name(), got, b.want, got)
+	sort.Slice(services, func(i, j int) bool { return services[i].Name() < services[j].Name() })
+	for _, svc := range services {
+		want := serviceStoreBaselines[svc]
+		f, ok := svc.FieldByName("st")
+		if !ok {
+			t.Errorf("%s has no st field; point its pin at the field that holds its store", svc.Name())
+			continue
+		}
+		got := f.Type.NumMethod()
+		t.Logf("%s: a fake needs %d methods (%s)", svc.Name(), got, f.Type.Name())
+		if got != want {
+			t.Errorf("%s takes %s with %d methods, pinned at %d. If it shrank, set the pin to %d; if it grew, say why in review", svc.Name(), f.Type.Name(), got, want, got)
 		}
 	}
 }
@@ -218,8 +258,14 @@ func TestFindStoreConsumers(t *testing.T) {
 		{"a function literal parameter", "package p\nfunc F() {\n\t_ = func(st Store) {}\n}\n", []string{"func F"}},
 		{"the Store declaration itself", "package p\ntype Store interface{ A() }\n", nil},
 		{"a narrow interface", "package p\ntype S struct {\n\tst blockStore\n}\nfunc F(st blockStore) {}\n", nil},
-		{"a type assertion is not a consumer", "package p\nfunc F(x any) {\n\t_, _ = x.(Store)\n}\n", nil},
+		{"a slice field", "package p\ntype S struct {\n\tst []Store\n}\n", []string{"type S"}},
+		{"a pointer parameter", "package p\nfunc F(st *Store) {}\n", []string{"func F"}},
+		{"a map parameter", "package p\nfunc F(m map[int]Store) {}\n", []string{"func F"}},
+		{"a generic argument", "package p\nfunc F(b Box[Store]) {}\n", []string{"func F"}},
+		{"a type assertion", "package p\nfunc F(x any) {\n\tst := x.(Store)\n\t_ = st\n}\n", []string{"func F"}},
+		{"a conversion", "package p\nfunc F(x blockStore) {\n\t_ = Store(nil)\n}\n", []string{"func F"}},
 		{"another package's Store is not ours", "package p\nfunc F(st other.Store) {}\n", nil},
+		{"a method named Store is not a consumer", "package p\nfunc F(v *atomic.Bool) {\n\tv.Store(true)\n}\n", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
