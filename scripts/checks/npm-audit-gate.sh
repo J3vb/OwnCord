@@ -99,7 +99,7 @@ npm error This command requires an existing lockfile."
 
 [ "${1:-}" = "--selftest" ] && selftest
 
-cd "$(dirname "$0")/../Client" || exit 1
+cd "$(dirname "$0")/../../Client" || exit 1
 
 for attempt in $(seq 1 "$ATTEMPTS"); do
   if out=$(npm audit --omit=dev --audit-level=high --json 2>&1); then
