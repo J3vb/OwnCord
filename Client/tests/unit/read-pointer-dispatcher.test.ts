@@ -56,18 +56,17 @@ vi.mock("@lib/voice/livekitSession", () => ({
   reconcileVideoFlags: vi.fn(),
   resendWatching: vi.fn(),
 }));
+// voice/wsHandlers loads screenShare lazily on some frames. Left real, that
+// load can finish after this file's environment is torn down.
+vi.mock("@lib/voice/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
+}));
 const mockShowToast = vi.fn();
 vi.mock("@lib/ui/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
 vi.mock("@lib/net/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
-}));
-// A refused mark_unread carries an envelope id, so the voice handlers try a
-// video rollback through a lazy import of screenShare. Mocked so that import
-// resolves at once instead of loading the media stack after teardown.
-vi.mock("@lib/voice/screenShare", () => ({
-  rollbackPendingVideo: vi.fn(() => undefined),
 }));
 
 function ch(id: number, unread: number, mentions: number, pointer?: number): ReadyChannel {
