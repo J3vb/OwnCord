@@ -9,6 +9,7 @@ import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import org.json.JSONObject
+import java.io.File
 
 object SpikeState {
     @Volatile var running = false
@@ -58,5 +59,25 @@ class SpikeBridge(private val activity: Activity) {
         o.put("device", "${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
         o.put("webview", WebView.getCurrentWebViewPackage()?.versionName ?: "?")
         return o.toString()
+    }
+
+    @JavascriptInterface
+    fun diag(): String {
+        val root = activity.filesDir.parentFile ?: activity.filesDir
+        val out = StringBuilder("data dir: ${root.path}\n")
+        val logs = mutableListOf<File>()
+        root.walkTopDown().maxDepth(5).forEach { f ->
+            if (f.isFile && !f.path.contains("/cache/") && !f.path.contains("/code_cache/") && !f.path.contains("/app_webview/")) {
+                out.append("file ${f.path.removePrefix(root.path)} (${f.length()} B)\n")
+                if (f.name.endsWith(".log")) logs.add(f)
+            }
+        }
+        val pattern = Regex("(?i)secret|credential|keyring|fallback|json_store|remember|auto.?login|error")
+        for (f in logs) {
+            val lines = f.readLines().filter { pattern.containsMatchIn(it) }.takeLast(60)
+            out.append("--- ${f.name}: ${lines.size} matching lines\n")
+            lines.forEach { out.append(it.take(400)).append("\n") }
+        }
+        return out.toString()
     }
 }

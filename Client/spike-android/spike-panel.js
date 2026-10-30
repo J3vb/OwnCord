@@ -110,6 +110,11 @@
     }),
   );
   panel.appendChild(
+    btn("5. Saved sign-in check", function () {
+      note("diag:\n" + S.diag());
+    }),
+  );
+  panel.appendChild(
     btn("Copy results", function () {
       var t = report();
       (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(
