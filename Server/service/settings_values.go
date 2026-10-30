@@ -98,7 +98,12 @@ func normalizeValueSetting(key, value string) (normalized string, ok bool, err e
 	return normalized, true, err
 }
 
-func getBooleanSetting(ctx context.Context, st Store, key string, defaultValue bool) (bool, error) {
+// settingGetter reads one server setting.
+type settingGetter interface {
+	GetSetting(ctx context.Context, key string) (string, error)
+}
+
+func getBooleanSetting(ctx context.Context, st settingGetter, key string, defaultValue bool) (bool, error) {
 	value, err := st.GetSetting(ctx, key)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {

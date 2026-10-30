@@ -635,7 +635,7 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("video codec select offers VP8, H.264 and Auto, defaults to VP8 and saves the choice", () => {
+  it("video codec select offers VP8, H.264 and Auto, defaults to Auto and saves the choice", () => {
     stubNavigator();
     const ac = new AbortController();
     const el = createVoiceAudioTab(ac.signal).build();
@@ -643,11 +643,12 @@ describe("VoiceAudioTab UI structure", () => {
 
     const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
     expect([...codecSelect.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
-    expect(codecSelect.value).toBe("vp8");
-    codecSelect.value = "auto";
+    expect(codecSelect.value).toBe("auto");
+    expect(localStorage.getItem("owncord:settings:videoCodec")).toBeNull();
+    codecSelect.value = "vp8";
     codecSelect.dispatchEvent(new Event("change"));
 
-    expect(localStorage.getItem("owncord:settings:videoCodec")).toBe('"auto"');
+    expect(localStorage.getItem("owncord:settings:videoCodec")).toBe('"vp8"');
     ac.abort();
   });
 
@@ -665,7 +666,7 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("video codec select shows the saved choice, and VP8 for an unknown one", () => {
+  it("video codec select shows the saved choice, and Auto for an unknown one", () => {
     stubNavigator();
     localStorage.setItem("owncord:settings:videoCodec", '"h264"');
     const ac = new AbortController();
@@ -674,10 +675,16 @@ describe("VoiceAudioTab UI structure", () => {
       "h264",
     );
 
-    localStorage.setItem("owncord:settings:videoCodec", '"av1"');
+    localStorage.setItem("owncord:settings:videoCodec", '"vp8"');
     el = createVoiceAudioTab(ac.signal).build();
     expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
       "vp8",
+    );
+
+    localStorage.setItem("owncord:settings:videoCodec", '"av1"');
+    el = createVoiceAudioTab(ac.signal).build();
+    expect((el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement).value).toBe(
+      "auto",
     );
     ac.abort();
   });

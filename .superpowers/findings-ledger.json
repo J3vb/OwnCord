@@ -1,5 +1,5 @@
 {
-  "nextId": 529,
+  "nextId": 533,
   "findings": [
     {
       "id": "OC-0001",
@@ -12221,6 +12221,92 @@
       "found": "2026-10-30",
       "hunt": "bug-hunt-2026-10-30",
       "lens": "tauri-rust",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0529",
+      "title": "Manual backup and restore in the admin panel were cut off after 30 seconds on a big database",
+      "file": "Server/admin/handlers_backup.go",
+      "line": 26,
+      "severity": "medium",
+      "why": "The server's 30 second write timeout applied to POST /backup and the restore route, which write nothing until the copy and verification finish. The panel showed an error although the work completed, and a retry of the backup made a second full copy. The download link already extends its deadline.",
+      "repro": "Back up or restore a database whose copy takes longer than 30 seconds; the panel reports a failure.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/backup_deadline_test.go (TestManualBackup_OutlivesWriteTimeout, TestRestore_OutlivesWriteTimeout)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "error-paths",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0530",
+      "title": "A database error while deciding an appeal was reported as already decided or withdrawn",
+      "file": "Server/service/appeal.go",
+      "line": 520,
+      "severity": "low",
+      "why": "Decide mapped any non-conflict transaction error to the 409 conflict outcome, so a moderator saw 'already decided' for a database failure.",
+      "repro": "Fail the decide transaction; the response is 409 instead of a server error.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/appeal_test.go (TestAppeal_DecideDatabaseErrorIsInternal, TestAppeal_DecideReversalFailureStaysAConflict)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "error-paths",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0531",
+      "title": "Out-of-range event_persistence values in config.yaml or the environment were not clamped",
+      "file": "Server/config/bounds.go",
+      "line": 33,
+      "severity": "low",
+      "why": "The admin panel validates the event_persistence keys, but values from the file or environment skipped that range check, so a huge batch_size, replay_ring_size or retention_hours reached the persister and could crash boot.",
+      "repro": "Set event_persistence.batch_size to 9223372036854775807 in config.yaml and start the server.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/config/config_test.go (TestLoadEventPersistenceBoundsAreClamped)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "integer-bounds",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0532",
+      "title": "Forum and thread list counted messages for every thread before taking the page",
+      "file": "Server/db/queries/sqlite/threads.sql",
+      "line": 54,
+      "severity": "medium",
+      "why": "The activity-ordered thread list worked out each thread's message count and last message time for every thread of the parent, then sorted and took the page, so each page cost the size of the forum instead of the page.",
+      "repro": "List a forum or channel with thousands of threads by recent activity: every page, including the first, takes as long as counting all their messages.",
+      "evidence": "3,000 threads with 300,000 messages: 0.40 s for a page against 0.007 s when ordered without the counts (about 55x). Same shape measured here with 400 threads and 16,000 messages: a 10-row page took 16.5 ms against 21.8 ms for the whole forum.",
+      "suggestedFix": "Pick the page of thread ids first with the same filter, order and limit, then compute the counts for those rows only.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/thread_list_cost_test.go",
+        "revertProof": "fail (a 10-row page took 16.5 ms against 21.8 ms for all 400 threads; after the change 1.1 ms against 18 ms)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "server-api",
       "finder": "claude",
       "fixedDate": "2026-10-30"
     }

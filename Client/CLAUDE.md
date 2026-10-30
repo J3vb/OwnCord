@@ -61,6 +61,13 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   check that `NODE_OPTIONS` block at the top of `vitest.config.ts` before your
   change (`poolOptions.forks.execArgv` does not work — vitest replaces it). CI
   pins Node 26.
+- The unit suite runs in the `vmForks` pool: each file gets its own jsdom VM
+  context inside reused worker processes. A file that needs Node's realm
+  (its own JSDOM, Playwright, `window.location` redefined, `instanceof`
+  against a value from Node) goes on the shrink-only `NODE_PROCESS_FILES`
+  list in `vitest.config.ts`, which runs as the `desktop-node` project on
+  `forks`. Each test has a 2 s budget (`testTimeout`): wait on fake timers,
+  never on the real clock.
 - `src/lib/dispatcher.ts` is the single WS-event entry point **into the
   stores**: server events reach domain stores only through a `ws.on(...)`
   subscription registered there. The handler bodies live in

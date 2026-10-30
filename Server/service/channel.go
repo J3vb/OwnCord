@@ -13,10 +13,45 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
+// channelStore is what ChannelService reads and writes. *db.DB satisfies it.
+type channelStore interface {
+	db.Auditor
+	permissions.DB
+	readAdmitStore
+	subjectStore
+	// MarkChannelReadAtLatest is the mark-read that computes its own watermark. The
+	// send path's read-state advance happens inside CreateMessageWithMentions /
+	// CreateMessageDelivery.
+	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
+	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
+	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
+	ListChannels(ctx context.Context) ([]db.Channel, error)
+	// Override CRUD for the channel permission layer: the listings the matrix editor
+	// renders and the gated writes/clears.
+	ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]db.ChannelRoleOverride, error)
+	ListChannelUserOverrides(ctx context.Context, channelID int64) ([]db.ChannelUserOverride, error)
+	UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error
+	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
+	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
+	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	UpdateUserPresence(ctx context.Context, userID int64, status string, customStatus, expiresAt *string) error
+	UpdateUserStatus(ctx context.Context, id int64, status string) error
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
+	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
+	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
+	AdminCreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
+	AdminUpdateChannel(ctx context.Context, id int64, u db.ChannelUpdate) error
+	AdminDeleteChannel(ctx context.Context, id int64) error
+}
+
 // ChannelService handles channel listing, permission-filtered access, typing,
 // presence and read state.
 type ChannelService struct {
-	st    Store
+	st    channelStore
 	afk   AFKStore
 	cats  CategoryStore
 	cperm CategoryPermStore
@@ -31,7 +66,7 @@ type ChannelService struct {
 }
 
 // NewChannelService creates a ChannelService.
-func NewChannelService(st Store, perms *PermissionService) *ChannelService {
+func NewChannelService(st channelStore, perms *PermissionService) *ChannelService {
 	// AFK lives on a slice interface because Store is ratcheted
 	// (datastore_ratchet_test.go); a Store lacking it makes SetAFKChannel answer
 	// ErrInternal.
@@ -334,12 +369,18 @@ func (s *ChannelService) markFocusedRead(ctx context.Context, userID, channelID 
 	}
 }
 
+// readAdmitStore is what admitReadState and admitReadPointer read.
+type readAdmitStore interface {
+	subjectStore
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+}
+
 // admitReadState is the gate every read-state operation shares (channel_focus,
 // mark_read, mark_unread): the channel must exist and the caller must pass
 // permissions.CanAdmitSession (visibility, the predicate behind
 // ListVisibleChannels, ready and replay), so a socket holding an id it can no
 // longer see, or an archived channel, cannot resubscribe or move read state.
-func admitReadState(ctx context.Context, st Store, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
+func admitReadState(ctx context.Context, st readAdmitStore, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
 	ch, err := st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)

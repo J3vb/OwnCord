@@ -62,8 +62,14 @@ describe("MessageInput unsent attachments (2A-3)", () => {
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     expect(chips(container)[0]!.classList.contains("unsent")).toBe(false);
 
-    await new Promise((r) => setTimeout(r, 600));
-    send(container);
+    // Step the clock past the double-click send guard instead of waiting it out.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.advanceTimersByTime(600);
+      send(container);
+    } finally {
+      vi.useRealTimers();
+    }
     expect(opts.onSend).toHaveBeenCalledWith(
       "",
       null,

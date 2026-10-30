@@ -145,7 +145,12 @@ describe("gpuRenderer", () => {
 });
 
 describe("getVideoCodecPref", () => {
-  it("defaults to VP8", () => {
+  it("defaults to Auto", () => {
+    expect(getVideoCodecPref()).toBe("auto");
+  });
+
+  it("keeps a saved VP8", () => {
+    savePref("vp8");
     expect(getVideoCodecPref()).toBe("vp8");
   });
 
@@ -161,9 +166,9 @@ describe("getVideoCodecPref", () => {
     expect(getVideoCodecPref()).toBe("vp9");
   });
 
-  it("falls back to VP8 for an unknown saved value", () => {
+  it("falls back to Auto for an unknown saved value", () => {
     savePref("av1");
-    expect(getVideoCodecPref()).toBe("vp8");
+    expect(getVideoCodecPref()).toBe("auto");
   });
 });
 
@@ -510,7 +515,8 @@ describe("h264GpuPublish", () => {
 });
 
 describe("resolveVideoCodec", () => {
-  it("publishes VP8 by default without probing", async () => {
+  it("publishes a saved VP8 without probing", async () => {
+    savePref("vp8");
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
     expect(encodingInfo).not.toHaveBeenCalled();
   });
@@ -567,6 +573,30 @@ describe("resolveVideoCodec", () => {
       encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
       await expect(resolveVideoCodec(track(1920, 1080), 60, 8_000_000)).resolves.toBe("vp8");
       expect(encodingInfo).toHaveBeenCalled();
+    });
+  });
+
+  describe("Auto in the Windows app", () => {
+    beforeEach(() => isWindowsDesktop.mockReturnValue(true));
+
+    it("publishes GPU H.264 without probing on a non-Intel GPU", async () => {
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 30, 3_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+
+    it("keeps VP8 on Intel graphics", async () => {
+      vi.restoreAllMocks();
+      stubGpu(INTEL);
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 30, 3_000_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps VP8 on a software renderer", async () => {
+      vi.restoreAllMocks();
+      stubGpu("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)");
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 30, 3_000_000)).resolves.toBe("vp8");
     });
   });
 
@@ -645,6 +675,8 @@ describe("resolveVideoCodec", () => {
   });
 
   describe("at 120 fps", () => {
+    beforeEach(() => savePref("vp8"));
+
     it("uses Auto's hardware rule when the saved choice is VP8", async () => {
       encodingInfo.mockResolvedValue(HARDWARE);
       await expect(resolveVideoCodec(track(1920, 1080), 120, 12_000_000)).resolves.toBe("h264");
@@ -779,6 +811,7 @@ describe("codec choice details", () => {
     isWindowsDesktop.mockReturnValue(true);
     encodingInfo.mockResolvedValue(HARDWARE);
 
+    savePref("vp8");
     await expect(resolveVideoCodec(track(), 30, 1_700_000)).resolves.toBe("vp8");
 
     savePref("vp9");

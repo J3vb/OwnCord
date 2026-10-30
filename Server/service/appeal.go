@@ -13,13 +13,40 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
+// appealStore is what AppealService reads and writes. *db.DB satisfies it.
+type appealStore interface {
+	db.Auditor
+	// GetModerationAction backs appeal submission and decision, which need the
+	// action's kind, target and actor.
+	GetModerationAction(ctx context.Context, id int64) (*db.ModerationAction, error)
+	// FindAppealForAction is the dedupe FAST PATH; InsertAppeal's UNIQUE(action_id)
+	// violation enforces "one appeal per action, ever" under concurrency.
+	FindAppealForAction(ctx context.Context, actionID int64) (int64, error)
+	InsertAppeal(ctx context.Context, publicID string, actionID, appellantID int64, body string) (int64, error)
+	GetAppealByPublicID(ctx context.Context, publicID string) (*db.Appeal, error)
+	ListAppealsMine(ctx context.Context, appellantID int64) ([]db.AppealSummary, error)
+	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
+	// AssignAppealTx is Assign's plain path in its own transaction with a fresh
+	// authority re-check and, when checkSelfReview is true, the deciding-moderator
+	// eligibility test (see db.AssignAppealTx).
+	AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64, checkSelfReview bool, appellantID, permBit, adminBit int64, checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
+	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64, checkSelfReviewNeeded bool, appellantID, permBit, adminBit int64, checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
+	// DecideAppealTx runs the fresh authority re-check, stale/terminal row rejection,
+	// self-review test, the guarded decide UPDATE (on the OBSERVED state/assignee)
+	// and, for an overturn, the reversal in one transaction (see db.DecideAppealTx).
+	// reversalApplied tells the caller whether to write the reversal's audit row,
+	// best-effort, AFTER the commit.
+	DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string, checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction, checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (result db.AppealWriteOutcome, soleModeratorUsed, reversalApplied bool, err error)
+	WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error)
+}
+
 // AppealService is the rate-limited appeal against a moderation action: submission,
 // the appellant's status view, withdrawal, and the queue's assignment and decision
 // (notably the deciding-moderator self-review rule). Appeal ids on its methods are
 // the opaque public id; the sequential internal id never reaches a response, route
 // parameter or mod_queue frame, for the same reason reports adopted one.
 type AppealService struct {
-	st    Store
+	st    appealStore
 	perms *PermissionService
 	// moderation serves requireOverturnAuthority (outrank check and, for a ban,
 	// BAN_MEMBERS) and FinalizeTimeoutLift. The overturn effects themselves run at
@@ -104,7 +131,7 @@ type AppealQueueBroadcaster interface {
 }
 
 // NewAppealService creates an AppealService.
-func NewAppealService(st Store, perms *PermissionService, moderation *ModerationService, limiter *auth.RateLimiter) *AppealService {
+func NewAppealService(st appealStore, perms *PermissionService, moderation *ModerationService, limiter *auth.RateLimiter) *AppealService {
 	return &AppealService{st: st, perms: perms, moderation: moderation, limiter: limiter, locks: newAppealLocker()}
 }
 
@@ -523,6 +550,11 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 		db.AppealedAction{ID: action.ID, Kind: action.Kind, TargetID: action.TargetID}, s.checkModeratorAuthority)
 	if err != nil {
 		slog.Error("appeal decide: transaction error", "appeal_id", appeal.ID, "action_id", action.ID, "err", err)
+		// A failed reversal has its own conflict outcome below; any other error
+		// is a database failure, not a lost race.
+		if result != db.AppealWriteReversalFailed {
+			return fmt.Errorf("%w: %w", ErrInternal, err)
+		}
 	}
 	switch result {
 	case db.AppealWriteOK:
@@ -533,7 +565,7 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	case db.AppealWriteForbidden:
 		// The decider's own bit was revoked, or a ban landed, after requireModerate.
 		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
-	default: // db.AppealWriteConflict, including the plain Go error case above.
+	default: // db.AppealWriteConflict: the observed row changed or was already decided.
 		return fmt.Errorf("%w: appeal already decided or withdrawn", ErrConflict)
 	}
 	if appealPostWriteHookForTest != nil {

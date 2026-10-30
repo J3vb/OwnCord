@@ -12,6 +12,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
+// roleStore is what RoleService reads and writes. *db.DB satisfies it.
+type roleStore interface {
+	db.Auditor
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	ListRoles(ctx context.Context) ([]*db.Role, error)
+	GetRoleByName(ctx context.Context, name string) (*db.Role, error)
+	GetDefaultRole(ctx context.Context) (*db.Role, error)
+	CreateRole(ctx context.Context, name string, color *string, perms int64, position int, hoist, mentionable bool) (*db.Role, error)
+	UpdateRole(ctx context.Context, id int64, name string, color *string, perms int64, position int, hoist, mentionable bool) ([]int64, error)
+	SetRolePositions(ctx context.Context, positions map[int64]int) ([]int64, error)
+	DeleteRoleReassigning(ctx context.Context, roleID, fallbackRoleID int64) ([]int64, error)
+	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
+	CountRoleMembers(ctx context.Context) (map[int64]int, error)
+}
+
 // RoleService owns create/edit/delete/reorder of roles, the only writer of the
 // roles table outside migrations. Every mutation is checked against the ACTOR's
 // role position, not a bit alone: MANAGE_ROLES says "may manage roles", the
@@ -19,7 +34,7 @@ import (
 // them or grant themselves ADMINISTRATOR through a role they create (the hole
 // ChangeUserRole closed for assignment).
 type RoleService struct {
-	st    Store
+	st    roleStore
 	perms *PermissionService
 	// notifier receives each committed mutation's fan-out; nil is a no-op. Always
 	// called outside mu.
@@ -31,7 +46,7 @@ type RoleService struct {
 }
 
 // NewRoleService creates a RoleService.
-func NewRoleService(st Store, perms *PermissionService) *RoleService {
+func NewRoleService(st roleStore, perms *PermissionService) *RoleService {
 	return &RoleService{st: st, perms: perms}
 }
 

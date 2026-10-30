@@ -66,11 +66,11 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 		{
 			name: "invite revoked",
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
-				code, err := svc.st.CreateInvite(ctx, owner, 1, nil)
+				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 1, nil)
 				if err != nil {
 					t.Fatalf("CreateInvite: %v", err)
 				}
-				if err := svc.st.RevokeInvite(ctx, code); err != nil {
+				if err := svc.st.(*db.DB).RevokeInvite(ctx, code); err != nil {
 					t.Fatalf("RevokeInvite: %v", err)
 				}
 				return code
@@ -80,7 +80,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 		{
 			name: "invite exhausted",
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
-				code, err := svc.st.CreateInvite(ctx, owner, 1, nil)
+				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 1, nil)
 				if err != nil {
 					t.Fatalf("CreateInvite: %v", err)
 				}
@@ -97,7 +97,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 			name: "invite expired",
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
 				past := time.Now().Add(-time.Hour)
-				code, err := svc.st.CreateInvite(ctx, owner, 0, &past)
+				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 0, &past)
 				if err != nil {
 					t.Fatalf("CreateInvite: %v", err)
 				}
@@ -108,7 +108,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 		{
 			name: "username taken",
 			setup: func(t *testing.T, svc *AuthService, owner int64) string {
-				code, err := svc.st.CreateInvite(ctx, owner, 0, nil) // unlimited
+				code, err := svc.st.(*db.DB).CreateInvite(ctx, owner, 0, nil) // unlimited
 				if err != nil {
 					t.Fatalf("CreateInvite: %v", err)
 				}
@@ -126,7 +126,7 @@ func TestRegister_LogsTheRefusalCause(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, logs := newLoggingRegistrationService(ctx, t, RegistrationInvite)
-			owner, err := svc.st.CreateUser(ctx, "owner", "hash", 1)
+			owner, err := svc.st.(*db.DB).CreateUser(ctx, "owner", "hash", 1)
 			if err != nil {
 				t.Fatalf("CreateUser: %v", err)
 			}
@@ -175,7 +175,7 @@ func (failingInviteReadStore) GetInvite(context.Context, string) (*db.Invite, er
 func TestRegister_InviteReadBackFaultIsItsOwnCause(t *testing.T) {
 	ctx := context.Background()
 	svc, logs := newLoggingRegistrationService(ctx, t, RegistrationInvite)
-	svc = NewAuthService(failingInviteReadStore{Store: svc.st}, auth.NewRateLimiter(), make([]byte, 32), nil)
+	svc = NewAuthService(failingInviteReadStore{Store: svc.st.(Store)}, auth.NewRateLimiter(), make([]byte, 32), nil)
 
 	logs.Reset()
 	_, err := svc.Register(ctx, RegisterInput{

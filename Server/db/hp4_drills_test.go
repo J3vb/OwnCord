@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/dbtime"
-	"github.com/J3vb/OwnCord/Server/internal/alphasnap"
 )
 
 // HP-4 baseline drills (docs/architecture/data-lifecycle.md, "Drill
@@ -23,16 +22,14 @@ import (
 //
 //	go test -count=1 -v -run 'TestHP4' ./db/
 //
-// The tracked snapshot is never opened: alphasnap.Copy hands each drill a
-// byte copy in a directory the test owns.
+// The tracked snapshot is never opened: each drill gets a byte copy, already
+// migrated, in a directory the test owns.
 
-// drillCopy is a migrated private copy of the alpha snapshot and its path.
+// drillCopy is a migrated private copy of the alpha snapshot and its path. The
+// copy starts from the snapshot migrated once per test binary.
 func drillCopy(t *testing.T) (*DB, string) {
 	t.Helper()
-	path, err := alphasnap.Copy(t.TempDir())
-	if err != nil {
-		t.Fatalf("alphasnap.Copy: %v", err)
-	}
+	path := writeMigratedAlphaCopy(t, t.TempDir())
 	database := openDrillDB(t, path)
 	if err := Migrate(database); err != nil {
 		t.Fatalf("Migrate: %v", err)
