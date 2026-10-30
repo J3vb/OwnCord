@@ -151,6 +151,7 @@ function turnStoragePage(delta){
 }
 /* The selection survives paging and filters, so files from several pages can
    go in one delete; the server takes 100 at a time. */
+/** @this {HTMLInputElement} @param {string} id */
 function toggleStorageFile(id){
   const s=state.storage;const it=s.rows[id];
   if(this.checked){

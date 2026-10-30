@@ -213,12 +213,12 @@ function openUploadLimit(uid,uname){
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveUploadLimit" data-args="'+actArgs(uid)+'">Save</button></div>');
 }
 async function saveUploadLimit(uid){
-  const picked=document.querySelector('input[name="uploadLimitMode"]:checked');
+  const picked=/** @type {HTMLInputElement|null} */(document.querySelector('input[name="uploadLimitMode"]:checked'));
   const mode=picked?picked.value:'default';
   let quota=null;
   if(mode==='none')quota=0;
   else if(mode==='custom'){
-    quota=parseInt(document.getElementById('uploadLimitMB').value,10);
+    quota=parseInt(/** @type {HTMLInputElement} */(document.getElementById('uploadLimitMB')).value,10);
     if(!(quota>=1&&quota<=10000000)){showToast('Enter a limit between 1 and 10000000 MB','error');return}
   }
   try{
