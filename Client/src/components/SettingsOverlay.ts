@@ -41,6 +41,9 @@ import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
 
 const log = createLogger("SettingsOverlay");
 
+/** Matches the phone rules in settings.css: the list and a section take turns. */
+const PHONE_QUERY = "(max-width: 600px)";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -216,6 +219,9 @@ export function createSettingsOverlay(
    * registrations short of `destroy()`.
    */
   let renderOwner: Disposable | null = null;
+  /** On a phone the panel shows either the section list or one open section. */
+  let sectionOpen = false;
+  const phone = typeof window.matchMedia === "function" ? window.matchMedia(PHONE_QUERY) : null;
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, disposable.signal);
@@ -393,6 +399,26 @@ export function createSettingsOverlay(
     renderActiveTab();
   }
 
+  /** Phone only: swap between the section list and the open section. */
+  function setSectionOpen(on: boolean): void {
+    sectionOpen = on;
+    panel?.classList.toggle("settings-panel--section", on);
+  }
+
+  /** A tab picked by tap or Enter: on a phone that also opens its section. */
+  function openSection(tab: TabName): void {
+    setActiveTab(tab);
+    if (activeTab !== tab) return;
+    setSectionOpen(true);
+    if (phone?.matches === true) contentArea?.scrollTo?.({ top: 0 });
+  }
+
+  /** Phone Back: from a section to the list, focus on the section it left. */
+  function backToList(): void {
+    setSectionOpen(false);
+    tabButtons.get(activeTab)?.focus();
+  }
+
   /** Another surface asked for a tab (a Q4 notice links to Safety, the server
    *  menu to Notifications). A tab that is not shown here is ignored. */
   function applyRequestedTab(): void {
@@ -402,11 +428,14 @@ export function createSettingsOverlay(
       clearSearch();
       setActiveTab(requested);
     }
+    if (requested !== null && requested === activeTab) setSectionOpen(true);
   }
 
   function show(): void {
     const wasOpen = root?.classList.contains("open") ?? false;
     root?.classList.add("open");
+    // A phone opens on the section list unless another surface asked for a tab.
+    if (!wasOpen) setSectionOpen(false);
     applyRequestedTab();
     // Closing tore down the live parts of the active tab (mic meter, camera
     // preview, log listener). Rebuild it so a reopened panel shows live state
@@ -535,6 +564,7 @@ export function createSettingsOverlay(
           e.preventDefault();
           if (e.key === "Enter" && query === "") return;
           enterTabs(e.key === "ArrowUp" ? "last" : "first");
+          if (e.key === "Enter") setSectionOpen(true);
         }
       },
       { signal: disposable.signal },
@@ -548,8 +578,16 @@ export function createSettingsOverlay(
       { signal: disposable.signal },
     );
     appendChildren(searchWrap, searchBox, searchClear);
+    // The list's own heading, shown only on a phone where the list is a page;
+    // CSS lifts it above the search box, which stays first in the tab order.
+    const listTitle = createElement(
+      "h2",
+      { class: "settings-list-title", "aria-hidden": "true" },
+      settingsText("shell.title"),
+    );
     sidebar.appendChild(searchWrap);
     sidebar.appendChild(searchEmpty);
+    sidebar.appendChild(listTitle);
 
     // User profile section at top of sidebar
     const user = authStore.getState().user;
@@ -582,7 +620,7 @@ export function createSettingsOverlay(
         "click",
         () => {
           clearSearch();
-          setActiveTab(ACCOUNT);
+          openSection(ACCOUNT);
         },
         { signal: disposable.signal },
       );
@@ -624,7 +662,7 @@ export function createSettingsOverlay(
       });
       accountBtn.prepend(createIcon(TAB_ICONS[ACCOUNT], 18));
       accountBtn.appendChild(document.createTextNode(settingsText("tabs.account")));
-      accountBtn.addEventListener("click", () => setActiveTab(ACCOUNT), {
+      accountBtn.addEventListener("click", () => openSection(ACCOUNT), {
         signal: disposable.signal,
       });
       tabButtons.set(ACCOUNT, accountBtn);
@@ -640,7 +678,7 @@ export function createSettingsOverlay(
         });
         safetyBtn.prepend(createIcon(TAB_ICONS[SAFETY], 18));
         safetyBtn.appendChild(document.createTextNode(tabLabel(SAFETY)));
-        safetyBtn.addEventListener("click", () => setActiveTab(SAFETY), {
+        safetyBtn.addEventListener("click", () => openSection(SAFETY), {
           signal: disposable.signal,
         });
         tabButtons.set(SAFETY, safetyBtn);
@@ -680,7 +718,7 @@ export function createSettingsOverlay(
           else btn.appendChild(dot);
         });
       }
-      btn.addEventListener("click", () => setActiveTab(name), { signal: disposable.signal });
+      btn.addEventListener("click", () => openSection(name), { signal: disposable.signal });
       tabButtons.set(name, btn);
       sidebar.appendChild(btn);
     }
@@ -746,6 +784,15 @@ export function createSettingsOverlay(
     );
     appendChildren(closeWrap, closeBtn, escLabel);
 
+    const backBtn = createElement("button", {
+      class: "settings-back-btn",
+      type: "button",
+      "aria-label": settingsText("shell.back"),
+      "data-testid": "settings-back",
+    });
+    backBtn.appendChild(createIcon("chevron-left", 22));
+    backBtn.addEventListener("click", backToList, { signal: disposable.signal });
+
     // Escape key
     document.addEventListener(
       "keydown",
@@ -757,7 +804,9 @@ export function createSettingsOverlay(
           closeLogoutPrompt === null &&
           root?.classList.contains("open")
         ) {
-          requestClose();
+          // On a phone, Back leaves the open section before it closes Settings.
+          if (sectionOpen && phone?.matches === true) backToList();
+          else requestClose();
         } else if (
           closeLogoutPrompt === null &&
           root?.classList.contains("open") === true &&
@@ -781,7 +830,7 @@ export function createSettingsOverlay(
     // Arming the trap while hidden is safe: Tab can't land inside a
     // display:none panel, so the handler only fires while the overlay is open.
     trapFocus(panel, disposable.signal);
-    appendChildren(panel, sidebar, contentArea, closeWrap);
+    appendChildren(panel, sidebar, contentArea, closeWrap, backBtn);
 
     // Click backdrop (outside panel) to close
     closeOnBackdropClick(root, () => requestClose(), disposable.signal);

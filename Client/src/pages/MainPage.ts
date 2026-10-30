@@ -2004,6 +2004,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           void import("../features/voice/cameraMenu")
             .then((m) => m.showCameraMenu(anchor, signal))
             .catch((err: unknown) => log.warn("Camera menu failed to open", err)),
+        cameraFlip: {
+          available: () =>
+            import("../features/voice/cameraFlip").then((m) => m.cameraFlipAvailable()),
+          flip: () => import("../features/voice/cameraFlip").then((m) => m.flipCamera()),
+        },
         onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
       },
       getStreamStats: (tileId) =>

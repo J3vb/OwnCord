@@ -33,3 +33,18 @@ export function isWindowsDesktop(): boolean {
   if (typeof navigator === "undefined" || !("__TAURI_INTERNALS__" in globalThis)) return false;
   return /\bWindows\b/.test(navigator.userAgent);
 }
+
+/** True in the Tauri app on Android, whose WebView has no screen capture. */
+export function isAndroidApp(): boolean {
+  if (typeof navigator === "undefined" || !("__TAURI_INTERNALS__" in globalThis)) return false;
+  return /Android/.test(navigator.userAgent);
+}
+
+/** True where this build can start a screen share. The desktop app always
+ *  can (Linux through the native backend); a browser or the Android app only
+ *  when its engine has `getDisplayMedia`, which phones lack. Watching a share
+ *  needs none of this. */
+export function canPublishScreen(): boolean {
+  if (!__OWNCORD_WEB__ && !isAndroidApp()) return true;
+  return typeof navigator.mediaDevices?.getDisplayMedia === "function";
+}

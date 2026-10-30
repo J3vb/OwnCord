@@ -32,6 +32,7 @@ import { viewersLabel } from "./video-grid/viewers";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
+import { canPublishScreen } from "../features/voice/native/platform";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import {
   openPopout,
@@ -92,6 +93,12 @@ export interface VideoGridCallbacks {
     /** Pick the camera from a menu at `anchor`, closed with the grid
      *  (`signal`): the arrow beside Camera. */
     readonly onCameraDevice?: (anchor: HTMLElement, signal: AbortSignal) => void;
+    /** Front to back camera and back: shown while the camera is on, once
+     *  `available` says this device has both. */
+    readonly cameraFlip?: {
+      readonly available: () => Promise<boolean>;
+      readonly flip: () => Promise<void>;
+    };
     readonly onScreenshareToggle?: () => void;
   };
   /** One receiver sample for a remote tile's quality chip, or null. */
@@ -546,6 +553,9 @@ export function createVideoGrid(): VideoGridComponent {
   let fullscreenTile: number | null = null;
   let theatreTile: number | null = null;
   let callState: CallState = { muted: false, deafened: false, listenOnly: false };
+  /** Whether the flip button may show: asked once per camera-on. */
+  let flipCheck: "idle" | "checking" | "yes" | "no" = "idle";
+  let flipping = false;
   let exitBtn: HTMLButtonElement | null = null;
   /** The call view (setExitVisible): header toggles, control bar, filters. */
   let callView = false;
@@ -1019,9 +1029,31 @@ export function createVideoGrid(): VideoGridComponent {
         pick.setAttribute("aria-haspopup", "menu");
         bar.appendChild(pick);
       }
+      const flip = cc.cameraFlip;
+      if (flip !== undefined) {
+        const flipBtn = callButton(
+          voiceText("call.flipCamera"),
+          "switch-camera",
+          "camera-flip",
+          () => {
+            if (flipping) return;
+            flipping = true;
+            redrawCallBars();
+            void flip
+              .flip()
+              .catch((err: unknown) => log.warn("Camera flip failed", err))
+              .finally(() => {
+                flipping = false;
+                redrawCallBars();
+              });
+          },
+        );
+        flipBtn.hidden = true;
+        bar.appendChild(flipBtn);
+      }
     }
-    if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
-      // No getDisplayMedia (phones): the call bar offers no screen share.
+    if (!canPublishScreen()) {
+      // A phone can watch a share but not start one: no share button.
     } else if (cc.onScreenshareToggle !== undefined) {
       const toggle = cc.onScreenshareToggle;
       // Starting a share opens its picker in the app window: the call comes
@@ -1087,6 +1119,12 @@ export function createVideoGrid(): VideoGridComponent {
       // Its menu opens in the app window.
       pick.style.display = callPop === null ? "" : "none";
     }
+    const flip = bar.querySelector<HTMLButtonElement>("[data-call-control='camera-flip']");
+    if (flip !== null) {
+      syncFlipCheck();
+      flip.hidden = callState.camera !== true || flipCheck !== "yes";
+      flip.disabled = flipping || mediaLockReason() !== null;
+    }
     const share = bar.querySelector<HTMLButtonElement>("[data-call-control='share']");
     if (share !== null) {
       const on = callState.screenshare === true;
@@ -1096,6 +1134,32 @@ export function createVideoGrid(): VideoGridComponent {
       share.title = mediaLockReason() ?? callState.shareBlock ?? label;
       if (callState.shareBlock !== undefined) share.disabled = true;
     }
+  }
+
+  function redrawCallBars(): void {
+    for (const bar of root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
+  }
+
+  /** Ask whether the flip can show when the camera comes on; forget the
+   *  answer when it goes off, since a "no" before the camera permission was
+   *  granted may be a "yes" now. */
+  function syncFlipCheck(): void {
+    const flip = callbacks.callControls?.cameraFlip;
+    if (callState.camera !== true) {
+      if (flipCheck !== "checking") flipCheck = "idle";
+      return;
+    }
+    if (flip === undefined || flipCheck !== "idle") return;
+    flipCheck = "checking";
+    void flip.available().then(
+      (ok) => {
+        flipCheck = ok ? "yes" : "no";
+        redrawCallBars();
+      },
+      () => {
+        flipCheck = "no";
+      },
+    );
   }
 
   /** Why camera and share are inert now, or null: the chat socket is down,

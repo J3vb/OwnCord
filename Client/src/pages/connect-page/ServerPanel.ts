@@ -139,14 +139,39 @@ export function createServerPanel(
   // DOM construction
   // ---------------------------------------------------------------------------
 
+  let toggleBtn: HTMLButtonElement;
+  let listOpen = false;
+
+  function setListOpen(open: boolean): void {
+    listOpen = open;
+    panelEl.classList.toggle("server-panel--collapsed", !open);
+    toggleBtn.setAttribute("aria-expanded", String(open));
+    toggleBtn.setAttribute(
+      "aria-label",
+      connectText(open ? "servers.hideList" : "servers.showList"),
+    );
+  }
+
   function buildPanel(): HTMLDivElement {
     const panel = createElement("div", { class: "server-panel" });
 
+    // On a phone the panel stacks above the form and folds down to the
+    // selected server; the toggle is hidden on wider screens (login.css).
+    panel.classList.add("server-panel--collapsed");
     const header = createElement("div", { class: "server-panel-header" });
     const heading = createElement("h2", {}, connectText("servers.heading"));
-    header.appendChild(heading);
+    toggleBtn = createElement("button", {
+      class: "server-panel-toggle",
+      type: "button",
+      "aria-expanded": "false",
+      "aria-controls": "server-list",
+      "aria-label": connectText("servers.showList"),
+      "data-testid": "server-panel-toggle",
+    });
+    toggleBtn.addEventListener("click", () => setListOpen(!listOpen), { signal });
+    appendChildren(header, heading, toggleBtn);
 
-    serverListEl = createElement("div", { class: "server-list" });
+    serverListEl = createElement("div", { class: "server-list", id: "server-list" });
 
     renderServerProfiles(initialProfiles);
 
@@ -290,6 +315,7 @@ export function createServerPanel(
         for (const row of serverListEl.querySelectorAll(".server-item")) {
           row.classList.toggle("active", row === item);
         }
+        if (listOpen) setListOpen(false);
         // Immediately fill host + username from profile
         const saved = profile.synthetic !== true;
         onServerClick(
