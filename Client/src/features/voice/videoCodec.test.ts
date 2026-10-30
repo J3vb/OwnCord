@@ -576,6 +576,30 @@ describe("resolveVideoCodec", () => {
     });
   });
 
+  describe("Auto in the Windows app", () => {
+    beforeEach(() => isWindowsDesktop.mockReturnValue(true));
+
+    it("publishes GPU H.264 without probing on a non-Intel GPU", async () => {
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 30, 3_000_000)).resolves.toBe("h264");
+      expect(encodingInfo).not.toHaveBeenCalled();
+    });
+
+    it("keeps VP8 on Intel graphics", async () => {
+      vi.restoreAllMocks();
+      stubGpu(INTEL);
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 30, 3_000_000)).resolves.toBe("vp8");
+    });
+
+    it("keeps VP8 on a software renderer", async () => {
+      vi.restoreAllMocks();
+      stubGpu("ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)");
+      encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: false });
+      await expect(resolveVideoCodec(track(1920, 1080), 30, 3_000_000)).resolves.toBe("vp8");
+    });
+  });
+
   it("probes H.264 for WebRTC at the captured size, frame rate and bitrate on Auto", async () => {
     savePref("auto");
     encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });

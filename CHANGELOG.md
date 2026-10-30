@@ -97,7 +97,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
-- The video codec for camera and screen share now defaults to Auto: H.264 when your graphics card can encode it, otherwise VP8. If you picked a codec yourself in Settings > Voice & Audio, that choice is kept.
+- The video codec for camera and screen share now defaults to Auto: H.264 when your graphics card can encode it, otherwise VP8. In the Windows app on an NVIDIA or AMD graphics card, Auto now uses the graphics card's H.264 encoder (before, it always ended up on VP8). If you picked a codec yourself in Settings > Voice & Audio, that choice is kept.
 
 ## v2.6.0
 

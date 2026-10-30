@@ -95,8 +95,9 @@ export function h265Offered(): boolean {
  *  graphics card and Constrained Baseline only in software, on a hardware GPU
  *  known not to be Intel's (see `isKnownNonIntel`). */
 export function h264GpuProfiles(): boolean {
+  if (!isWindowsDesktop()) return false;
   const renderer = gpuRenderer();
-  return isWindowsDesktop() && isKnownNonIntel(renderer) && !isSoftwareRenderer(renderer);
+  return isKnownNonIntel(renderer) && !isSoftwareRenderer(renderer);
 }
 
 /** WebView2 without GPU acceleration, or over RDP or in a VM, renders in
@@ -187,7 +188,8 @@ export async function resolveCodecChoice(
  *  120 fps; a saved VP9 never is. A saved H.264 and a saved H.265 are probed at
  *  any rate: H.265 for H.265, H.264 for H.264, where an answer that is not
  *  hardware gives VP8 and no answer keeps the user's H.264. A saved H.264 in
- *  the Windows app on a non-Intel GPU is not probed (`h264GpuProfiles`). */
+ *  the Windows app on a non-Intel GPU is not probed (`h264GpuProfiles`), and
+ *  Auto there publishes H.264 the same way. */
 async function resolvePreferredCodec(
   track: MediaStreamTrack,
   fps: number,
@@ -206,8 +208,9 @@ async function resolvePreferredCodec(
   // WebView2's encodingInfo answers powerEfficient:false for every WebRTC
   // config, so it cannot see the GPU encoder that Main/High reach. The live
   // check in `codecSwitch` still turns a share that lands on OpenH264 into VP8;
-  // a camera has no such check and stays on the software encoder then.
-  if (pref === "h264" && h264GpuProfiles()) return "h264";
+  // a camera has no such check and stays on the software encoder then. Auto
+  // takes the same GPU path, since the probe would always answer VP8 here.
+  if ((pref === "h264" || pref === "auto") && h264GpuProfiles()) return "h264";
   if (pref === "h264")
     return h264PublishCodec(await probeEncoder(track, fps, bitrate, "video/H264"));
   if (pref === "h265") return (await h265Publishable(track, fps, bitrate)) ? pref : "vp8";
