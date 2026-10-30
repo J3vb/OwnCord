@@ -197,3 +197,74 @@ func TestScanLeftovers_CountsOnlyOldUnnamedFiles(t *testing.T) {
 		t.Errorf("scan = %+v, %v; want one 7-byte file", scan, err)
 	}
 }
+
+// fakeLeftovers is an upload directory listing whose deletes are recorded; a
+// name in fail will not delete.
+type fakeLeftovers struct {
+	fakeLister
+	fail    string
+	deleted []string
+}
+
+func (l *fakeLeftovers) Delete(name string) error {
+	if name == l.fail {
+		return errors.New("file is in use")
+	}
+	l.deleted = append(l.deleted, name)
+	return nil
+}
+
+func TestCleanLeftovers_RemovesOnlyOldUnnamedFilesUpToTheLimit(t *testing.T) {
+	f := newForwardFixture(t, nil)
+	ctx := context.Background()
+	now := time.Now()
+	old := now.Add(-48 * time.Hour)
+	files := &fakeLeftovers{fakeLister: fakeLister{
+		{Name: f.srcFile, ModTime: old, Size: 100},
+		{Name: "stray-a", ModTime: old, Size: 1},
+		{Name: "stray-b", ModTime: old, Size: 1},
+		{Name: "stray-c", ModTime: old, Size: 1},
+		{Name: "stray-new", ModTime: now, Size: 1},
+	}, fail: "stray-b"}
+
+	n, err := f.uploads.CleanLeftovers(ctx, files, now.Add(-LeftoverMinAge), 1)
+	if err != nil || n != 1 || len(files.deleted) != 1 {
+		t.Fatalf("limit 1: removed %d, deleted %v, err %v", n, files.deleted, err)
+	}
+	n, err = f.uploads.CleanLeftovers(ctx, files, now.Add(-LeftoverMinAge), LeftoverCleanupMax)
+	if err != nil || n != 2 {
+		t.Fatalf("second pass removed %d, err %v; want the other unlocked file plus the repeat", n, err)
+	}
+	for _, name := range files.deleted {
+		if name == f.srcFile || name == "stray-new" || name == "stray-b" {
+			t.Errorf("deleted %s", name)
+		}
+	}
+	if n, err := f.uploads.CleanLeftovers(ctx, nil, now, 10); n != 0 || err != nil {
+		t.Errorf("no store = %d, %v", n, err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := f.uploads.CleanLeftovers(cancelled, files, now.Add(-LeftoverMinAge), 10); err == nil {
+		t.Error("a cancelled cleanup reported no error")
+	}
+
+	f.uploads.AuditLeftoverCleanup(ctx, fwdAlice, 3)
+	if n := f.count(t, `SELECT COUNT(*) FROM audit_log WHERE action = 'storage_cleanup' AND actor_id = ?`, fwdAlice); n != 1 {
+		t.Errorf("storage_cleanup audit rows = %d, want 1", n)
+	}
+}
+
+func TestUploadTotals_AndMemberStorageCap(t *testing.T) {
+	f := newForwardFixture(t, nil)
+	ctx := context.Background()
+	totals, err := f.uploads.UploadTotals(ctx)
+	if err != nil || len(totals) == 0 {
+		t.Fatalf("totals = %+v, %v", totals, err)
+	}
+	ids := make([]int64, MemberStorageMaxIDs+1)
+	if _, err := f.uploads.MemberStorage(ctx, ids); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("too many ids: err = %v, want ErrBadRequest", err)
+	}
+}
