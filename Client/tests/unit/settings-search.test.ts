@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { buildMyUploadsTab } from "@components/settings/MyUploadsTab";
 
 const mockAppVersion = vi.hoisted(() => vi.fn());
 vi.mock("../../src/features/whats-new/appVersion", () => ({
@@ -100,6 +101,12 @@ const options = {
     .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
 };
 
+const uploadsApi = {
+  getUserStorage: vi.fn().mockResolvedValue({ used_bytes: 1, quota_bytes: 0 }),
+  listUserUploads: vi.fn().mockResolvedValue({ items: [] }),
+  removeUserUpload: vi.fn().mockResolvedValue(undefined),
+};
+
 const TAB_SELECTOR = ".settings-sidebar > button.settings-nav-item[role='tab']";
 
 describe("settings search", () => {
@@ -178,7 +185,11 @@ describe("settings search", () => {
     it.each(names.filter((n) => n !== "Safety"))(
       "matches what the %s tab renders",
       async (name) => {
-        mountOverlay();
+        mountOverlay(
+          name === "My uploads"
+            ? { myUploadsTab: (signal) => buildMyUploadsTab(signal, uploadsApi) }
+            : {},
+        );
         const tab = tabs().find((t) => labelFor(t) === name)!;
         tab.click();
         if (name === "About") {
@@ -204,7 +215,10 @@ describe("settings search", () => {
     );
 
     it("lists every tab the overlay can show", () => {
-      mountOverlay({ safetyTab: () => document.createElement("div") });
+      mountOverlay({
+        safetyTab: () => document.createElement("div"),
+        myUploadsTab: () => document.createElement("div"),
+      });
       expect(
         tabs()
           .map((t) => labelFor(t))
@@ -217,6 +231,7 @@ describe("settings search", () => {
     const byId: Record<string, SearchableTab> = {
       "settings-tab-account": "Account",
       "settings-tab-safety": "Safety",
+      "settings-tab-my-uploads": "My uploads",
       "settings-tab-appearance": "Appearance",
       "settings-tab-accessibility": "Accessibility",
       "settings-tab-voice-video": "Voice & Video",

@@ -9,6 +9,7 @@ import { defineCatalog } from "./format";
 export const settingsText = defineCatalog("settings", {
   "tabs.safety": "Privacy & Safety",
   "tabs.account": "Account",
+  "tabs.myUploads": "My uploads",
   "tabs.appearance": "Appearance",
   "tabs.notifications": "Notifications",
   "tabs.textImages": "Text & Images",
@@ -606,4 +607,39 @@ export const settingsText = defineCatalog("settings", {
     "ML-powered noise removal (RNNoise) — filters keyboard, pets, and other non-voice sounds",
   "voiceAudio.nativeNote":
     "On Linux, the mic test cannot run during a call; the level bar then shows your call's microphone.",
+
+  "uploads.intro":
+    "Files you've uploaded across all channels and DMs. Remove one to free up space.",
+  "uploads.usage.of": "{used} used of {quota}",
+  "uploads.usage.noLimit": "{used} used, no limit",
+  "uploads.usage.label": "Upload storage used",
+  "uploads.sort.label": "Sort uploads",
+  "uploads.sort.newest": "Newest",
+  "uploads.sort.largest": "Largest",
+  "uploads.search.label": "Search your uploads by file name",
+  "uploads.search.placeholder": "Search file names",
+  "uploads.loading": "Loading your uploads…",
+  "uploads.loadFailed": "Couldn't load your uploads.",
+  "uploads.retry": "Retry",
+  "uploads.loadMore": "Load more",
+  "uploads.empty": "You haven't uploaded any files yet.",
+  "uploads.emptyFiltered": "No uploads match your search.",
+  "uploads.meta": "{size} · {date}",
+  "uploads.where.channel": "#{name}",
+  "uploads.where.dm": "DM with {name}",
+  "uploads.where.unavailable": "Unavailable channel",
+  "uploads.where.pending": "Not sent",
+  "uploads.where.avatar": "Profile picture",
+  "uploads.where.banner": "Profile banner",
+  "uploads.where.groupIcon": "Group icon",
+  "uploads.where.deleted": "Deleted message",
+  "uploads.remove": "Remove",
+  "uploads.removeLabel": "Remove {name}",
+  "uploads.confirm.title": "Remove this file?",
+  "uploads.confirm.body":
+    "{name} will be deleted for good and its {size} freed. If it was sent in a message, it disappears from that message for everyone.",
+  "uploads.confirm.busy": "Removing…",
+  "uploads.removeFailed": "Couldn't remove the file. Try again.",
+  "uploads.inUse":
+    "This file is in use as a profile picture, banner or group icon. Change that first.",
 });

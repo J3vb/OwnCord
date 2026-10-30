@@ -66,7 +66,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Messages & files**
 
-- The server can now show you your own upload quota and every file you sent, and remove one of your files to free space (new login-only routes under `/api/v1/users/me/storage` and `/api/v1/users/me/uploads`). Removing the last file of a message with no text deletes the message. The desktop page for this comes in a later release.
+- The server can now show you your own upload quota and every file you sent, and remove one of your files to free space (new login-only routes under `/api/v1/users/me/storage` and `/api/v1/users/me/uploads`). Removing the last file of a message with no text deletes the message. In the desktop app this is Settings > My uploads: a usage bar, your files across channels and DMs (newest or largest first, searchable), and Remove; the channel Files tab shows how much you have used, with a link there.
 
 ### Changed
 
