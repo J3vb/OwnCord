@@ -1,0 +1,6 @@
+{
+  "method": "Client/tests/e2e/fullstack/main-page-budget.spec.ts in the client-fullstack CI job (ubuntu-latest, headless Chromium, real server): in-page time from the Sign in click to the frame after the first message row of #general is painted, with 50 messages of history. Seven sign-ins, each on a fresh page load; the median is held to the budget.",
+  "budgetMs": 2000,
+  "goalMs": 800,
+  "note": "Baseline at dev 50a6a525 (2026-10-30), local 4 vCPU box, two runs: medians 709 and 787 ms, first sample of each run 984-993 ms (cold HTTP cache). The day before, at dev 517eaef5, three runs gave 615, 627 and 634 ms. Budget = the worst run median x 2.2, rounded up to the next 500 ms (the voice-join budget's rule for CI-runner timing noise): 787 x 2.2 = 1,731 -> 2,000 ms. goalMs is the Phase Q4 target, reported only."
+}
