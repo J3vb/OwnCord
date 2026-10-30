@@ -3487,7 +3487,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/contextMenus.test.ts",
         "revertProof": "pass",
         "branchCommit": "b0f9576e"
       },
@@ -4302,7 +4302,7 @@
       "confidence": "high",
       "fix": {
         "commit": "81b22f56",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/voiceRoster.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Resolve at render time in ChannelSidebar.ts:410 \u2014 it already imports membersStore (line 29): `const m = membersStore.getState().members.get(user.userId); const label = (m ? memberDisplayName(m) : user.username) || \"Unknown\";` and use `label` for the .vu-name text (leave the E2EE mismatch modal and moderation menu on user.username). One call site, no store/type/protocol change, and the \"Unknown\" empty-username test still passes.",
@@ -5016,7 +5016,7 @@
       "confidence": "high",
       "fix": {
         "commit": "05287f67725f44eb4933e29ff604481a1ad7baab",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/voiceIdentity.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Include the fingerprint (and safety number) in the structural signature at ChannelSidebar.ts:943 \u2014 replace `${verif ? `@${verif.status}` : \"\"}` with `${verif ? `@${verif.status}/${verif.safetyNumber ?? \"\"}/${verif.sessionFingerprint ?? \"\"}` : \"\"}`. One change in the shared selector covers every badge field the tooltip reads.",
@@ -5499,7 +5499,7 @@
       "confidence": "high",
       "fix": {
         "commit": "aa963efa464fef4e2a5cece8706afd6d3072ee82",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/channelRows.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Do not hand rows the factory-lifetime signal. In createChannelSidebar add `let renderAc: AbortController | null = null;` and at the top of renderChannels() (before clearChildren) do `renderAc?.abort(); renderAc = new AbortController();`, then pass `renderAc.signal` instead of `ac.signal` into renderCategoryGroup at ChannelSidebar.ts:806, and add `renderAc?.abort(); renderAc = null;` beside `ac.abort()` in destroy(). One change in the shared render function covers the context menu, drag handlers, and every other per-row listener; the sidebar-lifetime `ac.signal` stays for header/root listeners (mount at :826-855) that are created once.",
@@ -6655,7 +6655,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "0e3435a",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/voiceIdentity.test.ts",
         "revertProof": "pass"
       }
     },
@@ -6678,7 +6678,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "0e3435a",
-        "test": "Client/tests/unit/channel-sidebar.test.ts",
+        "test": "Client/tests/unit/channelSidebar/channelRows.test.ts",
         "revertProof": "pass"
       }
     },
