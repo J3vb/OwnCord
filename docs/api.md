@@ -173,6 +173,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/emoji/`                                                     |
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
+| GET     | `/api/v1/external/image`                                             |
+| GET     | `/api/v1/external/preview`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
 | POST    | `/api/v1/files/{id}/link`                                            |
 | GET     | `/api/v1/files/{id}/thumb`                                           |
