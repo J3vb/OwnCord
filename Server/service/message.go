@@ -11,7 +11,6 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
-	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -113,60 +112,24 @@ type ReactionResult struct {
 // messageStore is what MessageService reads and writes. *db.DB satisfies it.
 type messageStore interface {
 	db.Auditor
-	mentionBatchStore
-	readAdmitStore
 	subjectStore
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*db.Message, error)
 	FindMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
 	CreateMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
 	MessageDeliveryFloorMS() int64
 	GetMessage(ctx context.Context, id int64) (*db.Message, error)
-	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
-	GetMessagesAfterForAPI(ctx context.Context, channelID, after int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
-	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
 	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
-	SearchMessagesFiltered(ctx context.Context, q db.SearchQuery, page db.SearchPage) ([]db.MessageSearchResult, error)
-	GetPinnedMessages(ctx context.Context, channelID, requestingUserID int64) ([]db.MessageAPIResponse, error)
 	SetMessagePinned(ctx context.Context, p db.SetPinnedParams) (*db.PinEventRow, error)
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
-	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
-	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
-	// MoveReadPointer moves a reader's pointer and recomputes mention_count from the
-	// receipts in one writer transaction. The caller holds mentionEmitMu across it and
-	// the frame it sends.
-	MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error)
 	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (replyPingUserID int64, err error)
-	// DecrementMentionCounts reverses the bumps msgIDs made and returns userID to
-	// mention_count for exactly the readers the guards admitted, the live-badge signal
-	// for a removal path.
-	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) (map[int64]int64, error)
-	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
-	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
-	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
-	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
-	GetChannelUserOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
-	ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]db.MentionTarget, error)
-	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
 	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error)
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
 	GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*db.ReferencedMessage, error)
-	ListChannels(ctx context.Context) ([]db.Channel, error)
-	// GetMemberGrants fetches every held role's override and the per-user layer for
-	// one member in batch queries: the single fetch behind every "what can this
-	// member do here" site, so none pays an N+1.
-	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
-	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
-	ListRoles(ctx context.Context) ([]*db.Role, error)
-	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
-	OpenDM(ctx context.Context, userID, channelID int64) (bool, error)
-	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
-	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
-	GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64, iconID string, err error)
-	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are DeleteMessage/
 	// PurgeChannelMessages plus a removal ledger row in the same transaction, when
 	// the deleter is not the author. DeleteMessageWithRemoval's reason is the row's
@@ -180,14 +143,30 @@ type messageStore interface {
 	ListUserMessageChannelsSince(ctx context.Context, userID int64, since string) ([]int64, error)
 }
 
+// messageServiceStore is everything NewMessageService hands out: the write
+// path's own interface plus each part's.
+type messageServiceStore interface {
+	messageStore
+	messageReadStore
+	mentionStateStore
+	dmDeliveryStore
+}
+
 // MessageService handles message business logic: send, edit, delete, reactions,
 // pins and search.
 type MessageService struct {
+	// The read side, the mention and read-state writes, and DM delivery each
+	// take their own store interface; their methods are promoted onto
+	// MessageService, so callers see one service.
+	*messageReads
+	*mentionState
+	*dmDelivery
+
+	// st is what the write path itself calls: send, edit, delete, forward,
+	// polls, reactions, pins and purge.
 	st      messageStore
 	perms   *PermissionService
 	limiter *auth.RateLimiter
-	// mentionIDs backs the <@id> and <@&id> forms; nil leaves those as plain text.
-	mentionIDs MentionIDStore
 	// bg runs deferred bookkeeping with no dedicated worker (Web Push, the fallback
 	// mention write). The composition root installs a lifecycle-owned group via
 	// SetBackground so shutdown joins it before the database closes; nil runs each
@@ -199,40 +178,10 @@ type MessageService struct {
 	// resolves inline through bg. Atomic because it is started while other
 	// goroutines may already be sending.
 	mentionWorker atomic.Pointer[mentionWorker]
-	// mentionEmitMu serializes each mention_count write with the frame it emits, so
-	// frame order matches commit order across the worker flush and the removal paths.
-	// Held across write, notify and visibility check; job resolution stays outside.
-	// See mentionWorker.emitMu and reverseMentionCounts.
-	mentionEmitMu syncutil.Mutex
-	// readStateNotifier delivers the read_state frame MoveReadPointer sends under
-	// mentionEmitMu; nil leaves it off.
-	readStateNotifier ReadStateNotifier
-	// liveStatus returns userID's live status, "" with no live connection. The ws
-	// layer wires it (Hub.LiveStatus) so @here reads the status the member list
-	// overlays (ws/serve_ready.go presentableMembers), not users.status, which keeps
-	// a chosen idle/dnd/invisible across a disconnect and lags a connect by up to one
-	// StampFlushInterval. Nil falls back to the row.
-	liveStatus func(userID int64) string
-	// messageRequests is the first-contact gate and delivery-audience filter, wired
-	// by service.New(). Nil (tests and NewMessageService callers) disables the gate,
-	// so 1:1 DMs behave as before it existed.
-	messageRequests *MessageRequestService
-	// afterFirstContactTrustCheck is a test seam called from dmFirstContactGate once
-	// the recipient's trust is read false, before firstContact's insert (no exported
-	// setter, like storage_quota.go's afterRecount). Nil in production.
-	afterFirstContactTrustCheck func()
-	// beforeRequestPreviewLookup is a test seam called right before
-	// canonicalRequestPreview's DB read so a test can delete the held message in
-	// that window and confirm the preview comes back nil. Nil in production.
-	beforeRequestPreviewLookup func(messageID int64)
 	// pushNotifier is the Web Push dispatch hook. Nil means dispatch is off
 	// (push.enabled or push.dispatch_enabled false); the root installs a
 	// *PushDispatcher only when both are true.
 	pushNotifier PushNotifier
-	// mentionNotifier delivers the per-user mention_count frame (taskbar/tray badge)
-	// for each reader whose badge a mention raised. Nil (tests, no hub) pushes
-	// nothing; NewHub installs the hub-backed one.
-	mentionNotifier MentionCountNotifier
 	// forward backs ForwardMessage (message_forward.go).
 	forward forwardDeps
 	// poll backs CreatePoll (message_poll.go).
@@ -242,8 +191,6 @@ type MessageService struct {
 	sticker StickerStore
 	// threads reads a forum post's thread for a retry; nil disables forum posts.
 	threads ThreadStore
-	// media reads a channel's media gallery; nil disables it.
-	media MediaStore
 	// emptyDeleter and storedMentions back AfterAttachmentRemoved; nil disables the
 	// auto-delete and reports no stored mentions.
 	emptyDeleter   EmptyMessageDeleter
@@ -279,18 +226,19 @@ func (s *MessageService) SetPushNotifier(n PushNotifier) {
 var backgroundJobTimeout = pushDispatchTimeout
 
 // NewMessageService creates a MessageService.
-func NewMessageService(st messageStore, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
+func NewMessageService(st messageServiceStore, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
 	s := &MessageService{
-		st:      st,
-		perms:   perms,
-		limiter: limiter,
+		messageReads: newMessageReads(st, perms),
+		mentionState: newMentionState(st, perms),
+		dmDelivery:   &dmDelivery{st: st},
+		st:           st,
+		perms:        perms,
+		limiter:      limiter,
 	}
 	s.forward.store, _ = st.(ForwardStore)
 	s.poll.store, _ = st.(PollStore)
 	s.sticker, _ = st.(StickerStore)
 	s.threads, _ = st.(ThreadStore)
-	s.mentionIDs, _ = st.(MentionIDStore)
-	s.media, _ = st.(MediaStore)
 	s.emptyDeleter, _ = st.(EmptyMessageDeleter)
 	s.storedMentions, _ = st.(StoredMentionStore)
 	return s
@@ -311,7 +259,7 @@ func (s *MessageService) RunBackgroundInlineForTest() {
 // (app.startHub); tests leave it uncalled for deterministic inline writes. ctx
 // bounds the loop; the returned func drains and stops it (App.Close's job).
 func (s *MessageService) StartMentionWorker(ctx context.Context) func(context.Context) {
-	w := newMentionWorker(s.st)
+	w := newMentionWorker(s.mentionState.st)
 	// Share the write+emit lock with the removal paths so a coalesced increment
 	// flush cannot be overtaken by an older decrement frame, or vice versa.
 	w.emitMu = &s.mentionEmitMu

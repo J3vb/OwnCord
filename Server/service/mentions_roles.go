@@ -21,7 +21,7 @@ var _ MentionIDStore = (*db.DB)(nil)
 // resolveIDMentions returns the <@id> tokens that name a reachable user (one
 // that exists and is not banned), in token order. A read failure is logged and
 // leaves the tokens as text.
-func (s *MessageService) resolveIDMentions(ctx context.Context, ids []int64, channelID int64) []int64 {
+func (s *mentionState) resolveIDMentions(ctx context.Context, ids []int64, channelID int64) []int64 {
 	if len(ids) == 0 || s.mentionIDs == nil {
 		return nil
 	}
@@ -47,7 +47,7 @@ func (s *MessageService) resolveIDMentions(ctx context.Context, ids []int64, cha
 // clear the gate. The roles read and
 // the author's Subject are fetched only here, so a message without a role token
 // pays neither. A read failure leaves the tokens as plain text.
-func (s *MessageService) resolveRoleMentions(ctx context.Context, set *mentionSet, tokens []int64, authorID, channelID int64) {
+func (s *mentionState) resolveRoleMentions(ctx context.Context, set *mentionSet, tokens []int64, authorID, channelID int64) {
 	if s.mentionIDs == nil {
 		return
 	}
@@ -86,7 +86,7 @@ func (s *MessageService) resolveRoleMentions(ctx context.Context, set *mentionSe
 // with RoleUserIDs filled. Only a send calls it: an edit never raises a badge,
 // so it does not pay the read. Nothing is read when no role resolved; a read
 // failure is logged and leaves the roles listed with no holders to ping.
-func (s *MessageService) loadRoleHolders(ctx context.Context, set mentionSet, channelID int64) mentionSet {
+func (s *mentionState) loadRoleHolders(ctx context.Context, set mentionSet, channelID int64) mentionSet {
 	if len(set.RoleIDs) == 0 || s.mentionIDs == nil {
 		return set
 	}
