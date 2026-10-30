@@ -22,7 +22,7 @@ import { Permission } from "@lib/types";
 import type { ChannelAccess } from "../../features/channels/channelRow.view";
 import { formatChannelLink } from "@lib/nav/deepLink";
 import { navigateToChannel } from "@lib/nav/channelNavigation";
-import { markChannelRead, showsUnreadBadge } from "@lib/read-state";
+import { markChannelRead, showsUnreadBadge } from "@lib/readState";
 import {
   getChannelMute,
   muteChannel,
@@ -42,7 +42,7 @@ import {
   setChannelNotificationLevel,
   type NotificationLevel,
 } from "@lib/prefs/notificationLevel";
-import { appendPurgeSection } from "@components/purge-prompt";
+import { appendPurgeSection } from "@components/purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";

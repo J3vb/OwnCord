@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messageActionGates } from "../../src/components/message-list/message-actions";
+import { messageActionGates } from "../../src/components/message-list/messageActions";
 import { createMessageInput } from "../../src/components/MessageInput";
 import type { PollView } from "../../src/lib/types";
 import {

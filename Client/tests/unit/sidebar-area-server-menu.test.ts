@@ -37,7 +37,7 @@ const { inviteOpen, openAdminPanel, createModal } = vi.hoisted(() => ({
 vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
   createInviteManagerController: vi.fn().mockReturnValue({ open: inviteOpen, cleanup: vi.fn() }),
 }));
-vi.mock("@lib/admin-panel", () => ({ openAdminPanel }));
+vi.mock("@lib/adminPanel", () => ({ openAdminPanel }));
 vi.mock("@components/CreateChannelModal", () => ({
   createCreateChannelModal: createModal,
 }));
@@ -48,7 +48,7 @@ import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
 import { membersStore } from "../../src/stores/members.store";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 

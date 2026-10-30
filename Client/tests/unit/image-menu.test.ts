@@ -34,7 +34,7 @@ import {
   closeImageMenu,
   imageFilename,
   saveImageBytes,
-} from "../../src/components/message-list/image-menu";
+} from "../../src/components/message-list/imageMenu";
 import {
   bindImageMenu,
   closeActiveLightbox,

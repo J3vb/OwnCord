@@ -88,6 +88,8 @@ var requestDeadlineExempt = []requestDeadlineExemption{
 		"backup file download: streamed"},
 	{http.MethodPost, regexp.MustCompile(`^/admin/api/backups/[^/]+/restore$`),
 		"restore: drains connections and replaces the database; a half-cancelled restore would corrupt"},
+	{http.MethodPost, regexp.MustCompile(`^/admin/api/discord-imports/upload$`),
+		"Discord export upload: up to upload.import_max_mb under the transfer deadline, and the request starts the import"},
 	{http.MethodPost, regexp.MustCompile(`^/admin/api/updates/apply$`),
 		"update apply: downloads and verifies a release binary (5 min budget of its own)"},
 	{http.MethodPost, regexp.MustCompile(`^/admin/api/restart$`),

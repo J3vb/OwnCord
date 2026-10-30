@@ -106,7 +106,7 @@ import {
   snapshotReadyVoice,
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
-import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./read-state";
+import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./readState";
 import { resetServerCapabilities } from "./net/serverCapabilities";
 import {
   applyReadySafety,

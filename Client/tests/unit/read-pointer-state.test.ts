@@ -27,11 +27,11 @@ import {
   noteAwayUnread,
   setMarkReadSender,
   writeReadPointer,
-} from "@lib/read-state";
+} from "@lib/readState";
 import {
   markMessageUnread,
   setMarkUnreadSender,
-} from "../../src/components/message-list/mark-unread";
+} from "../../src/components/message-list/markUnread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { markReadyActiveChannelRead } from "../../src/features/channels/wsHandlers";
 import {

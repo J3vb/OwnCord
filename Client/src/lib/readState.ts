@@ -528,7 +528,7 @@ export function isHeldUnread(channelId: number): boolean {
 
 /**
  * Mark Unread, the shared half (the click logic is in
- * components/message-list/mark-unread.ts): `send` puts the `mark_unread` frame
+ * components/message-list/markUnread.ts): `send` puts the `mark_unread` frame
  * on the wire and returns its id; the local pointer moves to `pointer`, what
  * was seen is forgotten, and the channel is held so nothing on screen marks it
  * read straight away. False, and nothing sent, without the capability or for an

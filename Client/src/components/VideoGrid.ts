@@ -29,8 +29,8 @@ import type { ZoomPan } from "@lib/ui/zoomPan";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceText } from "../i18n/voice";
 import { viewersLabel } from "./video-grid/viewers";
-import type { StreamInfo } from "./video-grid/stream-info";
-import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
+import type { StreamInfo } from "./video-grid/streamInfo";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volumeMenu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import { canPublishScreen } from "../features/voice/native/platform";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
@@ -1407,7 +1407,7 @@ export function createVideoGrid(): VideoGridComponent {
       log.debug("Stream stats unavailable", { tileId, err });
     }
     // Loaded on first use: only a watched stream needs the readout.
-    infoModule ??= await import("./video-grid/stream-info");
+    infoModule ??= await import("./video-grid/streamInfo");
     const { chipText, renderStats, streamInfo } = infoModule;
     if (statsTile !== tileId || cells.get(tileId) !== entry) return;
     const info = sample !== null ? streamInfo(sample, entry.prevSample) : sizeOf(entry.video);
@@ -1429,7 +1429,7 @@ export function createVideoGrid(): VideoGridComponent {
   const lastInfo = new Map<number, StreamInfo>();
   /** The readout module, once a poll has loaded it (the chip shows only
    *  after one has). */
-  let infoModule: typeof import("./video-grid/stream-info") | null = null;
+  let infoModule: typeof import("./video-grid/streamInfo") | null = null;
 
   function toggleStats(tileId: number, chip: HTMLButtonElement): void {
     const entry = cells.get(tileId);
@@ -1770,7 +1770,7 @@ export function createVideoGrid(): VideoGridComponent {
       let sample: ShareSenderSample | null = null;
       try {
         sample = (await callbacks.getLocalShareStats?.()) ?? null;
-        infoModule ??= await import("./video-grid/stream-info");
+        infoModule ??= await import("./video-grid/streamInfo");
       } catch (err) {
         log.debug("Local share stats unavailable", { tileId, err });
       }
@@ -2034,7 +2034,7 @@ export function createVideoGrid(): VideoGridComponent {
     // so it stays out of the eager bundle. Your own screen share has none.
     if (config !== undefined && (!config.isSelf || !config.isScreenshare)) {
       const openMenu = (x: number, y: number): void =>
-        void import("./video-grid/tile-menu").then((menus) => {
+        void import("./video-grid/tileMenu").then((menus) => {
           if (entry.listeners.signal.aborted || root?.contains(cell) !== true) return;
           if (config.isSelf) menus.showSelfTileMenu(selfMenuOptions(x, y, userId, entry));
           else menus.showTileMenu(tileMenuOptions(x, y, userId, entry, config));

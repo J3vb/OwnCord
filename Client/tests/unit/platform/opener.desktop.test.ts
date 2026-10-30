@@ -1,6 +1,6 @@
 // Desktop binding for the UrlOpener suite: `platform/desktop`'s shell opener.
 // B7-5 ran the same suite file against the in-place seam in
-// `lib/admin-panel.ts` first (proving it could fail and pinning today's
+// `lib/adminPanel.ts` first (proving it could fail and pinning today's
 // behaviour), then re-bound it here. The legacy binding is deleted with this
 // commit: its export is gone. The shell opener is the `open_external_url`
 // command now, so the native side here is `invoke`.

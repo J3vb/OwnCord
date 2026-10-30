@@ -5,7 +5,7 @@ import { TEST_PASSWORD, type TestServer } from "../support/server";
 /**
  * P4-03 step A live validation.
  *
- * The app's only focus source is `document.hasFocus()` (lib/read-state.ts,
+ * The app's only focus source is `document.hasFocus()` (lib/readState.ts,
  * mirroring lib/notifications.ts). A headless browser cannot be given a real OS
  * focus transition, so the tests drive that one environment input explicitly
  * (override + a dispatched focus/blur event) while everything else — server

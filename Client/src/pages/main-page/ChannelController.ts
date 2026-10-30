@@ -29,8 +29,8 @@ import type {
 } from "@components/MessageInput";
 import { endPoll, votePoll } from "../../features/messaging/pollSend";
 import { clearReactionUsersCache } from "../../features/messaging/reactionUsers";
-import { loadSendQueue, preloadSendQueue } from "../../features/messaging/sendQueue-loader";
-import type { SendQueueModule } from "../../features/messaging/sendQueue-loader";
+import { loadSendQueue, preloadSendQueue } from "../../features/messaging/sendQueueLoader";
+import type { SendQueueModule } from "../../features/messaging/sendQueueLoader";
 import type { QueuedSend, QueueDeps } from "../../features/messaging/sendQueue";
 import { createTypingIndicator } from "@components/TypingIndicator";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
@@ -60,6 +60,7 @@ import {
   updateChatHeaderForDm,
   setChatHeaderChannelType,
   setChatHeaderThreads,
+  setChatHeaderMedia,
   setChatHeaderTopic,
 } from "./ChatHeader";
 import { createThreadPanelHost } from "./ThreadPanelHost";
@@ -90,8 +91,12 @@ import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
 import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
-import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
-import { readPointerEnabled, threadsEnabled } from "@lib/net/serverCapabilities";
+import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/readState";
+import {
+  channelMediaEnabled,
+  readPointerEnabled,
+  threadsEnabled,
+} from "@lib/net/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,
@@ -1248,6 +1253,11 @@ export function createChannelController(opts: ChannelControllerOptions): Channel
       const syncHeaderType = (): void => {
         setChatHeaderChannelType(typeRefs, typeOf());
         setChatHeaderThreads(typeRefs, typeOf() === "text" && threadsEnabled());
+        const type = typeOf();
+        setChatHeaderMedia(
+          typeRefs,
+          (type === "text" || type === "announcement") && channelMediaEnabled(),
+        );
       };
       syncHeaderType();
       composerGatingUnsubs.push(

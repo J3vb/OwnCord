@@ -62,7 +62,7 @@ import {
   toggleChannelMute,
   unmuteChannel,
 } from "@lib/prefs/channelMutes";
-import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
+import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/readState";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
@@ -80,7 +80,7 @@ import { keepDmForCall, releaseKeptDm } from "../../features/direct-messages/kep
 import { dmStore, closeDmLocally, restoreDmChannel, type DmChannel } from "@stores/dm.store";
 import { clearChannelVoiceUsers, voiceStore } from "@stores/voice.store";
 import { createProfileManager, createTauriBackend } from "@lib/presence/profiles";
-import { openAdminPanel } from "@lib/admin-panel";
+import { openAdminPanel } from "@lib/adminPanel";
 import { canManageInvites, canModerateMembers, canViewAuditLog } from "@lib/permissions";
 import type { ProfileManager } from "@lib/presence/profiles";
 import type { ContentViewId, NavigationDestinations } from "../../features/navigation/destinations";

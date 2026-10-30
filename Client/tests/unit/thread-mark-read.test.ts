@@ -5,7 +5,7 @@ import {
   noteMessageSeen,
   resetReadPointerState,
   setMarkReadSender,
-} from "../../src/lib/read-state";
+} from "../../src/lib/readState";
 import {
   applyReadyCapabilities,
   resetServerCapabilities,

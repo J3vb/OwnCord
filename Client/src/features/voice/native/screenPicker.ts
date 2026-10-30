@@ -9,7 +9,7 @@
 // The dialog itself lives in the UI layer (`components/ScreenSharePicker.ts`).
 // This module is a lower layer and must not import a component, so
 // the UI registers the dialog through `screenPickerSlot.ts` — the same
-// injection shape as `lib/read-state.ts`'s `setMarkReadSender` — and this
+// injection shape as `lib/readState.ts`'s `setMarkReadSender` — and this
 // module adapts the dialog's result to the host capture and the shared publish
 // settings, so the per-share quality the user picked drives both. With no
 // picker registered (a headless run) a share resolves to null, i.e. cancelled.

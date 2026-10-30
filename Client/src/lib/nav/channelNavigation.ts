@@ -15,7 +15,7 @@ import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store"
 import { isChannelMuted } from "../prefs/channelMutes";
 import { visibleCategories } from "../permissions";
 import { hiddenByMute } from "../prefs/hideMutedChannels";
-import { hasUnread } from "../read-state";
+import { hasUnread } from "../readState";
 
 const reselectListeners = new Set<(channelId: number) => void>();
 
@@ -57,7 +57,7 @@ export function navigateToChannel(channelId: number): void {
   // badge lives in dmStore, not channelsStore — clearUnread alone leaves the
   // DM sidebar row lit while the user is reading it. No-op for a non-DM id
   // (dmStore has no matching channel), mirroring markChannelRead's dual
-  // clear (read-state.ts).
+  // clear (readState.ts).
   clearDmUnread(channelId);
   if (reselect) for (const cb of reselectListeners) cb(channelId);
 }

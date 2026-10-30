@@ -174,7 +174,7 @@ permissions, plugin management, backups, updates, first-run setup — is the
 **server-rendered web panel** under `/admin`, gated by IP restriction + admin
 auth. The Tauri client has **no** REST methods for these (confirmed: no plugin/
 audit/settings/permissions/setup calls in `api.ts`). The one bridge the client
-does have is a deep-link: `lib/admin-panel.ts` opens
+does have is a deep-link: `lib/adminPanel.ts` opens
 `https://{host}/admin#{section}` in the OS browser (wired from
 the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarArea.ts`, gated by
 `lib/permissions.ts::canViewAuditLog`).

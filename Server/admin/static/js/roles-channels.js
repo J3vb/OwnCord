@@ -69,6 +69,9 @@ async function renderChannels(){
     html+='</tbody>';
   });
   html+='</table></div></div>';
+  /* The card paints itself once this markup is on the page. */
+  html+='<div class="section-card" id="discordImportCard"></div>';
+  setTimeout(initDiscordImport,0);
   state.channelCategories=[...catSet].sort();
   return html;
 }

@@ -21,7 +21,7 @@ const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve,
 
 describe("sendQueue loader", () => {
   it("loads the module once and hands every caller the same one", async () => {
-    const { loadSendQueue } = await import("./sendQueue-loader");
+    const { loadSendQueue } = await import("./sendQueueLoader");
     const first = await loadSendQueue();
     expect(await loadSendQueue()).toBe(first);
     expect(typeof first.runQueuedSend).toBe("function");
@@ -32,7 +32,7 @@ describe("sendQueue loader", () => {
     vi.doMock("./sendQueue", () => {
       throw new Error("chunk failed");
     });
-    const { loadSendQueue, preloadSendQueue } = await import("./sendQueue-loader");
+    const { loadSendQueue, preloadSendQueue } = await import("./sendQueueLoader");
     await expect(loadSendQueue()).rejects.toThrow();
     // A preload that fails is logged, never thrown.
     expect(() => preloadSendQueue()).not.toThrow();
@@ -44,14 +44,14 @@ describe("sendQueue loader", () => {
   });
 
   it("logs under the send-queue tag", async () => {
-    await import("./sendQueue-loader");
+    await import("./sendQueueLoader");
     expect(log.create).toHaveBeenCalledExactlyOnceWith("send-queue");
   });
 
   it("starts the import as soon as a preload is asked for", async () => {
     const factory = vi.fn(() => ({ runQueuedSend: vi.fn() }));
     vi.doMock("./sendQueue", factory);
-    const { loadSendQueue, preloadSendQueue } = await import("./sendQueue-loader");
+    const { loadSendQueue, preloadSendQueue } = await import("./sendQueueLoader");
     preloadSendQueue();
     await settle();
     expect(factory).toHaveBeenCalledTimes(1);
@@ -65,7 +65,7 @@ describe("sendQueue loader", () => {
     vi.doMock("./sendQueue", () => {
       throw new Error("chunk failed");
     });
-    const { preloadSendQueue } = await import("./sendQueue-loader");
+    const { preloadSendQueue } = await import("./sendQueueLoader");
     preloadSendQueue();
     await settle();
     expect(log.warn).toHaveBeenCalledExactlyOnceWith("Send queue preload failed", {

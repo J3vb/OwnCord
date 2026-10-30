@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The chat image right-click menu (message-list/image-menu.ts). Its own
+/** The chat image right-click menu (message-list/imageMenu.ts). Its own
  *  catalog so the copy loads with that lazy module, not at startup. */
 export const imageMenuText = defineCatalog("imageMenu", {
   copy: "Copy Image",

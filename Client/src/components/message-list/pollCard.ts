@@ -41,8 +41,8 @@ import {
   timeLeft,
   winningAnswers,
 } from "../../features/messaging/pollModel";
-import { buildCustomEmojiNode } from "./custom-emoji";
-import { connectionLockReason } from "./message-actions";
+import { buildCustomEmojiNode } from "./customEmoji";
+import { connectionLockReason } from "./messageActions";
 import { channelCanReact, reactionLockReason } from "./reactions";
 import { WsErrorCode } from "@lib/protocolTypes";
 

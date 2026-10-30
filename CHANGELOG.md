@@ -49,6 +49,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Accounts & admin**
+
+- Import a Discord channel's history: admin panel > Channels > Import from Discord takes a DiscordChatExporter JSON export (a `.json`, or a `.zip` with its media) and builds a new text channel from it, with a progress bar and a Cancel button. The channel appears for everyone at once with every message already read, so nobody is pinged. Messages keep their Discord time, edits, replies and pins, and show the Discord name with an Imported tag. Mentions are plain text and notify nobody. Reactions, embeds, stickers, polls, threads and system messages are skipped and counted in the result. The largest file is `upload.import_max_mb` (500 MB by default); the panel warns when message retention would delete old imported messages.
+
 **Desktop UI**
 
 - Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
@@ -59,6 +63,10 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - Voice channels with a password show a lock in the sidebar, and joining one for the first time asks for the password in a small dialog (a wrong password or too many tries says so). Admins who manage channels can set, change or remove the password in Edit Channel; it is never shown back.
+
+**Messages & files**
+
+- The server can now show you your own upload quota and every file you sent, and remove one of your files to free space (new login-only routes under `/api/v1/users/me/storage` and `/api/v1/users/me/uploads`). Removing the last file of a message with no text deletes the message. The desktop page for this comes in a later release.
 
 ### Changed
 

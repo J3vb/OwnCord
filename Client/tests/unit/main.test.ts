@@ -264,7 +264,7 @@ import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { ApiClientError, createApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "@lib/types";
 import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
 import { deleteCredential, loadCredential, saveCredential } from "@lib/net/credentials";

@@ -17,6 +17,10 @@ describe("linkDomain", () => {
     expect(linkDomain("http://user:pw@docs.example.com:8080/x")).toBe("docs.example.com");
   });
 
+  it("returns null when the host is only a dot", () => {
+    expect(linkDomain("http://./")).toBeNull();
+  });
+
   it("returns null for non-http(s) and unparseable URLs", () => {
     expect(linkDomain("javascript:alert(1)")).toBeNull();
     expect(linkDomain("ftp://example.com/")).toBeNull();
@@ -89,5 +93,25 @@ describe("trusted link domains", () => {
     });
     expect(isDomainTrusted("example.com")).toBe(false);
     expect(() => trustDomain("example.com")).not.toThrow();
+  });
+});
+
+describe("trusted link domains: recovery from unusable storage", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it("starts a fresh list after text that is not JSON", () => {
+    localStorage.setItem(KEY, "{not json");
+    trustDomain("new.example");
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(["new.example"]);
+  });
+
+  it("starts a fresh list after JSON that is not a list", () => {
+    localStorage.setItem(KEY, JSON.stringify({ a: 1 }));
+    trustDomain("new.example");
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(["new.example"]);
+    localStorage.setItem(KEY, JSON.stringify("text"));
+    trustDomain("other.example");
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(["other.example"]);
   });
 });

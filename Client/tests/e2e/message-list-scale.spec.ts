@@ -43,7 +43,7 @@ function gifImages(): Record<string, number[]> {
  *  intercepting the three-step plugin:http exchange for that path only. */
 function pagedHistory(): void {
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  const total = 600;
+  const total: number = (window as any).__historyTotal ?? 600;
   const page = 50;
   const gifEvery = 12;
   const internals = (window as any).__TAURI_INTERNALS__;
@@ -246,8 +246,11 @@ function pagedHistory(): void {
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
-async function seedSession(page: Page): Promise<void> {
+async function seedSession(page: Page, total = TOTAL): Promise<void> {
   await grantExternalConsent(page);
+  await page.addInitScript((n) => {
+    (window as unknown as { __historyTotal: number }).__historyTotal = n;
+  }, total);
   await page.addInitScript(
     buildTauriMockScript({
       wrappers: [pagedHistory],
@@ -261,12 +264,28 @@ async function seedSession(page: Page): Promise<void> {
     }),
   );
   await page.addInitScript(() => {
-    const tasks: number[] = [];
-    (window as unknown as { __longTasks: number[] }).__longTasks = tasks;
+    const tasks: LongTask[] = [];
+    (window as unknown as { __longTasks: LongTask[] }).__longTasks = tasks;
     new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) tasks.push(entry.duration);
+      for (const entry of list.getEntries()) {
+        tasks.push({ start: entry.startTime, duration: entry.duration });
+      }
     }).observe({ type: "longtask", buffered: true });
   });
+}
+
+interface LongTask {
+  readonly start: number;
+  readonly duration: number;
+}
+
+/** Long tasks that started after `since` (page time, ms). */
+function longTasksSince(page: Page, since: number): Promise<LongTask[]> {
+  return page.evaluate(
+    (from) =>
+      (window as unknown as { __longTasks: LongTask[] }).__longTasks.filter((t) => t.start >= from),
+    since,
+  );
 }
 
 interface Scale {
@@ -339,9 +358,7 @@ test.describe("Message list scrolling up through 600 messages", () => {
         .filter((c) => c.cmd === "external_image")
         .map((c) => c.args.url),
     );
-    const longTasks = await page.evaluate(
-      () => (window as unknown as { __longTasks: number[] }).__longTasks,
-    );
+    const longTasks = (await longTasksSince(page, 0)).map((t) => t.duration);
     test.info().annotations.push({
       type: "message-list-scale",
       description: `pages=${pages} rebuilds=${rebuilds} slides=${done.slides} overBudgetSlides=${done.overBudgetSlides} maxExtraHeightReads=${done.maxExtraReads} brokerImageCalls=${brokerCalls.length - brokerBefore} imageLoads=${done.imageLoads} imageLoadShifts=${done.imageLoadShifts} firstSightingMountShifts=${done.firstMountShifts}/${done.firstLoads} maxRowsInWindow=${maxRows} longTasksOver50ms=${longTasks.filter((d) => d > 50).length} (soft report)`,
@@ -389,5 +406,48 @@ test.describe("Message list scrolling up through 600 messages", () => {
       revisited.revisitMountShifts,
       "remounted images whose box moved between mount and load",
     ).toBe(0);
+  });
+});
+
+// Phase Q4 scroll budget: from the newest row of a 1,000-message channel to the
+// oldest, twenty history pages, with no main-thread task over 50 ms. Only tasks
+// that start after the first paint count; startup has its own budget.
+const LONG_TOTAL = 1000;
+const LONG_TASK_BAR_MS = 50;
+
+test.describe("Message list scrolling up through 1,000 messages", () => {
+  test.beforeEach(async ({ page }) => {
+    test.setTimeout(120_000);
+    await seedSession(page, LONG_TOTAL);
+    await page.goto("/");
+    await navigateToMainPage(page);
+    await waitForWsReady(page);
+    await expect(page.locator(`[data-testid='message-${LONG_TOTAL}']`)).toBeVisible();
+  });
+
+  test("reaching the oldest row runs no task over 50 ms", async ({ page }) => {
+    const region = page.locator(".messages-container");
+    const box = (await region.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    const since = await page.evaluate(() => performance.now());
+    const oldest = page.locator("[data-testid='message-1']");
+    for (let tick = 0; tick < 800 && !(await oldest.isVisible()); tick++) {
+      await page.mouse.wheel(0, -700);
+      await page.waitForTimeout(25);
+    }
+    await expect(oldest).toBeVisible();
+    await page.waitForTimeout(500);
+
+    const tasks = await longTasksSince(page, since);
+    const { pages } = await scale(page);
+    const over = tasks
+      .filter((t) => t.duration > LONG_TASK_BAR_MS)
+      .map((t) => Math.round(t.duration));
+    test.info().annotations.push({
+      type: "message-list-scroll",
+      description: `pages=${pages} longTasks=${tasks.length} longest=${Math.round(Math.max(0, ...tasks.map((t) => t.duration)))}ms over${LONG_TASK_BAR_MS}ms=[${over.join(",")}]`,
+    });
+    expect(pages, "history pages that landed").toBeGreaterThanOrEqual(LONG_TOTAL / 50 - 1);
+    expect(over, `tasks over ${LONG_TASK_BAR_MS} ms while scrolling`).toEqual([]);
   });
 });

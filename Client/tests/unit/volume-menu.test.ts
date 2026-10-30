@@ -1,5 +1,5 @@
 /**
- * Tests for src/components/channel-sidebar/volume-menu.ts (was 77.7% statements
+ * Tests for src/components/channel-sidebar/volumeMenu.ts (was 77.7% statements
  * / 50% functions, no test file — every event handler was unexercised).
  *
  * The menu is transient DOM appended to document.body with two AbortControllers
@@ -21,7 +21,7 @@ vi.mock("@lib/voice/livekitSession", () => ({
   getUserLocalMute: (...args: unknown[]) => getUserLocalMute(...args) as unknown,
 }));
 
-const { showUserVolumeMenu } = await import("@components/channel-sidebar/volume-menu");
+const { showUserVolumeMenu } = await import("@components/channel-sidebar/volumeMenu");
 
 function menuEl(): HTMLElement | null {
   return document.querySelector(".user-vol-menu");

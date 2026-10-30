@@ -46,15 +46,15 @@ import {
 } from "./message-list/renderers";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
-import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
-import { withMessageMenu } from "./message-list/message-menu-loader";
+import { ROW_FOCUSABLE_SELECTOR } from "./message-list/messageActions";
+import { withMessageMenu } from "./message-list/messageMenuLoader";
 import { preloadInlineEdit, withInlineEdit } from "../features/messaging/inlineEditLoader";
 import type { InlineEditSession } from "../features/messaging/inlineEdit";
 import {
   clearContentParseCache,
   relabelInlineTimestamps,
   resyncMentions,
-} from "./message-list/content-parser";
+} from "./message-list/contentParser";
 import { highlightsCurrentUser } from "@lib/text/mentions";
 import { applyPickedMentions, tokensToPickedText } from "@lib/text/pickedMentions";
 import { canManageMessages } from "@lib/permissions";
@@ -83,10 +83,10 @@ import {
   fitImageBox,
   getImageBox,
   knownImageHeight,
-} from "./message-list/image-sizes";
+} from "./message-list/imageSizes";
 import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
-import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/row-heights";
+import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/rowHeights";
 import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -101,9 +101,9 @@ import {
   noteVisibleMessageSeen,
   onMarkUnreadFailed,
   setLiveTailInView,
-} from "@lib/read-state";
+} from "@lib/readState";
 import { idMentionsEnabled, readPointerEnabled } from "@lib/net/serverCapabilities";
-import { markMessageUnread } from "./message-list/mark-unread";
+import { markMessageUnread } from "./message-list/markUnread";
 import { onPrefChange } from "@lib/prefs/preferences";
 
 // -- Options ------------------------------------------------------------------
@@ -1088,7 +1088,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * the window focused. Fires on every scroll and on window focus; the
    * hasUnread gate keeps a plain scroll from spending the server's 5/s
    * mark_read budget, and the bottom of a detached window is not the present,
-   * so that case is excluded too (isChannelAway, lib/read-state.ts).
+   * so that case is excluded too (isChannelAway, lib/readState.ts).
    * The bottom-in-view check alone also covers focus returning while the reader
    * is scrolled up.
    */
@@ -1221,7 +1221,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * A live message was appended while the reader had the live tail in view. The
    * dispatcher does not count it unread, so markReadIfSeen (gated on a local
    * unread count) never sends for it; tell the server it was seen, throttled
-   * (lib/read-state.ts). Same away and deferred-divider checks as above, plus
+   * (lib/readState.ts). Same away and deferred-divider checks as above, plus
    * the Settings overlay and content views, which cover a still-mounted list.
    */
   function markLiveArrivalSeen(): void {

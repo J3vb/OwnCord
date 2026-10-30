@@ -27,6 +27,7 @@ export interface ReadyCapabilityFlags {
   readonly voice_messages?: boolean;
   readonly game_activity?: boolean;
   readonly listening_activity?: boolean;
+  readonly channel_media?: boolean;
 }
 
 /** The last full `ready`'s capabilities; null until one arrives. */
@@ -123,6 +124,15 @@ export function stickersEnabled(): boolean {
  */
 export function threadsEnabled(): boolean {
   return caps?.threads === true;
+}
+
+/**
+ * Whether the server answers the channel media gallery routes
+ * (`GET /channels/{id}/media` and `/media/months`). False hides the header's
+ * Media button.
+ */
+export function channelMediaEnabled(): boolean {
+  return caps?.channel_media === true;
 }
 
 /**

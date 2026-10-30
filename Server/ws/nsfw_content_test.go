@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestNSFW_EveryServerFrameKindIsClassified is contentBearingKinds'
@@ -71,6 +72,12 @@ func TestNSFW_EveryServerFrameKindIsClassified(t *testing.T) {
 func TestDeliverBroadcast_NSFWGateStillRateLimited(t *testing.T) {
 	f := newNSFWGateFixture(t)
 	send := registerEmitTestClient(f.hub, f.aliceID, f.labelledID)
+
+	// The whole burst must land in one limiter window; a loaded -race runner
+	// can take over a second to deliver 120 frames and refill the bucket.
+	saved := topicRateWindow.Load()
+	topicRateWindow.Store(int64(time.Hour))
+	t.Cleanup(func() { topicRateWindow.Store(saved) })
 
 	total := topicRateLimitPerSecond + 20
 	for range total {

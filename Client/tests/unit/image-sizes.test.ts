@@ -9,7 +9,7 @@ import {
   knownImageHeight,
   rememberBlobSize,
   setImageBox,
-} from "../../src/components/message-list/image-sizes";
+} from "../../src/components/message-list/imageSizes";
 import { expectConsole } from "../helpers/console";
 import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 

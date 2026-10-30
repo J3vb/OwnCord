@@ -255,7 +255,8 @@ func planTrees(ctx context.Context, dataDir, uploadsDir string, paths backupPath
 	if t.uploads, err = resolvePath(uploadsDir); err != nil {
 		return nil, fmt.Errorf("resolving uploads dir: %w", err)
 	}
-	for _, dir := range []string{paths.dir, work} {
+	// The import directory holds a partly received export, not data to restore.
+	for _, dir := range []string{paths.dir, work, filepath.Join(dataDir, ImportDirName)} {
 		abs, err := resolvePath(dir)
 		if err != nil {
 			return nil, fmt.Errorf("resolving %s: %w", dir, err)

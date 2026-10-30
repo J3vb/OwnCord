@@ -35,6 +35,11 @@ const (
 	// a fast scroll asks for a page every few seconds.
 	mediaRateLimitPerMinute = 120
 
+	// ownUploadsRateLimitPerMinute covers the signed-in user's storage figure,
+	// upload list and removals on the My uploads page; one limit for all three,
+	// since paging and removing interleave.
+	ownUploadsRateLimitPerMinute = 120
+
 	livekitProxyRateLimitPerMinute = 30
 
 	clientUpdateRateLimitPerMinute = 30
@@ -103,6 +108,9 @@ var bodyCapExemptPrefixes = []string{
 	// 5 MiB banner envelope, enforced the same way with
 	// bannerMaxBodySize.
 	"/api/v1/users/me/banner",
+	// Discord export upload: its own cap (upload.import_max_mb) and the
+	// transfer deadline, enforced by the handler.
+	"/admin/api/discord-imports/upload",
 }
 
 // bodyCapExemptPattern names the one upload route with an id mid-path, which a

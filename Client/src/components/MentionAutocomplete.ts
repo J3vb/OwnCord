@@ -15,7 +15,7 @@ import { channelsStore } from "@stores/channels.store";
 import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
-} from "@components/inline-autocomplete";
+} from "@components/inlineAutocomplete";
 import { messagingText } from "../i18n/messaging";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the member list. */
