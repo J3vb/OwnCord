@@ -99,7 +99,7 @@ func TestRecoveryKit_EnrolRecoverRotate(t *testing.T) {
 	if res.Token == "" || res.Requires2FA {
 		t.Fatalf("recovery result = %+v, want a session without a 2FA challenge", res)
 	}
-	sessions, _ := svc.st.ListUserSessions(ctx, user.ID)
+	sessions, _ := svc.st.(*db.DB).ListUserSessions(ctx, user.ID)
 	if len(sessions) != 1 || sessions[0].TokenHash != auth.HashToken(res.Token) {
 		t.Fatalf("sessions after recovery = %d, want only the fresh one", len(sessions))
 	}
@@ -289,7 +289,7 @@ func TestRecoveryKit_ConcurrentRedemptionAdmitsOne(t *testing.T) {
 	if ok != 1 {
 		t.Fatalf("%d redemptions succeeded, want exactly 1", ok)
 	}
-	if sessions, _ := svc.st.ListUserSessions(ctx, user.ID); len(sessions) != 1 {
+	if sessions, _ := svc.st.(*db.DB).ListUserSessions(ctx, user.ID); len(sessions) != 1 {
 		t.Fatalf("sessions = %d, want the one winner's", len(sessions))
 	}
 }

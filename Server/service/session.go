@@ -9,6 +9,19 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
+// sessionStore is what SessionService reads and writes. *db.DB satisfies it.
+type sessionStore interface {
+	db.Auditor
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
+	GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []string) (map[string]*db.SessionWithBanStatus, error)
+	TouchAPIToken(ctx context.Context, tokenHash string) error
+	GetActiveAPIToken(ctx context.Context, tokenHash string) (*db.APIToken, error)
+	DeleteSession(ctx context.Context, tokenHash string) error
+	TouchSessions(ctx context.Context, tokenHashes []string) error
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
+}
+
 // SessionService answers, for every transport, who a bearer token authenticates
 // and whether that is still true. It is separate from AuthService (interactive
 // flows with process-singleton state: lockouts, partial-auth and pending-TOTP
@@ -16,7 +29,7 @@ import (
 // because the WebSocket hub holds this one: the hub IS AuthService's
 // broadcaster, so depending on it would close a construction cycle.
 type SessionService struct {
-	st Store
+	st sessionStore
 	// keys stores a session's device identity key; a slice interface so the Store
 	// surface does not grow (datastore_ratchet_test.go). Nil when st lacks it.
 	keys SessionKeyStore
@@ -26,7 +39,7 @@ type SessionService struct {
 }
 
 // NewSessionService creates a SessionService.
-func NewSessionService(st Store) *SessionService {
+func NewSessionService(st sessionStore) *SessionService {
 	keys, _ := st.(SessionKeyStore)
 	return &SessionService{st: st, keys: keys}
 }

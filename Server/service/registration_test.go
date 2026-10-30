@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
 )
 
 func newRegistrationService(t *testing.T, mode RegistrationMode) *AuthService {
@@ -45,14 +46,14 @@ func TestRegister_InviteFreeModesAreBudgetedPerAddress(t *testing.T) {
 	}
 
 	// The same address is not budgeted in invite mode: the invite is.
-	if err := svc.st.SetSetting(context.Background(), registrationModeKey, string(RegistrationInvite)); err != nil {
+	if err := svc.st.(*db.DB).SetSetting(context.Background(), registrationModeKey, string(RegistrationInvite)); err != nil {
 		t.Fatalf("SetSetting: %v", err)
 	}
-	owner, err := svc.st.CreateUser(context.Background(), "owner", "hash", 1)
+	owner, err := svc.st.(*db.DB).CreateUser(context.Background(), "owner", "hash", 1)
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
-	code, err := svc.st.CreateInvite(context.Background(), owner, 1, nil)
+	code, err := svc.st.(*db.DB).CreateInvite(context.Background(), owner, 1, nil)
 	if err != nil {
 		t.Fatalf("CreateInvite: %v", err)
 	}

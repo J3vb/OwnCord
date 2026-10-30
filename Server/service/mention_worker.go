@@ -47,6 +47,15 @@ type mentionFlushReq struct {
 	reply chan struct{}
 }
 
+// mentionBatchStore is what mentionWorker reads and writes. *db.DB satisfies it.
+type mentionBatchStore interface {
+	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in one
+	// writer transaction (the mention worker's flush). It returns userID to
+	// mention_count for exactly the recipients whose read-state guard admitted the
+	// bump: the live-badge signal.
+	IncrementMentionCountsBatch(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) (map[int64]int64, error)
+}
+
 // mentionWorker is the single background worker owning every mention badge write
 // while running. SendMessage enqueues here instead of a goroutine per send, so 100
 // concurrent @everyone sends cost one worker. Jobs coalesce per window and flush
@@ -54,7 +63,7 @@ type mentionFlushReq struct {
 // stops it on shutdown; SendMessage routes through it only while running,
 // otherwise resolves and writes inline.
 type mentionWorker struct {
-	st Store
+	st mentionBatchStore
 
 	queue chan mentionJob
 
@@ -87,7 +96,7 @@ type mentionWorker struct {
 	emitMu *syncutil.Mutex
 }
 
-func newMentionWorker(st Store) *mentionWorker {
+func newMentionWorker(st mentionBatchStore) *mentionWorker {
 	return &mentionWorker{
 		st:       st,
 		queue:    make(chan mentionJob, mentionQueueSize),

@@ -394,8 +394,8 @@ trust action entirely (a blind accept is refused).
   (`tests/unit/rnnoise-click-suppression.test.ts` pins it). If the worklet
   cannot start, the processor runs without it.
 - **Video codec:** one setting in Settings → Voice & Audio (`videoCodec`,
-  `features/voice/videoCodec.ts`) covers camera and screen share: VP8
-  (default), H.264 or Auto. E2EE is always on, so livekit-client publishes no
+  `features/voice/videoCodec.ts`) covers camera and screen share: VP8,
+  H.264 or Auto (the default; nothing is saved until the user picks). E2EE is always on, so livekit-client publishes no
   backup codec and every viewer must decode the chosen one. Auto picks H.264
   only when `MediaCapabilities.encodingInfo` reports it supported and
   power-efficient at that publish's size, frame rate and bitrate and WebGL's
@@ -408,7 +408,8 @@ trust action entirely (a blind accept is refused).
   encodes those on the GPU but Constrained Baseline only in software, and
   LiveKit answers Constrained Baseline first when it is offered. A saved
   H.264 there skips the `encodingInfo` probe, which always reports software
-  in WebView2. The 120 fps share option is hidden for now
+  in WebView2, and Auto there publishes H.264 the same way (a share that
+  lands on OpenH264 still switches to VP8). The 120 fps share option is hidden for now
   (`lib/voice/shareFps.ts`): WebView2's capture delivers about 60 fps, and a saved
   120 reads as 60.
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap
