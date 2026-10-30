@@ -152,6 +152,7 @@ func TestMemberRosterSplit_WithRoleIDs(t *testing.T) {
 // visibility watermark the add moves forces the resume onto a full ready, which
 // carries the new role in auth_ok.user and in the member's roster entry.
 func TestResume_AfterRoleAdd_FullReadyHasRole(t *testing.T) {
+	t.Parallel()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 

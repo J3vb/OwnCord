@@ -4,7 +4,8 @@
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
-import { ApiClientError, TransportError, errorText } from "@lib/api";
+import { ApiClientError, TLS_CERT_CODE, TransportError, errorText } from "@lib/api";
+import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
 import { normaliseInviteCode } from "@lib/nav/deepLink";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -172,6 +173,9 @@ export interface LoginFormApi {
   getHost(): string;
   /** Focus the host input. */
   focusHost(): void;
+  /** Resubmit a sign-in the desktop proxy refused because `host`'s certificate
+   *  was not confirmed yet. `host` is the accepted certificate's normalized host. */
+  resubmitAfterCertAccept(host: string): void;
   destroy(): void;
 }
 
@@ -257,6 +261,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // the banner/shake, but the overlay must stay up so the code can be
   // re-entered — see updateTotpOverlay().
   let totpPending = false;
+  // The last submit the desktop proxy refused because its host's certificate
+  // was not confirmed yet. Accepting that certificate resubmits it once.
+  let certRefusedSubmit: { host: string; mode: FormMode } | null = null;
   // What had focus when a request disabled the form, restored when it settles.
   let focusBeforeBusy: Element | null = null;
 
@@ -567,6 +574,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Wire form events
     form.addEventListener("submit", handleFormSubmit, { signal });
+    // An edit after a certificate refusal is a new sign-in the user has not
+    // sent yet, so accepting the certificate must not send it for them.
+    form.addEventListener(
+      "input",
+      () => {
+        certRefusedSubmit = null;
+      },
+      { signal },
+    );
     // Typing means the user is taking over from the automatic retry.
     for (const input of [hostInput, usernameInput, passwordInput]) {
       input.addEventListener("input", cancelServerWait, { signal });
@@ -1251,11 +1267,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const host = hostInput.value.trim();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
+    // The mode toggle stays live while a request is in flight.
+    const mode = formMode;
 
+    certRefusedSubmit = null;
     transitionTo("loading");
 
     try {
-      if (formMode === "login") {
+      if (mode === "login") {
         const savedPassword = usingSavedPassword;
         await loginRetryingWhileBusy(() =>
           savedPassword
@@ -1300,6 +1319,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         usernameHint.showError(message);
         transitionTo("error", connectText("limits.checkField"), "username");
         return;
+      }
+      if (err instanceof ApiClientError && err.code === TLS_CERT_CODE) {
+        certRefusedSubmit = { host, mode };
       }
       transitionTo("error", message);
     }
@@ -1474,6 +1496,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     setHost(host: string): void {
       if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
+      certRefusedSubmit = null;
       writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
@@ -1484,6 +1507,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setCredentials(username: string, hasSavedPassword?: boolean): void {
+      certRefusedSubmit = null;
       usernameInput.value = username;
       // The placeholder only ever belongs to LOGGING IN to an existing
       // account. Registration reads the password field as typed text, so a
@@ -1533,6 +1557,17 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     focusHost(): void {
       if (__OWNCORD_WEB__ && fixedHost !== undefined) usernameInput.focus();
       else hostInput.focus();
+    },
+
+    resubmitAfterCertAccept(host: string): void {
+      const refused = certRefusedSubmit;
+      if (refused === null || normalizeHostForCertCompare(refused.host) !== host) return;
+      certRefusedSubmit = null;
+      // The user may have moved on since: another server, the other mode, or
+      // a submit of their own already under way.
+      if (formState !== "error" || formMode !== refused.mode) return;
+      if (hostInput.value.trim() !== refused.host) return;
+      void handleFormSubmit(new Event("submit"));
     },
 
     destroy(): void {

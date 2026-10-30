@@ -121,6 +121,7 @@ collect:
 }
 
 func TestPinEventRow_DMParticipantsOnly(t *testing.T) {
+	t.Parallel()
 	f := newCallSinkFixture(t)
 	res := pinResult(f.alice, f.dm, 502, 78, true, []int64{f.alice.ID, f.bob.ID})
 	f.hub.PinEventRow(context.Background(), res)
@@ -181,6 +182,7 @@ func gotChatMessage(ch chan []byte, d time.Duration) bool {
 // channel and a member who has not acknowledged an NSFW channel receive nothing,
 // while an allowed member still does.
 func TestPinEventRow_ChannelGates(t *testing.T) {
+	t.Parallel()
 	hub, database := newTestHub(t)
 	go hub.Run()
 	defer hub.Stop()

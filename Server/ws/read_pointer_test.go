@@ -337,6 +337,7 @@ func TestChannelActivity_PartialReadKeepsLaterHints(t *testing.T) {
 // a mention increment (which sends mention_count under mentionEmitMu) and a
 // backward move (which sends read_state under the same lock).
 func TestReadState_OrderedWithMentionWorker(t *testing.T) {
+	t.Parallel()
 	f := newActivityFixture(t)
 	reader := f.user(t, "reader", permissions.MemberRoleID)
 	rSend := f.connect(reader, 0)

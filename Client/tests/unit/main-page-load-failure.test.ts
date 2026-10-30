@@ -192,7 +192,7 @@ vi.mock("@pages/ConnectPage", () => ({
 // "main" -> "connect" round trip through the router (the router only navigates
 // away from "connect" via the connected overlay's onReady -> router.navigate
 // ("main") callback), but doesn't care what MainPage renders, so stand in
-// with the same lightweight shape main-page.test.ts's own mocks return.
+// with the same lightweight shape the mainPage/ tests' own mocks return.
 // A factory that throws makes the dynamic `import("@pages/MainPage")` reject,
 // which is what a chunk that fails to load does.
 vi.mock("@pages/MainPage", () => {

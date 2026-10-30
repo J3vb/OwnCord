@@ -511,6 +511,7 @@ func TestListeningUpdate_ReplacedConnectionCannotTouchTheNewOne(t *testing.T) {
 // A real disconnect drops the song with the connection: the offline entry the
 // others get carries null.
 func TestListeningUpdate_DisconnectClearsIt(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	player := connect("lisleaver", true)
 	watcher := connect("lisleavewatch", true)

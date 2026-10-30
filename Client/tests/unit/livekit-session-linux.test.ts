@@ -1,4 +1,4 @@
-// The facade on the Linux native backend. `livekit-session.test.ts` is the
+// The facade on the Linux native backend. `livekitSession/` (the folder of split tests) is the
 // contract for LiveKitSession's state machine against the web Room; this
 // file runs the same facade with `isLinuxDesktop()` true, so the joins,
 // mute/deafen, teardown and reconnect below are served by the NativeRoom

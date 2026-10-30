@@ -1435,3 +1435,271 @@ details.disclose[open] > summary .icon {
   margin-top: 16px;
   font-weight: 600;
 }
+
+/* Phone parts of the shell, shown only by the rules below. */
+.settings-list-title,
+.settings-back-btn {
+  display: none;
+}
+
+/* Phone: Settings fills the screen. The section list is one page and an open
+   section is another, with a back arrow between them. */
+@media (max-width: 600px) {
+  .settings-panel {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .settings-sidebar {
+    width: 100%;
+    border-radius: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 0
+      calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 8px);
+  }
+  .settings-list-title {
+    order: -1;
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin: 0 64px 4px 0;
+    padding: 0 16px;
+    font-size: var(--font-size-xl);
+    font-weight: 700;
+    color: var(--header-primary);
+  }
+  .settings-search {
+    margin: 4px 16px 12px;
+  }
+  .settings-search-input {
+    min-height: 40px;
+    font-size: var(--font-size-md);
+  }
+  .settings-sidebar-profile {
+    margin: 0 16px 8px;
+    padding: 12px;
+    border-radius: var(--radius-lg);
+    background: var(--bg-primary);
+  }
+  .settings-sidebar-avatar {
+    width: 44px;
+    height: 44px;
+  }
+  .settings-sidebar-edit {
+    font-size: var(--font-size-sm);
+  }
+  .settings-cat {
+    padding: 14px 16px 6px;
+  }
+  .settings-nav-item {
+    min-height: 52px;
+    margin: 0;
+    padding: 0 16px;
+    gap: 12px;
+    border-radius: 0;
+    font-size: var(--font-size-md);
+    color: var(--text-normal);
+  }
+  .settings-nav-item.active {
+    background: transparent;
+    color: var(--text-normal);
+  }
+  .settings-nav-item[role="tab"]::after {
+    content: "";
+    width: 8px;
+    height: 8px;
+    margin-left: auto;
+    border-right: 2px solid var(--text-faint);
+    border-top: 2px solid var(--text-faint);
+    transform: rotate(45deg);
+    flex-shrink: 0;
+  }
+  .settings-sidebar-logout .settings-nav-item {
+    font-weight: 600;
+  }
+  .settings-sidebar-version {
+    padding: 4px 16px 0;
+  }
+
+  .settings-content {
+    display: none;
+    max-width: none;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 16px
+      calc(var(--safe-bottom, env(safe-area-inset-bottom, 0px)) + 24px);
+  }
+  .settings-content h1 {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    margin: 0 52px 16px 44px;
+    font-size: var(--font-size-lg);
+  }
+  .settings-panel--section .settings-sidebar {
+    display: none;
+  }
+  .settings-panel--section .settings-content {
+    display: block;
+  }
+
+  .settings-close-wrap {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: 8px;
+  }
+  .settings-close-btn {
+    width: 44px;
+    height: 44px;
+    border: 0;
+  }
+  .settings-esc-label {
+    display: none;
+  }
+  .settings-panel--section .settings-back-btn {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    left: 4px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-circle);
+    background: transparent;
+    color: var(--text-normal);
+  }
+}
+
+/* ── My uploads tab ── */
+.my-uploads__usage {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.my-uploads__usage-text {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--text-normal);
+}
+.my-uploads__bar {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+.my-uploads__bar[hidden] {
+  display: none;
+}
+.my-uploads__bar-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+.my-uploads__usage.is-warning .my-uploads__bar-fill {
+  background: var(--red);
+}
+.my-uploads__usage.is-warning .my-uploads__usage-text {
+  color: var(--text-danger);
+}
+.my-uploads__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.my-uploads__sort {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.my-uploads__sort-btn {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.my-uploads__sort-btn[aria-pressed="true"] {
+  background: var(--bg-active);
+  color: var(--text-normal);
+}
+.my-uploads__search {
+  flex: 1;
+  min-width: 160px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+}
+.my-uploads__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.my-uploads__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.my-uploads__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  overflow: hidden;
+}
+.my-uploads__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.my-uploads__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.my-uploads__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+.my-uploads__meta,
+.my-uploads__where {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.my-uploads__remove {
+  flex-shrink: 0;
+}
+.my-uploads__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+.my-uploads__status[hidden],
+.my-uploads__more[hidden] {
+  display: none;
+}
+.my-uploads__more {
+  display: block;
+  margin: var(--space-3) auto 0;
+}

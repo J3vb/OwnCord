@@ -24,6 +24,7 @@ import (
 // ready built from post-commit permissions (edge case 2); another user
 // resuming at the same time is served by replay.
 func TestRoleRefresh_ResumeWhilePendingTakesFullReady(t *testing.T) {
+	t.Parallel()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 	mk := func(name string) (int64, string) {

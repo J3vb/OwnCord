@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
 import { ApiClientError } from "../../src/lib/api";
 // The modules in SettingsOverlay's graph that install an app-lifetime window
 // listener at load. The re-import below reuses these instances, so the
@@ -229,6 +230,130 @@ describe("SettingsOverlay", () => {
     expect(prevActive.classList.contains("active")).toBe(false);
 
     overlay.destroy?.();
+  });
+
+  describe("on a phone, where the section list and a section take turns", () => {
+    function stubPhone(matches: boolean): void {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => ({ matches, media: query }) as unknown as MediaQueryList),
+      );
+    }
+    const panelOf = (c: HTMLElement): HTMLElement => c.querySelector(".settings-panel")!;
+    const escape = (): boolean =>
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("opens on the list, and a tapped tab opens its section", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      getTab(container, 1).click();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Appearance");
+
+      overlay.destroy?.();
+    });
+
+    it("Back returns to the list with focus on the section it left, without closing", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      const appearance = getTab(container, 1);
+      appearance.click();
+
+      clickEl(container.querySelector("[data-testid='settings-back']"));
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+      expect(document.activeElement).toBe(appearance);
+      expect(defaultOptions.onClose).not.toHaveBeenCalled();
+
+      overlay.destroy?.();
+    });
+
+    it("Escape leaves the open section first, then closes Settings", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+
+      escape();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+      expect(defaultOptions.onClose).not.toHaveBeenCalled();
+      escape();
+      expect(defaultOptions.onClose).toHaveBeenCalledTimes(1);
+
+      overlay.destroy?.();
+    });
+
+    it("Enter in search opens the picked section with focus on Back, and nothing on no match", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      const box = container.querySelector<HTMLInputElement>("[data-testid='settings-search']")!;
+      const enter = (): boolean =>
+        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      box.value = "zzzz";
+      box.dispatchEvent(new Event("input"));
+      enter();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      box.value = "appearance";
+      box.dispatchEvent(new Event("input"));
+      enter();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Appearance");
+      expect(document.activeElement).toBe(container.querySelector("[data-testid='settings-back']"));
+
+      overlay.destroy?.();
+    });
+
+    it("reopening starts on the list again", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+      overlay.close();
+      overlay.open();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      overlay.destroy?.();
+    });
+
+    it("a tab another surface asks for opens straight on its section", () => {
+      stubPhone(true);
+      mockUiState.settingsTab = "Notifications";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Notifications");
+
+      overlay.destroy?.();
+    });
+
+    it("on a wide window Escape still closes Settings with a section picked", () => {
+      stubPhone(false);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+
+      escape();
+      expect(defaultOptions.onClose).toHaveBeenCalledTimes(1);
+
+      overlay.destroy?.();
+    });
   });
 
   describe("while a one-time recovery secret request is in flight", () => {
@@ -552,6 +677,59 @@ describe("SettingsOverlay", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(defaultOptions.onClose).toHaveBeenCalled();
 
+    overlay.destroy?.();
+  });
+
+  it("Escape with the My uploads remove confirmation open cancels only it", async () => {
+    const api = {
+      getUserStorage: vi.fn().mockResolvedValue({ used_bytes: 1, quota_bytes: 0 }),
+      listUserUploads: vi.fn().mockResolvedValue({
+        items: [
+          {
+            attachment: {
+              id: "a",
+              filename: "a.pdf",
+              size: 5,
+              mime: "application/pdf",
+              url: "/f/a",
+            },
+            uploaded_at: "2026-10-01 10:00:00",
+            channel_id: null,
+            message_id: null,
+            state: "pending",
+            removable: true,
+          },
+        ],
+      }),
+      removeUserUpload: vi.fn().mockResolvedValue(undefined),
+    };
+    const overlay = createSettingsOverlay({
+      ...defaultOptions,
+      myUploadsTab: (signal) =>
+        buildMyUploadsTab(signal, api, {
+          formatFileSize: (n: number) => `${n} B`,
+          isImage: (mime: string) => mime.startsWith("image/"),
+          thumbnail: () => Promise.resolve(null),
+        }),
+    });
+    overlay.mount(container);
+    overlay.open();
+    const tab = [...container.querySelectorAll<HTMLElement>(".settings-nav-item")].find(
+      (b) => b.textContent === "My uploads",
+    )!;
+    tab.click();
+    await vi.waitFor(() => expect(container.querySelector(".my-uploads__remove")).not.toBeNull());
+    container.querySelector<HTMLElement>(".my-uploads__remove")!.click();
+    expect(document.querySelector("[data-testid='uploads-remove-confirm']")).not.toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector("[data-testid='uploads-remove-confirm']")).toBeNull();
+    expect(defaultOptions.onClose).not.toHaveBeenCalled();
+    expect(container.querySelectorAll(".my-uploads__row")).toHaveLength(1);
+    expect(api.removeUserUpload).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(defaultOptions.onClose).toHaveBeenCalled();
     overlay.destroy?.();
   });
 

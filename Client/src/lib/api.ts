@@ -24,6 +24,9 @@ import type {
   ChannelMediaPage,
   ChannelMediaMonthsResponse,
   ChannelMediaQuery,
+  UserStorage,
+  UserUploadsPage,
+  UserUploadsQuery,
   MessagesAroundResponse,
   ReactionUsersResponse,
   PurgeResponse,
@@ -606,6 +609,16 @@ export function channelMediaParams(query: ChannelMediaQuery): URLSearchParams {
   if (query.from !== undefined) params.set("from", String(query.from));
   if (query.month !== undefined) params.set("month", query.month);
   if (query.tz !== undefined && query.tz !== "") params.set("tz", query.tz);
+  if (query.cursor !== undefined && query.cursor !== "") params.set("cursor", query.cursor);
+  if (query.limit !== undefined) params.set("limit", String(query.limit));
+  return params;
+}
+
+/** The My uploads query as URL parameters; empty filters are left out. */
+export function userUploadsParams(query: UserUploadsQuery): URLSearchParams {
+  const params = new URLSearchParams();
+  if (query.sort !== undefined) params.set("sort", query.sort);
+  if (query.q !== undefined && query.q.trim() !== "") params.set("q", query.q.trim());
   if (query.cursor !== undefined && query.cursor !== "") params.set("cursor", query.cursor);
   if (query.limit !== undefined) params.set("limit", String(query.limit));
   return params;
@@ -1447,6 +1460,32 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
           undefined,
           signal,
         ),
+      );
+    },
+
+    /** How much of the upload quota the caller has used. */
+    getUserStorage(signal?: AbortSignal): Promise<UserStorage> {
+      return request<UserStorage>("GET", "/users/me/storage", undefined, signal);
+    },
+
+    /** One page of the caller's uploaded files, in every state. */
+    listUserUploads(query: UserUploadsQuery, signal?: AbortSignal): Promise<UserUploadsPage> {
+      const qs = userUploadsParams(query).toString();
+      return request<UserUploadsPage>(
+        "GET",
+        `/users/me/uploads${qs === "" ? "" : `?${qs}`}`,
+        undefined,
+        signal,
+      );
+    },
+
+    /** Remove one of the caller's own files; 404 when gone, 409 when in use. */
+    removeUserUpload(attachmentId: string, signal?: AbortSignal): Promise<void> {
+      return request<void>(
+        "DELETE",
+        `/users/me/uploads/${encodeURIComponent(attachmentId)}`,
+        undefined,
+        signal,
       );
     },
 

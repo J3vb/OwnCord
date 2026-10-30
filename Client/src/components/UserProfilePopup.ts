@@ -13,6 +13,7 @@
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { trapFocus } from "@lib/ui/a11y";
+import { openBottomSheet, type BottomSheet } from "@lib/ui/bottomSheet";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
@@ -142,6 +143,8 @@ export interface UserProfilePopupOptions {
   readonly onClose?: () => void;
   /** Where focus goes on close when the opener has left the document. */
   readonly fallbackFocus?: () => HTMLElement | null;
+  /** Open as a phone bottom sheet instead of a card beside the anchor. */
+  readonly sheet?: boolean;
 }
 
 export type UserProfilePopupComponent = MountableComponent & {
@@ -252,6 +255,13 @@ export function createUserProfilePopup(
   let overlay: HTMLDivElement | null = null;
   let popup: HTMLDivElement | null = null;
   let previousFocus: Element | null = null;
+  let sheet: BottomSheet | null = null;
+  const asSheet = options.sheet === true;
+
+  /** Keep the card on screen after its height changed. A sheet places itself. */
+  function place(el: HTMLElement): void {
+    if (!asSheet && el.isConnected) position(el, options.anchorX, options.anchorY);
+  }
 
   function isOpen(): boolean {
     return popup !== null && overlay !== null;
@@ -262,6 +272,9 @@ export function createUserProfilePopup(
     overlay.remove();
     overlay = null;
     popup = null;
+    const closingSheet = sheet;
+    sheet = null;
+    closingSheet?.close();
     disposable.destroy();
     options.onNoteFlush?.();
 
@@ -281,7 +294,7 @@ export function createUserProfilePopup(
 
     // Overlay for outside-click detection
     overlay = createElement("div", {
-      class: "upp-overlay",
+      class: asSheet ? "upp-sheet-host" : "upp-overlay",
       "data-testid": "user-profile-overlay",
     });
 
@@ -295,7 +308,7 @@ export function createUserProfilePopup(
       "data-testid": "user-profile-popup",
     });
 
-    popup.style.width = `${POPUP_WIDTH}px`;
+    if (!asSheet) popup.style.width = `${POPUP_WIDTH}px`;
 
     // --- Content ---
 
@@ -394,7 +407,7 @@ export function createUserProfilePopup(
       renderRoleContent();
       if (popup !== null && roleMenuOpen !== lastMenuOpen) {
         lastMenuOpen = roleMenuOpen;
-        if (popup.isConnected) position(popup, options.anchorX, options.anchorY);
+        place(popup);
       }
     }
 
@@ -751,7 +764,7 @@ export function createUserProfilePopup(
       }
       note.onFailedChange((failed) => {
         setText(noteError, failed ? requestsText("profile.noteNotSaved") : "");
-        if (popup !== null && popup.isConnected) position(popup, options.anchorX, options.anchorY);
+        if (popup !== null) place(popup);
       });
       noteInput.addEventListener(
         "input",
@@ -881,21 +894,39 @@ export function createUserProfilePopup(
     // the seam between them the way Discord's popout does.
     const banner = createElement("div", { class: "upp-banner" });
     const body = createElement("div", { class: "upp-body" });
-    appendChildren(
-      body,
-      nameEl,
-      handleEl,
-      customStatusEl,
-      activityEl,
-      listeningEl,
-      roleHolder,
-      statusLine,
-      aboutSection,
-      noteSection,
-      joinSection,
-    );
-    if (actions.childElementCount > 0) {
-      appendChildren(body, divider, actions);
+    if (asSheet) {
+      // The phone layout: Message and Call as large buttons under the name,
+      // Report and Block in their own row at the bottom.
+      banner.setAttribute("data-sheet-drag", "");
+      const primary = createElement("div", { class: "upp-actions upp-sheet-primary" });
+      for (const id of ["upp-message-btn", "upp-call-btn"]) {
+        const btn = actions.querySelector(`[data-testid="${id}"]`);
+        if (btn !== null) primary.appendChild(btn);
+      }
+      appendChildren(body, nameEl, handleEl, statusLine, customStatusEl, activityEl, listeningEl);
+      if (primary.childElementCount > 0) body.appendChild(primary);
+      appendChildren(body, roleHolder, aboutSection, noteSection, joinSection);
+      if (actions.childElementCount > 0) {
+        actions.classList.add("upp-sheet-secondary");
+        appendChildren(body, divider, actions);
+      }
+    } else {
+      appendChildren(
+        body,
+        nameEl,
+        handleEl,
+        customStatusEl,
+        activityEl,
+        listeningEl,
+        roleHolder,
+        statusLine,
+        aboutSection,
+        noteSection,
+        joinSection,
+      );
+      if (actions.childElementCount > 0) {
+        appendChildren(body, divider, actions);
+      }
     }
     // The avatar hangs off the body's top edge, so it is a child of the card
     // rather than the body — the body scrolls, and a scroll container clips.
@@ -905,11 +936,27 @@ export function createUserProfilePopup(
 
     renderRole();
     overlay.appendChild(popup);
-    container.appendChild(overlay);
-
-    // Measure, then place: the card has to be in the document before it has a
-    // height to clamp against.
-    position(popup, options.anchorX, options.anchorY);
+    if (asSheet) {
+      // The sheet is the dialog; the card inside is its content.
+      popup.removeAttribute("role");
+      popup.removeAttribute("aria-modal");
+      sheet = openBottomSheet({
+        label: requestsText("profile.label"),
+        content: overlay,
+        className: "profile-sheet",
+        testId: "profile-sheet",
+        focusFirst: false,
+        onClosed: () => {
+          sheet = null;
+          close();
+        },
+      });
+    } else {
+      container.appendChild(overlay);
+      // Measure, then place: the card has to be in the document before it has a
+      // height to clamp against.
+      position(popup, options.anchorX, options.anchorY);
+    }
 
     // The fade+scale itself lives in CSS so `prefers-reduced-motion` can drop it.
     requestAnimationFrame(() => {

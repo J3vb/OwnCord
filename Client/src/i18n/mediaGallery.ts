@@ -27,5 +27,8 @@ export const mediaGalleryText = defineCatalog("mediaGallery", {
   retry: "Retry",
   "empty.media": "No photos or videos in this channel yet.",
   "empty.files": "No files in this channel yet.",
+  "usage.of": "You've used {used} of {quota}",
+  "usage.noLimit": "{used} used",
+  "usage.manage": "Manage my uploads",
   "empty.filtered": "Nothing matches your search.",
 });

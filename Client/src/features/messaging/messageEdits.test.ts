@@ -28,6 +28,14 @@ function row(id: number, overrides: Partial<Message> = {}): Message {
   };
 }
 
+const att = (id: string) => ({
+  id,
+  filename: `${id}.png`,
+  size: 1,
+  mime: "image/png",
+  url: "/u",
+});
+
 const prev: MessagesState = {
   ...INITIAL_STATE,
   messagesByChannel: new Map([[1, [row(1), row(2), row(3, { deleted: true })]]]),
@@ -119,6 +127,46 @@ describe("reduceEditMessage", () => {
     });
     expect(list(next).map((m) => m.id)).toEqual([1, 2, 3]);
     expect(list(next).some((m) => m.kind === "call")).toBe(false);
+  });
+
+  it("replaces the attachments when the payload carries the remaining list", () => {
+    const withFiles: MessagesState = {
+      ...INITIAL_STATE,
+      messagesByChannel: new Map([[1, [row(5, { attachments: [att("a"), att("b")] })]]]),
+    };
+    const next = reduceEditMessage(withFiles, {
+      message_id: 5,
+      channel_id: 1,
+      content: "hi",
+      edited_at: null,
+      attachments: [att("b")],
+    });
+    expect(list(next)[0]?.attachments.map((a) => a.id)).toEqual(["b"]);
+    expect(list(next)[0]?.editedAt).toBeNull();
+
+    const none = reduceEditMessage(withFiles, {
+      message_id: 5,
+      channel_id: 1,
+      content: "hi",
+      edited_at: null,
+      attachments: [],
+    });
+    expect(list(none)[0]?.attachments).toEqual([]);
+  });
+
+  it("leaves the attachments alone when the payload has none", () => {
+    const files = [{ id: "a", filename: "a.png", size: 1, mime: "image/png", url: "/u" }];
+    const withFiles: MessagesState = {
+      ...INITIAL_STATE,
+      messagesByChannel: new Map([[1, [row(5, { attachments: files })]]]),
+    };
+    const next = reduceEditMessage(withFiles, {
+      message_id: 5,
+      channel_id: 1,
+      content: "edited",
+      edited_at: "T2",
+    });
+    expect(list(next)[0]?.attachments).toBe(files);
   });
 
   it("returns prev by identity for an unloaded channel", () => {

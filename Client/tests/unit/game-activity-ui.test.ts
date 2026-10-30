@@ -55,6 +55,25 @@ describe("Playing lines", () => {
   });
 });
 
+describe("Playing line duration boundaries", () => {
+  const game = { name: "VALORANT", startedAt: 0 };
+
+  it("switches from just started to minutes at exactly one minute", () => {
+    expect(playingForLine(game, 59_999)).toBe("Playing VALORANT · just started");
+    expect(playingForLine(game, 60_000)).toBe("Playing VALORANT · for 1 min");
+  });
+
+  it("switches from minutes to hours at exactly sixty minutes", () => {
+    expect(playingForLine(game, 59 * 60_000)).toBe("Playing VALORANT · for 59 min");
+    expect(playingForLine(game, 60 * 60_000)).toBe("Playing VALORANT · for 1 h");
+    expect(playingForLine(game, 61 * 60_000)).toBe("Playing VALORANT · for 1 h 1 min");
+  });
+
+  it("falls back to just started for a clock that is not a number", () => {
+    expect(playingForLine(game, Number.NaN)).toBe("Playing VALORANT · just started");
+  });
+});
+
 describe("game_activity capability", () => {
   afterEach(() => resetServerCapabilities());
 

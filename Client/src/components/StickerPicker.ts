@@ -3,6 +3,7 @@
 // picks it; the owner sends it at once. Uses @lib/dom helpers exclusively and
 // never sets innerHTML.
 
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, clearChildren } from "@lib/dom";
@@ -191,7 +192,10 @@ export function createStickerPicker(options: StickerPickerOptions): {
   );
   render();
 
-  requestAnimationFrame(() => searchInput.focus());
+  // On a phone the keyboard would cover half the sheet before anyone asked to search.
+  requestAnimationFrame(() => {
+    if (!isPhoneLayout()) searchInput.focus();
+  });
 
   function destroy(): void {
     cellsOwner.destroy();

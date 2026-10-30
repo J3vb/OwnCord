@@ -252,6 +252,7 @@ func (o *routeObserver) queue(wait time.Duration) string {
 // audience its route has always delivered on, so the class switch is a pure
 // refactor of the old structural type switch.
 func TestDeliveryClass_RouteUnchanged(t *testing.T) {
+	t.Parallel()
 	for _, c := range deliveryClassCases() {
 		t.Run(c.typeName, func(t *testing.T) {
 			if !accessorOK(c.ev) {

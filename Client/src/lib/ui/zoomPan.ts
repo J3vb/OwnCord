@@ -43,6 +43,8 @@ export interface ZoomPan {
   zoomAt(scale: number, clientX: number, clientY: number): void;
   /** Zoom to `scale` about the current view, the offset unchanged. */
   setScale(scale: number): void;
+  /** Move the view by a finger's step, in px. */
+  panBy(dx: number, dy: number): void;
   /** On a primary press: start panning when zoomed in. True if it did. */
   press(e: MouseEvent): boolean;
   /** Whether the pointer moved past a click since the last press. */
@@ -111,6 +113,11 @@ export function createZoomPan(opts: ZoomPanOptions): ZoomPan {
       scale = clamp(next);
       show();
     },
+    panBy(dx, dy) {
+      panX += dx;
+      panY += dy;
+      show();
+    },
     press(e) {
       pressX = e.clientX;
       pressY = e.clientY;
@@ -147,6 +154,63 @@ export function createZoomPan(opts: ZoomPanOptions): ZoomPan {
       show();
     },
   };
+}
+
+/**
+ * Touch screens have no wheel or mouse drag: two fingers on `target` pinch
+ * the view towards their midpoint, and one finger pans it once zoomed in.
+ * The element needs `touch-action: none` so the browser leaves the fingers
+ * to this.
+ */
+export function bindTouchZoom(target: HTMLElement, view: ZoomPan, signal: AbortSignal): void {
+  const fingers = new Map<number, { x: number; y: number }>();
+  let pinch: { distance: number; scale: number } | null = null;
+
+  const pair = (): [{ x: number; y: number }, { x: number; y: number }] | null => {
+    const [a, b] = [...fingers.values()];
+    return a === undefined || b === undefined ? null : [a, b];
+  };
+
+  target.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (e.pointerType !== "touch") return;
+      fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      target.setPointerCapture?.(e.pointerId);
+      const both = pair();
+      if (fingers.size === 2 && both !== null) {
+        const distance = Math.hypot(both[0].x - both[1].x, both[0].y - both[1].y);
+        pinch = { distance, scale: view.scale };
+      }
+    },
+    { signal },
+  );
+  target.addEventListener(
+    "pointermove",
+    (e) => {
+      const prev = fingers.get(e.pointerId);
+      if (prev === undefined) return;
+      const next = { x: e.clientX, y: e.clientY };
+      fingers.set(e.pointerId, next);
+      const both = pair();
+      if (pinch !== null && both !== null) {
+        const distance = Math.hypot(both[0].x - both[1].x, both[0].y - both[1].y);
+        if (pinch.distance <= 0) return;
+        const midX = (both[0].x + both[1].x) / 2;
+        const midY = (both[0].y + both[1].y) / 2;
+        view.zoomAt((pinch.scale * distance) / pinch.distance, midX, midY);
+      } else if (fingers.size === 1 && view.scale > PAN_MIN_SCALE) {
+        view.panBy(next.x - prev.x, next.y - prev.y);
+      }
+    },
+    { signal },
+  );
+  const lift = (e: PointerEvent): void => {
+    if (!fingers.delete(e.pointerId)) return;
+    if (fingers.size < 2) pinch = null;
+  };
+  target.addEventListener("pointerup", lift, { signal });
+  target.addEventListener("pointercancel", lift, { signal });
 }
 
 /** Presses on the host's own controls never pan; the tile's select button

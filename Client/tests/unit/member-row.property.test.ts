@@ -157,3 +157,105 @@ describe("member row view", () => {
     expect([...MEMBER_PATCH_FIELDS].sort()).toEqual(["away", "status", "text"]);
   });
 });
+
+describe("member row view markup", () => {
+  const base: MemberRowModel = {
+    kind: "row",
+    id: 7,
+    name: "Ada",
+    avatarName: "Ada",
+    avatarColor: "#5865f2",
+    avatarUrl: null,
+    customStatus: null,
+    activity: null,
+    activityIcon: "gamepad-2",
+    colorVar: "#ff0000",
+    status: "online",
+    away: false,
+  };
+
+  it("maps each status to its dot colour, and an unknown one to the muted colour", () => {
+    expect(statusColor("online")).toBe("var(--green)");
+    expect(statusColor("idle")).toBe("var(--yellow)");
+    expect(statusColor("dnd")).toBe("var(--red)");
+    expect(statusColor("invisible")).toBe("var(--text-micro)");
+    expect(statusColor("offline")).toBe("var(--text-micro)");
+    expect(statusColor("brb" as UserStatus)).toBe("var(--text-micro)");
+  });
+
+  it("draws a focusable button that opens a dialog and is named after the member", () => {
+    const row = draw(base);
+    expect(row.classList.contains("member-item")).toBe(true);
+    expect(row.getAttribute("role")).toBe("button");
+    expect(row.getAttribute("tabindex")).toBe("0");
+    expect(row.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(row.getAttribute("aria-label")).toBe("Ada");
+    expect(row.getAttribute("data-testid")).toBe("member-7");
+    expect(row.getAttribute("aria-describedby")).toBe("mi-status-7");
+    expect(row.querySelector(".mi-text .mi-name")?.textContent).toBe("Ada");
+    expect(row.querySelector(".mi-custom-status")).toBeNull();
+    expect(row.querySelector(".mi-activity")).toBeNull();
+  });
+
+  it("dims an away member and draws the status dot in its colour", () => {
+    const row = draw({ ...base, away: true, status: "idle" });
+    expect(row.classList.contains("offline")).toBe(true);
+    const dot = row.querySelector<HTMLElement>(".mi-status");
+    expect(dot?.style.background).toBe("var(--yellow)");
+    expect(dot?.getAttribute("aria-label")).toBe(dot?.title);
+    expect(dot?.id).toBe("mi-status-7");
+  });
+
+  it("draws a custom status under the name and describes the row by it", () => {
+    const row = draw({ ...base, customStatus: "Out for lunch", activity: null });
+    const custom = row.querySelector<HTMLElement>(".mi-text > .mi-custom-status");
+    expect(custom?.textContent).toBe("Out for lunch");
+    expect(custom?.getAttribute("data-testid")).toBe("member-custom-status-7");
+    expect(custom?.id).toBe("mi-custom-status-7");
+    expect(row.getAttribute("aria-describedby")).toBe("mi-custom-status-7 mi-status-7");
+  });
+
+  it("draws an activity line with a decorative icon and describes the row by it", () => {
+    const row = draw({ ...base, activity: "Playing Chess", activityIcon: "music" });
+    const activity = row.querySelector<HTMLElement>(".mi-text > .mi-activity");
+    expect(activity).not.toBeNull();
+    expect(activity?.getAttribute("data-testid")).toBe("member-activity-7");
+    expect(activity?.id).toBe("mi-activity-7");
+    const icon = activity?.querySelector(".mi-activity-icon");
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    expect(activity?.querySelector("span.mi-activity-text")?.textContent).toBe("Playing Chess");
+    expect(row.getAttribute("aria-describedby")).toBe("mi-activity-7 mi-status-7");
+  });
+
+  it("draws the header and the empty state with their classes", () => {
+    const header = draw({ kind: "header", text: "ADMIN — 1", offline: false });
+    expect(header.className).toBe("member-role-group");
+    expect(header.hasAttribute("data-testid")).toBe(false);
+    const offline = draw({ kind: "header", text: "OFFLINE — 1", offline: true });
+    expect(offline.getAttribute("data-testid")).toBe("member-group-offline");
+    const empty = draw({ kind: "empty", text: "Nobody" });
+    expect(empty.className).toBe("member-list-empty");
+    expect(empty.querySelector("p.member-list-empty-text")?.textContent).toBe("Nobody");
+  });
+});
+
+describe("member row view patching", () => {
+  it("leaves a header's text node alone when the text is unchanged", () => {
+    const header = draw({ kind: "header", text: "ADMIN — 1", offline: false });
+    const node = header.firstChild;
+    patchMemberItem(header, { kind: "header", text: "ADMIN — 1", offline: false });
+    expect(header.firstChild).toBe(node);
+    patchMemberItem(header, { kind: "header", text: "ADMIN — 2", offline: false });
+    expect(header.textContent).toBe("ADMIN — 2");
+  });
+
+  it("leaves the empty state's text node alone when the text is unchanged", () => {
+    const empty = draw({ kind: "empty", text: "Nobody" });
+    const text = empty.querySelector(".member-list-empty-text")!;
+    const node = text.firstChild;
+    patchMemberItem(empty, { kind: "empty", text: "Nobody" });
+    expect(text.firstChild).toBe(node);
+    patchMemberItem(empty, { kind: "empty", text: "Still nobody" });
+    expect(text.textContent).toBe("Still nobody");
+  });
+});

@@ -60,7 +60,8 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
         .map_err(|e| format!("failed to create app data dir for fallback key: {e}"))?;
 
     // Write the key to a uniquely named temp file first, then publish it with
-    // hard_link, which is atomic and fails if the final path already exists.
+    // hard_link, which is atomic and fails if the final path already exists
+    // (on Android a locked check-then-rename, see publish_key_file).
     // The final path therefore never holds a partial key: a crash mid-write
     // leaves only a stray temp file, and a concurrent loser always reads the
     // winner's complete key.
@@ -89,7 +90,7 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
     })?;
     drop(file);
 
-    let linked = fs::hard_link(&tmp_path, &path);
+    let linked = publish_key_file(&tmp_path, &path);
     let _ = fs::remove_file(&tmp_path);
     match linked {
         Ok(()) => Ok(key),
@@ -105,6 +106,32 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
         }
         Err(e) => Err(format!("failed to create credential fallback key: {e}")),
     }
+}
+
+/// Publish the temp key file at `path`, failing with `AlreadyExists` when a key
+/// is already there.
+#[cfg(not(target_os = "android"))]
+fn publish_key_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    fs::hard_link(tmp_path, path)
+}
+
+/// Android's SELinux policy denies `link(2)` to apps, so the key was never
+/// published there and every saved sign-in was lost on restart.
+#[cfg(target_os = "android")]
+fn publish_key_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    publish_by_rename(tmp_path, path)
+}
+
+/// The check and the rename run under a process-wide lock, which covers every
+/// writer because an Android app is a single process.
+#[cfg(any(target_os = "android", test))]
+fn publish_by_rename(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    static PUBLISH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = crate::sync::lock(&PUBLISH);
+    if path.exists() {
+        return Err(std::io::ErrorKind::AlreadyExists.into());
+    }
+    fs::rename(tmp_path, path)
 }
 
 /// Finish writing a just-created (empty) key file: run `write_and_sync` — the
@@ -226,6 +253,47 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(strays.is_empty(), "stray temp files: {strays:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_publish_keeps_the_first_key_and_refuses_the_rest() {
+        let dir = std::env::temp_dir().join(format!(
+            "owncord-fallback-key-rename-{}-{}",
+            std::process::id(),
+            test_key()[0]
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CREDENTIAL_FALLBACK_KEY_FILE);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8u8)
+            .map(|i| {
+                let (dir, path, barrier) = (dir.clone(), path.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    let tmp = dir.join(format!("key.{i}.tmp"));
+                    fs::write(&tmp, [i; KEY_LEN]).unwrap();
+                    barrier.wait();
+                    let result = publish_by_rename(&tmp, &path);
+                    let _ = fs::remove_file(&tmp);
+                    (i, result)
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let winners: Vec<u8> = results
+            .iter()
+            .filter(|(_, r)| r.is_ok())
+            .map(|(i, _)| *i)
+            .collect();
+        assert_eq!(winners.len(), 1, "exactly one publish wins: {results:?}");
+        for (_, r) in results.iter().filter(|(_, r)| r.is_err()) {
+            assert_eq!(
+                r.as_ref().unwrap_err().kind(),
+                std::io::ErrorKind::AlreadyExists
+            );
+        }
+        assert_eq!(fs::read(&path).unwrap(), vec![winners[0]; KEY_LEN]);
         let _ = fs::remove_dir_all(&dir);
     }
 

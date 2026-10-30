@@ -47,6 +47,7 @@ export const shards = {
     "src/features/voice/joinRequest.ts",
     "src/features/voice/passwordPrompt.ts",
     "src/lib/voice/watchRequest.ts",
+    "src/features/voice/cameraFlip.ts",
     "src/features/voice/cameraMenu.ts",
     "src/features/voice/autoPlayCameras.ts",
     "src/lib/voice/h264Profile.ts",
@@ -110,6 +111,7 @@ export const shards = {
     "src/lib/media/publicAssets.ts",
     "src/lib/voice/deviceManager.ts",
     "src/lib/ui/touchInput.ts",
+    "src/lib/ui/bottomSheet.ts",
     "src/lib/ui/zoomPan.ts",
     "src/lib/voice/ptt.ts",
     "src/lib/voice/voiceTokenManager.ts",
@@ -393,6 +395,7 @@ export const shards = {
     "src/lib/voice/livekitDiagnostics.ts",
   ],
   "safety-moderation-5": [
+    "src/features/uploads/myUploadsTab.ts",
     "src/features/blocks/blockActions.ts",
     "src/features/safety/DmPrivacy.ts",
     "src/features/message-requests/api.ts",

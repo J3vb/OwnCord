@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.5.0"
+version = "2.6.0"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -113,15 +113,6 @@ keyring = { version = "3", default-features = false, features = [
 # Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
 # via the tauri/rustls stack, so this costs no extra build.
 base64 = "0.22"
-# Native message box for the fatal-startup path in lib.rs on Windows and macOS,
-# where the Tauri app never built and tauri-plugin-dialog has no AppHandle to
-# run through (Linux shows that dialog with gtk instead, see below). Already
-# in the tree via that same plugin, so this costs no extra build -- but only
-# while the versions match: Cargo unifies features only within a
-# semver-compatible group. The plugin needs ^0.17 since 2.8.4; a different
-# minor here forks rfd into two crates, and the copy without the plugin's
-# backend features fails rfd's build.rs on Linux. Bump both together or neither.
-rfd = { version = "0.17", default-features = false }
 
 # Desktop-only plugins (no mobile bundle target). single-instance carries the
 # "deep-link" feature so an owncord:// link fired at a running app is forwarded
@@ -137,6 +128,16 @@ tauri-plugin-deep-link = "2"
 # the plugin's own desktop backend — directly to wait for the activation. Linux
 # uses the session bus directly (notification_bus.rs, the `dbus` crate below).
 notify-rust = "4"
+# Native message box for the fatal-startup path in lib.rs on Windows and macOS,
+# where the Tauri app never built and tauri-plugin-dialog has no AppHandle to
+# run through (Linux shows that dialog with gtk instead, see below). Already
+# in the tree via that same plugin, so this costs no extra build -- but only
+# while the versions match: Cargo unifies features only within a
+# semver-compatible group. The plugin needs ^0.17 since 2.8.4; a different
+# minor here forks rfd into two crates, and the copy without the plugin's
+# backend features fails rfd's build.rs on Linux. Bump both together or neither.
+# Desktop table because rfd's build script fails on Android.
+rfd = { version = "0.17", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs) and,

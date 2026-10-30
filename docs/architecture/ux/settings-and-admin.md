@@ -23,6 +23,13 @@ repository's `CHANGELOG.md`, built into a lazy chunk, never fetched) and a
 GitHub link. The first start on a new version shows that version's notes once
 in a "What's new" dialog (`features/whats-new/`); a fresh install does not.
 
+On a phone (600 px wide or less) the overlay fills the screen and opens on the
+section list; tapping a section shows only that section, with a back arrow
+(and Escape) to return to the list before a second Escape closes Settings.
+Another surface that asks for a tab opens straight on that section. The
+Connect page folds its saved servers down to the selected one there, with an
+arrow that opens the full list and Add Server.
+
 The Safety tab (labelled "Privacy & Safety") lists, top to bottom: Direct messages (two
 switches stored on the server: "Allow direct messages from server members" and
 "Message requests", the second disabled while the first is off; shown only when

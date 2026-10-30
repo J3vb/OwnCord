@@ -12,6 +12,7 @@
 import { describe, expect, it } from "vitest";
 import {
   describeDomDiff,
+  detachedByName,
   evaluateBars,
   formatBars,
   idleHeapSlope,
@@ -204,6 +205,36 @@ describe("lifecycle soak pass bars", () => {
     expect(nodes.bar).toContain(
       "phase 5: 2896→2909 [attached 2800→2813, detached 96→96, div[channel-sidebar] 400→413]",
     );
+  });
+
+  it("names the detached nodes JS holds when only the detached count moved", () => {
+    const dom = { attached: 752, regions: { "div[app-layout]": 700 } };
+    const from = sample(5, { nodes: 3112, dom, detached: { HTMLDivElement: 4, Text: 9 } });
+    const to = sample(15, {
+      nodes: 3125,
+      dom,
+      detached: { HTMLDivElement: 6, HTMLSpanElement: 2, Text: 9 },
+    });
+    expect(describeDomDiff(from, to)).toBe(
+      " [attached 752→752, detached 2360→2373, held HTMLDivElement 4→6, held HTMLSpanElement 0→2]",
+    );
+  });
+
+  it("counts a heap snapshot's detached DOM nodes by name", () => {
+    const heap = {
+      snapshot: { meta: { node_fields: ["type", "name", "id", "detachedness"] } },
+      strings: ["HTMLDivElement", "Detached HTMLSpanElement", "Window", "Text"],
+      // prettier-ignore
+      nodes: [
+        3, 0, 1, 2,
+        3, 0, 2, 2,
+        3, 0, 3, 1,
+        3, 1, 4, 0,
+        3, 2, 5, 0,
+        3, 3, 6, 2,
+      ],
+    };
+    expect(detachedByName(heap)).toEqual({ HTMLDivElement: 2, HTMLSpanElement: 1, Text: 1 });
   });
 
   it("describes no DOM diff when a sample has no breakdown", () => {
