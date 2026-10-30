@@ -9,7 +9,7 @@ import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/prefs/mediaVisibility";
-import { createZoomPan, PAN_MIN_SCALE } from "@lib/ui/zoomPan";
+import { bindTouchZoom, createZoomPan, PAN_MIN_SCALE } from "@lib/ui/zoomPan";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/ui/toast";
@@ -2132,6 +2132,8 @@ export function openImageLightbox(
 
   // Use a Disposable for cleanup of document-level listeners to prevent leaks
   const disposable = new Disposable();
+  // Pinch and drag on a touch screen, where the page itself does not zoom.
+  bindTouchZoom(overlay, view, disposable.signal);
 
   // One save path for the menu's Save Image and the Download button. It reads
   // the current image once, at the click, so a step cannot redirect it.
