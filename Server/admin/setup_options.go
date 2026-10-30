@@ -60,4 +60,7 @@ type SetupOptions struct {
 	// BeginTransfer gives the upload route the long-transfer deadline of the
 	// file routes. Nil leaves only the size cap.
 	BeginTransfer TransferBegin
+	// System feeds the Dashboard health row. The zero value serves uptime-less
+	// answers with every CPU, memory and disk figure null.
+	System SystemSources
 }
