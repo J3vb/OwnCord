@@ -1096,11 +1096,18 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     unsubscribers.push(...sidebar.unsubscribers);
 
     // --- Chat area ---
+    const callBarActions = createVoiceWidgetCallbacks(ws, limiters);
     const chatAreaResult = createChatArea({
       api,
       getRoot: () => root,
       getToast: () => toast,
       getChannelCtrl: () => channelCtrl,
+      callBar: {
+        isGridUp: () => videoModeCtrl?.isGridInWindow() ?? false,
+        onMuteToggle: () => callBarActions.onMuteToggle(),
+        onLeave: () => callBarActions.onDisconnect(),
+        onOpenCall: (channelId) => sidebar.openCall(channelId),
+      },
       subscribeDeletes: (listener) => {
         const offOne = ws.on("chat_deleted", (p) => listener(p.channel_id, [p.message_id]));
         const offMany = ws.on("chat_bulk_deleted", (p) => listener(p.channel_id, p.ids));
@@ -1154,7 +1161,10 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // The DM call panel hosts the video of its own call (chat stays up).
       panelHost: () => callPanelHost,
       chatColumn: chatAreaResult.chatArea,
-      onGridChange: () => callChat?.refresh(),
+      onGridChange: () => {
+        callChat?.refresh();
+        chatAreaResult.refreshCallBar();
+      },
     });
     // Opening the call view selects the voice channel; its chat sits beside the grid.
     const callChatBtn = chatAreaResult.chatHeaderRefs.callChatBtn;

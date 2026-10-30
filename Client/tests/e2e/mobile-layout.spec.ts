@@ -14,6 +14,8 @@ import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
+  mockTauriFullSessionWithVoice,
+  navigateToMainPage,
   submitLogin,
   waitForWsReady,
 } from "./helpers";
@@ -344,6 +346,87 @@ for (const profile of PROFILES) {
       await expect(bar).toHaveCSS("opacity", "0");
       await expect(page.locator(".message-context-menu")).toHaveCount(0);
       await expect(page.locator("[data-testid='message-sheet']")).toHaveCount(0);
+    });
+  });
+}
+
+for (const profile of PROFILES) {
+  test.describe(`mobile calls, ${profile.name}`, () => {
+    test.use(profile.use);
+
+    test.beforeEach(async ({ page }) => {
+      await mockTauriFullSessionWithVoice(page);
+      await page.goto("/");
+      await navigateToMainPage(page);
+    });
+
+    /** Stand in for the room connecting; the mocked join never reaches it. */
+    async function markConnected(page: Page): Promise<void> {
+      await page.evaluate(() =>
+        (
+          window as unknown as { __owncord: { setVoiceStatus(s: string): void } }
+        ).__owncord.setVoiceStatus("connected"),
+      );
+    }
+
+    async function openDrawerAndTapVoice(page: Page): Promise<void> {
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(page.locator("[data-testid='unified-sidebar']")).toHaveClass(/drawer-open/);
+      await page.locator(".channel-item.voice", { hasText: "Voice Chat" }).tap();
+    }
+
+    test("tapping a voice channel asks first, and joining shows the call bar", async ({ page }) => {
+      const bar = page.locator("[data-testid='phone-call-bar']");
+      await expect(bar).toBeHidden();
+
+      await openDrawerAndTapVoice(page);
+      const sheet = page.locator("[data-testid='voice-join-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(sheet).toContainText("Voice Chat");
+      await expect(sheet.locator("[data-testid='join-sheet-count']")).toHaveText(
+        "2 people in here",
+      );
+      // Nothing joined yet.
+      await expect(bar).toBeHidden();
+
+      await sheet.getByRole("button", { name: "Join Voice" }).tap();
+      await expect(sheet).toHaveCount(0);
+      await markConnected(page);
+
+      await expect(page.locator("[data-testid='unified-sidebar']")).not.toHaveClass(/drawer-open/);
+      await expect(bar).toBeVisible();
+      await expect(bar.locator("[data-testid='pcb-name']")).toHaveText("Voice Chat");
+      await expect(bar.locator("[data-testid='pcb-detail']")).toHaveText(
+        /^\d+ (person|people) · \d\d:\d\d$/,
+      );
+      for (const id of ["pcb-mute", "pcb-leave"]) {
+        const box = await bar.locator(`[data-testid='${id}']`).boundingBox();
+        expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+      await noHorizontalScroll(page);
+
+      await bar.locator("[data-testid='pcb-mute']").tap();
+      await expect(bar.locator("[data-testid='pcb-mute']")).toHaveAttribute("aria-pressed", "true");
+    });
+
+    test("Leave on the call bar ends the call and hides the bar", async ({ page }) => {
+      await openDrawerAndTapVoice(page);
+      await page.getByRole("button", { name: "Join Voice" }).tap();
+      await markConnected(page);
+      const bar = page.locator("[data-testid='phone-call-bar']");
+      await expect(bar).toBeVisible();
+
+      await bar.locator("[data-testid='pcb-leave']").tap();
+      await expect(bar).toBeHidden();
+    });
+
+    test("Cancel on the join sheet joins nothing", async ({ page }) => {
+      await openDrawerAndTapVoice(page);
+      await page.locator("[data-testid='join-sheet-cancel']").tap();
+      await expect(page.locator("[data-testid='voice-join-sheet']")).toHaveCount(0);
+      await expect(page.locator("[data-testid='phone-call-bar']")).toBeHidden();
+      await expect(page.locator("[data-testid='voice-widget']")).not.toBeVisible();
     });
   });
 }
