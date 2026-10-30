@@ -103,6 +103,8 @@ test.describe("shared navigation", () => {
     await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("tab", { name: "Privacy & Safety" })).toBeFocused();
     await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("tab", { name: "My uploads" })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
     await expect(page.getByRole("tab", { name: "Appearance" })).toBeFocused();
   });
 

@@ -385,8 +385,8 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 4px 12px;
-  padding: 8px 12px;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
   font-size: var(--font-size-sm);

@@ -393,6 +393,7 @@ export const shards = {
     "src/lib/voice/livekitDiagnostics.ts",
   ],
   "safety-moderation-5": [
+    "src/features/uploads/myUploadsTab.ts",
     "src/features/blocks/blockActions.ts",
     "src/features/safety/DmPrivacy.ts",
     "src/features/message-requests/api.ts",

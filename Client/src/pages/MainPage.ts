@@ -78,8 +78,13 @@ import {
 } from "@lib/voice/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
+  fetchImageAsObjectUrl,
+  formatFileSize,
+  isImageMime,
   pruneAttachmentCacheScope,
+  resolveServerUrl,
   setAttachmentCacheScope,
+  thumbnailUrl,
 } from "@components/message-list/attachments";
 import { closeActiveLightbox } from "@components/message-list/media";
 import {
@@ -1427,9 +1432,17 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         // Loaded on first open, like the About tab: the list code stays out of this chunk.
         const host = document.createElement("div");
         host.className = "settings-pane active";
-        void import("@components/settings/MyUploadsTab").then(
+        void import("../features/uploads/myUploadsTab").then(
           ({ buildMyUploadsTab }) => {
-            if (!signal.aborted) host.replaceWith(buildMyUploadsTab(signal, api));
+            if (!signal.aborted)
+              host.replaceWith(
+                buildMyUploadsTab(signal, api, {
+                  formatFileSize,
+                  isImage: isImageMime,
+                  thumbnail: (att) =>
+                    fetchImageAsObjectUrl(thumbnailUrl(resolveServerUrl(att.url), att.mime)),
+                }),
+              );
           },
           (err: unknown) => {
             log.warn("My uploads tab failed to load", { error: String(err) });

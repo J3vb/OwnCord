@@ -431,6 +431,11 @@ export function createSettingsOverlay(
     }
   }
 
+  /** A dialog sits inside the panel: the Log Out prompt or one a tab opened. */
+  function promptOpen(): boolean {
+    return closeLogoutPrompt !== null || root?.querySelector(".modal-overlay") != null;
+  }
+
   function hide(): void {
     // A Log Out prompt left open must not outlive the panel it belongs to.
     closeLogoutPrompt?.();
@@ -776,16 +781,16 @@ export function createSettingsOverlay(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        // The Log Out prompt owns Escape while it is open.
+        // A prompt mounted in the panel (Log Out, a tab's confirmation) owns Escape while it is open.
         if (
           e.key === "Escape" &&
           !isImeCommit(e) &&
-          closeLogoutPrompt === null &&
+          !promptOpen() &&
           root?.classList.contains("open")
         ) {
           requestClose();
         } else if (
-          closeLogoutPrompt === null &&
+          !promptOpen() &&
           root?.classList.contains("open") === true &&
           (e.ctrlKey || e.metaKey) &&
           !e.shiftKey &&

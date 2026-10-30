@@ -14,16 +14,9 @@ import { createIcon } from "@lib/icons";
 import { parseTimestamp } from "@lib/text/formatting";
 import type { Attachment, UserStorage, UserUploadItem, UserUploadsQuery } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
-import { createConfirmModal } from "../../features/dialogs/confirmModal";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import { formatDate } from "../../i18n/format";
 import { settingsText as t } from "../../i18n/settings";
-import {
-  fetchImageAsObjectUrl,
-  formatFileSize,
-  isImageMime,
-  resolveServerUrl,
-  thumbnailUrl,
-} from "../message-list/attachments";
 
 /** Quiet period after the last keystroke before a name search runs. */
 export const UPLOADS_SEARCH_DEBOUNCE_MS = 300;
@@ -31,6 +24,18 @@ export const UPLOADS_SEARCH_DEBOUNCE_MS = 300;
 export const UPLOADS_PAGE_SIZE = 50;
 /** The usage bar turns to its warning colour from this share of the quota. */
 export const UPLOADS_WARN_RATIO = 0.9;
+
+/**
+ * The attachment helpers the tab needs, supplied by the page: the code that
+ * formats sizes and fetches authenticated thumbnails lives in the UI layer,
+ * which a feature does not import.
+ */
+export interface UploadsMedia {
+  formatFileSize(bytes: number): string;
+  isImage(mime: string): boolean;
+  /** An object URL for the file's thumbnail, or null when it cannot be fetched. */
+  thumbnail(att: Attachment): Promise<string | null>;
+}
 
 export type MyUploadsApi = Pick<
   ApiClient,
@@ -40,7 +45,10 @@ export type MyUploadsApi = Pick<
 type Sort = NonNullable<UserUploadsQuery["sort"]>;
 
 /** The usage line's text: "X used of Y", or "X used, no limit". */
-export function usageText(storage: UserStorage): string {
+export function usageText(
+  storage: UserStorage,
+  formatFileSize: UploadsMedia["formatFileSize"],
+): string {
   return storage.quota_bytes > 0
     ? t("uploads.usage.of", {
         used: formatFileSize(storage.used_bytes),
@@ -76,15 +84,25 @@ export function uploadLocation(item: UserUploadItem): string {
   }
 }
 
-function loadThumb(img: HTMLImageElement, att: Attachment, scope: Disposable): void {
-  void fetchImageAsObjectUrl(thumbnailUrl(resolveServerUrl(att.url), att.mime)).then((url) => {
+function loadThumb(
+  media: UploadsMedia,
+  img: HTMLImageElement,
+  att: Attachment,
+  scope: Disposable,
+): void {
+  void media.thumbnail(att).then((url) => {
     if (scope.signal.aborted) return;
     if (url === null) img.replaceWith(createIcon("image", 20));
     else img.src = url;
   });
 }
 
-export function buildMyUploadsTab(signal: AbortSignal, api: MyUploadsApi): HTMLDivElement {
+export function buildMyUploadsTab(
+  signal: AbortSignal,
+  api: MyUploadsApi,
+  media: UploadsMedia,
+): HTMLDivElement {
+  const { formatFileSize } = media;
   const pane = createElement("div", { class: "settings-pane active my-uploads" });
   pane.appendChild(createElement("div", { class: "setting-desc" }, t("uploads.intro")));
 
@@ -187,7 +205,7 @@ export function buildMyUploadsTab(signal: AbortSignal, api: MyUploadsApi): HTMLD
 
   function showUsage(storage: UserStorage): void {
     usage.hidden = false;
-    usageLabel.textContent = usageText(storage);
+    usageLabel.textContent = usageText(storage, formatFileSize);
     if (storage.quota_bytes > 0) {
       const ratio = Math.min(1, storage.used_bytes / storage.quota_bytes);
       bar.hidden = false;
@@ -220,10 +238,10 @@ export function buildMyUploadsTab(signal: AbortSignal, api: MyUploadsApi): HTMLD
       "data-state": item.state,
     });
     const thumb = createElement("span", { class: "my-uploads__thumb" });
-    if (isImageMime(att.mime)) {
+    if (media.isImage(att.mime)) {
       const img = createElement("img", { alt: "", draggable: "false" });
       thumb.appendChild(img);
-      loadThumb(img, att, scope);
+      loadThumb(media, img, att, scope);
     } else {
       thumb.appendChild(createIcon("file-text", 20));
     }

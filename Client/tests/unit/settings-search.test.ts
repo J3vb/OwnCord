@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
-import { buildMyUploadsTab } from "@components/settings/MyUploadsTab";
+import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
 
 const mockAppVersion = vi.hoisted(() => vi.fn());
 vi.mock("../../src/features/whats-new/appVersion", () => ({
@@ -187,7 +187,14 @@ describe("settings search", () => {
       async (name) => {
         mountOverlay(
           name === "My uploads"
-            ? { myUploadsTab: (signal) => buildMyUploadsTab(signal, uploadsApi) }
+            ? {
+                myUploadsTab: (signal) =>
+                  buildMyUploadsTab(signal, uploadsApi, {
+                    formatFileSize: (n: number) => `${n} B`,
+                    isImage: (mime: string) => mime.startsWith("image/"),
+                    thumbnail: () => Promise.resolve(null),
+                  }),
+              }
             : {},
         );
         const tab = tabs().find((t) => labelFor(t) === name)!;

@@ -1438,14 +1438,14 @@ details.disclose[open] > summary .icon {
 
 /* ── My uploads tab ── */
 .my-uploads__usage {
-  margin: 16px 0;
-  padding: 12px 16px;
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
 }
 .my-uploads__usage-text {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
   font-size: var(--font-size-md);
   color: var(--text-normal);
 }
@@ -1467,13 +1467,13 @@ details.disclose[open] > summary .icon {
   background: var(--red);
 }
 .my-uploads__usage.is-warning .my-uploads__usage-text {
-  color: var(--red);
+  color: var(--text-danger);
 }
 .my-uploads__controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
 }
 .my-uploads__sort {
   display: inline-flex;
@@ -1482,7 +1482,7 @@ details.disclose[open] > summary .icon {
   overflow: hidden;
 }
 .my-uploads__sort-btn {
-  padding: 6px 12px;
+  padding: var(--space-2) var(--space-3);
   border: none;
   background: var(--bg-secondary);
   color: var(--text-muted);
@@ -1495,7 +1495,7 @@ details.disclose[open] > summary .icon {
 .my-uploads__search {
   flex: 1;
   min-width: 160px;
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
@@ -1509,8 +1509,8 @@ details.disclose[open] > summary .icon {
 .my-uploads__row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 0;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--border);
 }
 .my-uploads__thumb {
@@ -1554,8 +1554,8 @@ details.disclose[open] > summary .icon {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 24px 8px;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-2);
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   text-align: center;
@@ -1566,5 +1566,5 @@ details.disclose[open] > summary .icon {
 }
 .my-uploads__more {
   display: block;
-  margin: 12px auto 0;
+  margin: var(--space-3) auto 0;
 }

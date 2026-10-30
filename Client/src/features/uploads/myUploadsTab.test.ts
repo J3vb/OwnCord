@@ -1,21 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn(() => Promise.resolve("blob:thumb")));
-
-vi.mock("@components/message-list/attachments", () => ({
-  fetchImageAsObjectUrl,
+const fetchImageAsObjectUrl = vi.fn(() => Promise.resolve<string | null>("blob:thumb"));
+const media = {
   formatFileSize: (n: number) => `${n} B`,
-  isImageMime: (m: string) => m.startsWith("image/"),
-  resolveServerUrl: (url: string) => `https://server.test${url}`,
-  thumbnailUrl: (url: string) => `${url}/thumb`,
-}));
+  isImage: (m: string) => m.startsWith("image/"),
+  thumbnail: () => fetchImageAsObjectUrl(),
+};
 
-import {
-  buildMyUploadsTab,
-  UPLOADS_SEARCH_DEBOUNCE_MS,
-  uploadLocation,
-} from "@components/settings/MyUploadsTab";
-import type { MyUploadsApi } from "@components/settings/MyUploadsTab";
+import { buildMyUploadsTab, UPLOADS_SEARCH_DEBOUNCE_MS, uploadLocation } from "./myUploadsTab";
+import type { MyUploadsApi } from "./myUploadsTab";
 import { ApiClientError } from "@lib/api";
 import type { UserStorage, UserUploadItem, UserUploadsPage } from "@lib/types";
 import { resetChannelsStore, setChannels } from "@stores/channels.store";
@@ -36,9 +29,18 @@ function upload(
   };
 }
 
-const flush = async (): Promise<void> => {
-  for (let i = 0; i < 8; i++) await Promise.resolve();
-};
+/** Let pending promise callbacks run; works under fake timers too. */
+const flush = (): Promise<void> =>
+  Array.from({ length: 8 }).reduce<Promise<void>>((p) => p.then(() => {}), Promise.resolve());
+
+const confirmBtn = (): HTMLButtonElement | null =>
+  document.querySelector<HTMLButtonElement>("[data-testid='uploads-remove-confirm-btn']");
+
+async function remove(row: HTMLElement): Promise<void> {
+  row.querySelector<HTMLButtonElement>(".my-uploads__remove")!.click();
+  confirmBtn()!.click();
+  await flush();
+}
 
 describe("MyUploadsTab", () => {
   let abort: AbortController;
@@ -57,21 +59,17 @@ describe("MyUploadsTab", () => {
     listUserUploads.mockImplementation(() =>
       Promise.resolve(pages[Math.min(n++, pages.length - 1)]!),
     );
-    pane = buildMyUploadsTab(abort.signal, { getUserStorage, listUserUploads, removeUserUpload });
+    pane = buildMyUploadsTab(
+      abort.signal,
+      { getUserStorage, listUserUploads, removeUserUpload },
+      media,
+    );
     host.appendChild(pane);
     await flush();
   }
 
   const rows = (): HTMLElement[] => [...pane.querySelectorAll<HTMLElement>(".my-uploads__row")];
   const lastQuery = () => listUserUploads.mock.calls.at(-1)![0];
-  const confirmBtn = (): HTMLButtonElement | null =>
-    document.querySelector<HTMLButtonElement>("[data-testid='uploads-remove-confirm-btn']");
-
-  async function remove(row: HTMLElement): Promise<void> {
-    row.querySelector<HTMLButtonElement>(".my-uploads__remove")!.click();
-    confirmBtn()!.click();
-    await flush();
-  }
 
   beforeEach(() => {
     abort = new AbortController();
@@ -289,7 +287,11 @@ describe("MyUploadsTab", () => {
     getUserStorage.mockResolvedValue({ used_bytes: 1, quota_bytes: 0 });
     listUserUploads.mockRejectedValueOnce(new Error("offline"));
     listUserUploads.mockResolvedValueOnce({ items: [upload("a")] });
-    pane = buildMyUploadsTab(abort.signal, { getUserStorage, listUserUploads, removeUserUpload });
+    pane = buildMyUploadsTab(
+      abort.signal,
+      { getUserStorage, listUserUploads, removeUserUpload },
+      media,
+    );
     host.appendChild(pane);
     await flush();
     expect(pane.querySelector(".my-uploads__status")!.textContent).toContain("Couldn't load");
