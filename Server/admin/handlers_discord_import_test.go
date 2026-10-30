@@ -52,7 +52,7 @@ type channelRecorder struct {
 	created []int64
 }
 
-func (c *channelRecorder) ChannelCreated(_ context.Context, ch *db.Channel) {
+func (c *channelRecorder) BroadcastChannelCreate(ch *db.Channel) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.created = append(c.created, ch.ID)
@@ -99,12 +99,12 @@ func newImportFixture(t *testing.T, maxBytes int64) *importFixture {
 		ann:      &channelRecorder{},
 		gate:     &gatedStore{DB: database, reached: make(chan struct{}), release: make(chan struct{})},
 	}
-	runner := discordimport.NewRunner(discordimport.Config{
-		Store:     f.gate,
-		Files:     api.ReservedStore{Store: files},
-		Uploads:   service.NewUploadService(database, nil),
-		Announcer: f.ann,
-		Group:     group,
+	runner := discordimport.NewService(discordimport.ServiceConfig{
+		Store:   f.gate,
+		Files:   api.ReservedStore{Store: files},
+		Uploads: service.NewUploadService(database, nil),
+		Hub:     f.ann,
+		Group:   group,
 	})
 	f.token = createAdminUser(t, database)
 	f.audits = audittest.Install(t, database)
@@ -425,11 +425,14 @@ type stubImporter struct{ startErr error }
 func (s *stubImporter) Start(context.Context, discordimport.Request) (*discordimport.Job, error) {
 	return nil, s.startErr
 }
-func (*stubImporter) Running(int64) *discordimport.Job { return nil }
-func (*stubImporter) Status(context.Context, int64) (*db.ImportJob, error) {
-	return nil, db.ErrNotFound
+func (*stubImporter) Running(int64) *discordimport.Job           { return nil }
+func (*stubImporter) Cancel(context.Context, int64, int64) error { return discordimport.ErrNotFound }
+func (*stubImporter) Status(context.Context, int64) (discordimport.JobView, error) {
+	return discordimport.JobView{}, discordimport.ErrNotFound
 }
-func (*stubImporter) Latest(context.Context) (*db.ImportJob, error)       { return nil, db.ErrNotFound }
+func (*stubImporter) Latest(context.Context) (discordimport.JobView, error) {
+	return discordimport.JobView{}, discordimport.ErrNotFound
+}
 func (*stubImporter) CategoryExists(context.Context, int64) (bool, error) { return true, nil }
 
 func TestDiscordImport_StartRefusalsMapToStatuses(t *testing.T) {

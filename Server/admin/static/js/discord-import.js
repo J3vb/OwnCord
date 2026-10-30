@@ -4,7 +4,7 @@
    piece of text that came from the server or the chosen file is set with
    textContent, never written into markup. */
 const IMPORT_POLL_MS=2000;
-const importUI={job:null,retentionDays:0,maxBytes:0,busy:false,notice:'',pollTimer:null,token:'',cancelling:false};
+const importUI={job:null,retentionDays:0,maxBytes:0,busy:false,busyToken:'',notice:'',pollTimer:null,token:'',cancelling:false};
 
 function importEl(tag,cls,text){
   const e=document.createElement(tag);
@@ -129,6 +129,8 @@ function paintImportForm(body){
 async function initDiscordImport(){
   const token=state.token;
   importUI.token=token;importUI.notice='';
+  /* An upload that began under an earlier session no longer holds the form. */
+  if(importUI.busyToken!==token){importUI.busy=false;importUI.busyToken=''}
   try{
     const r=await api('GET','/discord-imports/latest');
     if(state.token!==token)return;
@@ -178,7 +180,7 @@ async function startDiscordImport(){
   const sel=/** @type {HTMLSelectElement|null} */(document.getElementById('discordImportCategory'));
   const categoryId=sel?sel.value:'0';
   const token=state.token;
-  importUI.busy=true;paintImportCard();
+  importUI.busy=true;importUI.busyToken=token;paintImportCard();
   try{
     const res=await fetch('/admin/api/discord-imports/upload?filename='+encodeURIComponent(file.name)+'&category_id='+encodeURIComponent(categoryId),
       {method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/octet-stream'},body:file});
@@ -195,7 +197,10 @@ async function startDiscordImport(){
   }catch(e){
     if(state.token===token)importUI.notice=e.message;
   }finally{
-    if(state.token===token){importUI.busy=false;paintImportCard()}
+    /* Cleared even when the session ended meanwhile (a 401 clears the token),
+       or the form would stay disabled after the next sign-in. */
+    if(importUI.busyToken===token){importUI.busy=false;importUI.busyToken=''}
+    if(state.token===token)paintImportCard();
   }
 }
 

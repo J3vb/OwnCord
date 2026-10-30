@@ -16,6 +16,7 @@ window.__test = {
   pollDiscordImport: pollDiscordImport,
   cancelDiscordImport: cancelDiscordImport,
   startDiscordImport: startDiscordImport,
+  handleSessionExpired: handleSessionExpired,
   importUI: importUI,
   state: state
 };
@@ -44,8 +45,9 @@ interface Bridge {
   pollDiscordImport: () => Promise<void>;
   cancelDiscordImport: () => Promise<void>;
   startDiscordImport: () => Promise<void>;
+  handleSessionExpired: () => void;
   importUI: { pollTimer: unknown };
-  state: { categoryList: unknown[] };
+  state: { categoryList: unknown[]; token: string };
 }
 
 const job = (over: Partial<Job> = {}): Job => ({
@@ -244,5 +246,42 @@ describe("Server/admin/static — Import from Discord card", () => {
     expect(b.doc.querySelector('#discordImportCard [role="alert"]')?.textContent).toContain(
       "larger than this server or a reverse proxy",
     );
+  });
+
+  it("frees the form after a 401 ends the session mid-upload and the admin signs in again", async () => {
+    const calls: FetchCall[] = [];
+    const b = await boot(calls, () => latest(null));
+    dom = b.dom;
+    b.bridge.state.token = "first";
+    await b.bridge.initDiscordImport();
+    (b.dom.window as unknown as { fetch: unknown }).fetch = async () =>
+      ({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        json: async () => ({}),
+      }) as unknown as Response;
+    const input = b.doc.getElementById("discordImportFile") as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      value: [new b.dom.window.File(["{}"], "export.json")],
+    });
+    await b.bridge.startDiscordImport();
+    expect(b.bridge.state.token).toBe("");
+
+    b.doc.getElementById("content")!.innerHTML =
+      '<div class="section-card" id="discordImportCard"></div>';
+    b.bridge.state.token = "second";
+    (b.dom.window as unknown as { fetch: unknown }).fetch = async () =>
+      ({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => latest(null),
+      }) as unknown as Response;
+    await b.bridge.initDiscordImport();
+    const go = b.doc.getElementById("discordImportGo") as HTMLButtonElement;
+    expect(go.disabled).toBe(false);
+    expect(go.textContent).toBe("Import");
+    expect((b.doc.getElementById("discordImportFile") as HTMLInputElement).disabled).toBe(false);
   });
 });

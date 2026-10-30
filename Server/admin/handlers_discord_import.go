@@ -15,9 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode"
 
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/service/discordimport"
@@ -49,16 +47,14 @@ func importTransferLifetime(maxBytes int64) time.Duration {
 	return max(importMinLifetime, time.Duration(secs)*time.Second)
 }
 
-// maxAuditSourceRunes bounds the file name an audit row carries.
-const maxAuditSourceRunes = 100
-
-// DiscordImporter is the import runner the admin routes drive;
-// *discordimport.Runner satisfies it.
+// DiscordImporter is the import service the admin routes drive;
+// *discordimport.Service satisfies it. It audits the import itself.
 type DiscordImporter interface {
 	Start(ctx context.Context, req discordimport.Request) (*discordimport.Job, error)
 	Running(id int64) *discordimport.Job
-	Status(ctx context.Context, id int64) (*db.ImportJob, error)
-	Latest(ctx context.Context) (*db.ImportJob, error)
+	Cancel(ctx context.Context, id, actor int64) error
+	Status(ctx context.Context, id int64) (discordimport.JobView, error)
+	Latest(ctx context.Context) (discordimport.JobView, error)
 	CategoryExists(ctx context.Context, id int64) (bool, error)
 }
 
@@ -72,7 +68,6 @@ type TransferBegin func(w http.ResponseWriter, r *http.Request, maxBytes int64, 
 // discordImportAPI holds what the Discord import routes share.
 type discordImportAPI struct {
 	importer  DiscordImporter
-	audit     db.Auditor
 	retention *service.RetentionService
 	group     *syncutil.Group
 	begin     TransferBegin
@@ -80,30 +75,24 @@ type discordImportAPI struct {
 	maxBytes  int64
 	// minFree is the free space kept in reserve on the import volume.
 	minFree uint64
-	// cancelledBy remembers who asked to cancel a job, for the audit row
-	// written once the job really ended cancelled.
-	cancelMu    syncutil.Mutex
-	cancelledBy map[int64]int64
 	// uploading is set while an upload is being received or started, so two
 	// large uploads never spool at once.
 	uploading atomic.Bool
 }
 
-func newDiscordImportAPI(audit db.Auditor, retention *service.RetentionService, opts SetupOptions) *discordImportAPI {
+func newDiscordImportAPI(retention *service.RetentionService, opts SetupOptions) *discordImportAPI {
 	var minFree uint64
 	if opts.RunningCfg != nil {
 		minFree = opts.RunningCfg.Server.MinFreeDiskBytes()
 	}
 	return &discordImportAPI{
-		minFree:     minFree,
-		cancelledBy: map[int64]int64{},
-		importer:    opts.DiscordImport,
-		audit:       audit,
-		retention:   retention,
-		group:       opts.Background,
-		begin:       opts.BeginTransfer,
-		dir:         cmp.Or(opts.ImportDir, os.TempDir()),
-		maxBytes:    cmp.Or(opts.ImportMaxBytes, DefaultImportMaxBytes),
+		minFree:   minFree,
+		importer:  opts.DiscordImport,
+		retention: retention,
+		group:     opts.Background,
+		begin:     opts.BeginTransfer,
+		dir:       cmp.Or(opts.ImportDir, os.TempDir()),
+		maxBytes:  cmp.Or(opts.ImportMaxBytes, DefaultImportMaxBytes),
 	}
 }
 
@@ -121,7 +110,7 @@ type importJobResponse struct {
 	FinishedAt         *string `json:"finished_at"`
 }
 
-func importJobDTO(j *db.ImportJob) importJobResponse {
+func importJobDTO(j discordimport.JobView) importJobResponse {
 	return importJobResponse{
 		ID: j.ID, Status: j.Status, SourceName: j.SourceName, Imported: j.Imported, Skipped: j.Skipped,
 		SkippedAttachments: j.SkippedAttachments, Total: j.Total, Error: j.Error,
@@ -158,7 +147,7 @@ func (a *discordImportAPI) handleLatest(w http.ResponseWriter, r *http.Request) 
 	case err == nil:
 		dto := importJobDTO(job)
 		out.Job = &dto
-	case !errors.Is(err, db.ErrNotFound):
+	case !errors.Is(err, discordimport.ErrNotFound):
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to read the latest import")
 		return
 	}
@@ -191,7 +180,7 @@ func (a *discordImportAPI) handleStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	job, err := a.importer.Status(r.Context(), id)
-	if errors.Is(err, db.ErrNotFound) {
+	if errors.Is(err, discordimport.ErrNotFound) {
 		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "import not found")
 		return
 	}
@@ -212,27 +201,16 @@ func (a *discordImportAPI) handleCancel(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	job := a.importer.Running(id)
-	if job != nil {
-		select {
-		case <-job.Done():
-			job = nil
-		default:
-		}
-	}
-	if job == nil {
-		if _, err := a.importer.Status(r.Context(), id); errors.Is(err, db.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "import not found")
-			return
-		}
+	switch err := a.importer.Cancel(r.Context(), id, actorFromContext(r)); {
+	case errors.Is(err, discordimport.ErrNotFound):
+		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "import not found")
+	case errors.Is(err, discordimport.ErrNotRunning):
 		writeErr(w, http.StatusConflict, httperr.CodeConflict, "that import is not running")
-		return
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to cancel the import")
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]any{"id": id, "status": "cancelling"})
 	}
-	a.cancelMu.Lock()
-	a.cancelledBy[id] = actorFromContext(r)
-	a.cancelMu.Unlock()
-	job.Cancel()
-	writeJSON(w, http.StatusAccepted, map[string]any{"id": id, "status": "cancelling"})
 }
 
 // uploadQuery reads the file name and optional category of an upload.
@@ -307,10 +285,8 @@ func (a *discordImportAPI) handleUpload(w http.ResponseWriter, r *http.Request) 
 		writeImportStartErr(w, err)
 		return
 	}
-	source := auditSource(name)
-	db.WriteAudit(context.WithoutCancel(r.Context()), a.audit, actor, "discord_import_start", "channel", job.ChannelID, "started importing "+source)
-	a.finishInBackground(r.Context(), job, ex, path, actor, source)
-	writeJSON(w, http.StatusAccepted, map[string]any{"id": job.ID, "status": db.ImportRunning})
+	a.finishInBackground(r.Context(), job, ex, path)
+	writeJSON(w, http.StatusAccepted, map[string]any{"id": job.ID, "status": discordimport.StatusRunning})
 }
 
 // spool streams the request body into a temp file under the import directory.
@@ -387,52 +363,22 @@ func (a *discordImportAPI) discard(path string, ex discordimport.Export) {
 }
 
 // finishInBackground closes the export and removes the upload once the job
-// ends, and audits a published or cancelled import. The group joins it at
-// shutdown, when it leaves without waiting and the start-up sweep removes the
-// file.
-func (a *discordImportAPI) finishInBackground(ctx context.Context, job *discordimport.Job, ex discordimport.Export, path string, actor int64, source string) {
+// ends. The group joins it at shutdown, when it leaves without waiting and the
+// start-up sweep removes the file.
+func (a *discordImportAPI) finishInBackground(ctx context.Context, job *discordimport.Job, ex discordimport.Export, path string) {
 	finish := func(ctx context.Context) {
 		select {
 		case <-job.Done():
 		case <-ctx.Done():
 			return
 		}
-		res := job.Wait()
 		a.discard(path, ex)
-		tail := context.WithoutCancel(ctx)
-		a.cancelMu.Lock()
-		by, asked := a.cancelledBy[job.ID]
-		delete(a.cancelledBy, job.ID)
-		a.cancelMu.Unlock()
-		switch res.Status {
-		case db.ImportDone:
-			db.WriteAudit(tail, a.audit, actor, "discord_import_publish", "channel", job.ChannelID,
-				fmt.Sprintf("published %s: %d messages imported, %d skipped", source, res.Imported, res.Skipped))
-		case db.ImportCancelled:
-			if asked {
-				db.WriteAudit(tail, a.audit, by, "discord_import_cancel", "channel", job.ChannelID, "cancelled importing "+source)
-			}
-		}
 	}
 	if !a.group.Go(ctx, finish) {
 		job.Cancel()
 		<-job.Done()
 		finish(ctx)
 	}
-}
-
-// auditSource is the upload's file name made safe and short for an audit row.
-func auditSource(name string) string {
-	s := strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return -1
-		}
-		return r
-	}, name)
-	if r := []rune(s); len(r) > maxAuditSourceRunes {
-		s = string(r[:maxAuditSourceRunes])
-	}
-	return s
 }
 
 // writeImportStartErr maps an open or start failure onto a response.
@@ -442,7 +388,7 @@ func writeImportStartErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusConflict, httperr.CodeConflict, "another import is already running")
 	case errors.Is(err, discordimport.ErrShuttingDown):
 		writeErr(w, http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "the server is shutting down")
-	case errors.Is(err, db.ErrNotFound):
+	case errors.Is(err, discordimport.ErrNotFound):
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "that category does not exist")
 	case errors.Is(err, discordimport.ErrBadExport), errors.Is(err, discordimport.ErrZipTooLarge):
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "not a usable Discord export: "+err.Error())

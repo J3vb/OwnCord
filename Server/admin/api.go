@@ -357,7 +357,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		mountRetentionRoutes(r, svc.Retention)
 
 		mountChannelActionRoutes(r, "/channels", channels, hub)
-		mountDiscordImportRoutes(r, newDiscordImportAPI(database, svc.Retention, setupOpts))
+		mountDiscordImportRoutes(r, newDiscordImportAPI(svc.Retention, setupOpts))
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageChannels))
 			r.Get("/channels", handleListChannels(channels))

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,46 +10,24 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
-	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/service/discordimport"
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// channelBroadcaster is the hub call an import makes once, when its channel
-// becomes visible.
-type channelBroadcaster interface {
-	BroadcastChannelCreate(ch *db.Channel)
-}
-
-// importAnnouncer tells everyone about a finished import's channel the way a
-// normal channel create does.
-type importAnnouncer struct {
-	perms *service.PermissionService
-	hub   channelBroadcaster
-}
-
-// ChannelCreated drops cached permissions, since the channel started as a copy
-// of its category's template, and then sends channel_create.
-func (a importAnnouncer) ChannelCreated(_ context.Context, ch *db.Channel) {
-	if a.perms != nil {
-		a.perms.InvalidateAll()
-	}
-	a.hub.BroadcastChannelCreate(ch)
-}
-
-// newDiscordImporter builds the runner behind the admin import routes, or nil
+// newDiscordImporter builds the import service behind the admin routes, or nil
 // when there is no upload storage to copy media into.
-func newDiscordImporter(database *db.DB, svc *service.Services, hub channelBroadcaster, store *storage.Storage, rt Runtime) admin.DiscordImporter {
-	if store == nil || svc.Uploads == nil {
+func newDiscordImporter(store discordimport.ServiceStore, svc *service.Services, hub discordimport.ChannelBroadcaster, files *storage.Storage, rt Runtime) admin.DiscordImporter {
+	if files == nil || svc.Uploads == nil {
 		return nil
 	}
-	return discordimport.NewRunner(discordimport.Config{
-		Store:     database,
-		Files:     ReservedStore{Store: store},
-		Uploads:   svc.Uploads,
-		Announcer: importAnnouncer{perms: svc.Permissions, hub: hub},
-		Group:     rt.Background,
+	return discordimport.NewService(discordimport.ServiceConfig{
+		Store:   store,
+		Files:   ReservedStore{Store: files},
+		Uploads: svc.Uploads,
+		Group:   rt.Background,
+		Hub:     hub,
+		Perms:   svc.Permissions,
 	})
 }
 
