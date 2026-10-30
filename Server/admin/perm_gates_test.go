@@ -172,6 +172,7 @@ func TestAuditAndSettings_ModeratorForbidden(t *testing.T) {
 		{http.MethodGet, "/config"},
 		{http.MethodPost, "/logs/ticket"},
 		{http.MethodGet, "/logs/level"},
+		{http.MethodGet, "/logs/history"},
 		{http.MethodPatch, "/logs/level"},
 		{http.MethodDelete, "/logs/level"},
 	} {
@@ -288,6 +289,7 @@ var expectedGatedRoutes = []admin.GatedRoute{
 	{Method: http.MethodPost, Pattern: "/users/{id}/recovery-credential", Gate: "issue_recovery"},
 	{Method: http.MethodPost, Pattern: "/logs/ticket", Gate: "view_diagnostics"},
 	{Method: http.MethodGet, Pattern: "/logs/level", Gate: "view_diagnostics"},
+	{Method: http.MethodGet, Pattern: "/logs/history", Gate: "view_diagnostics"},
 	{Method: http.MethodPatch, Pattern: "/logs/level", Gate: "view_diagnostics"},
 	{Method: http.MethodDelete, Pattern: "/logs/level", Gate: "view_diagnostics"},
 	{Method: http.MethodPost, Pattern: "/support-bundles/preview", Gate: "view_diagnostics"},

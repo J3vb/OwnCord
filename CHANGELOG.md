@@ -65,6 +65,7 @@ and only when it changes something a contributor or fork holder must do
 **Admin panel**
 
 - Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
+- Server logs survive a restart: the server keeps the last 7 days (at most 200 MB) on disk under `data/logs`, and the Logs page's new History tab searches them by time range, level and text, a page at a time. Change or turn off with `logging.history_days` and `logging.history_max_mb`.
 
 ### Fixed
 

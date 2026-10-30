@@ -439,10 +439,12 @@ const LOG_TIME=new Intl.DateTimeFormat(undefined,{hour:'2-digit',minute:'2-digit
 function pauseLabel(){return state.logPaused?OPS_ICON.play+'Resume':OPS_ICON.pause+'Pause'}
 
 function renderLogs(){
+  if(state.logMode==='history')return renderLogHistory();
   /* Each level chip is a toggle button: aria-pressed carries its state, and
      the filled or hollow dot shows it without relying on colour. */
   const lvlBtn=(l)=>'<button class="level-toggle lvl-'+l.toLowerCase()+'" aria-pressed="'+!!state.logLevels[l]+'" data-level="'+l+'" data-action="toggleLogLevel" data-args="'+actArgs(l)+'">'+l+' <span class="lvl-n" data-level-count="'+l+'">'+state.logCounts[l].toLocaleString()+'</span></button>';
   let html='<div class="page-title">Server logs</div><div class="page-desc">What the server is doing right now, newest at the bottom. Open the details on a line for everything it logged.</div>';
+  html+=logModeTabs();
   html+='<div class="log-toolbar"><div class="log-conn"><span class="'+(state.logPaused?'dot-off':'dot-wait')+'" id="logDot" aria-hidden="true"></span><span id="logStatusText" role="status">'+(state.logPaused?'Paused':'Connecting...')+'</span></div>';
   html+='<div class="level-group" role="group" aria-label="Show levels">'+lvlBtn('DEBUG')+lvlBtn('INFO')+lvlBtn('WARN')+lvlBtn('ERROR')+'</div>';
   html+='<input type="search" class="filter-search log-filter" aria-label="Filter logs" placeholder="Filter logs…" value="'+esc(state.logSearch)+'" data-input-action="setLogSearch">';
@@ -478,7 +480,7 @@ function renderLogs(){
   return html;
 }
 
-function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];document.querySelectorAll('.level-toggle[data-level="'+l+'"]').forEach(b=>b.setAttribute('aria-pressed',String(state.logLevels[l])));renderLogLines()}
+function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];document.querySelectorAll('.level-toggle[data-level="'+l+'"]').forEach(b=>b.setAttribute('aria-pressed',String(state.logLevels[l])));if(state.logMode==='history')newLogHistorySearch();else renderLogLines()}
 
 function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll));if(state.logAutoScroll)jumpToNewestLog()}
 
@@ -684,8 +686,8 @@ function jumpToNewestLog(){
   out.scrollTop=out.scrollHeight;state.logAtBottom=true;state.logUnseen=0;paintLogJump();out.focus();
 }
 
-function logLineHtml(entry){
-  return'<div class="log-line l-'+esc(String(entry.level||'').toLowerCase())+'"><span class="log-ts">'+fmtLocal(entry.ts,LOG_TIME)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+logChipsHtml(entry)+'</div>';
+function logLineHtml(entry,fmt){
+  return'<div class="log-line l-'+esc(String(entry.level||'').toLowerCase())+'"><span class="log-ts">'+fmtLocal(entry.ts,fmt||LOG_TIME)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+logChipsHtml(entry)+'</div>';
 }
 
 function renderLogLines(){
@@ -699,7 +701,8 @@ function renderLogLines(){
 }
 
 function filteredLogText(){
-  const lines=[];state.logEntries.forEach(e=>{if(matchesLogFilter(e))lines.push((e.ts||'')+' '+e.level+' ['+(e.source||'server')+'] '+e.msg+(e.attrs&&e.attrs!=='{}'?' '+e.attrs:''))});
+  const history=state.logMode==='history';
+  const lines=[];(history?state.logHistory.entries:state.logEntries).forEach(e=>{if(history||matchesLogFilter(e))lines.push((e.ts||'')+' '+e.level+' ['+(e.source||'server')+'] '+e.msg+(e.attrs&&e.attrs!=='{}'?' '+e.attrs:''))});
   return lines;
 }
 
@@ -717,6 +720,120 @@ function downloadLogs(){
 }
 
 function clearLogs(){state.logEntries=[];state.logPending=[];resetLogCounts();renderLogLines();showToast('Log view cleared','info')}
+
+/* Saved log history: the server searches the log files it keeps on disk, a
+   page of 200 lines at a time, newest page first. Each page is shown oldest
+   at the top like the live view. cursors is the stack of pages walked so
+   far, so Newer steps back without asking the server how. logHistorySeq
+   drops an answer to a search the operator has since replaced or left. */
+const LOG_DAYTIME=new Intl.DateTimeFormat(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',fractionalSecondDigits:3,hourCycle:'h23'});
+/** @type {Array<[string,string,number]>} */
+const LOG_RANGES=[['1h','Last hour',36e5],['6h','Last 6 hours',216e5],['24h','Last 24 hours',864e5],['7d','Last 7 days',6048e5],['custom','Custom range',0]];
+let logHistorySearchTimer=null;
+
+function logModeTabs(){
+  const tab=(m,label)=>{const on=state.logMode===m;return'<button class="member-tab" role="tab" aria-selected="'+on+'" tabindex="'+(on?0:-1)+'" data-action="setLogMode" data-args="'+actArgs(m)+'">'+label+'</button>'};
+  return'<div class="member-tabs" role="tablist" aria-label="Log view">'+tab('live','Live')+tab('history','History')+'</div>';
+}
+
+function stopLogStream(){
+  state.logConnectSeq++;
+  if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
+  if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
+}
+
+function setLogMode(m){
+  if(state.logMode===m)return;
+  state.logMode=m;clearTimeout(logHistorySearchTimer);state.logHistorySeq++;
+  if(m==='history')stopLogStream();
+  renderContent();
+}
+
+function localInputValue(d){const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())}
+
+/* The query a search pins: a preset range is turned into times once, so
+   paging through it does not drift as the clock moves. Null when no level
+   is shown, since nothing could match. */
+function logHistoryParams(){
+  const h=state.logHistory,p=new URLSearchParams();
+  let from=null,to=null;
+  if(h.range==='custom'){from=h.from?new Date(h.from):null;to=h.to?new Date(h.to):null}
+  else{const r=LOG_RANGES.find(x=>x[0]===h.range)||LOG_RANGES[2];to=new Date();from=new Date(to.getTime()-r[2])}
+  if(from&&!isNaN(from.getTime()))p.set('from',from.toISOString());
+  if(to&&!isNaN(to.getTime()))p.set('to',to.toISOString());
+  const levels=LOG_LEVELS.filter(l=>state.logLevels[l]);
+  if(!levels.length)return null;
+  if(levels.length<LOG_LEVELS.length)p.set('level',levels.join(','));
+  if(h.q.trim())p.set('q',h.q.trim());
+  return p.toString();
+}
+
+function renderLogHistory(){
+  const h=state.logHistory;
+  const lvlBtn=(l)=>'<button class="level-toggle lvl-'+l.toLowerCase()+'" aria-pressed="'+!!state.logLevels[l]+'" data-level="'+l+'" data-action="toggleLogLevel" data-args="'+actArgs(l)+'">'+l+'</button>';
+  let html='<div class="page-title">Server logs</div><div class="page-desc">Search the logs the server saved to disk, a page at a time. The newest page comes first.</div>';
+  html+=logModeTabs();
+  html+='<div class="log-toolbar">';
+  html+='<select class="filter-select log-range" aria-label="Time range" data-change-action="setLogHistoryRange">'+LOG_RANGES.map(r=>'<option value="'+r[0]+'"'+(h.range===r[0]?' selected':'')+'>'+r[1]+'</option>').join('')+'</select>';
+  html+='<span class="log-custom" id="logCustom"'+(h.range==='custom'?'':' hidden')+'><label>From <input type="datetime-local" class="form-input" id="logFrom" value="'+esc(h.from)+'" data-change-action="setLogHistoryFrom"></label>'
+    +'<label>To <input type="datetime-local" class="form-input" id="logTo" value="'+esc(h.to)+'" data-change-action="setLogHistoryTo"></label></span>';
+  html+='<div class="level-group" role="group" aria-label="Show levels">'+LOG_LEVELS.map(lvlBtn).join('')+'</div>';
+  html+='<input type="search" class="filter-search log-filter" aria-label="Search saved logs" placeholder="Search saved logs…" maxlength="200" value="'+esc(h.q)+'" data-input-action="setLogHistorySearch">';
+  html+='<div class="log-actions">';
+  html+='<button class="btn btn-ghost" data-action="copyAllLogs" title="Copy the lines on this page">'+OPS_ICON.copy+'Copy</button>';
+  html+='<button class="btn btn-ghost" data-action="downloadLogs" title="Save the lines on this page as a .log file">'+I.download+'Download</button>';
+  html+='</div></div>';
+  html+='<div class="log-wrap"><div class="log-output" id="logOutput" role="region" aria-label="Saved log lines" tabindex="0"></div></div>';
+  html+='<div class="log-status"><span id="logHistoryStatus" role="status"></span><span class="log-pager">'
+    +'<button class="btn btn-ghost" id="logOlder" data-action="logHistoryOlder" disabled>Older</button>'
+    +'<button class="btn btn-ghost" id="logNewer" data-action="logHistoryNewer" disabled>Newer</button></span></div>';
+  setTimeout(()=>{
+    const out=document.getElementById('logOutput');if(out)out.addEventListener('toggle',fillLogDetails,true);
+    if(h.params)loadLogHistory();else newLogHistorySearch();
+  },0);
+  return html;
+}
+
+function newLogHistorySearch(){
+  clearTimeout(logHistorySearchTimer);
+  const h=state.logHistory;
+  h.params=logHistoryParams();h.cursors=[''];
+  loadLogHistory();
+}
+
+function logHistoryOlder(){const h=state.logHistory;if(!h.next)return;h.cursors.push(h.next);loadLogHistory()}
+function logHistoryNewer(){const h=state.logHistory;if(h.cursors.length<2)return;h.cursors.pop();loadLogHistory()}
+
+async function loadLogHistory(){
+  const h=state.logHistory,seq=++state.logHistorySeq;
+  const status=document.getElementById('logHistoryStatus');
+  if(h.params===null){h.entries=[];h.next='';h.partial=false;paintLogHistory('Turn on at least one level to search.');return}
+  if(status)status.textContent='Searching…';
+  const older=/** @type {HTMLButtonElement|null} */(document.getElementById('logOlder'));if(older)older.disabled=true;
+  const newer=/** @type {HTMLButtonElement|null} */(document.getElementById('logNewer'));if(newer)newer.disabled=true;
+  const cursor=h.cursors[h.cursors.length-1];
+  let res;
+  try{res=await api('GET','/logs/history?'+h.params+(cursor?'&cursor='+encodeURIComponent(cursor):''))}
+  catch(e){if(seq===state.logHistorySeq&&status)status.textContent=(e&&e.message)||'Search failed';if(seq===state.logHistorySeq&&newer)newer.disabled=h.cursors.length<2;return}
+  if(seq!==state.logHistorySeq||state.section!=='logs'||state.logMode!=='history')return;
+  h.enabled=res.enabled!==false;
+  h.entries=(res.entries||[]).slice().reverse();h.next=res.next_cursor||'';h.partial=!!res.partial;
+  paintLogHistory();
+}
+
+function paintLogHistory(note){
+  const h=state.logHistory;
+  const out=document.getElementById('logOutput');
+  if(out){let html='';h.entries.forEach(e=>{html+=logLineHtml(e,LOG_DAYTIME)});out.innerHTML=html;out.scrollTop=out.scrollHeight}
+  const older=/** @type {HTMLButtonElement|null} */(document.getElementById('logOlder'));if(older)older.disabled=!h.next;
+  const newer=/** @type {HTMLButtonElement|null} */(document.getElementById('logNewer'));if(newer)newer.disabled=h.cursors.length<2;
+  const status=document.getElementById('logHistoryStatus');if(!status)return;
+  const page=h.cursors.length>1?' · page '+h.cursors.length:'';
+  if(note)status.textContent=note;
+  else if(!h.enabled)status.textContent='Saved logs are off. Set logging.history_days in config.yaml to keep them.';
+  else if(!h.entries.length)status.textContent=(h.partial?'Nothing found in this stretch yet. Older searches further back.':'No saved lines match.')+page;
+  else status.textContent=h.entries.length.toLocaleString()+' lines, '+LOG_DAYTIME.format(utcDate(h.entries[0].ts))+' to '+LOG_DAYTIME.format(utcDate(h.entries[h.entries.length-1].ts))+page;
+}
 
 /* ═══ API Tokens ═══ */
 function tokenStatus(t){
@@ -926,7 +1043,7 @@ async function uninstallPlugin(id){
   renderContent();
 }
 
-Object.assign(ACTIONS,{clearLogs,downloadLogs,jumpToNewestLog,confirmRevokeToken,runConnectivityCheck,copyAllLogs,copyAuditLog,copyToken,createToken,
+Object.assign(ACTIONS,{clearLogs,downloadLogs,setLogMode,logHistoryOlder,logHistoryNewer,jumpToNewestLog,confirmRevokeToken,runConnectivityCheck,copyAllLogs,copyAuditLog,copyToken,createToken,
   discardSupportBundle,downloadSupportBundle,exportAuditCSV,reloadAudit,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
   toggleServerLogLevel,
@@ -943,4 +1060,22 @@ Object.assign(ACTIONS,{clearLogs,downloadLogs,jumpToNewestLog,confirmRevokeToken
     reloadAudit(1);
   },
   setLogSearch(){state.logSearch=this.value;renderLogLines()},
+  /** @this {HTMLInputElement} */
+  setLogHistorySearch(){
+    state.logHistory.q=this.value;clearTimeout(logHistorySearchTimer);
+    logHistorySearchTimer=setTimeout(newLogHistorySearch,400);
+  },
+  /** @this {HTMLSelectElement} */
+  setLogHistoryRange(){
+    const h=state.logHistory;h.range=this.value;
+    const custom=document.getElementById('logCustom');if(custom)custom.hidden=h.range!=='custom';
+    if(h.range==='custom'&&!h.from){const to=new Date();h.to=localInputValue(to);h.from=localInputValue(new Date(to.getTime()-864e5));
+      const f=/** @type {HTMLInputElement|null} */(document.getElementById('logFrom'));if(f)f.value=h.from;
+      const t=/** @type {HTMLInputElement|null} */(document.getElementById('logTo'));if(t)t.value=h.to}
+    newLogHistorySearch();
+  },
+  /** @this {HTMLInputElement} */
+  setLogHistoryFrom(){state.logHistory.from=this.value;newLogHistorySearch()},
+  /** @this {HTMLInputElement} */
+  setLogHistoryTo(){state.logHistory.to=this.value;newLogHistorySearch()},
   pluginFileChosen(){document.getElementById('pluginInstallBtn').disabled=!this.files.length}});

@@ -37,5 +37,7 @@ func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImp
 		ImportDir:      importTempDir(cfg),
 		ImportMaxBytes: cfg.Upload.ImportMaxBytes(),
 		BeginTransfer:  beginImportTransfer,
+
+		LogHistoryDir: cfg.LogHistoryDir(),
 	}
 }

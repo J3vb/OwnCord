@@ -526,6 +526,12 @@ details.disclose:not([open])>summary.section-card-header{border-bottom:none}
 .level-toggle[aria-pressed="true"].lvl-warn{background:rgba(242,184,75,.15);border-color:rgba(242,184,75,.5);color:var(--text-warning)}
 .level-toggle[aria-pressed="true"].lvl-error{background:rgba(255,143,146,.15);border-color:rgba(255,143,146,.5);color:var(--text-danger)}
 .log-toolbar .log-filter{flex:1;min-width:180px}
+.log-range{min-height:32px}
+.log-custom{display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text-muted)}
+.log-custom[hidden]{display:none}
+.log-custom label{display:inline-flex;gap:6px;align-items:center}
+.log-custom .form-input{width:auto;padding:6px 8px}
+.log-pager{margin-left:auto;display:inline-flex;gap:6px}
 .log-level-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;padding:8px 12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm)}
 .log-level-status{color:var(--text-muted);font-size:12px}
 .log-actions{display:flex;gap:6px;flex-wrap:wrap}

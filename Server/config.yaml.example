@@ -152,8 +152,13 @@ voice:
 # Logging. "level" gates what is logged, to stdout and the admin panel's live
 # log view alike. Override without editing this file via the
 # OWNCORD_LOGGING_LEVEL environment variable.
+# "history_days" keeps that many days of logs on disk under <data_dir>/logs,
+# searchable from the Logs page's History tab (0 turns it off);
+# "history_max_mb" caps their total size, deleting the oldest first.
 # logging:
 #   level: "info"             # debug | info | warn | error
+#   history_days: 7
+#   history_max_mb: 200
 
 # Moderation: the report queue's content retention window (B5-8), and the
 # moderator-action ledger's own window (B5-9). Report rows and ban/kick/

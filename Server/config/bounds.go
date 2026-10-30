@@ -38,6 +38,8 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited", false},
 		{"upload.import_max_mb", &cfg.Upload.ImportMaxMB, 1, maxMiB, def.Upload.ImportMaxMB, "the default, 500 MB", false},
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it", false},
+		{"logging.history_days", &cfg.Logging.HistoryDays, 0, 3650, def.Logging.HistoryDays, "the default, 7 days; write 0 to turn saved logs off", false},
+		{"logging.history_max_mb", &cfg.Logging.HistoryMaxMB, 1, 1 << 20, def.Logging.HistoryMaxMB, "the default, 200 MB", false},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content", false},
 		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows", false},
 		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 for only the critical level at server.min_free_disk_mb", false},
