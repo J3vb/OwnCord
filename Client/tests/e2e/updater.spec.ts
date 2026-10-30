@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { mockTauriFullSession, navigateToMainPageReady } from "./helpers";
+import { Q1, findUnnamedControls, keyboardReachable, textContrast } from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
 // Tests: updater journey (DC-04, spec: docs/architecture/ux/settings-and-admin.md §5)
@@ -19,7 +20,7 @@ import { mockTauriFullSession, navigateToMainPageReady } from "./helpers";
 
 async function mockUpdaterSession(
   page: Page,
-  opts: { available: boolean; version?: string; failInstall?: boolean },
+  opts: { available: boolean; version?: string; failInstall?: boolean; android?: boolean },
 ): Promise<void> {
   await mockTauriFullSession(page);
   await page.addInitScript((cfg) => {
@@ -46,6 +47,19 @@ async function mockUpdaterSession(
         return cfg.available
           ? { available: true, version: cfg.version, body: "release notes" }
           : { available: false, version: null, body: null };
+      }
+      if (cmd === "download_and_install_update" && cfg.android === true) {
+        // The Android backend: the first attempt finds installs from OwnCord
+        // not allowed yet, the next one opens Android's installer.
+        const attempt =
+          ((w as unknown as { __androidAttempts?: number }).__androidAttempts ?? 0) + 1;
+        (w as unknown as { __androidAttempts: number }).__androidAttempts = attempt;
+        if (attempt === 1) throw "update install permission needed";
+        (w as unknown as { __tauriEmitEvent: (e: string, d: unknown) => void }).__tauriEmitEvent(
+          "update-installer-opened",
+          null,
+        );
+        return undefined;
       }
       if (cmd === "download_and_install_update") {
         // Held open until the test resolves/rejects it, so progress events
@@ -162,6 +176,48 @@ test.describe("Updater journey", () => {
         (e) => e.cmd === "plugin:process|restart",
       ),
     );
+  });
+
+  test("Android: allow-installs prompt, then the installer's Install tap, both accessible", async ({
+    page,
+  }) => {
+    await mockUpdaterSession(page, { available: true, version: "9.9.9", android: true });
+    await page.goto("/");
+    await navigateToMainPageReady(page);
+    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
+      timeout: 10_000,
+    });
+
+    await page.locator(".update-banner-install").click();
+    await expect(bannerText(page)).toHaveText(
+      "Allow OwnCord to install apps on the settings page that opened, then tap Retry.",
+    );
+    await expect(page.getByTestId("update-announce")).toHaveText(
+      "Allow OwnCord to install apps on the settings page that opened, then tap Retry.",
+    );
+    expect(await findUnnamedControls(banner(page))).toEqual([]);
+    expect((await textContrast(bannerText(page))).ratio).toBeGreaterThanOrEqual(Q1.text);
+    const retry = page.locator(".update-banner-install");
+    await expect(retry).toHaveText("Retry");
+    expect(await keyboardReachable(page, retry)).toBe(true);
+
+    await page.keyboard.press("Enter");
+    await expect(bannerText(page)).toHaveText(
+      "Tap Install in the Android prompt to finish the update. Closed it? Tap Retry.",
+    );
+    expect(await findUnnamedControls(banner(page))).toEqual([]);
+    expect((await textContrast(bannerText(page))).ratio).toBeGreaterThanOrEqual(Q1.text);
+    expect(await keyboardReachable(page, page.locator(".update-banner-install"))).toBe(true);
+    // Android restarts the app itself after Install; the webview never relaunches.
+    const restarted = await page.evaluate(() =>
+      (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.some(
+        (e) => e.cmd === "plugin:process|restart",
+      ),
+    );
+    expect(restarted).toBe(false);
+
+    await page.locator(".update-banner-later").click();
+    await expect(banner(page)).toHaveCount(0);
   });
 
   test("a failed install shows the error state and Dismiss clears it", async ({ page }) => {
