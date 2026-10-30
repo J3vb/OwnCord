@@ -16,17 +16,16 @@ import (
 // Group DM membership routes: add, remove and owner transfer. The
 // leave and rename routes live in dm_handler.go and share the fan-out below.
 
-// dmGroupRateLimitPerMinute bounds the group mutations that publish to the other
-// members (add, remove, owner transfer, rename), per user.
+// dmGroupRateLimitPerMinute bounds, per user, the group mutations that publish
+// to other members (add, remove, owner transfer, rename).
 const dmGroupRateLimitPerMinute = 20
 
-// dmGroupMaxBody bounds a membership request body: nine ids need far less.
 const dmGroupMaxBody = 1 << 14
 
 // groupEventSink is the DMBroadcaster capability that delivers group system rows
-// as sequenced chat_message frames. Reached by type assertion so the
-// SendToUser-only test doubles in this package keep working; the production
-// broadcaster must keep satisfying it, or the rows silently stop going out.
+// as sequenced chat_message frames. Reached by type assertion so SendToUser-only
+// test doubles keep working; the production broadcaster must keep satisfying it
+// or the rows silently stop going out.
 type groupEventSink interface {
 	GroupEventRows(ctx context.Context, channelID int64, audience []int64, rows []service.GroupEventRow)
 }
@@ -34,9 +33,9 @@ type groupEventSink interface {
 var _ groupEventSink = (*ws.Hub)(nil)
 
 // dmVoiceRosterSender is the DMBroadcaster capability that tells one user who is
-// in a DM's call right now. Reached by type assertion for the same reason as
-// groupEventSink; the production broadcaster must keep satisfying it, or a
-// member added mid-call silently stops seeing the call's roster.
+// in a DM's call now. Reached by type assertion like groupEventSink; the
+// production broadcaster must keep satisfying it or a member added mid-call
+// stops seeing the roster.
 type dmVoiceRosterSender interface {
 	SendDMVoiceRoster(ctx context.Context, userID, channelID int64)
 }
@@ -44,9 +43,8 @@ type dmVoiceRosterSender interface {
 var _ dmVoiceRosterSender = (*ws.Hub)(nil)
 
 // sendAddedVoiceRoster hands each newly added member the group call's current
-// voice states. It runs after fanOutGroupChange so, on each connection, the
-// user's dm_channel_open precedes the first state. A broadcaster without the
-// capability sends nothing.
+// voice states. It runs after fanOutGroupChange so the user's dm_channel_open
+// precedes the first state on each connection.
 func sendAddedVoiceRoster(ctx context.Context, broadcaster DMBroadcaster, channelID int64, added []int64) {
 	if broadcaster == nil || len(added) == 0 {
 		return
@@ -61,18 +59,16 @@ func sendAddedVoiceRoster(ctx context.Context, broadcaster DMBroadcaster, channe
 	}
 }
 
-// addGroupMembersRequest is the JSON body for POST /api/v1/dms/{channelId}/members.
 type addGroupMembersRequest struct {
 	UserIDs []int64 `json:"user_ids"`
 }
 
-// transferGroupOwnerRequest is the JSON body for PUT /api/v1/dms/{channelId}/owner.
 type transferGroupOwnerRequest struct {
 	UserID int64 `json:"user_id"`
 }
 
-// allowGroupMutation applies the per-user limit on the group mutations and
-// writes the 429 itself. A nil limiter (tests, no limiter wired) allows.
+// allowGroupMutation applies the per-user limit and writes the 429 itself; a nil
+// limiter allows.
 func allowGroupMutation(w http.ResponseWriter, limiter *auth.RateLimiter, userID int64) bool {
 	if limiter == nil || limiter.Allow(auth.Key("dm_group", userID), dmGroupRateLimitPerMinute, time.Minute) {
 		return true
@@ -81,20 +77,17 @@ func allowGroupMutation(w http.ResponseWriter, limiter *auth.RateLimiter, userID
 	return false
 }
 
-// decodeGroupBody reads a small JSON body into v under the group cap,
-// writing the error reply on failure.
 func decodeGroupBody(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, dmGroupMaxBody)
 	return decodeJSON(w, r, v)
 }
 
-// fanOutGroupChange tells every member who is in the group after a committed
-// change: the refreshed dm_channel_open first, then the system rows. The open
-// (SendToUser) and the rows (sequenced) go out one after the other from this
-// goroutine on the same per-connection queue, so an added user always learns of
-// the DM before the first row naming it. It runs on a context detached from the
-// request: the change has committed, and a client that drops right after must
-// not make the rest of the room miss it.
+// fanOutGroupChange tells every member of the group about a committed change:
+// the refreshed dm_channel_open first, then the system rows. Both go out in
+// order from this goroutine on the same per-connection queue, so an added user
+// learns of the DM before the first row naming it. It runs on a context detached
+// from the request: the change has committed and a client dropping right after
+// must not make the rest of the room miss it.
 func fanOutGroupChange(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, channelID int64, audience []int64, rows []service.GroupEventRow) {
 	if broadcaster == nil {
 		return
@@ -112,7 +105,6 @@ func fanOutGroupChange(ctx context.Context, svc *service.Services, broadcaster D
 	sink.GroupEventRows(ctx, channelID, audience, rows)
 }
 
-// handleAddGroupMembers adds users to a group DM. Any member may add.
 func handleAddGroupMembers(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -142,7 +134,6 @@ func handleAddGroupMembers(svc *service.Services, broadcaster DMBroadcaster, lim
 	}
 }
 
-// handleRemoveGroupMember removes a member from a group DM. Owner only.
 func handleRemoveGroupMember(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -167,10 +158,10 @@ func handleRemoveGroupMember(svc *service.Services, broadcaster DMBroadcaster, l
 			return
 		}
 
-		// The removed member loses the DM and its call, and is not told with a
-		// row: the room hears "removed" from the remaining members' side only.
-		// dm_channel_close is unsequenced like dm_channel_open, so the watermark
-		// is bumped BEFORE the send (see markDMVisibilityChanged).
+		// The removed member loses the DM and its call and gets no row; the room
+		// hears "removed" from the remaining members only. dm_channel_close is
+		// unsequenced, so bump the watermark BEFORE the send (see
+		// markDMVisibilityChanged).
 		bg := context.WithoutCancel(r.Context())
 		if broadcaster != nil {
 			markDMVisibilityChanged(broadcaster)
@@ -187,8 +178,8 @@ func handleRemoveGroupMember(svc *service.Services, broadcaster DMBroadcaster, l
 	}
 }
 
-// handleTransferGroupOwner hands a group DM to another member. Owner only. It
-// writes no row: the members get a refreshed dm_channel_open with the new owner_id.
+// handleTransferGroupOwner hands a group DM to another member (owner only). It
+// writes no row: members get a refreshed dm_channel_open with the new owner_id.
 func handleTransferGroupOwner(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -218,10 +209,10 @@ func handleTransferGroupOwner(svc *service.Services, broadcaster DMBroadcaster, 
 }
 
 // writeGroupSummary answers a committed group change with the caller's view of
-// the group. If that read fails the change has still happened and the fan-out
-// has gone out, so an error status would invite a retry of a done change: it
-// logs a warning and answers 204 No Content instead. The caller gets the same
-// summary from its dm_channel_open.
+// the group. If that read fails the change has still happened and fanned out, so
+// an error status would invite a retry of a done change: it logs a warning and
+// answers 204 instead; the caller gets the same summary from its
+// dm_channel_open.
 func writeGroupSummary(w http.ResponseWriter, r *http.Request, svc *service.Services, userID, channelID int64) {
 	summary, err := svc.DMs.DMSummaryFor(context.WithoutCancel(r.Context()), userID, channelID)
 	if err != nil {

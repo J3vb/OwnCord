@@ -75,7 +75,6 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 	}
 }
 
-// discardGroupIconUpload removes an uploaded icon whose transaction failed.
 func discardGroupIconUpload(ctx context.Context, svc *service.Services, store FileStore, fileID string, userID int64) {
 	ctx = context.WithoutCancel(ctx)
 	if err := svc.Uploads.Unrecord(ctx, fileID, userID); err != nil {

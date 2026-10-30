@@ -12,7 +12,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// diagnosticsResponse is returned by GET /api/v1/diagnostics/connectivity.
 type diagnosticsResponse struct {
 	Server serverDiag `json:"server"`
 	Voice  voiceDiag  `json:"voice"`
@@ -111,7 +110,6 @@ func handleDiagnosticsConnectivity(
 	}
 }
 
-// classifyIP names the range ip falls in, or KindOther when it does not parse.
 func classifyIP(ip string) netclass.Kind {
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
@@ -121,17 +119,11 @@ func classifyIP(ip string) netclass.Kind {
 }
 
 // isPrivateIP reports whether ip reaches this server from somewhere other than
-// the public internet.
-//
-// It used to be a list of string prefixes, which could not see three ranges
-// that matter here: 100.64.0.0/10 (carrier-grade NAT, and the range Tailscale
-// hands out — docs/tailscale.md:19-24), 169.254.0.0/16 and fe80::/10
-// (link-local), and any IPv4-mapped form such as ::ffff:192.168.1.1. A
-// tailnet peer was reported as a public-internet client, which is exactly the
-// confusion the reachability report exists to remove.
-//
-// The documentation and benchmarking ranges stay false, as they always were:
-// they are not private, they are simply not allocated to anyone.
+// the public internet. It covers 100.64.0.0/10 (carrier-grade NAT and Tailscale,
+// docs/tailscale.md), 169.254.0.0/16 and fe80::/10 (link-local) and IPv4-mapped
+// forms such as ::ffff:192.168.1.1, so a tailnet peer is not reported as a
+// public-internet client. Documentation and benchmarking ranges stay false: not
+// private, just unallocated.
 func isPrivateIP(ip string) bool {
 	switch classifyIP(ip) {
 	case netclass.KindLoopback, netclass.KindPrivate, netclass.KindUniqueLocal,

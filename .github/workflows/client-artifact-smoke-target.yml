@@ -80,6 +80,11 @@ jobs:
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev
 
+      # The release's AppImage plugins (H.264/AAC, PipeWire cameras).
+      - name: Choose the AppImage's GStreamer plugins
+        if: runner.os == 'Linux'
+        run: bash Client/scripts/appimage-gst-plugins.sh
+
       # clang >= 21 and the pinned, digest-verified libwebrtc the Linux client
       # links for native voice — the release jobs' step, same no-cache rule.
       - name: Install native-voice build prerequisites

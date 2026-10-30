@@ -124,6 +124,12 @@ says exactly what the beta does and does not claim about who can read what.
 - **On Linux, viewers hear screen-share audio in mono for now.** The app sends
   it in stereo, but the stereo signal is not passed on yet. This needs PulseAudio or
   pipewire-pulse to be running.
+- **On Wayland, sharing one window shares every app's sound.** The desktop
+  portal does not say which app owns the window, so the app sends all sound
+  except OwnCord's own. On X11 a window share sends only that app's sound, as
+  on Windows. An app in a Flatpak or Snap sandbox reports a process id
+  OwnCord cannot match, so sharing its window shares every app's sound, as
+  on Wayland.
 - **On Linux, some media needs extra distro packages.**
   - Video attachments and YouTube embeds that use H264/AAC play only with
     `gstreamer1.0-libav` and `gstreamer1.0-plugins-bad`.
@@ -134,10 +140,11 @@ says exactly what the beta does and does not claim about who can read what.
   not if you use `--no-install-recommends`. To add them by hand, see
   [Recommended extras](linux-install.md#recommended-extras).
 
-  The AppImage only uses the host's fonts. It uses its own bundled GStreamer
-  plugins, so installing GStreamer packages on the host does not help it.
-  H264/AAC playback and PipeWire cameras do not work in the AppImage until the
-  release build bundles them.
+  The AppImage only uses the host's fonts. It bundles its own GStreamer
+  plugins, H264/AAC playback and PipeWire cameras included, so installing
+  GStreamer packages on the host changes nothing for it. Its PipeWire camera
+  support needs the host's `libpipewire`, and its H264/AAC playback the
+  host's `libva` and `libvdpau`; most desktops have all three.
 
 - **On Linux, updating and removing depend on how you installed.** The AppImage
   and the `.deb` update differently; see

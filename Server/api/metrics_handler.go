@@ -34,9 +34,9 @@ type ServerMetrics struct {
 	ConnectedUsers int     `json:"connected_users"`
 	VoiceSessions  int     `json:"voice_sessions"`
 	// BroadcastDrops counts messages dropped because the hub-wide broadcast
-	// queue was full — a hub-level overload signal, distinct from the
-	// per-client backpressure counters below. Any nonzero growth here means
-	// sequenced events were lost before delivery and is worth alerting on.
+	// queue was full, a hub-level overload signal distinct from the per-client
+	// counters below; any growth means sequenced events were lost before
+	// delivery and is worth alerting on.
 	BroadcastDrops uint64 `json:"broadcast_drops"`
 	// TopicSheds counts channel frames dropped by the topic limiter before a
 	// seq was assigned — replay cannot recover them, so like
@@ -44,9 +44,8 @@ type ServerMetrics struct {
 	TopicSheds     uint64 `json:"topic_sheds_total"`
 	LiveKitHealthy *bool  `json:"livekit_healthy,omitempty"`
 
-	// Shipped in-process latency distributions (SRE-M1). These exist in every
-	// build, unlike the OpenTelemetry instruments, which compile only with
-	// -tags otel.
+	// In-process latency distributions, present in every build (unlike the
+	// OpenTelemetry instruments, which need -tags otel).
 	BroadcastMs   *metrics.Summary `json:"ws_broadcast_ms,omitempty"`
 	DispatchLagMs *metrics.Summary `json:"ws_dispatch_lag_ms,omitempty"`
 	ChatAckMs     *metrics.Summary `json:"chat_send_ack_ms,omitempty"`
@@ -68,14 +67,13 @@ type ServerMetrics struct {
 	// serve. Usually ends in db or full; not a tier. Hit rate = db / this.
 	ReconnectRingMisses uint64 `json:"reconnect_ring_misses"`
 
-	// Per-client send-queue backpressure totals.
 	BackpressureQueueDisconnects uint64 `json:"backpressure_queue_disconnects"`
 	BackpressureHighFallbacks    uint64 `json:"backpressure_high_fallbacks"`
 	BackpressureLowDrops         uint64 `json:"backpressure_low_drops"`
 	BackpressurePresenceDrops    uint64 `json:"backpressure_presence_drops"`
 
 	// DeliveryLossMarks counts connected clients told to resync because a
-	// sequenced frame meant for them was dropped or withheld (2A-5).
+	// sequenced frame meant for them was dropped or withheld.
 	DeliveryLossMarks uint64 `json:"delivery_loss_marks"`
 
 	// WSConnRejects counts upgrades refused by the max_ws_connections cap.
@@ -99,8 +97,7 @@ type ServerMetrics struct {
 	DBWALMB *float64 `json:"db_wal_mb,omitempty"`
 
 	// SQLite writer-pool saturation: time spent queueing for the single write
-	// connection. The most direct signal for the documented single-writer
-	// bottleneck.
+	// connection, the most direct signal of the single-writer bottleneck.
 	DBWriterWaitCount   int64   `json:"db_writer_wait_count"`
 	DBWriterWaitSeconds float64 `json:"db_writer_wait_seconds"`
 
@@ -110,7 +107,6 @@ type ServerMetrics struct {
 	DBReaderWaitCount   int64   `json:"db_reader_wait_count"`
 	DBReaderWaitSeconds float64 `json:"db_reader_wait_seconds"`
 
-	// Permission cache effectiveness.
 	PermCacheHits   uint64 `json:"perm_cache_hits"`
 	PermCacheMisses uint64 `json:"perm_cache_misses"`
 
@@ -130,7 +126,6 @@ type ServerMetrics struct {
 	Windows map[string]*WindowMetrics `json:"windows,omitempty"`
 }
 
-// metricsWindows are the two windows reported, newest-ending, by JSON key.
 var metricsWindows = []struct {
 	key string
 	d   time.Duration
@@ -253,7 +248,7 @@ type MetricsSources struct {
 	VoiceSessions  func() int
 	BroadcastDrops func() uint64
 	// TopicSheds, BroadcastMs, DispatchLagMs, ChatAckMs, VoiceJoinMs,
-	// BroadcastQueueDepth and SeqMuMaxHoldMs are the shipped in-process metrics (SRE-M1). Nil
+	// BroadcastQueueDepth and SeqMuMaxHoldMs are the in-process metrics. Nil
 	// fields are skipped, so tests and partial wirings stay cheap.
 	TopicSheds          func() uint64
 	BroadcastMs         func() metrics.Summary
@@ -289,7 +284,6 @@ type MetricsSources struct {
 	LatencyCounts func() ws.LatencyCounts
 }
 
-// handleMetrics returns an HTTP handler that reports runtime server metrics.
 func handleMetrics(src MetricsSources) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, collectMetrics(r.Context(), src))

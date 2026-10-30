@@ -67,6 +67,20 @@ const realRequestAnimationFrame = globalThis.requestAnimationFrame.bind(globalTh
 // the deterministic discriminator — no stack inspection, no per-call string.
 let inAnimationFrame = false;
 
+// jsdom's selector engine (@asamuzakjp/dom-selector) adds nine capture
+// listeners to the window the first time a document runs a selector, and keeps
+// them for that document's lifetime; every `createHTMLDocument` adds nine more.
+// Since vitest 5 an assignment to `window.addEventListener` also reaches
+// jsdom's own window, so those registrations pass through the wrapper. They are
+// jsdom's, not the app's. Its handlers are bound methods with these names, so
+// the name is the deterministic discriminator; if the engine renames them, the
+// guard fails loudly rather than going quiet.
+const JSDOM_SELECTOR_HANDLERS = new Set([
+  "bound handleFocusEvent",
+  "bound handleKeyboardEvent",
+  "bound handleMouseEvent",
+]);
+
 let listeners: ListenerEntry[] = [];
 let intervals: IntervalEntry[] = [];
 
@@ -87,6 +101,7 @@ function recordListener(
   // aborts — which is exactly how a component that was never destroyed is
   // caught, even though every listener it registered carried a signal.
   if (typeof options === "object" && options !== null && options.once === true) return;
+  if (typeof listener === "function" && JSDOM_SELECTOR_HANDLERS.has(listener.name)) return;
 
   const entry: ListenerEntry = {
     target,

@@ -134,6 +134,41 @@ describe("voice recorder", () => {
     });
   });
 
+  it("asks for the device the platform resolves the saved one to", async () => {
+    localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("native-id"));
+    const rec = createVoiceRecorder({ env: env({ micDeviceId: async () => "webview-id" }) });
+    await rec.start();
+    const constraints = getUserMedia.mock.calls[0]?.[0] as MediaStreamConstraints;
+    const audio = constraints.audio as MediaTrackConstraints;
+    expect(audio.deviceId).toEqual({ exact: "webview-id" });
+    rec.cancel();
+    localStorage.clear();
+  });
+
+  it("never opens the microphone when cancelled during the device lookup", async () => {
+    const lookup: { answer?: (id: string) => void } = {};
+    const micDeviceId = () => new Promise<string>((resolve) => (lookup.answer = resolve));
+    const rec = createVoiceRecorder({ env: env({ micDeviceId }) });
+    const started = rec.start();
+    rec.cancel();
+    lookup.answer?.("webview-id");
+    await expect(started).rejects.toMatchObject({ kind: "cancelled" });
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["finds no device", async () => ""],
+    ["fails", async () => Promise.reject(new Error("x"))],
+  ])("records from the default device when the lookup %s", async (_, micDeviceId) => {
+    const rec = createVoiceRecorder({ env: env({ micDeviceId }) });
+    await rec.start();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    const constraints = getUserMedia.mock.calls[0]?.[0] as MediaStreamConstraints;
+    const audio = constraints.audio as MediaTrackConstraints;
+    expect(audio.deviceId).toBeUndefined();
+    rec.cancel();
+  });
+
   it("falls back to the default device when the picked one is gone", async () => {
     localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("gone"));
     getUserMedia = vi

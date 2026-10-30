@@ -7,6 +7,8 @@ src-tauri/gen/
 *.tsbuildinfo
 .vite/
 coverage/
+# vitest 5 writes reports, attachments and failure screenshots here
+.vitest/
 playwright-report/
 test-results/
 ~/

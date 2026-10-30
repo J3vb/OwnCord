@@ -57,6 +57,12 @@ export default defineConfig({
     // thread inherits the variable but not its effect (today jsdom supplies
     // the globals anyway, so that half is belt-and-braces, not load-bearing).
     pool: "forks",
+    // vitest 5 clears every mock's call history before each test. Several
+    // suites assert on calls made while a module loads or in `beforeAll`
+    // (a logger name, a session-reset registration, main.ts's wiring), which
+    // that default would wipe before the test reads them. Keep vitest 4's
+    // behaviour; files that want a clean slate already clear their own mocks.
+    clearMocks: false,
     // Asserts the NODE_OPTIONS flag below actually arrived; see its comment
     // and tests/setup.ts's header.
     setupFiles: ["./tests/setup.ts"],

@@ -373,9 +373,16 @@ function openPicker(
       if (opts.osPicker !== true)
         options.appendChild(
           opts.audioAvailable === true
-            ? buildAudioSwitch((on) => {
-                selectedAudio = on;
-              })
+            ? buildAudioSwitch(
+                (on) => {
+                  selectedAudio = on;
+                },
+                {
+                  label: t("picker.shareAudio"),
+                  // X11 knows which app owns a window; the portal does not say.
+                  hint: t(opts.portal ? "picker.shareAudioHint" : "picker.shareAudioHintWindow"),
+                },
+              )
             : buildAudioNote(),
         );
       options.appendChild(buildQualityOption());

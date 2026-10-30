@@ -14,13 +14,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// NewLiveKitProxy creates a reverse proxy handler that forwards both HTTP
-// and WebSocket requests to the LiveKit server. This allows the client to
-// reach LiveKit through OwnCord's existing HTTPS server, avoiding
-// mixed-content blocks in WebView2 (secure page → insecure WebSocket).
-//
-// The client connects to wss://server:8443/livekit/ which is proxied to
-// ws://localhost:7880/ on the LiveKit server.
+// NewLiveKitProxy creates a reverse proxy forwarding HTTP and WebSocket requests
+// to the LiveKit server, so the client reaches LiveKit through OwnCord's HTTPS
+// server and avoids WebView2 mixed-content blocks: wss://server:8443/livekit/ is
+// proxied to ws://localhost:7880/.
 func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 	target, err := url.Parse(livekitURL)
 	if err != nil {
@@ -29,7 +26,6 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		target, _ = url.Parse("http://localhost:7880")
 	}
 
-	// Normalise scheme for HTTP proxy target.
 	httpTarget := *target
 	switch httpTarget.Scheme {
 	case "ws":
@@ -38,7 +34,6 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		httpTarget.Scheme = "https"
 	}
 
-	// Normalise scheme for WebSocket proxy target.
 	wsTarget := *target
 	switch wsTarget.Scheme {
 	case "http":
@@ -64,7 +59,6 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 		// including WebSocket upgrades — otherwise a client could reach a
 		// blocked/admin endpoint simply by sending an Upgrade header.
 
-		// Block sensitive LiveKit endpoints (exact segment match).
 		for seg := range strings.SplitSeq(strings.ToLower(r.URL.Path), "/") {
 			if blockedSegments[seg] {
 				writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "access denied")
@@ -81,7 +75,6 @@ func NewLiveKitProxy(livekitURL string, allowedOrigins []string) http.Handler {
 			return
 		}
 
-		// Detect WebSocket upgrade requests.
 		if isWebSocketUpgrade(r) {
 			proxyWebSocket(w, r, &wsTarget)
 			return
@@ -100,21 +93,17 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	return false
 }
 
-// firstPartyClientOrigins are the fixed webview origins of OwnCord's own
-// desktop client (Tauri): WebView2 on Windows uses http(s)://tauri.localhost,
-// WKWebView/WebKitGTK use the tauri:// scheme. The client's chat connection
-// goes through its Rust proxy (which sends no Origin header), but the LiveKit
-// JS SDK's signal requests and validate probes are issued directly from the
-// webview and DO carry these origins — without this allowance, voice fails
-// with 403 on every default install (empty allowed_origins) for any client
-// not on the server machine.
-//
-// Allowing them matches the trust already extended to absent-Origin requests:
-// a remote website can never present these origins (browsers resolve
-// *.localhost to loopback per RFC 6761 semantics and the tauri:// scheme is
-// not reachable from web content), so this does not widen the CSRF surface —
-// only code running on the user's own machine could ever send them, which is
-// outside the web attacker model this check defends against.
+// firstPartyClientOrigins are the fixed webview origins of the desktop client
+// (Tauri): http(s)://tauri.localhost on WebView2, the tauri:// scheme on
+// WKWebView/WebKitGTK. The chat connection goes through the Rust proxy (no
+// Origin), but the LiveKit JS SDK's signal requests and validate probes come
+// from the webview and DO carry these origins; without them voice fails with 403
+// on every default install (empty allowed_origins) for any client off the server
+// machine.
+// This matches the trust already given to absent-Origin requests and does not
+// widen the CSRF surface: a remote website cannot present these origins
+// (browsers resolve *.localhost to loopback, tauri:// is unreachable from web
+// content), so only code on the user's own machine could send them.
 var firstPartyClientOrigins = []string{
 	"http://tauri.localhost",
 	"https://tauri.localhost",
@@ -147,13 +136,11 @@ func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 	if origin == "" {
 		return true // non-browser or same-origin requests
 	}
-	// Browsers attach the page's own origin to every WebSocket handshake
-	// (fetch may omit it same-origin; WS never does). An Origin whose host
-	// matches the request's Host is a page this server itself served —
-	// same-origin, not cross-origin. This mirrors websocket.Accept's default
-	// policy, which the chat WS endpoint already applies; web content on
-	// another origin can never present it (the browser pins Origin), so it
-	// does not widen the CSRF surface.
+	// Browsers attach the page's own origin to every WebSocket handshake. An
+	// Origin whose host matches the request's Host is a page this server served:
+	// same-origin. This mirrors websocket.Accept's default policy, which the
+	// chat WS endpoint already applies; other origins cannot present it (the
+	// browser pins Origin), so the CSRF surface is unchanged.
 	if u, err := url.Parse(origin); err == nil && u.Host != "" && strings.EqualFold(stripDefaultPort(u.Scheme, u.Host), stripDefaultPort(u.Scheme, r.Host)) {
 		return true
 	}
@@ -179,7 +166,6 @@ func isOriginAllowed(r *http.Request, allowedOrigins []string) bool {
 // proxyWebSocket opens a backend WS connection and shovels data in both
 // directions until either side closes.
 func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
-	// Build backend URL preserving the request path and query.
 	backendURL := *target
 	backendURL.Path = r.URL.Path
 	backendURL.RawQuery = r.URL.RawQuery
@@ -193,7 +179,6 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		backendHeader = http.Header{"Authorization": {authz}}
 	}
 
-	// Connect to LiveKit backend.
 	backConn, dialResp, err := websocket.Dial(r.Context(), backendURL.String(), &websocket.DialOptions{
 		HTTPHeader:   backendHeader,
 		Subprotocols: r.Header.Values("Sec-WebSocket-Protocol"),
@@ -202,17 +187,15 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 		defer dialResp.Body.Close() //nolint:errcheck // best-effort close
 	}
 	if err != nil {
-		// websocket.Dial wraps a *url.Error, which embeds the full request URL —
+		// websocket.Dial wraps a *url.Error that embeds the full request URL,
 		// including the access_token query parameter, a live LiveKit room-join
-		// JWT. Anyone with log access (stdout, a shipper, or the admin panel's
-		// live view, whose ring buffer captures DEBUG+ regardless of the
-		// configured stdout level) could replay it inside its 5-minute TTL as
-		// the victim's participant identity. Strip the credential before the
-		// error reaches slog: the raw query blob first, so an encoded form is
-		// caught too, then the decoded token. The Authorization header carries
-		// the same JWT for the native client. coder/websocket's dial errors do
-		// not include request headers today, so scrubbing it is future-proofing
-		// against a library change that starts echoing them.
+		// JWT. Anyone with log access (the admin panel's ring buffer captures
+		// DEBUG+ regardless of the stdout level) could replay it within its
+		// 5-minute TTL as the victim's participant. Strip the credential before
+		// the error reaches slog: the raw query blob first (so an encoded form
+		// is caught), then the decoded token. The Authorization header carries
+		// the same JWT for the native client; dial errors do not echo headers
+		// today, so scrubbing it is future-proofing.
 		safeErr := redactKey(err.Error(), backendURL.RawQuery)
 		safeErr = redactKey(safeErr, backendURL.Query().Get("access_token"))
 		safeErr = redactKey(safeErr, authz)
@@ -227,11 +210,10 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 	// signaling frame before copyWS's own limit is reached.
 	backConn.SetReadLimit(wsProxyMaxMessageSize)
 
-	// Accept the frontend WebSocket. The Origin was already decided by
-	// isOriginAllowed before this handler was reached; letting Accept run its
-	// own check would apply a second, different policy (a literal Host
-	// comparison with no default-port equivalence and no first-party client
-	// origins) and refuse requests the proxy has admitted.
+	// Accept the frontend WebSocket. isOriginAllowed already decided the Origin;
+	// letting Accept run its own check would apply a second, different policy
+	// (literal Host comparison, no default-port equivalence, no first-party
+	// client origins) and refuse requests the proxy admitted.
 	frontConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:       []string{backConn.Subprotocol()},
 		InsecureSkipVerify: true,
@@ -250,31 +232,28 @@ func proxyWebSocket(w http.ResponseWriter, r *http.Request, target *url.URL) {
 
 	errc := make(chan error, 2)
 
-	// Frontend → Backend
 	go func() {
 		errc <- copyWS(ctx, backConn, frontConn)
 	}()
 
-	// Backend → Frontend
 	go func() {
 		errc <- copyWS(ctx, frontConn, backConn)
 	}()
 
-	// Wait for either direction to finish, then cancel+drain both.
 	<-errc
 	cancel()
 	<-errc
 }
 
-// wsProxyMaxMessageSize is the maximum WebSocket message size the LiveKit
-// proxy will forward. Both legs set it as their read limit, so a larger
-// message closes the proxied connection with StatusMessageTooBig.
-// 256 KB is generous for LiveKit signaling (typically < 10 KB).
+// wsProxyMaxMessageSize is the largest WebSocket message the proxy forwards;
+// both legs use it as their read limit, so a larger message closes the
+// connection with StatusMessageTooBig. 256 KB is generous for LiveKit signalling
+// (typically < 10 KB).
 const wsProxyMaxMessageSize = 256 * 1024
 
-// copyWS reads messages from src and writes them to dst until an error or
-// context cancellation. The read limit on src rejects messages over
-// wsProxyMaxMessageSize to prevent memory exhaustion via oversized frames.
+// copyWS copies messages from src to dst until an error or context cancellation.
+// The read limit on src (wsProxyMaxMessageSize) prevents memory exhaustion via
+// oversized frames.
 func copyWS(ctx context.Context, dst, src *websocket.Conn) error {
 	for {
 		msgType, reader, err := src.Reader(ctx)
