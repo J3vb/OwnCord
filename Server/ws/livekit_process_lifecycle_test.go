@@ -178,6 +178,9 @@ func TestLiveKitProcess_StopKillsCompanionThatIgnoresShutdown(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows always uses immediate process termination")
 	}
+	prevGrace := liveKitStopGrace
+	liveKitStopGrace = 500 * time.Millisecond
+	t.Cleanup(func() { liveKitStopGrace = prevGrace })
 	p, listeners := startLiveKitTestProcess(t, "ignore")
 	stopped := make(chan struct{})
 	go func() {

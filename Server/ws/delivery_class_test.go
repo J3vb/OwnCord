@@ -231,14 +231,15 @@ func routeHub() (*Hub, map[int64]*routeObserver) {
 type routeObserver struct{ high, normal, low chan []byte }
 
 // queue returns the queue name every frame arrived on, or "" if none, or
-// "multiple" if frames split across queues.
-func (o *routeObserver) queue(wait time.Duration) string {
+// "multiple" if frames split across queues. Every queue is read until the
+// same deadline, so one wait after the emit covers every observer and queue.
+func (o *routeObserver) queue(deadline time.Time) string {
 	got := ""
 	for _, q := range []struct {
 		name string
 		ch   chan []byte
 	}{{"high", o.high}, {"normal", o.normal}, {"low", o.low}} {
-		if len(drainChan(q.ch, wait)) > 0 {
+		if len(drainChanUntil(q.ch, deadline)) > 0 {
 			if got != "" {
 				return "multiple"
 			}
@@ -246,6 +247,20 @@ func (o *routeObserver) queue(wait time.Duration) string {
 		}
 	}
 	return got
+}
+
+// drainChanUntil collects frames until deadline, then whatever is already
+// buffered.
+func drainChanUntil(ch chan []byte, deadline time.Time) [][]byte {
+	msgs := drainChan(ch, time.Until(deadline))
+	for {
+		select {
+		case msg := <-ch:
+			msgs = append(msgs, msg)
+		default:
+			return msgs
+		}
+	}
 }
 
 // TestDeliveryClass_RouteUnchanged pins, per concrete event, the queue and
@@ -265,8 +280,9 @@ func TestDeliveryClass_RouteUnchanged(t *testing.T) {
 			go h.Run()
 			defer h.Stop()
 			h.EmitEvents(context.Background(), []Event{c.ev})
+			deadline := time.Now().Add(60 * time.Millisecond)
 			for uid, o := range obs {
-				if got, want := o.queue(60*time.Millisecond), c.want[uid]; got != want {
+				if got, want := o.queue(deadline), c.want[uid]; got != want {
 					t.Errorf("user %d: frame on queue %q, want %q", uid, got, want)
 				}
 			}
@@ -309,8 +325,9 @@ func TestDeliveryClass_UnroutableDropped(t *testing.T) {
 			go h.Run()
 			defer h.Stop()
 			h.EmitEvents(context.Background(), []Event{ev})
+			deadline := time.Now().Add(60 * time.Millisecond)
 			for uid, o := range obs {
-				if q := o.queue(60 * time.Millisecond); q != "" {
+				if q := o.queue(deadline); q != "" {
 					t.Errorf("user %d received the unroutable event on %q; it must be dropped", uid, q)
 				}
 			}

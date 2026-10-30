@@ -1502,15 +1502,20 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 	userID := seedUser(t, database, "pinner")
 	chID := seedChannel(t, database, "pins")
 
+	// One pin through the API, the rest set-based: a thousand round trips each
+	// way cost seconds under the race detector.
+	first, err := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: first, Pinned: true, UserID: 1}); err != nil {
+		t.Fatalf("SetMessagePinned: %v", err)
+	}
 	total := db.MaxPinnedMessages + 5
-	for i := range total {
-		id, err := database.CreateMessage(context.Background(), chID, userID, "msg", nil)
-		if err != nil {
-			t.Fatalf("CreateMessage[%d]: %v", i, err)
-		}
-		if _, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: id, Pinned: true, UserID: 1}); err != nil {
-			t.Fatalf("SetMessagePinned[%d]: %v", i, err)
-		}
+	if _, err := database.ExecContext(context.Background(), `WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < ?)
+		INSERT INTO messages (channel_id, user_id, content, pinned, pinned_at)
+		SELECT ?, ?, 'msg', 1, datetime('now', printf('+%d seconds', i)) FROM s`, total-1, chID, userID); err != nil {
+		t.Fatalf("seed pinned messages: %v", err)
 	}
 
 	msgs, err := database.GetPinnedMessages(context.Background(), chID, userID)
