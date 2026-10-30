@@ -31,7 +31,7 @@ import {
   resetReadPointerState,
   setLiveTailInView,
   setMarkReadSender,
-} from "@lib/read-state";
+} from "@lib/readState";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 

@@ -54,7 +54,7 @@ import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { membersStore } from "../../src/stores/members.store";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [

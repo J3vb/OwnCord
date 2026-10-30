@@ -27,7 +27,7 @@
 
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
-import { setKnownThreadCheck, setThreadReadPointer } from "@lib/read-state";
+import { setKnownThreadCheck, setThreadReadPointer } from "@lib/readState";
 import type { ReadyThread, ThreadInfo } from "@lib/types";
 import { publishFollowedThreads, type FollowedThreadRow } from "./followedThreads.store";
 

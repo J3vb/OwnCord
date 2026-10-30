@@ -363,7 +363,7 @@ import {
 import { desktop } from "../../src/platform/desktop";
 import { SCREENSHARE_TILE_ID_OFFSET } from "../../src/lib/constants";
 import { saveUserStatus } from "../../src/lib/presence/userStatus";
-import { markAllRead } from "../../src/lib/read-state";
+import { markAllRead } from "../../src/lib/readState";
 import { startRingChime, startRingback, stopRingback } from "../../src/lib/media/notificationSound";
 import {
   alertIncomingCall,
@@ -3944,7 +3944,7 @@ describe("MainPage — mark-all-read teardown", () => {
   });
 
   it("cancels a queued Mark All as Read burst on destroy instead of letting it fire after the page is torn down", () => {
-    // Five unread channels: read-state.ts paces sends in bursts of 4 per
+    // Five unread channels: readState.ts paces sends in bursts of 4 per
     // 1100ms, so the 5th send is queued behind a timer instead of going out
     // synchronously.
     channelsStore.setState((prev) => {

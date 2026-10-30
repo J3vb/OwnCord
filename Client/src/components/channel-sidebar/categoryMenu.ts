@@ -15,7 +15,7 @@ import { createElement } from "@lib/dom";
 import { getChannelsByCategory, type CategoryRef } from "@stores/channels.store";
 import { canManageChannels, visibleCategories } from "@lib/permissions";
 import { collapseCategories, isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
-import { hasUnread, markChannelsRead } from "@lib/read-state";
+import { hasUnread, markChannelsRead } from "@lib/readState";
 import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
 import { shellText } from "../../i18n/shell";
 import { canMoveCategory } from "../../features/channels/categoryActions";

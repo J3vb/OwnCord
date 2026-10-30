@@ -51,7 +51,7 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
-import { setMarkReadSender } from "../../src/lib/read-state";
+import { setMarkReadSender } from "../../src/lib/readState";
 import {
   resetServerCapabilities,
   serverSupportsGameActivity,

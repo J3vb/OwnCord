@@ -131,7 +131,7 @@
       "stores/auth.store.ts": 1,
       "stores/members.store.ts": 1
     },
-    "lib/read-state.ts": {
+    "lib/readState.ts": {
       "stores/channels.store.ts": 1,
       "stores/dm.store.ts": 1,
       "stores/messages.store.ts": 1,

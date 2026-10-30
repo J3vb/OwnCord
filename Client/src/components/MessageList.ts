@@ -101,9 +101,9 @@ import {
   noteVisibleMessageSeen,
   onMarkUnreadFailed,
   setLiveTailInView,
-} from "@lib/read-state";
+} from "@lib/readState";
 import { idMentionsEnabled, readPointerEnabled } from "@lib/net/serverCapabilities";
-import { markMessageUnread } from "./message-list/mark-unread";
+import { markMessageUnread } from "./message-list/markUnread";
 import { onPrefChange } from "@lib/prefs/preferences";
 
 // -- Options ------------------------------------------------------------------
@@ -1088,7 +1088,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * the window focused. Fires on every scroll and on window focus; the
    * hasUnread gate keeps a plain scroll from spending the server's 5/s
    * mark_read budget, and the bottom of a detached window is not the present,
-   * so that case is excluded too (isChannelAway, lib/read-state.ts).
+   * so that case is excluded too (isChannelAway, lib/readState.ts).
    * The bottom-in-view check alone also covers focus returning while the reader
    * is scrolled up.
    */
@@ -1221,7 +1221,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * A live message was appended while the reader had the live tail in view. The
    * dispatcher does not count it unread, so markReadIfSeen (gated on a local
    * unread count) never sends for it; tell the server it was seen, throttled
-   * (lib/read-state.ts). Same away and deferred-divider checks as above, plus
+   * (lib/readState.ts). Same away and deferred-divider checks as above, plus
    * the Settings overlay and content views, which cover a still-mounted list.
    */
   function markLiveArrivalSeen(): void {
