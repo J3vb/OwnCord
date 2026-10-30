@@ -8,12 +8,10 @@ import (
 )
 
 // Params is everything BuildReport needs from the server's configuration.
-//
 // It is a plain struct rather than a *config.Config so this package stays a
-// leaf with no dependency on config, and so a test can state a topology
-// without constructing a server. It also has nowhere to put an http.Client or
-// a context.Context, which is how the rule of no outbound reachability helper
-// is enforced by the signature rather than by a comment.
+// leaf and a test can state a topology without a server. It has nowhere to
+// put an http.Client or context.Context, so the no-outbound-probe rule is
+// enforced by the signature.
 type Params struct {
 	ListenPort   int
 	TLSMode      string
@@ -41,11 +39,10 @@ type RequiredPort struct {
 
 // Unknown is one thing this server cannot determine about its own
 // reachability, why it cannot, and the check the owner runs instead.
-//
-// This is the milestone's actual deliverable. A diagnostic that reports only
-// what it can measure reads as a clean bill of health; the failures this report is
-// about — a blocked port, carrier NAT, a router that will not hairpin — are
-// all invisible from in here, and saying so is the honest answer.
+// This is the report's actual deliverable. A diagnostic that reports only what
+// it can measure reads as a clean bill of health; the failures it is about (a
+// blocked port, carrier NAT, a router that will not hairpin) are invisible from
+// in here, and saying so is the honest answer.
 type Unknown struct {
 	Fact       string `json:"fact"`
 	Why        string `json:"why"`
@@ -65,10 +62,10 @@ type Report struct {
 	VoiceNodeIPKind    Kind           `json:"voice_node_ip_kind,omitempty"`
 	TLSMode            string         `json:"tls_mode"`
 
-	// PublicIPHTTPSSupported is false in every build that ships today: a
-	// public-IP certificate flow is deferred and loadACME rejects an IP for tls.domain. It is a field
-	// rather than a constant string so the day a certificate flow exists,
-	// the report changes with it instead of continuing to say "no".
+	// PublicIPHTTPSSupported is false in every shipped build: a public-IP
+	// certificate flow is deferred and loadACME rejects an IP for tls.domain.
+	// It is a field so the report changes with the flow instead of continuing
+	// to say "no".
 	PublicIPHTTPSSupported bool   `json:"public_ip_https_supported"`
 	PublicIPHTTPSReason    string `json:"public_ip_https_reason"`
 
@@ -76,16 +73,15 @@ type Report struct {
 }
 
 // cgnatNote names both explanations for a 100.64.0.0/10 address, because
-// nothing observable from this host tells them apart. Stating either one alone
-// would be the confident wrong answer this milestone exists to prevent.
+// nothing observable from this host tells them apart; either alone would be a
+// confident wrong answer.
 const cgnatNote = "An address in 100.64.0.0/10 is either a carrier-grade NAT (RFC6598) address " +
 	"from your ISP, in which case inbound port forwarding cannot be made to work, or a Tailscale " +
 	"tailnet address, in which case it is working as intended. This server cannot tell which from here."
 
 // BuildReport classifies addrs and states what it cannot determine.
 //
-// It performs no network I/O at all: every input is already in hand. See the
-// package comment for why there is no probe.
+// It performs no network I/O; see the package comment for why there is no probe.
 func BuildReport(addrs []netip.Addr, p Params) Report {
 	r := Report{
 		ListenPort: p.ListenPort,
@@ -109,10 +105,9 @@ func BuildReport(addrs []netip.Addr, p Params) Report {
 		case KindCGNAT:
 			r.CGNATRangePresent = true
 		default:
-			// Every other class is recorded in LocalAddresses above and
-			// sets no summary flag: the two flags exist to answer "is this
-			// host directly on the internet" and "is the ambiguous 100.64/10
-			// range in play", and nothing else bears on either question.
+			// Other classes are recorded in LocalAddresses and set no summary
+			// flag: the two flags answer only "is this host directly on the
+			// internet" and "is the ambiguous 100.64/10 range in play".
 		}
 	}
 	if r.CGNATRangePresent {
@@ -166,8 +161,8 @@ func VoiceUDPLabel(port int) string {
 }
 
 // undeterminable is unconditional. It does not shrink when the topology looks
-// healthy, because a topology looking healthy from in here is exactly the
-// state in which an owner most needs to be told what was not checked.
+// healthy, which is exactly when an owner most needs to be told what was not
+// checked.
 func undeterminable(p Params) []Unknown {
 	const selfCheck = "Test from a network that is not your own — a phone on mobile data works — " +
 		"never from inside the LAN. See docs/port-forwarding.md."
@@ -232,15 +227,12 @@ func undeterminable(p Params) []Unknown {
 // LocalAddrs returns every address on every interface of this host, as
 // netip.Addr values ready for BuildReport.
 //
-// net.InterfaceAddrs reads the kernel's interface table. It is a syscall, not
-// a packet: nothing is sent, nothing is resolved, and no third party learns
-// this server exists. TestReport_MakesNoOutboundCall asserts that at runtime
-// rather than trusting this comment.
+// net.InterfaceAddrs reads the kernel's interface table: nothing is sent or
+// resolved. TestReport_MakesNoOutboundCall asserts that at runtime.
 //
 // Errors are swallowed into an empty slice on purpose: an unreadable interface
-// table means "unknown", and BuildReport's Undeterminable list already says
-// the important things are unknown. Failing the diagnostics endpoint because
-// the topology could not be read would be worse than reporting no addresses.
+// table means "unknown", which BuildReport's Undeterminable list already says,
+// and failing the diagnostics endpoint over it would be worse.
 func LocalAddrs() []netip.Addr {
 	ifaceAddrs, err := net.InterfaceAddrs()
 	if err != nil {

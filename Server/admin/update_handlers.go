@@ -20,7 +20,7 @@ import (
 
 // installWritable reports whether the install directory accepts the files a
 // self-update writes next to the binary. A var so tests can stand in for a
-// read-only install without depending on file permissions.
+// read-only install.
 var installWritable = func() error {
 	exePath, err := updater.ExecutablePath()
 	if err != nil {
@@ -90,9 +90,8 @@ func applyCancelled(ctx context.Context, w http.ResponseWriter) bool {
 
 // applyBudget bounds one POST /updates/apply: the release check, the asset
 // download and its verification, together. It matches the transfer lifetime in
-// api (transferMaxLifetime). The request context ends at this budget, and the
-// connection deadlines are set from that context's deadline plus
-// applyDeadlineMargin (see extendApplyDeadlines).
+// api (transferMaxLifetime). The request context ends at this budget and the
+// connection deadlines extend to it plus applyDeadlineMargin.
 const applyBudget = 10 * time.Minute
 
 // applyDeadlineMargin is added to applyBudget for the connection deadlines so
@@ -106,9 +105,8 @@ const applyDeadlineMargin = 30 * time.Second
 // never delivered (HTTP/1.1) while the update carries on. The read deadline
 // moves too because on HTTP/1.1 an expired read deadline cancels the request
 // context. Errors are ignored: http.ErrNotSupported means the writer has no
-// connection (a test recorder), so there is no deadline to extend. The
-// ResponseController reaches the connection through any wrapper that exposes
-// Unwrap.
+// connection (a test recorder). ResponseController reaches the connection
+// through any wrapper that exposes Unwrap.
 func extendApplyDeadlines(w http.ResponseWriter, deadline time.Time) {
 	ctl := http.NewResponseController(w)
 	_ = ctl.SetReadDeadline(deadline)
@@ -118,20 +116,17 @@ func extendApplyDeadlines(w http.ResponseWriter, deadline time.Time) {
 // handleApplyUpdate downloads and applies a server update.
 //
 // It is audited, which is why it takes a database handle it otherwise has no
-// use for. Replacing the running binary is the largest change an owner
-// credential can make — strictly larger than plugin_install, which is
-// audited — and it used to be the one owner-only mutation on this
-// router that wrote no audit row at all, on any path. Both halves are
-// recorded: update_apply when the verified binary is staged and the swap
-// becomes inevitable, update_applied or update_failed for what actually
-// happened.
+// use for: replacing the running binary is the largest change an owner
+// credential can make. Both halves are recorded: update_apply when the
+// verified binary is staged and the swap becomes inevitable, update_applied or
+// update_failed for what actually happened.
 func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, _ string, bg *syncutil.Group, shutdown <-chan struct{}) http.Handler {
 	stop := stopSignal{draining: bg.Draining(), shutdown: shutdown}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// In a container the running binary is image content: the staged
-		// replacement dies with the container and the restart comes back as
-		// the old image. Refuse before any nil/availability logic so the
-		// answer does not depend on updater configuration.
+		// replacement dies with the container and the restart comes back as the
+		// old image. Refuse before any availability logic so the answer does not
+		// depend on updater configuration.
 		if updater.RunningInContainer() {
 			writeErr(w, http.StatusServiceUnavailable, httperr.CodeContainerDeployment,
 				"in-place self-update is disabled in container deployments — upgrade by pulling the new image")
@@ -142,17 +137,15 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 
-		// A shutdown that has already begun refuses the request up front:
-		// before any outbound call, any slot claim and any long download,
-		// while the database is surely open.
+		// Refuse a begun shutdown up front: before any outbound call, slot claim
+		// or long download, while the database is surely open.
 		if stop.stopping() {
 			refuseApplyShuttingDown(w)
 			return
 		}
 
-		// A read-only install directory cannot take the staged file or the
-		// backup name, so say so before any download or countdown rather than
-		// failing later as a download error.
+		// A read-only install directory cannot take the staged file or backup
+		// name; say so before any download or countdown.
 		if err := installWritable(); err != nil {
 			slog.Info("update apply refused: install directory not writable", "err", err)
 			writeErr(w, http.StatusServiceUnavailable, httperr.CodeInstallReadOnly,
@@ -160,13 +153,11 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			return
 		}
 
-		// Serialize against concurrent applies, restores, and an
-		// already-requested restart — claimed before any updater work so a
-		// pending restart answers 409 without an outbound GitHub call, and
-		// so two concurrent applies can never both stage into the same .new
-		// path (each download removes the other's staged file). The deferred
-		// release covers every early return; ownership transfers to the
-		// applyAndRestart goroutine at the bottom.
+		// Serialize against concurrent applies, restores and an already-requested
+		// restart. Claimed before any updater work so a pending restart answers
+		// 409 without an outbound GitHub call, and two applies never stage into
+		// the same .new path. The deferred release covers every early return;
+		// ownership transfers to the applyAndRestart goroutine at the bottom.
 		if !beginRestartSensitiveOp() {
 			writeRestartConflict(w)
 			return
@@ -178,9 +169,9 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 			}
 		}()
 
-		// One budget for the check and the download. EndApplies cancels it at
-		// shutdown. The connection deadlines are derived from it, so the final
-		// response can always still be written after the context expires.
+		// One budget for the check and the download; EndApplies cancels it at
+		// shutdown. Connection deadlines derive from it so the final response can
+		// still be written after the context expires.
 		ctx, cancel := context.WithTimeout(r.Context(), applyBudget)
 		defer cancel()
 		srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
@@ -216,25 +207,23 @@ func handleApplyUpdate(database *db.DB, u *updater.Updater, hub HubBroadcaster, 
 		}
 
 		// Audited here rather than on entry: everything above can refuse the
-		// request, and a row per refused attempt would bury the one that
-		// matters. From this point the binary is staged and verified and the
-		// swap happens in the background, so this is the last moment the
-		// request context is still alive to carry it.
+		// request, and a row per refused attempt would bury the one that matters.
+		// From here the binary is staged and verified and the swap happens in the
+		// background, so this is the last moment the request context is alive.
 		actor := actorFromContext(r)
 		auditCtx := context.WithoutCancel(r.Context())
 		slog.Info("server update applying", "actor_id", actor, "from", info.Current, "to", info.Latest)
 		db.WriteAudit(auditCtx, database, actor, "update_apply", "server", 0,
 			fmt.Sprintf("applying server update %s -> %s", info.Current, info.Latest))
 
-		// The tail runs on the app's background group, so shutdown can abort
-		// its countdown and join it before the database closes. Admitted
-		// before the response, so a refusal (the process is already shutting
-		// down) can still be answered honestly: the slot is released by the
-		// deferred abort and the outcome row records that nothing was swapped.
-		// The goroutine takes over the busy state claimed above, so the
-		// deferred release stands down once the job is admitted.
-		// Checked again after the download: a handler that finishes during
-		// the drain must not tell the admin UI the server is restarting.
+		// The tail runs on the app's background group, so shutdown can abort its
+		// countdown and join it before the database closes. Admitted before the
+		// response so a refusal (already shutting down) can still be answered
+		// honestly: the slot is released by the deferred abort and the outcome row
+		// records that nothing was swapped. The goroutine takes over the busy
+		// state claimed above, so the deferred release stands down once the job
+		// is admitted. Checked again after the download: a handler that finishes
+		// during the drain must not tell the admin UI the server is restarting.
 		if stop.stopping() || !bg.Go(auditCtx, func(jobCtx context.Context) {
 			applyAndRestart(jobCtx, database, actor, info.Latest, hub, exePath, newPath, stagedHash, stop)
 		}) {
@@ -314,18 +303,17 @@ func stageApplyUpdate(ctx context.Context, w http.ResponseWriter, u *updater.Upd
 }
 
 // applyAndRestart is POST /updates/apply's background tail: give clients the
-// promised countdown, swap the binary on disk, and hand the process over to
-// the main package's restart coordinator. On a failed swap it releases the
-// exclusive slot claimed by the handler so a corrected release can be applied
-// without a manual restart (the corrective update_aborted broadcast is sent
-// by applyStagedUpdate's deferred guard).
+// promised countdown, swap the binary on disk, and hand the process to the
+// main package's restart coordinator. On a failed swap it releases the
+// exclusive slot so a corrected release can be applied without a manual
+// restart (applyStagedUpdate's deferred guard sends the corrective
+// update_aborted broadcast).
 //
 // stop fires when the process starts shutting down. It, not ctx, ends the
-// countdown early: ctx is cancelled only after the group's grace, so a
-// SIGTERM during the countdown would otherwise still swap the binary and ask
-// for a restart the operator did not want. On a drain nothing is swapped, the
-// slot is released and an update_failed row is written while the database is
-// still open (the background-jobs step runs before it closes).
+// countdown early: ctx is cancelled only after the group's grace, so a SIGTERM
+// during the countdown would otherwise still swap the binary and request an
+// unwanted restart. On a drain nothing is swapped, the slot is released and an
+// update_failed row is written while the database is still open.
 func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version string, hub HubBroadcaster, exePath, newPath, stagedHash string, stop stopSignal) {
 	if hub != nil {
 		hub.BroadcastServerRestart(ws.RestartReasonUpdate, 5)
@@ -337,11 +325,10 @@ func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version 
 		return
 	}
 	if applyStagedUpdate(hub, exePath, newPath, stagedHash, stop.stopping) {
-		// Synchronous, like the backup restore's row and for the same reason:
-		// the next thing this process does is hand itself over to the restart
-		// coordinator, and a row still sitting in the async writer's buffer
-		// would go with it. A failed write is logged, never a reason to leave
-		// a swapped binary unstarted.
+		// Synchronous, like the backup restore's row: the next step hands the
+		// process to the restart coordinator, and a row still in the async
+		// writer's buffer would go with it. A failed write is logged, never a
+		// reason to leave a swapped binary unstarted.
 		auditUpdateOutcome(ctx, database, actor, "update_applied",
 			fmt.Sprintf("server binary replaced with %s, restarting", version))
 		commitRestartPending()
@@ -354,7 +341,7 @@ func applyAndRestart(ctx context.Context, database *db.DB, actor int64, version 
 }
 
 // stopSignal says the process has begun to shut down. Two channels carry it
-// because they close at different times: shutdown closes at the very start of
+// because they close at different times: shutdown at the very start of
 // App.Close (before the HTTP drain), draining only when the background group
 // is stopped, seven steps later. The group's ctx is cancelled later still, so
 // it is never the signal. Either channel may be nil, which never fires.
@@ -416,21 +403,18 @@ func auditUpdateOutcome(ctx context.Context, database *db.DB, actor int64, actio
 
 // applyStagedUpdate performs the on-disk swap: verified staged binary ->
 // exePath, previous binary -> a unique exePath.old-*. It reports whether the
-// swap committed — on true the caller must request a restart, because the
-// file at exePath is no longer the binary this process is running.
+// swap committed; on true the caller must request a restart, because the file
+// at exePath is no longer the binary this process is running.
 //
-// The caller has already broadcast "restarting in 5s" to every connected
-// client before invoking this, so every failure path must correct that
-// promise — otherwise the client's restart banner counts down to a permanent
-// "Reconnecting..." over a connection that never actually dropped.
-// The deferred broadcast below covers all such paths (verification failure,
-// rename failure, commit failure) with one guard; it is cancelled by setting
-// committed=true once the verified binary is in place.
+// The caller has already broadcast "restarting in 5s", so every failure path
+// must correct that promise or the client's restart banner counts down to a
+// permanent "Reconnecting..." over a connection that never dropped. The
+// deferred broadcast below is that one guard (verification, rename and commit
+// failure); committed=true cancels it once the verified binary is in place.
 //
-// It does NOT spawn, signal, or exit: the restart itself is the main
-// package's job, after run() has fully drained (Server/internal/app/restart.go).
-// Keeping
-// the swap free of process side effects is also what makes the success path
+// It does NOT spawn, signal, or exit: the restart is the main package's job,
+// after run() has fully drained (Server/internal/app/restart.go). Keeping the
+// swap free of process side effects also makes the success path
 // unit-testable.
 //
 // The name is unique because an earlier binary can still be running: on
@@ -445,10 +429,10 @@ func applyStagedUpdate(hub HubBroadcaster, exePath, newPath, stagedHash string, 
 		}
 	}()
 
-	// TOCTOU guard: open the staged binary once, verify its hash
-	// through that handle, and commit (rename) that exact file.
-	// Commit fails if the path was swapped after verification, so
-	// the bytes verified are the bytes the restart will execute.
+	// TOCTOU guard: open the staged binary once, verify its hash through that
+	// handle, and commit (rename) that exact file. Commit fails if the path was
+	// swapped after verification, so the bytes verified are the bytes the
+	// restart will execute.
 	staged, err := updater.OpenVerifiedBinary(newPath, stagedHash)
 	if err != nil {
 		slog.Error("update: staged binary re-verification failed, aborting update", "error", err)

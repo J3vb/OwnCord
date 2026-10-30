@@ -6,25 +6,20 @@
 //	config  -> docs/server-configuration.md  every yaml key, and where it is documented
 //
 // Each index replaces the text between a pair of HTML-comment markers
-// (<!-- gendocs:NAME:start --> … <!-- gendocs:NAME:end -->). Everything
+// (<!-- gendocs:NAME:start --> … <!-- gendocs:NAME:end -->); everything
 // hand-written around them is left alone. Run it from Server/:
 //
 //	go run ./cmd/gendocs
 //
-// `make docs-verify` runs that and then `git diff --exit-code` on the three
-// documents, so a route, table or config key that changes in code without
-// reaching the docs fails the build — the same shape as protocol-verify and
-// sqlc-verify.
+// `make docs-verify` runs it and then `git diff --exit-code` on the three
+// documents, so a route, table or config key that changes without reaching the
+// docs fails the build.
 //
-// Two sources are read the way the absence-contract tests read them, because
-// no non-test seam exists: the router is rebuilt with every optional family
-// switched on and walked with chi.Walk, and the config surface comes from
-// reflection over the yaml struct tags. The schema comes from an in-memory
-// database with the migrations applied — sqlc exposes no catalog, so the
-// migrated database is the catalog.
-//
-// Output is padded exactly the way Prettier formats a Markdown table, so the
-// generated blocks survive the repository's `prettier --check` gate.
+// The router is rebuilt with every optional family switched on and walked with
+// chi.Walk, the config surface comes from reflection over the yaml struct
+// tags, and the schema from an in-memory database with the migrations applied
+// (sqlc exposes no catalog). Output is padded the way Prettier formats a
+// Markdown table, so the blocks survive `prettier --check`.
 package main
 
 import (
@@ -60,13 +55,12 @@ const (
 )
 
 // regenCmd is quoted into every generated block so a reader who spots a stale
-// row knows what to run without going looking for it.
+// row knows what to run.
 const regenCmd = "cd Server && go run -tags otel,wazero ./cmd/gendocs"
 
-// minRoutes is the vacuity floor the route index inherits from
-// TestAbsenceContract_NoFederationDirectoryOrListingRoutes: a walk over an
-// empty or wrapped mux would otherwise produce a short table that diffs clean
-// on the next run. An empty table is drift too.
+// minRoutes is the vacuity floor for the route index (as in
+// TestAbsenceContract_NoFederationDirectoryOrListingRoutes): a walk over an
+// empty or wrapped mux would otherwise diff clean on the next run.
 const minRoutes = 100
 
 func main() {
@@ -110,9 +104,8 @@ func run() error {
 }
 
 // spliceBlock replaces the text between the gendocs markers for name with
-// body, leaving the markers and everything around them untouched. Missing
-// markers are an error rather than an append: where a block lives is a
-// hand-made editorial decision, not something a generator should guess.
+// body. Missing markers are an error, not an append: where a block lives is an
+// editorial decision.
 func spliceBlock(doc, name, body string) (string, error) {
 	start := "<!-- gendocs:" + name + ":start -->"
 	end := "<!-- gendocs:" + name + ":end -->"
@@ -127,16 +120,14 @@ func spliceBlock(doc, name, body string) (string, error) {
 	return doc[:i+len(start)] + "\n\n" + strings.Trim(body, "\n") + "\n\n" + doc[j:], nil
 }
 
-// writeTable renders a GitHub-flavoured Markdown table padded the way Prettier
-// formats one: every cell in a column padded to the widest cell in that
-// column (the header included, minimum three), and the separator row filled
-// with that many dashes. Emitting anything else means `prettier --check` and
-// `git diff --exit-code` fight each other forever, each undoing the other.
+// writeTable renders a GitHub-flavoured Markdown table padded as Prettier does
+// (each column padded to its widest cell, minimum three, separator filled with
+// that many dashes); anything else makes `prettier --check` and
+// `git diff --exit-code` undo each other forever.
 func writeTable(w io.Writer, header []string, rows [][]string) {
-	// ponytail: widths are rune counts, Prettier's are display widths — a
-	// full-width CJK or emoji cell would pad two columns narrow. No generated
-	// cell holds one (route paths, SQL identifiers, config keys, section
-	// headings); switch to a display-width count if that ever changes.
+	// Widths are rune counts, Prettier's are display widths, so a full-width
+	// CJK or emoji cell would pad two columns narrow. No generated cell holds
+	// one; switch to a display-width count if that changes.
 	widths := make([]int, len(header))
 	cells := make([][]string, 0, len(rows)+1)
 	for _, r := range append([][]string{header}, rows...) {
@@ -166,22 +157,20 @@ func writeTable(w io.Writer, header []string, rows [][]string) {
 	}
 }
 
-// printf writes formatted output to w. Every w here is an in-memory buffer
-// that run() then splices into a document, so a write error is not reachable
-// and dropping it once beats five checks that can never fire.
+// printf writes formatted output to w. Every w is an in-memory buffer, so a
+// write error is unreachable.
 func printf(w io.Writer, format string, a ...any) {
 	_, _ = fmt.Fprintf(w, format, a...)
 }
 
-// escapeCell hides the one character that would end a cell early. Prettier
-// writes the same escape, so an escaped pipe round-trips.
+// escapeCell hides the character that would end a cell early, as Prettier does.
 func escapeCell(s string) string { return strings.ReplaceAll(s, "|", `\|`) }
 
 // code wraps s in a Markdown code span.
 func code(s string) string { return "`" + s + "`" }
 
-// joinCode renders a list of identifiers as comma-separated code spans, or an
-// em dash when there are none, matching cmd/dbinventory's table style.
+// joinCode renders identifiers as comma-separated code spans, or an em dash
+// when there are none (cmd/dbinventory's table style).
 func joinCode(items []string) string {
 	if len(items) == 0 {
 		return "—"
@@ -189,8 +178,8 @@ func joinCode(items []string) string {
 	return code(strings.Join(items, "`, `"))
 }
 
-// openMigrated opens an in-memory database with every migration applied. It is
-// the schema catalog and the router's dependency both.
+// openMigrated opens an in-memory database with every migration applied: the
+// schema catalog and the router's dependency.
 func openMigrated() (*db.DB, func(), error) {
 	database, err := db.Open(":memory:")
 	if err != nil {
@@ -204,16 +193,14 @@ func openMigrated() (*db.DB, func(), error) {
 }
 
 // genRoutes walks the production router with every optional family switched
-// on — uploads, voice, the GIF proxy, telemetry and the browser client portal
-// — so the table is the whole tree rather than the bare-config subset. The
-// scaffolding is a copy of fullRouter in api/absence_contract_test.go plus
-// the telemetry init main.go does; test code stays in the test.
+// on (uploads, voice, the GIF proxy, telemetry, the browser client portal) so
+// the table is the whole tree. The scaffolding copies fullRouter in
+// api/absence_contract_test.go plus main.go's telemetry init.
 //
-// The index is the superset build: /metrics mounts only when
-// telemetry.PrometheusHandler() returns non-nil, which needs -tags otel, so
-// every invocation of this tool passes -tags otel,wazero. Nothing under
-// Server/api or Server/admin is itself tag-gated, so wazero adds and removes
-// no route; it rides along so one build serves the whole repository.
+// /metrics mounts only when telemetry.PrometheusHandler() is non-nil, which
+// needs -tags otel, so every invocation passes -tags otel,wazero. Nothing under
+// Server/api or Server/admin is tag-gated, so wazero adds no route; it rides
+// along so one build serves the repository.
 func genRoutes(w io.Writer) error {
 	database, closeDB, err := openMigrated()
 	if err != nil {
@@ -229,7 +216,7 @@ func genRoutes(w io.Writer) error {
 
 	cfg := &config.Config{
 		// BrowserClientEnabled mounts the browser client portal's GET / and
-		// /assets/*, an owner opt-in like the other optional families.
+		// /assets/*.
 		Server: config.ServerConfig{Name: "gendocs", Port: 8443, DataDir: dir, BrowserClientEnabled: true},
 		Upload: config.UploadConfig{MaxSizeMB: 1, StorageDir: filepath.Join(dir, "uploads")},
 		//nolint:gosec // G101: placeholder values so the optional voice routes mount; the router is walked, never served.
@@ -240,9 +227,7 @@ func genRoutes(w io.Writer) error {
 		},
 		GIF: config.GIFConfig{APIKey: "gendocs"},
 		// /metrics mounts only when telemetry.PrometheusHandler() is non-nil,
-		// which needs both the otel build tag and telemetry switched on at
-		// runtime. Without this the index would silently omit a production
-		// route.
+		// which needs the otel build tag and telemetry enabled at runtime.
 		Telemetry: config.TelemetryConfig{Enabled: true, Exporter: "prometheus", ServiceName: "gendocs"},
 	}
 
@@ -252,23 +237,21 @@ func genRoutes(w io.Writer) error {
 		return fmt.Errorf("telemetry.Init: %w", err)
 	}
 	defer func() { _ = shutdown(ctx) }()
-	// The default build's Init installs a no-op provider, so this is the
-	// runtime check that the tool was built the way the index claims.
+	// The default build's Init installs a no-op provider; this checks the tool
+	// was built with the tags the index claims.
 	if telemetry.PrometheusHandler() == nil {
 		return errors.New("telemetry.Init left no Prometheus handler: run this tool as `go run -tags otel,wazero ./cmd/gendocs`, the build the route index is generated from")
 	}
 
-	// internal/app owns hub construction, so the route index is
-	// generated over the same collaborators the server runs with.
+	// internal/app owns hub construction, so the index is generated over the
+	// same collaborators the server runs with.
 	rt, err := app.StartRuntime(cfg, database, nil, app.RuntimeInputs{Version: "gendocs", Storage: app.OpenStorage(slog.Default(), cfg)})
 	if err != nil {
 		return fmt.Errorf("building runtime for the route walk: %w", err)
 	}
 	defer rt.Hub.GracefulStop()
 	// GET /admin/api/logs/stream mounts only when a log buffer is wired
-	// (admin.NewAdminAPI: `if logBuf != nil`). A running server always has
-	// one, so the index must be walked with one too, or that production
-	// route is silently missing from docs/api.md.
+	// (admin.NewAdminAPI), as a running server always has.
 	handler, cleanup := api.NewRouter(cfg, database, "gendocs", admin.NewRingBuffer(1), nil, rt)
 	defer cleanup()
 
@@ -280,8 +263,7 @@ func genRoutes(w io.Writer) error {
 	admin := 0
 	walk := func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		// A real admin subroute, not the per-method `/admin/*` catch-all chi
-		// emits for the Mount itself — those appear whether or not the walk
-		// ever descended into the subrouter.
+		// emits for the Mount itself.
 		if strings.HasPrefix(route, "/admin/api/") && !strings.HasSuffix(route, "/*") {
 			admin++
 		}
@@ -297,10 +279,9 @@ func genRoutes(w io.Writer) error {
 	if admin == 0 {
 		return errors.New("walk saw no /admin/api/ routes; the mounted admin subrouter was not traversed")
 	}
-	// chi hands the methods of one pattern back in map order, so the sort is
-	// what makes two runs produce the same bytes. Sorted on the bare path,
-	// before the code span goes on: a trailing backtick would order
-	// `/x` after `/x/y`.
+	// chi returns a pattern's methods in map order, so the sort makes runs
+	// byte-identical. It is on the bare path, before the code span: a trailing
+	// backtick would order `/x` after `/x/y`.
 	slices.SortFunc(rows, cmpRoute)
 	for _, r := range rows {
 		r[1] = code(r[1])
@@ -320,18 +301,14 @@ func cmpRoute(a, b []string) int {
 	return strings.Compare(a[0], b[0])
 }
 
-// genSchema reads the catalog of the migrated database. sqlc has no catalog
-// export (Server/sqlc.yaml declares no plugins and takes its schema from
-// migrations/), so the migrated database is the catalog — the same trick the
-// absence contract's fullRouter uses to get a real schema without a file.
+// genSchema reads the catalog of the migrated database (sqlc has no catalog
+// export; Server/sqlc.yaml takes its schema from migrations/).
 //
-// sqlite_sequence and the FTS5 shadow tables behind messages_fts are kept:
-// they are what the migrations create, and a change to either is a schema
-// change worth seeing in the diff. The sqlite_stat* tables are dropped —
-// db.Migrate runs ANALYZE after applying migrations, so they hold planner
-// statistics rather than schema, and which of them exists is a property of
-// the SQLite build (sqlite_stat4 only with STAT4 compiled in). Including them
-// would fail this drift check on a modernc.org/sqlite bump.
+// sqlite_sequence and the FTS5 shadow tables behind messages_fts are kept: a
+// change to either is a schema change. The sqlite_stat* tables are dropped:
+// db.Migrate runs ANALYZE, so they hold planner statistics, and which exist
+// depends on the SQLite build (sqlite_stat4 only with STAT4), so including
+// them would fail the drift check on a modernc.org/sqlite bump.
 func genSchema(w io.Writer) error {
 	database, closeDB, err := openMigrated()
 	if err != nil {
@@ -372,17 +349,11 @@ func genSchema(w io.Writer) error {
 	return nil
 }
 
-// checkMigrationHistory fails when a migration the database actually applied
-// has no row in the hand-written "### Migration History" table of schema.md.
-// The descriptions there are editorial — several explain why a migration
-// exists, which no generator could reconstruct — so they stay hand-written and
-// only their completeness is gated. This is genConfig's rule for config keys,
-// applied to migrations: the generated block below is not evidence, because
-// the scan stops at the next "## " heading.
-//
-// It caught the real thing it was written for: migrations 033-043 shipped with
-// no row, in a table sitting immediately above a generated block, where
-// "make docs-verify" could not see it.
+// checkMigrationHistory fails when an applied migration has no row in the
+// hand-written "### Migration History" table of schema.md. The descriptions
+// are editorial, so only their completeness is gated (genConfig's rule for
+// config keys); the generated block below is no evidence, since the scan stops
+// at the next "## " heading.
 func checkMigrationHistory(ctx context.Context, database *db.DB) error {
 	applied, err := queryStrings(ctx, database,
 		`SELECT version FROM schema_versions ORDER BY version`)
@@ -416,9 +387,8 @@ func checkMigrationHistory(ctx context.Context, database *db.DB) error {
 var migrationFile = regexp.MustCompile("`([0-9]{3}_[a-z0-9_]+\\.sql)`")
 
 // migrationHistoryFiles returns every migration filename named inside the
-// "### Migration History" section of schema.md. The scan starts at that
-// heading and stops at the next "## " heading, so neither the generated table
-// index nor any later prose can stand in for a real row.
+// "### Migration History" section of schema.md; the scan stops at the next
+// "## " heading, so no later prose can stand in for a real row.
 func migrationHistoryFiles(doc string) map[string]bool {
 	out := map[string]bool{}
 	inHistory := false
@@ -492,9 +462,8 @@ func queryStrings(ctx context.Context, database *db.DB, query string, args ...an
 }
 
 // genConfig lists every dotted yaml key and the reference section that
-// documents it. A key documented nowhere fails the run by name: the point of
-// the index is that the configuration surface and its reference cannot drift
-// apart silently, and a row saying "undocumented" would just record the drift.
+// documents it. A key documented nowhere fails the run by name rather than
+// getting an "undocumented" row that would record the drift.
 func genConfig(w io.Writer) error {
 	raw, err := os.ReadFile(configDoc)
 	if err != nil {
@@ -531,8 +500,8 @@ var dottedKey = regexp.MustCompile("`([a-z0-9_]+(?:\\.[a-z0-9_]+)+)`")
 
 // docSections maps each config key named inside the "## Config Key Reference"
 // section to the "### " heading it appears under. The scan stops at the next
-// "## " heading, which is where the generated index itself lives — so the
-// index can never be its own evidence that a key is documented.
+// "## " heading, where the generated index lives, so the index is never its
+// own evidence.
 func docSections(doc string) map[string]string {
 	out := map[string]string{}
 	inReference, heading := false, ""
@@ -560,10 +529,8 @@ func docSections(doc string) map[string]string {
 }
 
 // configKeys returns every dotted yaml key reachable from t, recursing into
-// nested structs the same way yaml.v3 unmarshals them. Copied from
-// api/absence_contract_test.go, which walks the same surface for the same
-// reason: config.Config's tags are the only enumeration of the keys, and
-// config.defaults() is unexported.
+// nested structs as yaml.v3 does. Copied from api/absence_contract_test.go:
+// config.Config's tags are the only enumeration of the keys.
 func configKeys(t reflect.Type, prefix string) []string {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()

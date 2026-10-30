@@ -1,5 +1,5 @@
-// Package webclient embeds the browser client bundle (6.13) the server hosts
-// when server.browser_client_enabled is on.
+// Package webclient embeds the browser client bundle the server hosts when
+// server.browser_client_enabled is on.
 //
 // The committed dist/ holds only PLACEHOLDER.txt, so a plain `go build` works
 // without npm and the binary carries no client. Release builds copy

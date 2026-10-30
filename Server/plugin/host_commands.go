@@ -1,8 +1,8 @@
-// Phase C Step 9 — `commands` host capability.
+// `commands` host capability.
 //
-// Plugins that declare the "commands" capability register one or more slash
-// commands at activation time. The WS command dispatcher (Server/ws/command.go)
-// calls Registry.DispatchCommand after exhausting its built-in command table.
+// Plugins that declare the "commands" capability register slash commands at
+// activation. The WS command dispatcher (Server/ws/command.go) calls
+// Registry.DispatchCommand after exhausting its built-in command table.
 
 package plugin
 
@@ -21,8 +21,8 @@ type CommandResult struct {
 }
 
 // RegisterCommand binds cmd to inst. Called from the activation path in the
-// wazero-tagged build once the module exports its `register_commands` table.
-// Default build can call it directly from tests.
+// wazero-tagged build once the module exports its `register_commands` table;
+// the default build can call it from tests.
 func (r *Registry) RegisterCommand(cmd string, inst *Instance) error {
 	cmd = strings.ToLower(strings.TrimPrefix(cmd, "/"))
 	if cmd == "" {
@@ -31,21 +31,20 @@ func (r *Registry) RegisterCommand(cmd string, inst *Instance) error {
 	if !inst.Manifest.HasCapability(CapCommands) {
 		return ErrCapabilityNotGranted
 	}
-	// Per-command ACL. The `commands` capability alone used to bind whatever
-	// the guest module returned from list_commands, so an admin enabling a
-	// plugin could not know which commands it would claim. The manifest is now
-	// the authority: only declared names bind, and this is the single choke
-	// point both auto-registration and direct registration route through.
+	// Per-command ACL: the manifest is the authority, so an admin enabling a
+	// plugin knows which commands it will claim. Only declared names bind, and
+	// this single choke point is where auto-registration and direct
+	// registration both route.
 	if !inst.Manifest.DeclaresCommand(cmd) {
 		return fmt.Errorf("%w: %s/%s", ErrCommandNotDeclared, inst.Manifest.Name, cmd)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Ownership is compared by plugin identity (manifest name — unique per
+	// Ownership is compared by plugin identity (manifest name, unique per
 	// registry), not instance pointer: an in-place upgrade replaces the
-	// *Instance, and the same plugin must be able to re-bind its own
-	// commands. A *different* plugin claiming an owned command is still
-	// refused (cross-plugin command-hijack protection).
+	// *Instance, and the same plugin must be able to re-bind its commands. A
+	// different plugin claiming an owned command is refused (cross-plugin
+	// command-hijack protection).
 	if existing, ok := r.commands[cmd]; ok && existing.Manifest.Name != inst.Manifest.Name {
 		return fmt.Errorf("plugin: command %q already registered by %q", cmd, existing.Manifest.Name)
 	}
@@ -53,10 +52,10 @@ func (r *Registry) RegisterCommand(cmd string, inst *Instance) error {
 	return nil
 }
 
-// DispatchCommand routes a slash command to the owning plugin. Returns
-// (nil, false) when no plugin owns the command, letting the WS dispatcher
-// fall back to the not-found response. Returns (nil, true) when the runtime
-// is unavailable so the dispatcher can show a helpful error message.
+// DispatchCommand routes a slash command to the owning plugin. It returns
+// (nil, false) when no plugin owns the command, so the WS dispatcher falls back
+// to not-found, and (nil, true) when the runtime is unavailable so the
+// dispatcher can show a helpful error.
 func (r *Registry) DispatchCommand(ctx context.Context, userID int64, channelID int64, cmd string, args []string) (*CommandResult, bool) {
 	if r == nil {
 		return nil, false

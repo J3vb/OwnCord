@@ -1,25 +1,19 @@
 //go:build wazero
 
-// Phase C Step 9 — Real Wazero-backed plugin runtime. Compiled only with
-// `-tags wazero`; matches the otel build-tag pattern used
-// elsewhere in the repo so the default sqlite-only build does not pull
-// wazero into go.mod at runtime.
-//
-// # Architecture
+// Real Wazero-backed plugin runtime, compiled only with `-tags wazero` so the
+// default sqlite-only build does not pull wazero in at runtime.
 //
 // The wazero-tagged build provides:
 //
 //	platformInit        — creates the shared wazero.Runtime (with the
 //	                      configured memory cap and WASI preview-1 imports)
-//	                      and returns a teardown closure consumed by
-//	                      Registry.Close.
+//	                      and returns a teardown closure for Registry.Close.
 //	activateWithRuntime — compiles the plugin's .wasm entrypoint, instantiates
-//	                      it against the shared runtime, stores the resulting
-//	                      api.Module on the Instance, and auto-registers any
-//	                      commands the module exports via list_commands.
+//	                      it against the shared runtime, stores the api.Module
+//	                      on the Instance, and auto-registers any commands the
+//	                      module exports via list_commands.
 //	platformDeactivate  — closes the per-plugin module without tearing down
-//	                      the shared runtime; called by DisablePlugin so a
-//	                      disabled plugin frees memory immediately.
+//	                      the shared runtime, so a disabled plugin frees memory.
 //	invokeCommand       — calls the plugin's `command_dispatch` export using
 //	                      the JSON-ABI:
 //	                          allocate(size u32) → ptr u32
@@ -27,8 +21,8 @@
 //	                          deallocate(ptr u32, len u32)
 //	                      Both input and output payloads are JSON.
 //
-// Plugins that do not export command_dispatch / allocate are still loadable
-// — DispatchCommand reports a user-facing diagnostic instead of crashing.
+// Plugins that export neither command_dispatch nor allocate still load;
+// DispatchCommand reports a user-facing diagnostic instead of crashing.
 package plugin
 
 import (
@@ -51,13 +45,11 @@ import (
 const wazeroPageBytes = 65536
 
 // guestMemory returns the module's linear memory, or nil when the guest
-// declared none. It exists because api.Module.Memory() is NOT safe to
-// dereference blindly: wazero returns its *wasm.MemoryInstance field as-is, and
-// that field is only populated for a module with a memory section — so a
-// memoryless guest yields a non-nil api.Memory interface wrapping a nil
-// pointer, and every method on it (Read, Write, Size) panics. A plain
-// `mem == nil` check does not catch that, hence the pointer-level check here.
-// Every host access to guest memory must go through this helper.
+// declared none. api.Module.Memory() is not safe to dereference blindly: wazero
+// returns its *wasm.MemoryInstance field as-is, populated only for a module with
+// a memory section, so a memoryless guest yields a non-nil api.Memory wrapping a
+// nil pointer whose methods panic. A plain `mem == nil` misses that, hence the
+// pointer-level check. Every host access to guest memory goes through this.
 func guestMemory(mod api.Module) api.Memory {
 	mem := mod.Memory()
 	if mem == nil {
@@ -69,14 +61,11 @@ func guestMemory(mod api.Module) api.Memory {
 	return mem
 }
 
-// platformInit stands up the shared wazero runtime for this Registry. The
-// runtime is the top-level handle that owns compiled modules, host modules,
-// and per-instance linear memory; every plugin in this registry shares it.
-//
-// The configured MaxMemoryMB cap is translated to wazero's per-page memory
-// limit (64 KiB pages) and applied at runtime construction. WASI preview-1
-// is pre-instantiated so plugins compiled with the standard TinyGo / Rust
-// wasm32-wasi targets can resolve their syscall imports.
+// platformInit stands up the shared wazero runtime for this Registry, the
+// handle that owns compiled modules, host modules and per-instance linear
+// memory. MaxMemoryMB is translated to wazero's 64 KiB page limit, and WASI
+// preview-1 is pre-instantiated so TinyGo / Rust wasm32-wasi plugins resolve
+// their syscall imports.
 func platformInit(cfg Config) (any, func(context.Context) error, error) {
 	ctx := context.Background()
 
@@ -84,12 +73,10 @@ func platformInit(cfg Config) (any, func(context.Context) error, error) {
 	if memMB <= 0 {
 		memMB = 64 // default 64 MiB per plugin runtime
 	}
-	// Compute the byte count in 64-bit before dividing down to pages: doing
-	// the multiplication in uint32 wraps at 4 GiB, so a configured
-	// max_memory_mb at or above 4096 would silently truncate (or zero out)
-	// the limit actually installed. wazero's own ceiling is 65536 pages
-	// (4 GiB, wasm32's addressable maximum; WithMemoryLimitPages panics
-	// above it), so clamp to that after computing in 64-bit.
+	// Compute the byte count in 64-bit before dividing to pages: a uint32
+	// multiplication wraps at 4 GiB, silently truncating a max_memory_mb of 4096
+	// or more. wazero's ceiling is 65536 pages (wasm32's maximum;
+	// WithMemoryLimitPages panics above it), so clamp after the 64-bit compute.
 	const wazeroMaxPages = 65536
 	pages := uint64(memMB) * 1024 * 1024 / wazeroPageBytes
 	if pages > wazeroMaxPages {
@@ -113,24 +100,20 @@ func platformInit(cfg Config) (any, func(context.Context) error, error) {
 }
 
 // activateWithRuntime compiles inst.WASMPath into a wazero module and
-// instantiates it under the shared runtime. The resulting api.Module is
-// stashed on inst.module so lifecycle teardown (Close, DisablePlugin) can
-// free it without walking the registry again.
-//
-// The runtime is passed in by Registry.activate as a captured snapshot so
-// this function never re-reads r.runtimePlatform — that field can be nil-ed
-// concurrently by Close, but the snapshot remains valid (the wazero runtime
-// itself returns an error gracefully if it has been closed underneath us).
+// instantiates it under the shared runtime, stashing the api.Module on
+// inst.module so Close and DisablePlugin can free it without walking the
+// registry. Registry.activate passes the runtime as a captured snapshot so this
+// never re-reads r.runtimePlatform, which Close can nil concurrently (a closed
+// wazero runtime returns an error gracefully).
 func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *Instance) error {
 	rt, ok := platform.(wazero.Runtime)
 	if !ok || rt == nil {
 		return fmt.Errorf("plugin %q: wazero runtime unavailable", inst.Manifest.Name)
 	}
-	// A module closed out from under us (CPU-budget deadline, guest trap)
-	// leaves its CompiledModule valid, and releaseClosedModule retains it, so
-	// re-activation re-instantiates without touching the disk or the compiler.
-	// A guest can force a re-activation per dispatch; it must not also buy a
-	// compile with each one.
+	// A module closed out from under us (CPU-budget deadline, guest trap) leaves
+	// its CompiledModule valid and releaseClosedModule retains it, so
+	// re-activation re-instantiates without the disk or compiler. A guest can
+	// force a re-activation per dispatch; it must not also buy a compile each.
 	r.mu.RLock()
 	compiled, _ := inst.compiled.(wazero.CompiledModule)
 	r.mu.RUnlock()
@@ -146,10 +129,9 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 		}
 	}
 
-	// Each plugin gets its own module name so multiple instances can coexist
-	// without colliding in the runtime's global module namespace. Output is
-	// swallowed so a misbehaving plugin can't flood server logs. _start is
-	// suppressed so exports are only invoked on demand.
+	// Each plugin gets its own module name so instances do not collide in the
+	// runtime's namespace. Output is swallowed so a misbehaving plugin cannot
+	// flood server logs, and _start is suppressed so exports run on demand.
 	modCfg := wazero.NewModuleConfig().
 		WithName(inst.Manifest.Name).
 		WithStdin(strings.NewReader("")). // prevent plugins from reading server stdin
@@ -168,24 +150,20 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 		return fmt.Errorf("plugin %q: instantiate: %w", inst.Manifest.Name, err)
 	}
 
-	// Store the module under the lock, then auto-bind any commands the plugin
-	// exports via list_commands. Binding is routed through RegisterCommand so
-	// each name goes through the same normalization (trim "/" + lowercase) and
-	// conflict check the direct registration path uses: a command already owned
-	// by a DIFFERENT plugin is refused rather than silently clobbered, closing
-	// the cross-plugin command-hijack hole. RegisterCommand acquires r.mu
-	// itself, so it is called outside the lock below to avoid re-entrant
-	// locking. The plugin must also have declared the `commands` capability in
-	// its manifest, otherwise no binding happens — and RegisterCommand refuses
-	// any name the manifest's `commands` block did not declare, so a guest
-	// module cannot widen its own command surface by returning extra names
-	// from list_commands.
+	// Store the module under the lock, then auto-bind any commands it exports
+	// via list_commands. Binding goes through RegisterCommand so each name gets
+	// the same normalization (trim "/" + lowercase) and conflict check as direct
+	// registration: a command owned by a different plugin is refused, closing the
+	// cross-plugin command-hijack hole. RegisterCommand takes r.mu itself, so it
+	// runs outside the lock. The plugin must declare the `commands` capability
+	// and RegisterCommand refuses names its manifest's `commands` block did not
+	// declare, so a guest cannot widen its command surface via list_commands.
 	r.mu.Lock()
 	if inst.module != nil {
-		// Lost a concurrent activation race (e.g. two dispatches both saw a
-		// closed module); keep the winner's module and discard ours. The
-		// winner already handled command binding. The compile is ours to close
-		// only if the winner is not running on the same retained one.
+		// Lost a concurrent activation race (two dispatches both saw a closed
+		// module): keep the winner's module and discard ours; the winner bound
+		// the commands. Our compile is closed only if the winner is not running
+		// on the same retained one.
 		shared := inst.compiled == compiled
 		r.mu.Unlock()
 		_ = module.Close(ctx)
@@ -200,14 +178,13 @@ func (r *Registry) activateWithRuntime(ctx context.Context, platform any, inst *
 	if inst.Manifest.HasCapability(CapCommands) {
 		// list_commands is guest code: it runs under the same CPU budget as
 		// command_dispatch, not the caller's long-lived context. This path is
-		// reached at enable, at startup, and on every lazy re-activation (with
-		// inst.invokeMu held), so an unbounded call here is an unbounded hold.
+		// reached at enable, startup and every lazy re-activation (with
+		// inst.invokeMu held), so an unbounded call would be an unbounded hold.
 		listCtx, cancel := context.WithTimeout(ctx, r.guestBudget(inst))
 		cmds, err := listExportedCommands(listCtx, module)
 		cancel()
 		if err != nil || module.IsClosed() {
-			// A trap leaves the module open; close it so releaseClosedModule
-			// (a no-op on an open module) drops it.
+			// A trap leaves the module open; close it so releaseClosedModule drops it.
 			_ = module.Close(ctx)
 			r.releaseClosedModule(inst, module)
 			return listCommandsError(inst.Manifest.Name, err)
@@ -231,13 +208,13 @@ func listCommandsError(plugin string, err error) error {
 	return fmt.Errorf("plugin %q: list_commands exceeded its CPU budget or trapped: %w", plugin, err)
 }
 
-// platformDeactivate closes the wazero module held by inst without touching
-// the shared runtime. Safe to call on an instance that was never activated.
-// Called from DisablePlugin and Close. Module teardown must run to completion
-// once started, so the caller's cancellation is detached (WithoutCancel).
+// platformDeactivate closes the wazero module held by inst without touching the
+// shared runtime; safe on a never-activated instance. Called from
+// DisablePlugin and Close. Module teardown must run to completion once started,
+// so the caller's cancellation is detached.
 func (r *Registry) platformDeactivate(ctx context.Context, inst *Instance) {
-	// No early return on a nil module: releaseClosedModule leaves a retained
-	// CompiledModule behind a nil module, and it still has to be freed.
+	// No early return on a nil module: releaseClosedModule can leave a retained
+	// CompiledModule behind a nil module, which still has to be freed.
 	if inst == nil {
 		return
 	}
@@ -251,28 +228,26 @@ func (r *Registry) platformDeactivate(ctx context.Context, inst *Instance) {
 	inst.compiled = nil
 }
 
-// invokeCommand calls the plugin's exported `command_dispatch` function
-// using a small JSON ABI:
+// invokeCommand calls the plugin's exported `command_dispatch` function using
+// the JSON ABI:
 //
 //	allocate(size u32) → ptr u32
 //	command_dispatch(ptr u32, len u32) → (result_ptr u32, result_len u32)
 //	deallocate(ptr u32, len u32)
 //
-// Both the input and output payloads are JSON. A plugin that does not
-// export command_dispatch returns (nil, false) so the WS dispatcher can
-// fall back to the not-found response. A plugin that exports
-// command_dispatch but lacks allocate returns a user-facing diagnostic.
+// Input and output payloads are JSON. A plugin without command_dispatch returns
+// (nil, false) so the WS dispatcher falls back to the not-found response; one
+// that exports it but lacks allocate returns a user-facing diagnostic.
 func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, channelID int64, cmd string, args []string) (*CommandResult, bool) {
 	if inst == nil {
 		return nil, false
 	}
-	// F2: serialize all guest interaction for this instance. wazero's
-	// Function.Call is not goroutine-safe, and concurrent allocate/mem.Write/
-	// command_dispatch/mem.Read on the shared module tear its linear-memory
-	// slice header. A per-Instance lock (not r.mu — that would serialize every
-	// plugin in the registry and be held across a full CPU budget) confines
-	// contention to concurrent invocations of the SAME plugin, and also makes the
-	// lazy re-activation below atomic so two overruns can't double-instantiate.
+	// Serialize all guest interaction for this instance: wazero's Function.Call
+	// is not goroutine-safe, and concurrent allocate/mem.Write/command_dispatch/
+	// mem.Read tear the module's linear-memory slice header. A per-Instance lock
+	// (not r.mu, which would serialize every plugin and be held across a full CPU
+	// budget) confines contention to the same plugin and makes the lazy
+	// re-activation below atomic, so two overruns cannot double-instantiate.
 	inst.invokeMu.Lock()
 	defer inst.invokeMu.Unlock()
 
@@ -281,11 +256,10 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	enabled := inst.Enabled
 	r.mu.RUnlock()
 	if moduleAny == nil {
-		// A previous CPU-budget overrun or guest trap closed the module
+		// A CPU-budget overrun or guest trap closed the module
 		// (releaseClosedModule cleared it). Re-instantiate lazily so one bad
-		// command doesn't brick the plugin until an admin disable/enable
-		// cycle or a server restart. Re-instantiation resets the guest's
-		// in-memory state. Disabled plugins stay dark.
+		// command doesn't brick the plugin until a disable/enable or restart; this
+		// resets the guest's in-memory state. Disabled plugins stay dark.
 		if !enabled {
 			return nil, false
 		}
@@ -317,9 +291,8 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 			Reply: fmt.Sprintf("plugin %s: missing allocate export (required for command dispatch)", inst.Manifest.Name),
 		}, true
 	}
-	// A guest that declares no linear memory has no usable JSON ABI. Checked
-	// here, with the other ABI preconditions and before any guest call, rather
-	// than dereferenced blindly further down.
+	// A guest that declares no linear memory has no usable JSON ABI; check with
+	// the other ABI preconditions before any guest call.
 	mem := guestMemory(mod)
 	if mem == nil {
 		return &CommandResult{
@@ -340,26 +313,21 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: marshal payload: %v", inst.Manifest.Name, err)}, true
 	}
 
-	// Enforce the plugin's CPU budget (see guestBudget for how it is chosen).
-	// Every guest call (allocate / command_dispatch / deallocate) runs under
-	// this deadline instead of the long-lived WebSocket context. The runtime
-	// was created WithCloseOnContextDone(true), so an expired deadline closes
-	// the module and interrupts a runaway guest (e.g. `for {}`) — the Call
-	// returns an error rather than panicking, which the paths below surface,
-	// and releaseClosedModule then marks the instance for lazy
+	// Enforce the plugin's CPU budget (see guestBudget). Every guest call runs
+	// under this deadline instead of the long-lived WebSocket context. The
+	// runtime was created WithCloseOnContextDone(true), so an expired deadline
+	// closes the module and interrupts a runaway guest (`for {}`): Call returns
+	// an error, and releaseClosedModule marks the instance for lazy
 	// re-instantiation on the next dispatch.
 	//
-	// The budget is wall-clock over guest execution. No host imports are
-	// wired into the runtime yet, so host-call time cannot be attributed to
-	// the guest today; when host functions (host_http, host_storage, …) land,
-	// their execution time must be excluded from this budget — otherwise the
-	// floor would kill any command performing a host HTTP call (httpTimeout
-	// is 10s against a 100ms floor).
+	// The budget is wall-clock over guest execution. No host imports are wired
+	// into the runtime yet; when host functions (host_http, host_storage, ...)
+	// land, their time must be excluded, or the floor would kill any command
+	// making a host HTTP call (httpTimeout is 10s against a 100ms floor).
 	budget := r.guestBudget(inst)
 	callCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 
-	// Allocate guest memory for the input payload.
 	size := uint64(len(payload))
 	ptrs, callErr := allocFn.Call(callCtx, size)
 	if callErr != nil || len(ptrs) == 0 {
@@ -374,7 +342,6 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 
 	results, callErr := dispatchFn.Call(callCtx, ptr, size)
 
-	// Free the input buffer regardless of dispatch outcome.
 	if deallocFn != nil {
 		_, _ = deallocFn.Call(callCtx, ptr, size)
 	}
@@ -384,8 +351,8 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 		// parent-context cancellation); release it so the next dispatch
 		// re-instantiates instead of dispatching into a dead module forever.
 		r.releaseClosedModule(inst, mod)
-		// Surface a CPU-budget overrun as a clean, specific error rather than
-		// leaking the raw "module closed with context deadline exceeded".
+		// Surface a CPU-budget overrun as a clean error, not the raw "module
+		// closed with context deadline exceeded".
 		if callCtx.Err() == context.DeadlineExceeded {
 			return &CommandResult{Reply: fmt.Sprintf("plugin %s: command exceeded CPU budget of %dms", inst.Manifest.Name, budget.Milliseconds())}, true
 		}
@@ -398,7 +365,7 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	resPtr, resLen := uint32(results[0]), uint32(results[1])
 	// The guest picks resLen, up to its whole linear memory. Refuse before
 	// reading: past here the bytes are copied out, marshalled into a frame and
-	// queued on the invoker's socket, none of which has a size policy.
+	// queued on the invoker's socket, none with a size policy.
 	if resLen > maxGuestResultBytes {
 		return &CommandResult{Reply: fmt.Sprintf("plugin %s: reply of %d bytes exceeds the %d-byte limit", inst.Manifest.Name, resLen, maxGuestResultBytes)}, true
 	}
@@ -418,14 +385,14 @@ func (r *Registry) invokeCommand(ctx context.Context, inst *Instance, userID, ch
 	return &CommandResult{Reply: dr.Reply}, true
 }
 
-// maxGuestResultBytes caps a result region a guest hands back by (ptr, len):
-// a command reply or the list_commands name list.
+// maxGuestResultBytes caps a result region a guest hands back by (ptr, len): a
+// command reply or the list_commands name list.
 const maxGuestResultBytes = 64 << 10
 
 // guestBudget is the wall-clock deadline for one guest call. The operator's
 // plugins.cpu_budget_ms is the ceiling (100ms when unset, so zero or negative
-// can never mean "no limit"); a manifest may ask for less, never for more —
-// the manifest is the untrusted side's input.
+// never means "no limit"); a manifest may ask for less, never more, since the
+// manifest is the untrusted side's input.
 func (r *Registry) guestBudget(inst *Instance) time.Duration {
 	budgetMs := r.cfg.CPUBudgetMs
 	if budgetMs <= 0 {
@@ -438,12 +405,10 @@ func (r *Registry) guestBudget(inst *Instance) time.Duration {
 }
 
 // releaseClosedModule drops inst.module when the wazero runtime closed it out
-// from under us (CPU-budget deadline via WithCloseOnContextDone, a guest
-// trap, or parent-context cancellation), so the next dispatch lazily
-// re-instantiates the plugin instead of erroring on a dead module forever.
-// The pointer guard keeps a concurrent re-activation's fresh module intact.
-// inst.compiled is deliberately kept: closing an instance does not invalidate
-// its CompiledModule, and activateWithRuntime re-instantiates from it.
+// from under us (CPU-budget deadline, guest trap, parent-context cancellation),
+// so the next dispatch re-instantiates instead of erroring forever. The pointer
+// guard keeps a concurrent re-activation's fresh module intact. inst.compiled
+// is kept: closing an instance does not invalidate its CompiledModule, and
 // platformDeactivate frees it on disable, upgrade and Close.
 func (r *Registry) releaseClosedModule(inst *Instance, mod api.Module) {
 	if !mod.IsClosed() {
@@ -456,11 +421,11 @@ func (r *Registry) releaseClosedModule(inst *Instance, mod api.Module) {
 	r.mu.Unlock()
 }
 
-// listExportedCommands calls the plugin's optional `list_commands` export
-// which returns (ptr u32, len u32) pointing to a JSON array of command name
-// strings. If the export is absent, the module declares no linear memory, or
-// the result is invalid JSON, an empty slice is returned and no command
-// bindings are created. A failed call (trap, budget overrun) is an error.
+// listExportedCommands calls the plugin's optional `list_commands` export,
+// which returns (ptr u32, len u32) pointing to a JSON array of command names.
+// If the export is absent, the module declares no memory, or the result is
+// invalid JSON, it returns an empty slice and no bindings are created. A failed
+// call (trap, budget overrun) is an error.
 func listExportedCommands(ctx context.Context, mod api.Module) ([]string, error) {
 	fn := mod.ExportedFunction("list_commands")
 	if fn == nil {
@@ -473,8 +438,8 @@ func listExportedCommands(ctx context.Context, mod api.Module) ([]string, error)
 	if len(results) < 2 {
 		return nil, nil
 	}
-	// A guest with no memory section has no memory to read the name list from
-	// (and its api.Memory must not be touched — see guestMemory).
+	// A guest with no memory section has nothing to read the names from, and its
+	// api.Memory must not be touched (see guestMemory).
 	mem := guestMemory(mod)
 	if mem == nil {
 		return nil, nil

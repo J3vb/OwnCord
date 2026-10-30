@@ -8,8 +8,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Retention ───────────────────────────────────────────────────────
-
 // handleGetRetentionChannels lists the channels a policy can target, for a
 // MANAGE_SERVER principal that cannot read /channels (MANAGE_CHANNELS).
 func handleGetRetentionChannels(retention *service.RetentionService) http.HandlerFunc {

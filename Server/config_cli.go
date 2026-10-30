@@ -17,9 +17,9 @@ import (
 )
 
 // runConfigCLI implements `chatserver config reset-overrides [--all] [key ...]`:
-// drop settings saved from the admin panel while the server is
-// stopped, so an owner whose panel change made the panel unreachable can start
-// the server again without a shell or a hand-edit of the overrides file.
+// drop settings saved from the admin panel while the server is stopped, so an
+// owner whose panel change made the panel unreachable can start the server
+// again without a shell or a hand-edit of the overrides file.
 //
 // It is offline and modelled on `restore`: it takes the database's process
 // lock, so it refuses while a server is running and cannot race a panel save.
@@ -107,13 +107,13 @@ func configCLI(stdout, stderr io.Writer, cfgPath string, args []string) int {
 
 // lockServerPaths takes the process lock at every database path a running
 // server may hold. The panel can move database.path, and a running server
-// holds the lock at the path it booted with, which is the base path unless an
-// earlier save has since been applied by a restart. Both the base path and the
-// path the overrides now name are locked (base first, always), so a pending
-// move cannot let this command rewrite the file under a live server. A saved
-// chain A -> B -> C with no restart in between is not covered: the server does
-// not record the path it is running on. When the file does not parse, no
-// server can have booted on it, so only the base path applies.
+// holds the lock at the path it booted with: the base path unless an earlier
+// save has since been applied by a restart. Both the base path and the path the
+// overrides now name are locked (base first, always), so a pending move cannot
+// let this command rewrite the file under a live server. A saved chain
+// A -> B -> C with no restart in between is not covered: the server does not
+// record the path it is running on. When the file does not parse, no server can
+// have booted on it, so only the base path applies.
 func lockServerPaths(stderr io.Writer, cfgPath, overridesPath, baseDBPath string) (release func(), ok bool) {
 	lockPaths := []string{lockTarget(baseDBPath)}
 	if effective, err := config.Preview(cfgPath, overridesPath, nil); err == nil {

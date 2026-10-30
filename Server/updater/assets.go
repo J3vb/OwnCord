@@ -18,8 +18,7 @@ type ClientAssets struct {
 }
 
 // textAssetCacheEntry caches a small text asset (e.g. a client update .sig
-// file) alongside the release cache so repeated requests are served from
-// memory instead of re-fetching from GitHub on every call.
+// file) so repeated requests are served from memory.
 type textAssetCacheEntry struct {
 	content string
 	// err caches a failed fetch so an upstream outage is not re-dialled on
@@ -31,15 +30,14 @@ type textAssetCacheEntry struct {
 
 // clientAssetSuffixByTarget maps a Tauri updater target
 // ("{os}-{arch}-{installer}") to the release asset suffix for that platform's
-// updater artifact. The matching signature asset is the same suffix plus
-// ".sig". Targets without a published updater artifact are absent.
+// updater artifact; the signature asset is the same suffix plus ".sig".
+// Targets without a published updater artifact are absent.
 //
-// The linux-*-deb entries point at the signed .deb package itself (Tauri names
-// debs by Debian architecture). The release workflow signs each .deb with the
-// updater key, bound to the release version. A deb target is only answered for
-// clients that opt in (see api/client_update.go debOptIn); a client that does
-// not opt in gets 204 before this map is consulted, because it cannot install
-// a .deb and serving it would turn an honest banner into a failing install.
+// The linux-*-deb entries point at the signed .deb itself. A deb target is
+// answered only for clients that opt in (see api/client_update.go debOptIn); a
+// client that does not gets 204 before this map is consulted, because it cannot
+// install a .deb and serving it would turn an honest banner into a failing
+// install.
 var clientAssetSuffixByTarget = map[string]string{
 	"windows-x86_64-nsis":    "_x64-setup.nsis.zip",
 	"windows-aarch64-nsis":   "_arm64-setup.nsis.zip",
@@ -88,23 +86,19 @@ func (u *Updater) FetchTextAsset(ctx context.Context, url string) (string, error
 }
 
 // FetchTextAssetCached is FetchTextAsset with an in-memory cache keyed by URL,
-// using the same cacheTTL as the release cache. It lets unauthenticated
-// callers (e.g. the client-update endpoint, which api/router.go rate-limits to
-// 30/min/IP) be served from memory instead of triggering an outbound fetch on
-// every request.
+// using the release cache's cacheTTL. It lets unauthenticated callers (the
+// rate-limited client-update endpoint) be served from memory instead of
+// triggering an outbound fetch per request.
 func (u *Updater) FetchTextAssetCached(ctx context.Context, url string) (string, error) {
 	if entry, ok := u.lookupTextAsset(url, time.Now()); ok {
 		return entry.content, entry.err
 	}
 
 	// Coalesce concurrent misses: when the TTL expires under load, every caller
-	// would otherwise issue its own outbound fetch. One flight per URL runs and
-	// the rest wait on its result.
-	//
-	// The flight is detached from the leader's ctx (see detachFetch): callers
-	// are the unauthenticated client-update endpoint, so a leader that aborts
-	// its request must not fail its followers or write its own
-	// context.Canceled into the shared negative cache.
+	// would otherwise issue its own fetch. One flight per URL runs and the rest
+	// wait on its result. The flight is detached from the leader's ctx (see
+	// detachFetch) so a leader that aborts its request cannot fail its
+	// followers or cache its own context.Canceled.
 	v, err, _ := u.textAssetSF.Do(url, func() (any, error) {
 		now := time.Now()
 		// Re-check: another flight may have filled the cache while we queued.

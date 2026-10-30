@@ -17,10 +17,9 @@ const (
 var bcryptCost = 12
 
 // SetCostForTesting lowers the bcrypt cost for the current process and resets
-// the dummy timing pad so it is regenerated at the new cost. Intended to be
-// called from TestMain with bcrypt.MinCost: password hashing dominates the
-// api/admin test suites (~264 cost-12 hashes ≈ minutes of pure bcrypt), and
-// nothing about the tests depends on the hash strength.
+// the dummy timing pad so it is regenerated at the new cost. Call it from
+// TestMain with bcrypt.MinCost: password hashing dominates the api/admin test
+// suites (~264 cost-12 hashes) and no test depends on hash strength.
 func SetCostForTesting(cost int) {
 	bcryptCost = cost
 	dummyHashOnce = sync.Once{}
@@ -42,10 +41,9 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// dummyHash is a lazily-computed bcrypt hash used to prevent timing
-// side-channels when the user does not exist. Comparing against this dummy
-// ensures that CheckPassword takes roughly constant time regardless of
-// whether a valid hash was supplied.
+// dummyHash is a lazily computed bcrypt hash used to prevent timing
+// side-channels when the user does not exist, so CheckPassword takes roughly
+// constant time whether or not a valid hash was supplied.
 var (
 	dummyHash     []byte
 	dummyHashOnce sync.Once
@@ -72,11 +70,9 @@ func getDummyHash() []byte {
 // username enumeration.
 func CheckPassword(hash, password string) bool {
 	if hash == "" {
-		// Perform a dummy comparison so the response time is indistinguishable
-		// from a real check, preventing timing-based username enumeration.
-		// The error is intentionally discarded: we always return false here.
-		// The comparison is performed only to consume time and prevent
-		// timing-based username enumeration.
+		// A dummy comparison makes the response time indistinguishable from a
+		// real check, preventing timing-based username enumeration; the error
+		// is discarded because this branch always returns false.
 		_ = bcrypt.CompareHashAndPassword(getDummyHash(), []byte(password))
 		return false
 	}
