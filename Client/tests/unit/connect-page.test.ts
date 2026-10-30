@@ -287,6 +287,51 @@ describe("ConnectPage", () => {
       page.destroy?.();
     });
 
+    it("does not send an edit the user made after the refusal", async () => {
+      const onLogin = vi.fn<ConnectPageCallbacks["onLogin"]>().mockRejectedValue(certRefusal());
+      const page = await refusedThen(onLogin, "chat.example:8443");
+
+      const passwordInput = container.querySelector("#password") as HTMLInputElement;
+      passwordInput.value = "half-typed";
+      passwordInput.dispatchEvent(new Event("input", { bubbles: true }));
+      page.resubmitAfterCertAccept("chat.example:8443");
+      await Promise.resolve();
+      expect(onLogin).toHaveBeenCalledTimes(1);
+      page.destroy?.();
+    });
+
+    it("does not turn a registration switched to Login mid-request into a login", async () => {
+      let refuse!: (err: unknown) => void;
+      const onRegister = vi.fn<ConnectPageCallbacks["onRegister"]>(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            refuse = reject;
+          }),
+      );
+      const onLogin = vi.fn<ConnectPageCallbacks["onLogin"]>().mockResolvedValue(undefined);
+      const page = createConnectPage(
+        makeCallbacks({ onLogin, onRegister, getRegistrationMode: () => "open" }),
+        testProfiles,
+      );
+      page.mount(container);
+      const toggle = container.querySelector(".form-switch button") as HTMLElement;
+      toggle.click();
+      submitLogin("chat.example:8443");
+      await vi.waitFor(() => expect(onRegister).toHaveBeenCalledTimes(1));
+
+      toggle.click();
+      refuse(certRefusal());
+      await vi.waitFor(() => {
+        expect(container.querySelector(".error-banner")!.textContent).not.toBe("");
+      });
+
+      page.resubmitAfterCertAccept("chat.example:8443");
+      await Promise.resolve();
+      expect(onLogin).not.toHaveBeenCalled();
+      expect(onRegister).toHaveBeenCalledTimes(1);
+      page.destroy?.();
+    });
+
     it("does not resubmit a sign-in the server refused for another reason", async () => {
       const onLogin = vi
         .fn<ConnectPageCallbacks["onLogin"]>()

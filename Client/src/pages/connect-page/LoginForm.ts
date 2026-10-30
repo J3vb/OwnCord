@@ -574,6 +574,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Wire form events
     form.addEventListener("submit", handleFormSubmit, { signal });
+    // An edit after a certificate refusal is a new sign-in the user has not
+    // sent yet, so accepting the certificate must not send it for them.
+    form.addEventListener(
+      "input",
+      () => {
+        certRefusedSubmit = null;
+      },
+      { signal },
+    );
     // Typing means the user is taking over from the automatic retry.
     for (const input of [hostInput, usernameInput, passwordInput]) {
       input.addEventListener("input", cancelServerWait, { signal });
@@ -1258,12 +1267,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const host = hostInput.value.trim();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
+    // The mode toggle stays live while a request is in flight.
+    const mode = formMode;
 
     certRefusedSubmit = null;
     transitionTo("loading");
 
     try {
-      if (formMode === "login") {
+      if (mode === "login") {
         const savedPassword = usingSavedPassword;
         await loginRetryingWhileBusy(() =>
           savedPassword
@@ -1310,7 +1321,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         return;
       }
       if (err instanceof ApiClientError && err.code === TLS_CERT_CODE) {
-        certRefusedSubmit = { host, mode: formMode };
+        certRefusedSubmit = { host, mode };
       }
       transitionTo("error", message);
     }
@@ -1485,6 +1496,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     setHost(host: string): void {
       if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
+      certRefusedSubmit = null;
       writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
@@ -1495,6 +1507,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setCredentials(username: string, hasSavedPassword?: boolean): void {
+      certRefusedSubmit = null;
       usernameInput.value = username;
       // The placeholder only ever belongs to LOGGING IN to an existing
       // account. Registration reads the password field as typed text, so a
