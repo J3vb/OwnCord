@@ -64,6 +64,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Voice channels with a password show a lock in the sidebar, and joining one for the first time asks for the password in a small dialog (a wrong password or too many tries says so). Admins who manage channels can set, change or remove the password in Edit Channel; it is never shown back.
 
+**Messages & files**
+
+- The server can now show you your own upload quota and every file you sent, and remove one of your files to free space (new login-only routes under `/api/v1/users/me/storage` and `/api/v1/users/me/uploads`). Removing the last file of a message with no text deletes the message. The desktop page for this comes in a later release.
+
 ### Changed
 
 **Server (operators)**

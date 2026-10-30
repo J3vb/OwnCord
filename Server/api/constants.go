@@ -35,6 +35,11 @@ const (
 	// a fast scroll asks for a page every few seconds.
 	mediaRateLimitPerMinute = 120
 
+	// ownUploadsRateLimitPerMinute covers the signed-in user's storage figure,
+	// upload list and removals on the My uploads page; one limit for all three,
+	// since paging and removing interleave.
+	ownUploadsRateLimitPerMinute = 120
+
 	livekitProxyRateLimitPerMinute = 30
 
 	clientUpdateRateLimitPerMinute = 30

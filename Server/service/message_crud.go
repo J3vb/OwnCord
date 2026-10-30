@@ -420,17 +420,20 @@ func (s *MessageService) deleteAuthz(ctx context.Context, userID int64, msg *db.
 
 // DeleteMessage validates and soft-deletes a message.
 func (s *MessageService) DeleteMessage(ctx context.Context, userID, msgID int64) (*DeleteMessageResult, error) {
-	return s.deleteMessage(ctx, userID, msgID, nil, "")
+	return s.deleteMessage(ctx, userID, msgID, nil, "", false)
 }
 
 // DeleteMessageForReport is DeleteMessage for the report-linked removal: same
 // authorization and effect, plus report_id on the ledger row. reason is the
 // moderator's text for that row; empty falls back to the fixed phrase.
 func (s *MessageService) DeleteMessageForReport(ctx context.Context, userID, msgID, reportID int64, reason string) (*DeleteMessageResult, error) {
-	return s.deleteMessage(ctx, userID, msgID, &reportID, reason)
+	return s.deleteMessage(ctx, userID, msgID, &reportID, reason, false)
 }
 
-func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64, reportID *int64, reason string) (*DeleteMessageResult, error) {
+// deleteMessage is the delete every path shares. onlyIfEmpty adds a precondition
+// checked in the write itself: the message must still have no text and no file,
+// else the delete is refused with errNoLongerEmpty and nothing changes.
+func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64, reportID *int64, reason string, onlyIfEmpty bool) (*DeleteMessageResult, error) {
 	if err := validateActionReason(reason); err != nil {
 		return nil, err
 	}
@@ -485,15 +488,8 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	// unflushed reversal would wrongly consume.
 	s.FlushPendingMentionCounts(context.WithoutCancel(ctx), []int64{msgID})
 
-	if err := s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, msg.UserID, reportID, reason); err != nil {
-		// A message that raced this request to the writer after the msg.Deleted check
-		// surfaces as db.ErrNotFound. Map it to ErrDeletedMessage, the same taxonomy as
-		// the sequential-repeat guard, and so this request never reaches
-		// DecrementMentionCounts for a delete that did not happen.
-		if errors.Is(err, db.ErrNotFound) {
-			return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
-		}
-		return nil, fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	if err := s.softDeleteRow(ctx, msgID, userID, isMod, msg.UserID, reportID, reason, onlyIfEmpty); err != nil {
+		return nil, err
 	}
 
 	slog.Debug("message deleted", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID, "is_mod", isMod)
@@ -530,4 +526,32 @@ func (s *MessageService) deleteMessage(ctx context.Context, userID, msgID int64,
 	}
 
 	return result, nil
+}
+
+// softDeleteRow writes the delete: the guarded own-empty variant when onlyIfEmpty,
+// else the normal one.
+func (s *MessageService) softDeleteRow(ctx context.Context, msgID, userID int64, isMod bool, authorID int64, reportID *int64, reason string, onlyIfEmpty bool) error {
+	var err error
+	switch {
+	case !onlyIfEmpty:
+		err = s.st.DeleteMessageWithRemoval(ctx, msgID, userID, isMod, authorID, reportID, reason)
+	case s.emptyDeleter == nil:
+		return errNoLongerEmpty
+	default:
+		err = s.emptyDeleter.DeleteEmptyOwnMessage(ctx, msgID, userID)
+	}
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, db.ErrMessageNotEmpty):
+		return errNoLongerEmpty
+	case errors.Is(err, db.ErrNotFound):
+		// A message that raced this request to the writer after the msg.Deleted check
+		// surfaces as db.ErrNotFound. Map it to ErrDeletedMessage, the same taxonomy as
+		// the sequential-repeat guard, and so this request never reaches
+		// DecrementMentionCounts for a delete that did not happen.
+		return fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
+	default:
+		return fmt.Errorf("%w: cannot delete this message", ErrForbidden)
+	}
 }
