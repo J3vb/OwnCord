@@ -34,13 +34,7 @@ const log = createLogger("audioPipeline");
 export const GATE_HYSTERESIS_DB = 6;
 const GATE_CLOSE_RATIO = 10 ** (-GATE_HYSTERESIS_DB / 20);
 
-export {
-  GATE_DB_MAX,
-  GATE_DB_MIN,
-  vadLevelPosition,
-  vadThreshold,
-  vadThresholdDb,
-} from "@lib/voice/gateScale";
+export { vadLevelPosition, vadThreshold, vadThresholdDb } from "@lib/voice/gateScale";
 
 /**
  * The browser processing every microphone capture asks for: the three saved
