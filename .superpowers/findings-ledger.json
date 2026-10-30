@@ -10961,7 +10961,7 @@
       "fixed": "2026-09-27",
       "fix": {
         "commit": "0d4d267e",
-        "test": "Client/src/features/voice/native/nativeRoom.test.ts",
+        "test": "Client/src/features/voice/native/nativeRoom/connection.test.ts",
         "revertProof": "pass"
       }
     },
@@ -11334,7 +11334,7 @@
       "fixedDate": "2026-10-15",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/connection-diagnostics.test.ts (Linux native voice cases), Client/src/features/voice/native/nativeRoom.test.ts (maps native events onto livekit RoomEvents)",
+        "test": "Client/tests/unit/connection-diagnostics.test.ts (Linux native voice cases), Client/src/features/voice/native/nativeRoom/connection.test.ts (maps native events onto livekit RoomEvents)",
         "revertProof": "pass (before the fix the native signaling case reported failed and the native microphone cases called getUserMedia)"
       },
       "note": "Roadmap Phase LP, WP LP-4. Incoming media on Linux stays not-tested until LP-5 adds native stats."
