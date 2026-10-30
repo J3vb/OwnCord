@@ -137,7 +137,7 @@ notify-rust = "4"
 # crates, and the copy without the plugin's backend features fails rfd 0.17's
 # build.rs on Linux. Pinned to the plugin in .github/dependabot.yml; bump both
 # together or neither.
-rfd = { version = "0.16", default-features = false }
+rfd = { version = "0.17", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs) and,
