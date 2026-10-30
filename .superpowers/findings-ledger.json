@@ -575,7 +575,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "0db0433",
-        "test": "Client/tests/unit/screen-share-tracks.test.ts",
+        "test": "Client/tests/unit/screenShareTracks/camera.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -601,7 +601,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "62792c7",
-        "test": "Client/tests/unit/screen-share-tracks.test.ts",
+        "test": "Client/tests/unit/screenShareTracks/screenshare.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },

@@ -46,7 +46,7 @@ export function livekitSessionMock() {
 }
 
 // screenShare.ts's rollback correlation is exercised at the unit level in
-// screen-share-tracks.test.ts; here only the dispatcher's own reaction to it
+// the screenShareTracks tests; here only the dispatcher's own reaction to it
 // is under test, so the lookup itself is mocked and controlled per test.
 export function screenShareMock() {
   return {
