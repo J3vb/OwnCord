@@ -55,6 +55,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Desktop UI**
 
+- Picking another server in the server rail or the switch list asks "Switch to (server name)?" first, so a stray click no longer drops you out of a call. Tick "Don't ask again" to skip it; turn it back on in Settings > Advanced > Ask before switching servers.
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
 
 ### Fixed
