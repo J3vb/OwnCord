@@ -4417,7 +4417,7 @@
       "confidence": "high",
       "fix": {
         "commit": "9fedef5b",
-        "test": "Client/tests/unit/member-list.test.ts",
+        "test": "Client/tests/unit/memberList/listAndNavigation.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Resolve the live member inside the click handler instead of using the render-time snapshot: at MemberList.ts:242 insert `const live = membersStore.getState().members.get(member.id) ?? member;` and build the popup's `user` from `live` (at minimum `status: live.status`). One change in createMemberItem covers every row.",
@@ -6977,7 +6977,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "7e767fe",
-        "test": "Client/tests/unit/member-list.test.ts",
+        "test": "Client/tests/unit/memberList/listAndNavigation.test.ts",
         "revertProof": "pass"
       }
     },
@@ -11188,7 +11188,7 @@
       "fixed": "2026-09-27",
       "fix": {
         "commit": "58c81b6bc1ca4e7502645d7e2a250decf2937f3b",
-        "test": "Client/tests/unit/member-list.test.ts, Client/tests/unit/sidebarArea/memberAndEntries.test.ts, Client/tests/e2e/user-profile.spec.ts",
+        "test": "Client/tests/unit/memberList/profileAndSearch.test.ts, Client/tests/unit/sidebarArea/memberAndEntries.test.ts, Client/tests/e2e/user-profile.spec.ts",
         "revertProof": "self-reported"
       },
       "note": "Phase B lane B6 item BUG-05. The un-fixme'd e2e asserts the Call action opens the DM and rings its voice channel; two unit tests cover the MemberList onCall wiring (incl. no button for yourself) and the SidebarArea open-or-create flow."
