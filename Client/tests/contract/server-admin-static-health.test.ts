@@ -284,4 +284,46 @@ describe("Server/admin/static — Dashboard health row", () => {
     await bridge.pollHealth(seq, "tok");
     expect(bridge.health.timer).toBeNull();
   });
+  // A hung first request must not hold the rest of the Dashboard; the row
+  // shows dashes and fills in when the answer arrives.
+  it("renders the Dashboard without waiting on a hung first request", async () => {
+    let release: ((v: unknown) => void) | undefined;
+    const booted = await boot([], (p) =>
+      p.startsWith("/system/stats")
+        ? new Promise((resolve) => {
+            release = resolve;
+          })
+        : {},
+    );
+    dom = booted.dom;
+    const { bridge } = booted;
+    bridge.state.me = { permissions: ADMINISTRATOR };
+    const host = render(dom, await bridge.renderDashboard());
+    expect(text(host, "healthCpu", "health-value")).toBe("–");
+
+    release!(STATS);
+    await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
+    expect(dom.window.document.querySelector("#healthCpu .health-value")?.textContent).toBe("7.4%");
+  }, 10_000);
+
+  // Another session signing in on the same page never sees the last one's
+  // figures, even when its own first request fails.
+  it("clears the previous session's figures on a new sign-in", async () => {
+    let fail = false;
+    const booted = await boot([], (p) => {
+      if (p.startsWith("/system/stats") && fail) throw new Error("down");
+      return p.startsWith("/system/stats") ? STATS : {};
+    });
+    dom = booted.dom;
+    const { bridge } = booted;
+    bridge.state.me = { permissions: ADMINISTRATOR };
+    render(dom, await bridge.renderDashboard());
+    expect(bridge.health.data).not.toBeNull();
+
+    fail = true;
+    bridge.state.token = "other";
+    const host = render(dom, await bridge.renderDashboard());
+    expect(bridge.health.data).toBeNull();
+    expect(text(host, "healthCpu", "health-value")).toBe("–");
+  });
 });

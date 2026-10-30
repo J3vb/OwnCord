@@ -9,7 +9,10 @@
    leaving the page, signing out or re-rendering is dropped and its loop ends.
    A figure the server could not read is null and shows as a dash, never 0. */
 const HEALTH_POLL_MS=5000;
-const health={seq:0,timer:null,data:null};
+const health={seq:0,timer:null,data:null,token:''};
+/* The first answer is waited for at most this long, so a hung request cannot
+   hold the rest of the Dashboard on "Loading"; the loop paints it later. */
+const HEALTH_FIRST_WAIT_MS=3000;
 
 /* CPU tone: the average over the last five minutes. RAM tone: the share of
    machine (or container) memory in use now. */
@@ -23,7 +26,15 @@ function healthOwns(seq,token){return seq===health.seq&&state.section==='dashboa
 async function startHealthPoll(){
   if(health.timer){clearTimeout(health.timer);health.timer=null}
   const seq=++health.seq,token=state.token;
-  await loadHealth(seq,token);
+  /* Another session's figures are never shown, even while this one's first
+     answer is late or fails. */
+  if(health.token!==token){health.data=null;health.token=token}
+  let waited;
+  const first=loadHealth(seq,token).then(ok=>{
+    if(healthOwns(seq,token)&&ok)paintHealth();
+  });
+  await Promise.race([first,new Promise(r=>{waited=setTimeout(r,HEALTH_FIRST_WAIT_MS)})]);
+  clearTimeout(waited);
   if(healthOwns(seq,token))health.timer=setTimeout(()=>pollHealth(seq,token),HEALTH_POLL_MS);
 }
 async function pollHealth(seq,token){
