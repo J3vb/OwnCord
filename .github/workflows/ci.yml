@@ -1861,7 +1861,10 @@ jobs:
           cache: npm
           cache-dependency-path: Client/package-lock.json
 
+      # From src-tauri/ so rustup reads its rust-toolchain.toml and adds the
+      # Android target to the pinned toolchain, not the runner's default.
       - name: Android toolchains
+        working-directory: Client/src-tauri/
         run: |
           rustup show active-toolchain || rustup toolchain install
           rustup target add aarch64-linux-android
