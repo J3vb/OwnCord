@@ -88,7 +88,8 @@ func decodeLogCursor(s string) (logHistoryCursor, bool) {
 	if !ok {
 		return logHistoryCursor{}, false
 	}
-	offset, err := strconv.ParseInt(off, 10, 64)
+	// A file never passes logFileMaxCap, so an offset always fits 32 bits.
+	offset, err := strconv.ParseInt(off, 10, 32)
 	if err != nil || offset < 0 {
 		return logHistoryCursor{}, false
 	}
