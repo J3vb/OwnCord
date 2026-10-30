@@ -104,6 +104,8 @@ export function createConnectPage(
   ): void;
   /** Pre-fill + switch to register mode from an owncord:// invite deep link. */
   applyInviteLink(code: string, host?: string): void;
+  /** Resubmit a sign-in refused because `host`'s certificate was not confirmed yet. */
+  resubmitAfterCertAccept(host: string): void;
 } {
   let container: Element | null = null;
   let root: HTMLDivElement;
@@ -491,6 +493,7 @@ export function createConnectPage(
     getRememberPassword: () => loginForm.getRememberPassword(),
     getAutoConnect: () => loginForm.getAutoConnect(),
     getPassword: () => loginForm.getPassword(),
+    resubmitAfterCertAccept: (host: string) => loginForm.resubmitAfterCertAccept(host),
     isUsingSavedPassword: () => loginForm.isUsingSavedPassword(),
     refreshProfiles(profiles: readonly SimpleProfile[]): void {
       knownProfiles = profiles;

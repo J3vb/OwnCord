@@ -113,6 +113,10 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 
 ### Fixed
 
+**Login & connection**
+
+- Accepting a new server's certificate left an error on the login screen, and you had to press Connect again; the sign-in now carries on by itself once you accept.
+
 **Voice**
 
 - Joining a full voice channel from another device while your call was parked (waiting to reconnect) ended the parked call and then refused the join; the parked call now stays.

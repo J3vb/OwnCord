@@ -40,7 +40,7 @@ let activePage: PageId = "connect";
 // Re-run the connect page's health checks (set while the connect page is
 // mounted, cleared otherwise) — refreshes a server's status after its
 // certificate is trusted for the first time.
-let rerunConnectHealth: (() => void) | null = null;
+let rerunConnectHealth: ((acceptedHost?: string) => void) | null = null;
 // Set while the connect page is mounted so an owncord:// deep link can pre-fill
 // its register form; the pending value covers links that arrive before it mounts.
 let applyInviteToConnectPage: ((code: string, host?: string) => void) | null = null;
@@ -89,9 +89,13 @@ export function renderActive(): Promise<void> {
   return renderPage(activePage);
 }
 
-/** Re-run the mounted connect page's health checks; a no-op when it is not mounted. */
-export function rerunHealth(): void {
-  rerunConnectHealth?.();
+/**
+ * Re-run the mounted connect page's health checks; a no-op when it is not
+ * mounted. `acceptedHost` (a just-trusted certificate's normalized host) also
+ * resubmits a sign-in that certificate refused.
+ */
+export function rerunHealth(acceptedHost?: string): void {
+  rerunConnectHealth?.(acceptedHost);
 }
 
 /** Remember an invite link for the next connect mount to take (null clears it). */
