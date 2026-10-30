@@ -89,7 +89,7 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
     })?;
     drop(file);
 
-    let linked = fs::hard_link(&tmp_path, &path);
+    let linked = publish_key_file(&tmp_path, &path);
     let _ = fs::remove_file(&tmp_path);
     match linked {
         Ok(()) => Ok(key),
@@ -105,6 +105,25 @@ pub fn load_or_create_key(dir: &Path) -> Result<[u8; KEY_LEN], String> {
         }
         Err(e) => Err(format!("failed to create credential fallback key: {e}")),
     }
+}
+
+/// Publish the temp key file at `path`, failing with `AlreadyExists` if a key
+/// is already there. Android's SELinux policy denies `link(2)` to apps, so
+/// there the check and the rename run under a process-wide lock instead (an
+/// Android app is one process, so the lock covers every writer).
+#[cfg(not(target_os = "android"))]
+fn publish_key_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    fs::hard_link(tmp_path, path)
+}
+
+#[cfg(target_os = "android")]
+fn publish_key_file(tmp_path: &Path, path: &Path) -> std::io::Result<()> {
+    static PUBLISH: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = PUBLISH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if path.exists() {
+        return Err(std::io::ErrorKind::AlreadyExists.into());
+    }
+    fs::rename(tmp_path, path)
 }
 
 /// Finish writing a just-created (empty) key file: run `write_and_sync` — the
