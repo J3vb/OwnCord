@@ -93,8 +93,9 @@ func (f *storageFixture) deleteFiles(t *testing.T, ctx context.Context, ids ...s
 }
 
 func ids(v any) []string {
-	var out []string
-	for _, x := range v.([]any) {
+	items := v.([]any)
+	out := make([]string, 0, len(items))
+	for _, x := range items {
 		out = append(out, x.(string))
 	}
 	return out
