@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
-import { setActivityRefusalHandler } from "../../src/lib/gameActivityBridge";
+import { setActivityRefusalHandler } from "../../src/lib/presence/gameActivityBridge";
 // Vite's `?raw` suffix inlines the file's source text as a string (see
 // src/vite-env.d.ts's `vite/client` types) — used below for a structural
 // bundle-hygiene assertion, without pulling in node:fs.
@@ -56,10 +56,10 @@ import {
   resetServerCapabilities,
   serverSupportsGameActivity,
   serverSupportsListeningActivity,
-} from "../../src/lib/serverCapabilities";
-import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence";
-import { createPresenceLimiter } from "../../src/lib/rate-limiter";
-import { loadCustomStatus, saveCustomStatus } from "../../src/lib/userStatus";
+} from "../../src/lib/net/serverCapabilities";
+import { createPresenceSender, setActivePresenceSender } from "../../src/lib/presence/presence";
+import { createPresenceLimiter } from "../../src/lib/net/rateLimiter";
+import { loadCustomStatus, saveCustomStatus } from "../../src/lib/presence/userStatus";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage, MessageResponse } from "../../src/lib/types";
 
@@ -70,7 +70,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),
@@ -102,7 +102,7 @@ vi.mock("@lib/livekitSession", () => ({
 // that has not settled is counted so the afterEach below can assert none are.
 const lazyVoiceImports = vi.hoisted(() => ({
   inFlight: 0,
-  shared: undefined as Promise<typeof import("@lib/livekitSession")> | undefined,
+  shared: undefined as Promise<typeof import("@lib/voice/livekitSession")> | undefined,
 }));
 vi.mock("../../src/features/connection/dispatchContext", async (importOriginal) => {
   const actual =
@@ -111,7 +111,7 @@ vi.mock("../../src/features/connection/dispatchContext", async (importOriginal) 
     ...actual,
     livekitSession: () => {
       lazyVoiceImports.inFlight++;
-      lazyVoiceImports.shared ??= import("@lib/livekitSession");
+      lazyVoiceImports.shared ??= import("@lib/voice/livekitSession");
       const loading = lazyVoiceImports.shared;
       void loading.then(
         () => {
@@ -128,21 +128,21 @@ vi.mock("../../src/features/connection/dispatchContext", async (importOriginal) 
 // screenShare.ts's rollback correlation is exercised at the unit level in
 // screen-share-tracks.test.ts; here only the dispatcher's own reaction to it
 // is under test, so the lookup itself is mocked and controlled per test.
-vi.mock("@lib/screenShare", () => ({
+vi.mock("@lib/voice/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
 }));
 // F3: the ready handler publishes our identity key. Mock the orchestrator so
 // the wiring is asserted without real keygen/keyring.
 const mockShowToast = vi.fn();
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
 
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 
-import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/identity";
+import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../src/lib/net/identity";
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
 
 import { notifyIncomingMessage as mockNotifyIncomingMessage } from "../../src/lib/notifications";
@@ -157,8 +157,8 @@ import {
   handleParticipantLeft as mockHandleParticipantLeft,
   isAutoReconnecting as mockIsAutoReconnecting,
   failPendingRejoin as mockFailPendingRejoin,
-} from "@lib/livekitSession";
-import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/screenShare";
+} from "@lib/voice/livekitSession";
+import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/voice/screenShare";
 import { takeVoiceMoved } from "../../src/features/voice/moveHint";
 import {
   noteJoinSent,
@@ -4712,7 +4712,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_token to handleVoiceToken", async () => {
-    const { handleVoiceToken } = await import("@lib/livekitSession");
+    const { handleVoiceToken } = await import("@lib/voice/livekitSession");
 
     mock.dispatch("voice_token", {
       token: "lk-token",
@@ -6689,7 +6689,7 @@ describe("WS Dispatcher", () => {
       motd: "",
       isAuthenticated: true,
     }));
-    const { reconcileVideoFlags } = await import("@lib/livekitSession");
+    const { reconcileVideoFlags } = await import("@lib/voice/livekitSession");
     vi.mocked(reconcileVideoFlags).mockClear();
 
     mock.dispatch("ready", {
@@ -7115,7 +7115,7 @@ describe("WS Dispatcher", () => {
 describe("bundle hygiene", () => {
   // screenShare.ts has VALUE imports from livekit-client (~1.3 MB) at module
   // scope. dispatcher.ts is imported statically from main.ts, so a top-level
-  // `import ... from "@lib/screenShare"` here drags the whole library into
+  // `import ... from "@lib/voice/screenShare"` here drags the whole library into
   // the startup bundle — every other voice call site in this file already
   // loads its module lazily (see the livekitSession() helper), and
   // screenShare.ts's one export used here (rollbackPendingVideo) must follow

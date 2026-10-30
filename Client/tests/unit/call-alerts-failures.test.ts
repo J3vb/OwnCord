@@ -4,7 +4,7 @@
  * reported as an empty one. Also which conversation a replaced ring names.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RingState } from "../../src/lib/call-ring";
+import type { RingState } from "../../src/lib/voice/callRing";
 
 const { debug, showCall, clearCall, requestAttention, showToast } = vi.hoisted(() => ({
   debug: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock("../../src/lib/logger", () => ({
 vi.mock("../../src/platform/desktop", () => ({
   desktop: { notifier: { showCall, clearCall, requestAttention } },
 }));
-vi.mock("../../src/lib/toast", () => ({ showToast }));
+vi.mock("../../src/lib/ui/toast", () => ({ showToast }));
 
 const { alertIncomingCall, alertMissedCall, alertSupersededCall, clearIncomingCall } =
   await import("../../src/features/direct-messages/callAlerts");

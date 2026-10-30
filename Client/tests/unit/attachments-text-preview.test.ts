@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));

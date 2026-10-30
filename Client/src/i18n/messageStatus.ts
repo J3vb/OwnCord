@@ -9,7 +9,7 @@ import { defineCatalog } from "./format";
  *
  * `message-list/attachments.ts` and `message-list/reaction-tooltip.ts` are no
  * longer in the entry's static closure. Attachments used to be pulled in
- * through `lib/notifications.ts` → `lib/avatar.ts`, which no longer imports it;
+ * through `lib/notifications.ts` → `lib/ui/avatar.ts`, which no longer imports it;
  * it is now reached only from components and pages. The tooltip used to be
  * pulled in through the dispatcher's `reaction_update` handler, which now
  * imports `features/messaging/reactionUsers.ts` instead; it is reached only

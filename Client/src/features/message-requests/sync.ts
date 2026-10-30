@@ -6,7 +6,7 @@
  */
 
 import { createLogger } from "@lib/logger";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { mapRequest } from "./api";
 import { applySnapshot, beginSnapshot, failSnapshot } from "./store";

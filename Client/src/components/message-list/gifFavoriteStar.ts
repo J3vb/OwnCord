@@ -1,5 +1,5 @@
 import { createElement } from "@lib/dom";
-import { isAllowedGifUrl } from "@lib/gifProvider";
+import { isAllowedGifUrl } from "@lib/media/gifProvider";
 import {
   gifFavoritesAvailable,
   gifFavoritesStore,

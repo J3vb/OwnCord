@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const showToast = vi.fn();
-vi.mock("@lib/toast", () => ({ showToast: (...a: unknown[]) => showToast(...a) }));
+vi.mock("@lib/ui/toast", () => ({ showToast: (...a: unknown[]) => showToast(...a) }));
 
 import { expectConsole } from "../helpers/console";
 import { createLazyScreen } from "../../src/components/lazyScreen";

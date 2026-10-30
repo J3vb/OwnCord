@@ -6,14 +6,14 @@
 
 import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
-import { reconcileModels } from "@lib/reconcile";
-import { select } from "@lib/select";
+import { reconcileModels } from "@lib/net/reconcile";
+import { select } from "@lib/ui/select";
 import { shallowEqual } from "@lib/store";
-import { buildOffsets, rangeFor } from "@lib/virtualRange";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { buildOffsets, rangeFor } from "@lib/ui/virtualRange";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { membersStore, memberDisplayName, type Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
@@ -26,9 +26,9 @@ import { assignableRoleNames, outranksPosition } from "../features/moderation/ro
 import { memberTimeoutsStore } from "../features/moderation/store";
 import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
-import { openMenuOnKeyboard, type OpenMenu } from "@lib/context-menu";
+import { openMenuOnKeyboard, type OpenMenu } from "@lib/ui/contextMenu";
 import { Permission, type ReadyRole } from "@lib/types";
-import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/serverCapabilities";
+import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/net/serverCapabilities";
 import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
 import {
   MEMBER_PATCH_FIELDS,

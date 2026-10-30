@@ -6,7 +6,7 @@ import { uiStore, setTransientError } from "../../src/stores/ui.store";
 
 // Mock credentials module
 const mockLoadCredential = vi.fn().mockResolvedValue(null);
-vi.mock("../../src/lib/credentials", () => ({
+vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: (...args: unknown[]) => mockLoadCredential(...args),
 }));
 

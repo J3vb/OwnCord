@@ -20,8 +20,8 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon } from "../../lib/icons";
-import { syncVideoSurface } from "../../lib/videoSurface";
-import { bindVideoZoom } from "../../lib/zoomPan";
+import { syncVideoSurface } from "../../lib/voice/videoSurface";
+import { bindVideoZoom } from "../../lib/ui/zoomPan";
 import { voiceText } from "../../i18n/voice";
 
 /** How often to check whether the window was closed (the system's close

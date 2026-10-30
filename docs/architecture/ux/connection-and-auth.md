@@ -321,7 +321,7 @@ not a mismatch. This is correct today; the spec locks it.
 
 > **✓ Resolved 2026-07-20 — server session revoked on logout.** User-initiated
 > logout now calls `api.logout()` (`POST /auth/logout`) via the `logout()` helper
-> (`src/lib/logout.ts`), wired into the settings Log Out button
+> (`src/lib/net/logout.ts`), wired into the settings Log Out button
 > (`MainPage.ts` → `logout(api)`). The revocation is strictly best-effort:
 > fire-and-forget with its rejection swallowed and the request aborted after 10 s, so a slow/offline/rejecting
 > server never blocks or delays the local teardown — `clearAuth()` always runs
@@ -334,7 +334,7 @@ not a mismatch. This is correct today; the spec locks it.
 
 `src/main.ts`, `src/pages/ConnectPage.ts`,
 `src/pages/connect-page/LoginForm.ts`, `src/lib/ws.ts`, `src/lib/api.ts`,
-`src/lib/httpProxy.ts`, `src/components/ConnectedOverlay.ts`,
+`src/lib/net/httpProxy.ts`, `src/components/ConnectedOverlay.ts`,
 `src/components/ServerBanner.ts`, `src/components/CertMismatchModal.ts`,
 `src-tauri/src/ws_proxy.rs`, `src-tauri/src/http_proxy.rs`;
 server `Server/api/auth_handler.go`, `Server/api/totp_handler.go`.

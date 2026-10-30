@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { listSessionResets } from "../../src/lib/sessionRegistry";
-import { isVoiceDeafened, setVoiceDeafened, setVoiceInSession } from "../../src/lib/voiceDeafened";
+import { listSessionResets } from "../../src/lib/net/sessionRegistry";
+import {
+  isVoiceDeafened,
+  setVoiceDeafened,
+  setVoiceInSession,
+} from "../../src/lib/voice/voiceDeafened";
 import { channelsStore, setChannels, updateChannel } from "../../src/stores/channels.store";
 import { loadPref } from "../../src/lib/prefs/preferences";
 

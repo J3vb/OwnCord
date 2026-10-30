@@ -31,7 +31,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   },
 }));
 vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
@@ -43,7 +43,7 @@ vi.mock("@lib/logPersistence", () => ({
 vi.mock("@lib/prefs/windowState", () => ({
   initWindowState: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({})),
 }));

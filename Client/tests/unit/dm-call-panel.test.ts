@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // The panel reuses the voice widget's status text, which pulls in the voice
 // session facade; nothing here touches a real session.
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: vi.fn().mockResolvedValue(undefined),
 }));
@@ -34,7 +34,7 @@ import { dmStore, type DmChannel } from "../../src/stores/dm.store";
 import { membersStore, updateMemberProfile, updatePresence } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
-import type { RingState, OutgoingCallState } from "../../src/lib/call-ring";
+import type { RingState, OutgoingCallState } from "../../src/lib/voice/callRing";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 const SELF = 1;

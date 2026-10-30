@@ -12,7 +12,7 @@ import {
   cleanupNotificationAudio,
   playNotificationSound,
   startRingback,
-} from "@lib/notificationSound";
+} from "@lib/media/notificationSound";
 import {
   setLocalDeafened,
   joinVoiceChannel,

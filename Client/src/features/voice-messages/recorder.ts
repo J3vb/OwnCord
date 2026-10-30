@@ -14,7 +14,7 @@
 import { Disposable } from "@lib/disposable";
 import { setOwnedTimeout } from "@lib/dom";
 import { loadPref } from "@lib/prefs/preferences";
-import { publicAssetUrl } from "@lib/publicAssets";
+import { publicAssetUrl } from "@lib/media/publicAssets";
 import { clipFilename, pickRecorderMime } from "./mime";
 import { encodeWaveform, reducePeaks, WAVEFORM_BARS } from "./waveform";
 import { encodeWav } from "./wav";

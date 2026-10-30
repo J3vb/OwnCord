@@ -20,7 +20,7 @@ vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getLocalCameraStream: mockGetLocalCameraStream,
   getLocalScreenshareStream: mockGetLocalScreenshareStream,
   hasLocalScreenshareAudio: mockHasLocalScreenshareAudio,

@@ -4,7 +4,7 @@ import {
   navigateToChannel,
   onChannelReselect,
   stepChannel,
-} from "../../src/lib/channel-navigation";
+} from "../../src/lib/nav/channelNavigation";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { Channel } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";

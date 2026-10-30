@@ -19,7 +19,7 @@
 import type { ApiClient, MyAppeal, OwnModerationAction } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { AppealStatusPayload, ReadyNotice } from "@lib/types";
 
 const log = createLogger("safety");

@@ -6,10 +6,10 @@
 
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
-import { threadsEnabled } from "@lib/serverCapabilities";
+import { threadsEnabled } from "@lib/net/serverCapabilities";
 import { authorityChannelId, threadOfMessage } from "@stores/threads.store";
 import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
-import { formatMessageLink } from "@lib/deep-link";
+import { formatMessageLink } from "@lib/nav/deepLink";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { getChannelMessages, type Message } from "@stores/messages.store";

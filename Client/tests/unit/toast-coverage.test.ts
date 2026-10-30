@@ -5,11 +5,11 @@ import {
   showToast,
   showActionToast,
   showChangeOutcomeToast,
-} from "../../src/lib/toast";
+} from "../../src/lib/ui/toast";
 import type { ToastContainer } from "../../src/components/Toast";
 
 /**
- * Tests for src/lib/toast.ts — global toast helper.
+ * Tests for src/lib/ui/toast.ts — global toast helper.
  * Covers initToast, teardownToast, and showToast forwarding behavior.
  */
 

@@ -50,7 +50,7 @@ function byPosition(
  * group in sidebar order. DMs are not channels here, and a name the `#token`
  * grammar cannot express is left out: inserting it would not link. Of
  * channels sharing a name (in any case) only the one a `#name` link opens is
- * offered, the first in store order (lib/channel-navigation findChannelByName).
+ * offered, the first in store order (lib/nav/channelNavigation findChannelByName).
  */
 export function filterChannelSuggestions(query: string): ChannelSuggestion[] {
   const q = query.toLowerCase();

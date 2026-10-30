@@ -21,7 +21,7 @@ import {
 import { expectConsole } from "../../../tests/helpers/console";
 
 const resendWatching = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/livekitSession", () => ({ leaveVoice: vi.fn(), resendWatching }));
+vi.mock("../../lib/voice/livekitSession", () => ({ leaveVoice: vi.fn(), resendWatching }));
 
 const user = { id: 9, username: "me", avatar: null, role: "member" };
 

@@ -12,11 +12,11 @@
  * modules, so it cannot close a cycle through attachments.ts.
  */
 
-import { findChannelById } from "@lib/channel-navigation";
+import { findChannelById } from "@lib/nav/channelNavigation";
 import { createElement, setText } from "@lib/dom";
 import { formatFullDate, formatMessageTimestamp } from "@lib/text/formatting";
 import { createIcon } from "@lib/icons";
-import { jumpToMessage } from "@lib/message-navigation";
+import { jumpToMessage } from "@lib/nav/messageNavigation";
 import type { ForwardInfo } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 

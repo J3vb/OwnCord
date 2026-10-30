@@ -15,7 +15,7 @@
  */
 
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 export type ExternalConsentChoice = "auto" | "ask";
 

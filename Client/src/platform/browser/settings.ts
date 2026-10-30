@@ -1,6 +1,6 @@
 // The browser platform's settings store: one JSON envelope in
 // `localStorage`, under the key the desktop store uses. Validating what comes
-// back is the app's business (`lib/profiles.ts`), as on desktop.
+// back is the app's business (`lib/presence/profiles.ts`), as on desktop.
 import type { SettingsSnapshot, SettingsStore } from "../contracts/settings";
 import { UnavailableError } from "./unavailable";
 
@@ -23,7 +23,7 @@ export const settings: SettingsStore = {
     } catch {
       return null;
     }
-    // Handed back as stored; the app checks the shape (`lib/profiles.ts`).
+    // Handed back as stored; the app checks the shape (`lib/presence/profiles.ts`).
     return parsed === null ? null : (parsed as SettingsSnapshot);
   },
 

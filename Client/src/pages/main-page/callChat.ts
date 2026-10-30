@@ -13,7 +13,7 @@ import { channelsStore } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
 import { Disposable } from "@lib/disposable";
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { navigateToChannel } from "@lib/channel-navigation";
+import { navigateToChannel } from "@lib/nav/channelNavigation";
 import type { VideoModeController } from "./VideoModeController";
 
 /** What the header toggle shows: whether it applies, and the user's choice. */

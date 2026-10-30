@@ -10,7 +10,7 @@
 // voice-polish-css.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: vi.fn().mockResolvedValue(undefined),
   getUserVolume: vi.fn().mockReturnValue(100),
@@ -23,7 +23,7 @@ vi.mock("@lib/livekitSession", () => ({
   setScreenshareAudioVolume: vi.fn(),
 }));
 
-vi.mock("@lib/connectionStats", () => ({
+vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),

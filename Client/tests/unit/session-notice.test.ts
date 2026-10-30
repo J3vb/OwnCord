@@ -4,7 +4,7 @@ import {
   sessionNoticeMessage,
   startSessionNotice,
   MIN_POLL_INTERVAL_MS,
-} from "../../src/lib/session-notice";
+} from "../../src/lib/net/sessionNotice";
 import type { SessionInfo } from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
 

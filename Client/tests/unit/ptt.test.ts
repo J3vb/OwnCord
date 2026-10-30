@@ -1,6 +1,6 @@
 /**
  * Unit tests for the Push-to-Talk service (src/platform/desktop/pushToTalkService.ts, and
- * the vkName display helper in src/lib/ptt.ts).
+ * the vkName display helper in src/lib/voice/ptt.ts).
  *
  * Covers:
  *  - vkName: known keys, A-Z, 0-9, Numpad, unknown (hex fallback)
@@ -81,7 +81,7 @@ vi.mock("@lib/logger", () => ({
 
 // PTT only ever calls setPttGated; setMuted is mocked so tests can assert it is
 // never touched (PTT no longer uses mute).
-vi.mock("../../src/lib/livekitSession", () => ({
+vi.mock("../../src/lib/voice/livekitSession", () => ({
   setPttGated: (gated: boolean) => mockSetPttGated(gated),
   setMuted: (muted: boolean) => mockSetMuted(muted),
 }));
@@ -90,7 +90,7 @@ vi.mock("../../src/lib/livekitSession", () => ({
 // Import module under test (AFTER mocks)
 // ---------------------------------------------------------------------------
 
-import { vkName } from "../../src/lib/ptt";
+import { vkName } from "../../src/lib/voice/ptt";
 import { pushToTalk } from "../../src/platform/desktop/pushToTalkService";
 
 const { init: initPtt, stop: stopPtt, updateKey: updatePttKey, captureKeyPress } = pushToTalk;

@@ -1,11 +1,11 @@
 // owncord:// deep links through the native deep-link plugin. Lifted verbatim
-// from `lib/deep-link.ts`'s `initDeepLinks`; the parsers it dispatches
-// through are pure and stay in `lib/deep-link.ts`.
+// from `lib/nav/deepLink.ts`'s `initDeepLinks`; the parsers it dispatches
+// through are pure and stay in `lib/nav/deepLink.ts`.
 //
 // The plugin stays a dynamic `import()`: it is not part of the startup chunk
 // today, and this registry is statically reachable from the entry.
 import { createLogger } from "@lib/logger";
-import { parseChannelLink, parseInviteLink, parseMessageLink } from "@lib/deep-link";
+import { parseChannelLink, parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import type { DeepLinks } from "../contracts/deepLinks";
 
 const log = createLogger("deep-link");

@@ -9,7 +9,7 @@
  */
 
 import type { ApiClient } from "@lib/api";
-import { cropImage, type CropResult } from "@lib/imageCrop";
+import { cropImage, type CropResult } from "@lib/ui/imageCrop";
 import { groupActionErrorText } from "./groupMembers";
 
 /** A group icon is drawn at most ~40 px; 512 keeps it sharp on dense screens. */

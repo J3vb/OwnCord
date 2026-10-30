@@ -9,13 +9,13 @@
 
 import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
-import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/credentials";
+import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import { safeMount } from "@lib/text/safeRender";
 import type { MountableComponent, RenderRecovery } from "@lib/text/safeRender";
-import { SessionScope } from "@lib/sessionScope";
+import { SessionScope } from "@lib/net/sessionScope";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
 import type { AuthResponse } from "@lib/types";
 import { bracketBareIPv6Host } from "@lib/ws";

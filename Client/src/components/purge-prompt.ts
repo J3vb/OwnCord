@@ -6,7 +6,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { isImeCommit } from "@lib/text/ime";
-import { createMenuItem } from "@lib/context-menu";
+import { createMenuItem } from "@lib/ui/contextMenu";
 import { shellText } from "../i18n/shell";
 
 /** Server-side bounds on one purge request (docs/api.md). */

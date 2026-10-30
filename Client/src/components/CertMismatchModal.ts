@@ -10,8 +10,8 @@ import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
-import { closeOnBackdropClick } from "@lib/modalFactory";
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { connectText } from "../i18n/connect";
 

@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: vi.fn(() => false),

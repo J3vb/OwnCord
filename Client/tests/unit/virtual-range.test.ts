@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildOffsets, indexAt, rangeFor } from "../../src/lib/virtualRange";
+import { buildOffsets, indexAt, rangeFor } from "../../src/lib/ui/virtualRange";
 
 // 100 items of height 10: offsets 0, 10, ... 1000.
 const offsets = buildOffsets(Array.from({ length: 100 }, () => 10));

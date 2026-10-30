@@ -3,10 +3,10 @@
  * PTT key is NOT consumed/hijacked. Other apps and chat input continue
  * to receive the key normally. Works even when OwnCord is unfocused.
  *
- * Lifted from `lib/ptt.ts`: the `PushToTalk` suite binds `init()` to
+ * Lifted from `lib/voice/ptt.ts`: the `PushToTalk` suite binds `init()` to
  * the persisted key and `stop()`/`updateKey()` to the binding's polling
  * state, so the binding/generation bookkeeping moves with the native calls.
- * `vkName` is a pure display helper and stays in `lib/ptt.ts`. The native
+ * `vkName` is a pure display helper and stays in `lib/voice/ptt.ts`. The native
  * modules stay dynamic `import()`s.
  *
  * A press or release only opens or closes the push-to-talk gate inside the
@@ -30,8 +30,8 @@
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
-import { vkName, pttReleaseDelayMs } from "@lib/ptt";
-import { inputMode } from "@lib/inputMode";
+import { vkName, pttReleaseDelayMs } from "@lib/voice/ptt";
+import { inputMode } from "@lib/ui/inputMode";
 import { invokeOrThrow } from "./nativeInvoke";
 import type { PushToTalk } from "../contracts/pushToTalk";
 import type { GlobalKeysStatus } from "../contracts/globalShortcuts";
@@ -116,7 +116,7 @@ function ungateMic(): void {
   if (voiceStore.getState().pttGated !== true) return;
   const version = generation;
   const { currentChannelId, joinedAt } = voiceStore.getState();
-  void import("@lib/livekitSession")
+  void import("@lib/voice/livekitSession")
     .then(({ setPttGated }) => {
       const state = voiceStore.getState();
       if (
@@ -211,7 +211,7 @@ async function startBinding(vk: number, gateMidCall: boolean): Promise<void> {
       // loaded lazily so it stays out of the startup path. In a voice channel
       // the module is necessarily already loaded, so this import resolves
       // from the module cache in a microtask.
-      void import("@lib/livekitSession")
+      void import("@lib/voice/livekitSession")
         .then(({ setPttGated }) => {
           const apply = (): void => {
             const state = voiceStore.getState();
@@ -343,7 +343,7 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
   const version = attempt.generation;
   const currentEdge = edge;
   try {
-    const { setPttGated } = await import("@lib/livekitSession");
+    const { setPttGated } = await import("@lib/voice/livekitSession");
     const state = voiceStore.getState();
     if (
       !isCurrent(attempt, version) ||

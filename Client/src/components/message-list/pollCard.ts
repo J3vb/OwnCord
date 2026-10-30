@@ -26,7 +26,7 @@
 import { createElement, setText, clearChildren, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createConfirmModal } from "../../features/dialogs/confirmModal";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { PollAnswer, PollView } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";

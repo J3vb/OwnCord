@@ -5,10 +5,10 @@
 // page's owner arrive through createConnectProfiles(). Nothing here runs at
 // import time.
 
-import { deleteCredential } from "@lib/credentials";
+import { deleteCredential } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
-import type { ProfileManager } from "@lib/profiles";
-import type { SessionScope } from "@lib/sessionScope";
+import type { ProfileManager } from "@lib/presence/profiles";
+import type { SessionScope } from "@lib/net/sessionScope";
 import { setTransientError } from "@stores/ui.store";
 import { connectText } from "../i18n/connect";
 

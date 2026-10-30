@@ -5,8 +5,8 @@ const mockUpdatePttKey = vi.fn();
 const mockPttSupported = vi.fn(async () => true);
 const mockVkName = vi.fn((vk: number) => `Key-${vk}`);
 
-vi.mock("@lib/ptt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/ptt")>()),
+vi.mock("@lib/voice/ptt", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/voice/ptt")>()),
   vkName: (vk: number) => mockVkName(vk),
 }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({

@@ -7,9 +7,9 @@
 // peer set and room key stay owned by E2EEManager and its other modules; this
 // module reaches them only through E2EEOfferHost.
 import type { WsClient } from "../../lib/ws";
-import { wrapRoomKey, unwrapRoomKey } from "../../lib/e2eeCrypto";
+import { wrapRoomKey, unwrapRoomKey } from "../../lib/net/e2eeCrypto";
 import { createLogger } from "../../lib/logger";
-import { markJoinMilestone } from "../../lib/voiceJoinTrace";
+import { markJoinMilestone } from "../../lib/voice/voiceJoinTrace";
 
 // Same logger tag as before the extraction, so the E2EE log lines are unchanged.
 const log = createLogger("livekitE2EE");

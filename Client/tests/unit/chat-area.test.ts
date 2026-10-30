@@ -43,7 +43,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
 }));
 
@@ -87,7 +87,7 @@ vi.mock("@components/VideoGrid", () => ({
 import { createChatArea } from "../../src/pages/main-page/ChatArea";
 import { createVideoGrid } from "@components/VideoGrid";
 import type { ChatAreaOptions } from "../../src/pages/main-page/ChatArea";
-import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
+import { jumpToMessage, setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import {
   addChannel,
   channelsStore,

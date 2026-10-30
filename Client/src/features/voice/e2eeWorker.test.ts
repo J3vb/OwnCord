@@ -6,7 +6,7 @@ vi.mock("livekit-client", () => ({
     this.setKey = setKey;
   }),
 }));
-vi.mock("../../lib/e2eeCrypto", () => ({
+vi.mock("../../lib/net/e2eeCrypto", () => ({
   roomKeyToBase64: (key: Uint8Array) => `b64:${key[0]}`,
 }));
 

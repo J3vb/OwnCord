@@ -6,7 +6,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/updater", () => ({ checkForUpdate: mockCheckForUpdate }));
+vi.mock("@lib/net/updater", () => ({ checkForUpdate: mockCheckForUpdate }));
 
 import {
   createUpdateChecker,

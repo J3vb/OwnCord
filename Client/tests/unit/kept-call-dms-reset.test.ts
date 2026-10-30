@@ -3,7 +3,7 @@ import {
   registerSessionReset,
   listSessionResets,
   runSessionResets,
-} from "../../src/lib/sessionRegistry";
+} from "../../src/lib/net/sessionRegistry";
 import { joinVoiceChannel, leaveVoiceChannel, voiceStore } from "../../src/stores/voice.store";
 
 afterEach(() => {

@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -21,7 +21,7 @@ import {
   resyncMentions,
 } from "../../src/components/message-list/content-parser";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
-import { setInviteJoinHandler } from "../../src/lib/invite-navigation";
+import { setInviteJoinHandler } from "../../src/lib/nav/inviteNavigation";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
   highlightsCurrentUser,

@@ -11,7 +11,7 @@
 
 import { createElement, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import type { WsClient } from "@lib/ws";
 import type { ThreadAutoArchiveMinutes, ThreadInfo } from "@lib/types";
 import { getChannelMessages } from "@stores/messages.store";

@@ -12,7 +12,7 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { actionLabel, comboOrNotSet } from "@lib/prefs/keybindLabels";
 import { loadPref } from "@lib/prefs/preferences";
-import { keyEventToVk } from "@lib/voiceShortcuts";
+import { keyEventToVk } from "@lib/voice/voiceShortcuts";
 import {
   REBINDABLE_ACTIONS,
   comboFromEvent,

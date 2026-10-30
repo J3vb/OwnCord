@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { createUserUpdateCredentialSaver } from "@lib/credentials";
+import { createUserUpdateCredentialSaver } from "@lib/net/credentials";
 import { desktop } from "../../src/platform/desktop";
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));

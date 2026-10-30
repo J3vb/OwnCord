@@ -4,7 +4,7 @@ import {
   bindAnimatedImage,
   clearAnimatedStills,
   isAnimatedImage,
-} from "../../src/lib/animatedStill";
+} from "../../src/lib/ui/animatedStill";
 
 const bytes = (...parts: Array<string | number[]>): Uint8Array => {
   const out: number[] = [];

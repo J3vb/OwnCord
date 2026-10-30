@@ -1,6 +1,6 @@
 /** The unblocks-in-flight set resets with the derived caches, after the domain stores. */
 import { describe, expect, it } from "vitest";
-import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
+import { listSessionResets, registerSessionReset } from "../../src/lib/net/sessionRegistry";
 import "../../src/features/safety/BlockedUsers";
 
 describe("blocked users session reset", () => {

@@ -1,6 +1,6 @@
 // Behaviour suite for the `SettingsStore` contract
 // (`src/platform/contracts/settings.ts`). Run now against the legacy binding
-// (`settings.legacy.test.ts`, today's `lib/profiles.ts` `createTauriBackend()`)
+// (`settings.legacy.test.ts`, today's `lib/presence/profiles.ts` `createTauriBackend()`)
 // and again in B7-4 against `platform/desktop`.
 import { beforeEach, describe, expect, test } from "vitest";
 import type { SettingsSnapshot, SettingsStore } from "../../../src/platform/contracts/settings";

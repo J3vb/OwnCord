@@ -5,7 +5,7 @@
 import { dmStore } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { resolveAuthor } from "@lib/text/formatting";
 import { ChatMessageKind } from "@lib/protocolTypes";
 import { messagingText } from "../../i18n/messaging";

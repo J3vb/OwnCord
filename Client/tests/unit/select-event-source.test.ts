@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { eventSource, select } from "../../src/lib/select";
+import { eventSource, select } from "../../src/lib/ui/select";
 import { createStore } from "../../src/lib/store";
 
 let controllers: AbortController[] = [];

@@ -5,10 +5,10 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
-import type { Compatibility, HealthStatus, ServerProfile } from "@lib/profiles";
-import { loadCredential } from "@lib/credentials";
-import { isValidHost } from "@lib/hostValidation";
+import { createModal } from "@lib/ui/modalFactory";
+import type { Compatibility, HealthStatus, ServerProfile } from "@lib/presence/profiles";
+import { loadCredential } from "@lib/net/credentials";
+import { isValidHost } from "@lib/net/hostValidation";
 import { createLogger } from "@lib/logger";
 import { connectText } from "../../i18n/connect";
 

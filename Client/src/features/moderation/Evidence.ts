@@ -8,7 +8,7 @@
  * part of the report and nothing here fetches it or offers it back.
  */
 
-import { formatByteSize } from "@lib/connectionStats";
+import { formatByteSize } from "@lib/voice/connectionStats";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { parseTimestamp } from "@lib/text/formatting";
 import { channelsStore } from "@stores/channels.store";

@@ -1,6 +1,6 @@
 // Desktop binding for the DeepLinks suite: `platform/desktop`'s deep-link
 // wiring. B7-5 re-runs the same suite file the legacy binding ran against
-// `lib/deep-link.ts`'s `initDeepLinks`; that export is now internal to the
+// `lib/nav/deepLink.ts`'s `initDeepLinks`; that export is now internal to the
 // desktop adapter, so the legacy binding is deleted with this commit.
 //
 // Each test needs a fresh module instance and a fresh `vi.doMock` of the

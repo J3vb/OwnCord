@@ -7,7 +7,7 @@
  * (pollSend.ts) loads with the message list.
  */
 
-import { registerSessionReset } from "../../lib/sessionRegistry";
+import { registerSessionReset } from "../../lib/net/sessionRegistry";
 
 const claimed = new Set<string>();
 

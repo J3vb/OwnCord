@@ -6,7 +6,7 @@
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, clearChildren } from "@lib/dom";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { stickersStore, type Sticker } from "@stores/stickers.store";
 import { loadStickerImage } from "@components/message-list/sticker";
 import { stickersText } from "../i18n/stickers";

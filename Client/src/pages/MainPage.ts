@@ -18,7 +18,7 @@ import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
-import { createRateLimiterSet } from "@lib/rate-limiter";
+import { createRateLimiterSet } from "@lib/net/rateLimiter";
 import type { CallState, VideoGridComponent } from "@components/VideoGrid";
 import { isConnecting } from "@components/voiceStatusText";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
@@ -26,30 +26,30 @@ import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
-import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
+import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/ui/toast";
 import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
 import { joinBackoffText } from "../features/voice/joinBackoffText";
 import { shareBlockReason } from "../features/voice/shareGate";
-import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
-import { logout } from "@lib/logout";
+import { sessionNoticeMessage, startSessionNotice } from "@lib/net/sessionNotice";
+import { logout } from "@lib/net/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
 import { closeSettings, openSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
-import { loadUserStatus } from "@lib/userStatus";
-import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
+import { loadUserStatus } from "@lib/presence/userStatus";
+import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
 import {
   anyTriggerBound,
   clearPortalBound,
   globalKeysErrorCode,
   portalBoundBefore,
-} from "@lib/globalKeys";
+} from "@lib/ui/globalKeys";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
-import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
-import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
-import type { GameActivityLoop } from "@lib/gameActivity";
-import type { MusicActivityLoop } from "@lib/musicActivity";
-import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
+import { createPresenceSender, setActivePresenceSender } from "@lib/presence/presence";
+import { startAutoIdle, type AutoIdleController } from "@lib/presence/autoIdle";
+import type { GameActivityLoop } from "@lib/presence/gameActivity";
+import type { MusicActivityLoop } from "@lib/presence/musicActivity";
+import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/presence/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { watchGroupDmExits } from "../features/direct-messages/groupExitWatch";
@@ -75,7 +75,7 @@ import {
   setRemoteVideoView,
   setRemoteVideoWatched,
   forgetRemoteVideoWatch,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
   pruneAttachmentCacheScope,
@@ -89,9 +89,9 @@ import {
 import { createNotesContext, setNotesContextSource } from "../features/profiles/userNotes";
 import { markAllRead, setMarkReadSender } from "@lib/read-state";
 import { setMarkUnreadSender } from "@components/message-list/mark-unread";
-import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
+import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
-import { setAudioVolumeHost } from "@lib/audioElements";
+import { setAudioVolumeHost } from "@lib/voice/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
@@ -111,10 +111,15 @@ import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmPro
 import type { GroupMemberPanelController } from "./main-page/GroupMemberPanelController";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
-import { createRingController, createOutgoingCall } from "@lib/call-ring";
-import type { RingController, OutgoingCall } from "@lib/call-ring";
+import { createRingController, createOutgoingCall } from "@lib/voice/callRing";
+import type { RingController, OutgoingCall } from "@lib/voice/callRing";
 import type { DmCallPanelComponent } from "@components/DmCallPanel";
-import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib/notificationSound";
+import {
+  startRingChime,
+  stopRingChime,
+  startRingback,
+  stopRingback,
+} from "@lib/media/notificationSound";
 import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
@@ -480,7 +485,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  stuck on "idle" with nothing left to correct it. `presenceSender`
    *  retries once the window reopens instead, re-reading the status at that
    *  time so a burst of calls in between coalesces onto one retry carrying
-   *  the latest value — see @lib/presence. */
+   *  the latest value — see @lib/presence/presence. */
   function applyPresence(status: UserStatus): void {
     presenceSender.send(status);
   }
@@ -961,7 +966,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     // Auto-idle. It only ever moves a status it is itself responsible for
-    // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
+    // (see @lib/presence/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
     // whole session. The OS idle source makes input in other apps count too.
     autoIdle = startAutoIdle({
@@ -972,7 +977,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // loop sends nothing unless the setting is on and the server advertises
     // game_activity; the web build has no detector and never loads it.
     if (desktop.gameDetector.available) {
-      void import("@lib/gameActivity").then(
+      void import("@lib/presence/gameActivity").then(
         ({ startGameActivity }) => {
           if (tornDown) return;
           gameActivity = startGameActivity({
@@ -986,7 +991,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // The song being listened to, for the "Listening to <player>" line. Same
     // rules as the game loop, with its own capability (listening_activity).
     if (desktop.mediaDetector.available) {
-      void import("@lib/musicActivity").then(
+      void import("@lib/presence/musicActivity").then(
         ({ startMusicActivity }) => {
           if (tornDown) return;
           musicActivity = startMusicActivity({

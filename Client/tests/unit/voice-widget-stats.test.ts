@@ -13,7 +13,7 @@ const connectionStatsMock = vi.hoisted(() => ({
   qualityListeners: [] as unknown[],
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: vi.fn().mockResolvedValue(undefined),
   joinVoice: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock("@lib/livekitSession", () => ({
   toggleDeafen: vi.fn(),
 }));
 
-vi.mock("@lib/connectionStats", () => ({
+vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),
@@ -56,7 +56,7 @@ import { voiceStore } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
-import type { ConnectionStats } from "../../src/lib/connectionStats";
+import type { ConnectionStats } from "../../src/lib/voice/connectionStats";
 
 function resetStores(): void {
   voiceStore.setState(() => ({

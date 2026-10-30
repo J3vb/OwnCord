@@ -3,7 +3,7 @@ import { channelsStore, type Channel } from "@stores/channels.store";
 import type { ForwardInfo } from "@lib/types";
 
 const jumpToMessage = vi.fn();
-vi.mock("@lib/message-navigation", () => ({
+vi.mock("@lib/nav/messageNavigation", () => ({
   jumpToMessage: (...a: unknown[]) => jumpToMessage(...a),
 }));
 

@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/livekitDiagnostics.ts (was 30.4% statements, no test file).
+ * Tests for src/lib/voice/livekitDiagnostics.ts (was 30.4% statements, no test file).
  *
  * This module is what an operator reads when a voice call fails to connect, so
  * a diagnostic that silently returns nothing — or worse, throws while poking at
@@ -20,10 +20,10 @@ import {
   buildSessionDebugInfo,
   getIceConnectionState,
   logIceConnectionInfo,
-} from "@lib/livekitDiagnostics";
-import type { SessionDebugDeps } from "@lib/livekitDiagnostics";
-import type { AudioPipeline } from "@lib/audioPipeline";
-import type { AudioElements } from "@lib/audioElements";
+} from "@lib/voice/livekitDiagnostics";
+import type { SessionDebugDeps } from "@lib/voice/livekitDiagnostics";
+import type { AudioPipeline } from "@lib/voice/audioPipeline";
+import type { AudioElements } from "@lib/voice/audioElements";
 import { expectConsole } from "../helpers/console";
 import { captureLogs } from "../helpers/log-capture";
 

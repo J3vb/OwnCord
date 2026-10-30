@@ -5,7 +5,7 @@
  */
 
 import { appendChildren, createElement } from "@lib/dom";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import { externalConsentText as t } from "../../i18n/externalConsent";
 import type { ExternalConsentChoice } from "./external";
 

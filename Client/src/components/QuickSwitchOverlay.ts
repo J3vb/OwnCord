@@ -6,9 +6,9 @@
 
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { closeOnBackdropClick } from "@lib/modalFactory";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 

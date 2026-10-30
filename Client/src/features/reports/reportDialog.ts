@@ -17,8 +17,8 @@ import type { ApiClient, ReportReason, ReportTargetType } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { showToast } from "@lib/toast";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import { showToast } from "@lib/ui/toast";
 import { reportsText as t } from "../../i18n/reports";
 import { RestErrorCode } from "@lib/protocolTypes";
 

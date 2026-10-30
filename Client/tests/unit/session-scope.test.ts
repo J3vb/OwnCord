@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { SessionScope } from "../../src/lib/sessionScope";
+import { SessionScope } from "../../src/lib/net/sessionScope";
 import { expectConsole } from "../helpers/console";
 
 describe("SessionScope", () => {

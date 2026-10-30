@@ -4,7 +4,7 @@ import {
   AUTO_MAX_THRESHOLD,
   AUTO_MIN_THRESHOLD,
   NoiseFloorTracker,
-} from "../../src/lib/noiseFloor";
+} from "../../src/lib/voice/noiseFloor";
 
 const db = (rms: number): number => 20 * Math.log10(rms);
 const rmsAt = (dbfs: number): number => 10 ** (dbfs / 20);

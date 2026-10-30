@@ -268,9 +268,9 @@ import type { NativeScreenTrack } from "./screenTrack";
 import { nativeCounters } from "./counters";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "../cameraSwitch";
 import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
-import { createConnectionStatsPoller } from "../../../lib/connectionStats";
+import { createConnectionStatsPoller } from "../../../lib/voice/connectionStats";
 import { readSenderSample } from "../shareSenderStats";
-import { createRoomEventHandlers, type RoomEventDeps } from "../../../lib/roomEventHandlers";
+import { createRoomEventHandlers, type RoomEventDeps } from "../../../lib/voice/roomEventHandlers";
 
 const audio = {
   echoCancellation: true,

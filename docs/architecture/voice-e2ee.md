@@ -15,7 +15,7 @@ The short version:
 - The Go server issues short-lived, scoped LiveKit tokens and relays the E2EE
   key-exchange messages. Media goes between the client and LiveKit; the
   server never has the media key.
-- On the client, everything goes through `src/lib/livekitSession.ts`, a facade
+- On the client, everything goes through `src/lib/voice/livekitSession.ts`, a facade
   over the `src/features/voice/` modules.
 - Self-hosted servers often use self-signed certificates. So the LiveKit
   connection goes through a local Rust TLS proxy, pinned to the same TOFU
@@ -86,27 +86,27 @@ Supporting pieces:
   limited to `server.livekit_webhook_allowed_cidrs`, which falls back to
   `server.admin_allowed_cidrs`), `Server/api/livekit_proxy.go` (reverse proxy
   for LiveKit signalling).
-- **Client:** `src/lib/livekitSession.ts` (facade owning the state machine:
+- **Client:** `src/lib/voice/livekitSession.ts` (facade owning the state machine:
   idle/connecting/connected/reconnecting), `src/features/voice/`
   (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
   superseded ones; `roomLifecycle.ts` Room + E2EE worker creation and
   teardown; `mediaControl.ts` mute/deafen/devices; `remoteTracks.ts`;
-  `sessionState.ts` state types), `src/lib/livekitE2EE.ts` (`E2EEManager`
+  `sessionState.ts` state types), `src/lib/voice/livekitE2EE.ts` (`E2EEManager`
   facade: key-holder election, join/reconnect key exchange, announce handling,
   rotation-on-leave), its `src/features/voice/e2ee*.ts` modules
   (`e2eeIdentity.ts` identity signing and the ephemeral keypair;
   `e2eeEpoch.ts` room key, epoch and rotation; `e2eePeerState.ts` peer keys
   and TOFU pin verification; `e2eeWorker.ts` key provider write queue;
-  `e2eeOffer.ts` room-key offers), `src/lib/e2eeCrypto.ts` (ECDH
+  `e2eeOffer.ts` room-key offers), `src/lib/net/e2eeCrypto.ts` (ECDH
   primitives, safety-number fingerprints, long-term identity keys),
-  `src/lib/identity.ts` (OS-keyring identity key + peer identity pins),
-  `src/lib/audioPipeline.ts` + `src/lib/noise-suppression.ts` (RNNoise WASM),
-  `src/lib/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
+  `src/lib/net/identity.ts` (OS-keyring identity key + peer identity pins),
+  `src/lib/voice/audioPipeline.ts` + `src/lib/voice/noiseSuppression.ts` (RNNoise WASM),
+  `src/lib/voice/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
   screen-share codec: VP8 by default, H.264, VP9, H.265 (hardware encoder, non-Intel GPU) or Auto by choice on Windows;
   Linux native publishes VP8 or, by choice when its encoder has it, H.264; Auto is VP8), `src/features/voice/codecSwitch.ts`
   (republishes a live VP9 or H.265 camera or share on a codec every viewer decodes when
   a peer that cannot decode it joins, and back once they leave),
-  `src/lib/audioElements.ts` (per-user
+  `src/lib/voice/audioElements.ts` (per-user
   volume up to 200% and a local Mute per user), `src-tauri/src/livekit_proxy.rs`
   (tunnel), `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
@@ -137,8 +137,8 @@ device's key. A new client verifies an announce against its
 otherwise. An older client sends no key and its announces carry none.
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
-`Client/src/lib/livekitSession.ts`, `Client/src/features/voice/`,
-`Client/src/lib/livekitE2EE.ts`, `Client/src/lib/e2eeCrypto.ts`,
+`Client/src/lib/voice/livekitSession.ts`, `Client/src/features/voice/`,
+`Client/src/lib/voice/livekitE2EE.ts`, `Client/src/lib/net/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
 
 ## Linux: native LiveKit in the Rust backend
@@ -197,7 +197,7 @@ adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 `EncryptionError` for a non-`Ok` frame-cryptor state — at once for the local
 identity; the backend reports each transition once, so a remote peer's failure
 is re-raised every second until its `Ok`, as the web worker does, and the
-shared 3 s decrypt grace in `lib/roomEventHandlers.ts` decides when it degrades
+shared 3 s decrypt grace in `lib/voice/roomEventHandlers.ts` decides when it degrades
 the call; the grace restarts only when a room key was installed since the
 peer's last failure, which `E2EEWorker` reports on both paths — participant
 join/leave).
@@ -340,7 +340,7 @@ the call. Three routes:
 **Remote video.** On `trackSubscribed` for a video track, `NativeRoom` opens a
 `NativeVideoRenderer` (`features/voice/native/videoRenderer.ts`): it draws each
 frame with a WebGL2 I420→RGB shader (BT.601 limited range). The canvas itself
-is the picture: `lib/videoSurface.ts` shows it right after any `<video>` given
+is the picture: `lib/voice/videoSurface.ts` shows it right after any `<video>` given
 the renderer's `MediaStreamTrack` and hides that `<video>`, following it into
 the pop-out window, the mini-player and back. The track is
 `canvas.captureStream(0)` and carries no frames: on some WebKitGTK GPU stacks
@@ -622,7 +622,7 @@ the backend captures with libwebrtc's `DesktopCapturer`
   Applications tabs, so what will be shared is visible before sharing starts.
   Nothing is captured until the user presses Go Live.
 
-**The shared path runs unchanged.** `lib/screenShare.ts`'s
+**The shared path runs unchanged.** `lib/voice/screenShare.ts`'s
 `enableScreenshare` makes one Linux-only call: instead of
 `createLocalScreenTracks` it asks the room for
 `localParticipant.createScreenTracks`, which `NativeRoom` implements as pick,
