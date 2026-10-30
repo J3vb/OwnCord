@@ -14,7 +14,7 @@
  */
 
 import { loadPref, savePref } from "./preferences";
-import type { MediaPrefs } from "../platform/contracts/mediaDetector";
+import type { MediaPrefs } from "../../platform/contracts/mediaDetector";
 
 /** The device-local setting "Share the music you're listening to". */
 export const MUSIC_ACTIVITY_PREF_KEY = "shareMusicActivity";

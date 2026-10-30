@@ -1,6 +1,6 @@
 /**
  * The read-only Keyboard Shortcuts overlay (Ctrl+/ or Cmd+/), like Discord's.
- * It renders the shared catalog (`lib/keybindCatalog.ts`) that the settings
+ * It renders the shared catalog (`lib/prefs/keybindCatalog.ts`) that the settings
  * Keybinds tab renders too, plus the current global mute and deafen keys. A
  * rebindable row shows the user's binding as it is when the overlay opens, and
  * screen share and disconnect appear once they are bound.
@@ -14,9 +14,9 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS } from "@lib/keybindCatalog";
-import { loadEffectiveKeybinds } from "@lib/keybinds";
-import { comboLabel, comboOrNotSet } from "@lib/keybindLabels";
+import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS } from "@lib/prefs/keybindCatalog";
+import { loadEffectiveKeybinds } from "@lib/prefs/keybinds";
+import { comboLabel, comboOrNotSet } from "@lib/prefs/keybindLabels";
 import { vkName } from "@lib/ptt";
 import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
 import { settingsText as t } from "../i18n/settings";

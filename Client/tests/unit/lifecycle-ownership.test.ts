@@ -67,7 +67,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/formatting.ts",
+    file: "lib/text/formatting.ts",
     receiver: "window",
     event: "owncord:pref-change",
     category: "app-lifetime",
@@ -88,14 +88,14 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/channel-mutes.ts",
+    file: "lib/prefs/channelMutes.ts",
     receiver: "window",
     event: "owncord:pref-change",
     category: "app-lifetime",
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/channel-mutes.ts",
+    file: "lib/prefs/channelMutes.ts",
     receiver: "window",
     event: "storage",
     category: "app-lifetime",
@@ -117,35 +117,35 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/media-visibility.ts",
+    file: "lib/prefs/mediaVisibility.ts",
     receiver: "document",
     event: "visibilitychange",
     category: "app-lifetime",
     reason: "once-guarded app-lifetime visibility listener (ensureVisibilityListener)",
   },
   {
-    file: "lib/media-visibility.ts",
+    file: "lib/prefs/mediaVisibility.ts",
     receiver: "window",
     event: "blur",
     category: "app-lifetime",
     reason: "once-guarded app-lifetime visibility listener (ensureVisibilityListener)",
   },
   {
-    file: "lib/media-visibility.ts",
+    file: "lib/prefs/mediaVisibility.ts",
     receiver: "window",
     event: "focus",
     category: "app-lifetime",
     reason: "once-guarded app-lifetime visibility listener (ensureVisibilityListener)",
   },
   {
-    file: "lib/safe-render.ts",
+    file: "lib/text/safeRender.ts",
     receiver: "window",
     event: "error",
     category: "app-lifetime",
     reason: "global error handler installed once at startup (installGlobalErrorHandlers)",
   },
   {
-    file: "lib/safe-render.ts",
+    file: "lib/text/safeRender.ts",
     receiver: "window",
     event: "unhandledrejection",
     category: "app-lifetime",
@@ -371,7 +371,7 @@ for (const rel of sourceFiles) {
         }
       }
       // `onPrefChange(keys, handler)` with no signal is a bare window listener
-      // under another name (lib/preferences.ts), so R1 counts it as one.
+      // under another name (lib/prefs/preferences.ts), so R1 counts it as one.
       if (name === "onPrefChange" && node.arguments.length < 3) {
         bareListeners++;
         bareListenerFiles.add(rel);

@@ -9,7 +9,7 @@
  * ship with no key, so they are not in the fixed list.
  */
 
-import type { settingsText } from "../i18n/settings";
+import type { settingsText } from "../../i18n/settings";
 import type { RebindableId } from "./keybinds";
 
 /** A key of the settings catalog. */

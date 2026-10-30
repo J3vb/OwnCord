@@ -8,7 +8,7 @@ import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/de
 import { channelBitOrRole } from "@lib/permissions";
 import { threadsEnabled } from "@lib/serverCapabilities";
 import { authorityChannelId, threadOfMessage } from "@stores/threads.store";
-import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
 import { formatMessageLink } from "@lib/deep-link";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";

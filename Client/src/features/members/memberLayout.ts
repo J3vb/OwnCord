@@ -1,10 +1,10 @@
 /**
- * Member list layout prefs (3C-6a). Pure helpers over `lib/preferences`; the
+ * Member list layout prefs (3C-6a). Pure helpers over `lib/prefs/preferences`; the
  * right-hand column and the Appearance setting that read them arrive in 3C-6b.
  * Kept eager and tiny: nothing here imports a store or a component.
  */
 
-import { loadPref } from "../../lib/preferences";
+import { loadPref } from "../../lib/prefs/preferences";
 
 /** Where the member list sits: beside the chat or under the channels. */
 export type MemberLayout = "right" | "left";

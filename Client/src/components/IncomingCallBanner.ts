@@ -11,7 +11,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { RingState } from "@lib/call-ring";
 import type { AvatarSubject } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";

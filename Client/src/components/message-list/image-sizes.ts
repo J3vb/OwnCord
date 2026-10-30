@@ -12,7 +12,7 @@
  *  - the box maths shared with server attachments (400x350 ceiling).
  */
 
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import type { ImageSize } from "@lib/imageHeader";
 

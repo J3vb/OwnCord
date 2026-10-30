@@ -136,10 +136,10 @@ describe("Enter handlers respect IME composition", () => {
     expect([...exempt].filter((key) => !found.includes(key))).toEqual([]);
   });
 
-  it("the guard is not copied inline outside lib/ime.ts", () => {
+  it("the guard is not copied inline outside lib/text/ime.ts", () => {
     const copies = sourceFiles.filter(
       (file) =>
-        file !== "lib/ime.ts" &&
+        file !== "lib/text/ime.ts" &&
         /isComposing\s*\|\|\s*\w+\.keyCode\s*===\s*229/.test(
           readFileSync(path.join(srcDir, file), "utf8"),
         ),

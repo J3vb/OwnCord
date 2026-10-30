@@ -25,9 +25,9 @@ import {
   renderMessageContent,
 } from "../../src/components/message-list/content-parser";
 import { extractUrls } from "../../src/components/message-list/media";
-import { markdownToPlainText, parseBlocks, parseInline } from "../../src/lib/markdown";
+import { markdownToPlainText, parseBlocks, parseInline } from "../../src/lib/text/markdown";
 import { formatDiscordTimestamp } from "../../src/features/messaging/discordTimestamp";
-import { refreshTimeFormat, saveTimeFormat } from "../../src/lib/timeFormat";
+import { refreshTimeFormat, saveTimeFormat } from "../../src/lib/text/timeFormat";
 import { replaceEmojiShortcodes } from "../../src/features/messaging/shortcodes";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";

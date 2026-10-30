@@ -2,7 +2,7 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/modalFactory";

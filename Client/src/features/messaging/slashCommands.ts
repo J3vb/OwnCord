@@ -7,7 +7,7 @@
  * frame, which this module never touches.
  */
 
-import { codeSpanEnd } from "../../lib/markdown";
+import { codeSpanEnd } from "../../lib/text/markdown";
 import type { messagingText } from "../../i18n/messaging";
 
 type MessagingKey = Parameters<typeof messagingText>[0];
@@ -29,7 +29,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
 
 /**
  * `¯\_(ツ)_/¯` with the backslash and underscores escaped so the markdown
- * renderer (lib/markdown.ts ESCAPABLE) shows it literally, as Discord does.
+ * renderer (lib/text/markdown.ts ESCAPABLE) shows it literally, as Discord does.
  */
 const SHRUG = "¯\\\\\\_(ツ)\\_/¯";
 const TABLEFLIP = "(╯°□°)╯︵ ┻━┻";
@@ -49,7 +49,7 @@ const LINE_LEAD = /^( *)(?:([-*+>#])|(\d{1,9})([.)]))/;
 /** Stands in for a backtick of a fence while the text is split. */
 const FENCE_MARK = "\uE000";
 const URL_RUN = /https?:\/\/[^\s<>"']+/iy;
-/** lib/mentions MENTION_TOKEN_REGEX's token, which Server/service/mentions.go shares. */
+/** lib/text/mentions MENTION_TOKEN_REGEX's token, which Server/service/mentions.go shares. */
 const MENTION_RUN = /@[\p{L}\p{N}_.-]{1,64}/uy;
 
 interface Piece {
@@ -60,7 +60,7 @@ interface Piece {
 
 /**
  * Split `text` into runs the markdown and mention parsers read as units —
- * code spans (same-length backtick runs, as lib/markdown's codeSpanEnd), bare
+ * code spans (same-length backtick runs, as lib/text/markdown's codeSpanEnd), bare
  * URLs and, when `mentions` is set, `@name` tokens — and the prose between
  * them. Escaping goes in the prose only: a backslash inside a code span or a
  * URL shows, and `@\_bob` is no longer a mention.

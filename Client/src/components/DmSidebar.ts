@@ -14,13 +14,13 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
+import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon, type IconName } from "@lib/icons";
 import type { ModalInstance } from "@lib/modalFactory";
 import { openMenuOnKeyboard } from "@lib/context-menu";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {
   fetchImageAsObjectUrl,
@@ -29,9 +29,9 @@ import {
 } from "./message-list/attachments";
 import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
-import { getChannelMute } from "@lib/channel-mutes";
+import { getChannelMute } from "@lib/prefs/channelMutes";
 import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {

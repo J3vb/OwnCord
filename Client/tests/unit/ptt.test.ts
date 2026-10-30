@@ -50,7 +50,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => mockListen(...args),
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => {
     testPrefs.set(key, value);

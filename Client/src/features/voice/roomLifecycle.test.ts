@@ -28,7 +28,7 @@ vi.mock("../../stores/voice.store", () => ({
   bumpLocalShareRev: vi.fn(),
   setVoiceStatus: vi.fn(),
 }));
-vi.mock("../../lib/preferences", () => ({
+vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
 }));
 vi.mock("../../lib/logger", () => ({

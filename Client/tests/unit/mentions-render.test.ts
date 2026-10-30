@@ -20,14 +20,14 @@ import {
   renderMessageContent,
   resyncMentions,
 } from "../../src/components/message-list/content-parser";
-import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import { setInviteJoinHandler } from "../../src/lib/invite-navigation";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
   highlightsCurrentUser,
   mentionsCurrentUser,
   resolveMentionUserId,
-} from "../../src/lib/mentions";
+} from "../../src/lib/text/mentions";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";

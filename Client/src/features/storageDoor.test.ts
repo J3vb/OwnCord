@@ -1,4 +1,4 @@
-// lib/preferences.ts is the only door to `localStorage`. Its helpers are
+// lib/prefs/preferences.ts is the only door to `localStorage`. Its helpers are
 // guarded: storage that is missing, blocked or full reads as absent and a
 // failed write returns false, so no caller can throw on it. This test pins
 // that no other module reaches `localStorage` itself. The two browser-platform
@@ -12,7 +12,7 @@ const srcDir = path.resolve(__dirname, "..");
 
 /** Shrink-only: remove an entry once its file no longer needs it. */
 const ALLOWED = [
-  "lib/preferences.ts",
+  "lib/prefs/preferences.ts",
   "platform/browser/credentials.ts",
   "platform/browser/settings.ts",
 ];

@@ -1,6 +1,6 @@
 /**
  * Native E2E: the desktop-only surface a browser build cannot reach — window
- * geometry restore and its off-screen guard (lib/window-state.ts), the tray's
+ * geometry restore and its off-screen guard (lib/prefs/windowState.ts), the tray's
  * Status submenu events (main.ts → platform/desktop/trayStatus.ts), the
  * reload/DevTools keyboard handling in main.ts, external links (main.ts routes
  * them, backed by tauri-plugin-opener's injected click handler),
@@ -128,7 +128,7 @@ interface Monitor {
   size: { width: number; height: number };
 }
 
-/** lib/window-state.ts's isRectOnScreen contract: 100px of horizontal overlap
+/** lib/prefs/windowState.ts's isRectOnScreen contract: 100px of horizontal overlap
  *  and a grabbable title bar, on some monitor. */
 function reachable(monitors: readonly Monitor[], r: Rect): boolean {
   return monitors.some(
@@ -209,7 +209,7 @@ test("window geometry is restored on relaunch and an unreachable restore is re-c
         await expect.poll(() => windowRect(page)).toEqual(saved);
         // Top-left corner 50px inside the rightmost monitor's right edge: the
         // plugin restores it (a corner is on a monitor), but 50px is too little
-        // to grab, so lib/window-state.ts must re-center it.
+        // to grab, so lib/prefs/windowState.ts must re-center it.
         const rightmost = monitors.reduce((a, b) =>
           b.position.x + b.size.width > a.position.x + a.size.width ? b : a,
         );

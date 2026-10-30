@@ -8,7 +8,7 @@
  * nothing here imports the platform registry.
  */
 
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("zoom");

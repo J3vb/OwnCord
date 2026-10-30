@@ -8,7 +8,7 @@
 
 import { Room, Track, type LocalAudioTrack } from "livekit-client";
 import { voiceStore } from "@stores/voice.store";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { micCaptureOptions, type AudioPipeline } from "@lib/audioPipeline";
 import { nativeAudioDevices, onNativeDevicesChanged } from "../features/voice/native/devices";

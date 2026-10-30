@@ -6,7 +6,7 @@
  * hand-edited preference can never put a share into an unknown mode.
  */
 
-import { loadPref } from "./preferences";
+import { loadPref } from "./prefs/preferences";
 
 /** Bumped whenever the meaning of a recorded policy changes. */
 export const SHARE_POLICY_VERSION = "2b-1";

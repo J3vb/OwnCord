@@ -2,7 +2,7 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, TransportError, errorText } from "@lib/api";
 import { normaliseInviteCode } from "@lib/deep-link";
@@ -18,7 +18,7 @@ import {
   usernameProblemText,
   MAX_USERNAME_LEN,
   type LimitHint,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------

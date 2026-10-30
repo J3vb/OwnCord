@@ -12,7 +12,7 @@
 // it, and this session remembers the claim as well, so no other host reads or
 // consumes it and the owner retries the copy on its next read.
 
-import { readStored, removeStored, writeStored } from "./preferences";
+import { readStored, removeStored, writeStored } from "./prefs/preferences";
 
 const CLAIM_PREFIX = "owncord:legacy-claim:";
 

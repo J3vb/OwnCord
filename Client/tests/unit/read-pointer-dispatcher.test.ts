@@ -27,7 +27,7 @@ import {
   markMessageUnread,
   setMarkUnreadSender,
 } from "../../src/components/message-list/mark-unread";
-import { viewChannel } from "../../src/lib/last-channel";
+import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";

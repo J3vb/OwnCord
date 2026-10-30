@@ -2,7 +2,7 @@
 import type { Room } from "livekit-client";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { isMissingDeviceError } from "@lib/audioPipeline";
 import { nativeAudioDevices, type AudioDevice } from "../features/voice/native/devices";
 import { probeNativeMicrophone, type NativeMicProbe } from "../features/voice/native/micProbe";

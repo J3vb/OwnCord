@@ -16,7 +16,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {

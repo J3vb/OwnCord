@@ -1,6 +1,6 @@
 /**
  * Picked mention spans <-> id tokens, for the composer and the edit
- * box. Kept out of lib/mentions.ts, which the startup chunk carries, because
+ * box. Kept out of lib/text/mentions.ts, which the startup chunk carries, because
  * only the message list and the composer ever call it.
  */
 

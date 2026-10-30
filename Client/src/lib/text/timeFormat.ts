@@ -2,14 +2,14 @@
  * The client clock-format preference: 12-hour (default) or 24-hour.
  *
  * A leaf module — it imports only `preferences.ts` — so both the low-level
- * `i18n/format.ts` and `lib/formatting.ts` can read it without a cycle.
+ * `i18n/format.ts` and `lib/text/formatting.ts` can read it without a cycle.
  *
  * The value is cached here and refreshed by the app-lifetime `owncord:pref-change`
- * listener in `lib/formatting.ts` (and set directly by `saveTimeFormat`), so
+ * listener in `lib/text/formatting.ts` (and set directly by `saveTimeFormat`), so
  * hot timestamp formatters do not touch localStorage on every call.
  */
 
-import { loadPref, savePref } from "./preferences";
+import { loadPref, savePref } from "../prefs/preferences";
 
 export type TimeFormat = "12h" | "24h";
 
@@ -25,7 +25,7 @@ function readTimeFormat(): TimeFormat {
 }
 
 // Lazily read on first use, not at import: this module sits under
-// `i18n/format.ts`, which tests import with a mocked `@lib/preferences`, and a
+// `i18n/format.ts`, which tests import with a mocked `@lib/prefs/preferences`, and a
 // module-load read would run before that test's mock state is initialized.
 let current: TimeFormat | null = null;
 

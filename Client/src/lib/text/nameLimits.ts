@@ -4,8 +4,8 @@
 // only stops a request the server would refuse on length or on a new
 // username's allowed characters, and gives every limited input one inline hint.
 
-import { createElement } from "./dom";
-import { connectText } from "../i18n/connect";
+import { createElement } from "../dom";
+import { connectText } from "../../i18n/connect";
 
 export const MIN_USERNAME_LEN = 2;
 export const MAX_USERNAME_LEN = 32;

@@ -13,7 +13,7 @@ const { prefs, nativeWatch } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, val: unknown) => {
     prefs.set(key, val as string);

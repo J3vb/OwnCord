@@ -12,7 +12,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
 import { messageActionGates } from "@components/message-list/message-actions";
-import { shouldGroup } from "@lib/formatting";
+import { shouldGroup } from "@lib/text/formatting";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { voiceStore } from "@stores/voice.store";
 import {

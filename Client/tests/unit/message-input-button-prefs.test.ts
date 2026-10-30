@@ -3,7 +3,7 @@
 // button the server or host left out.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMessageInput } from "@components/MessageInput";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { authStore } from "@stores/auth.store";
 import {

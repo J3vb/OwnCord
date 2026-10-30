@@ -4,7 +4,7 @@
  * only a later, different version counts as an update worth announcing.
  */
 
-import { readStored, writeStored } from "@lib/preferences";
+import { readStored, writeStored } from "@lib/prefs/preferences";
 
 const SEEN_KEY = "owncord:whats-new:seen-version";
 

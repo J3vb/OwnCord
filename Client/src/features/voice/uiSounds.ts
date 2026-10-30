@@ -32,10 +32,10 @@ import {
   type VoiceStatus,
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { loadUserStatus } from "@lib/userStatus";
 import { playVoiceSound, type VoiceSound } from "@lib/notificationSound";
-import { soundSwitchOn, type SoundSwitch } from "@lib/soundPrefs";
+import { soundSwitchOn, type SoundSwitch } from "@lib/prefs/soundPrefs";
 import { takeVoiceMoved, isVoiceMovePending } from "./moveHint";
 
 /** Snapshot of the fields an edge is measured on. */

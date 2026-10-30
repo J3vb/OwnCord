@@ -8,7 +8,7 @@
  */
 
 import { Disposable } from "../../lib/disposable";
-import { loadPref, savePref } from "../../lib/preferences";
+import { loadPref, savePref } from "../../lib/prefs/preferences";
 
 export interface PaneResizeOptions {
   /** Gets the width property. */

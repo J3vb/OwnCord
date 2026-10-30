@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { listSessionResets } from "../../src/lib/sessionRegistry";
 import { isVoiceDeafened, setVoiceDeafened, setVoiceInSession } from "../../src/lib/voiceDeafened";
 import { channelsStore, setChannels, updateChannel } from "../../src/stores/channels.store";
-import { loadPref } from "../../src/lib/preferences";
+import { loadPref } from "../../src/lib/prefs/preferences";
 
 // The voice store is imported inside the test body on purpose: its module-level
 // setup (initial state, session-reset entry, channel subscriptions) is only

@@ -16,7 +16,7 @@ import { messagesStore } from "../../src/stores/messages.store";
 import { setBlockedByMe } from "../../src/stores/blocks.store";
 import type { ChannelActivityEntry, ChatMessagePayload } from "../../src/lib/types";
 import { setLogLevel } from "../../src/lib/logger";
-import { muteChannel, setChannelMutesHost, unmuteChannel } from "../../src/lib/channel-mutes";
+import { muteChannel, setChannelMutesHost, unmuteChannel } from "../../src/lib/prefs/channelMutes";
 import { setMessageJumpHandler } from "../../src/lib/message-navigation";
 
 // The three tests that assert on the logger's debug lines raise the level the
@@ -31,8 +31,8 @@ const { testPrefs } = vi.hoisted(() => ({
 }));
 
 // Mock the preference store shared by the settings panel and lib modules
-vi.mock("../../src/lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
+vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
@@ -946,7 +946,7 @@ describe("notifyIncomingMessage", () => {
 
     // OC-0233: the popup that tells you who wrote to you has to name them the
     // same way the message row you click through to does. resolveAuthor
-    // (lib/formatting.ts) prefers the live membersStore copy of the
+    // (lib/text/formatting.ts) prefers the live membersStore copy of the
     // author's nickname over whatever was frozen into the payload.
     it("titles the notification with the member store's nickname, not the raw username", async () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");

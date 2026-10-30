@@ -5,7 +5,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { readStored, writeStored } from "@lib/preferences";
+import { readStored, writeStored } from "@lib/prefs/preferences";
 import { createElement, appendChildren } from "@lib/dom";
 import { createMemberList } from "@components/MemberList";
 import { buildVoiceModOptions } from "@components/ChannelSidebar";

@@ -17,7 +17,7 @@ import {
   tokenHex,
   type AppearancePrefs,
 } from "./support/accessibility";
-import { contrastRatio, parseColor } from "../../src/lib/color-contrast";
+import { contrastRatio, parseColor } from "../../src/lib/text/colorContrast";
 
 // ---------------------------------------------------------------------------
 // B9-2: shared accessibility primitives and tokens against the owner's Q1

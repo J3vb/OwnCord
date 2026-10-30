@@ -13,9 +13,9 @@
 
 import { clearUnread } from "@stores/channels.store";
 import { loadPref, savePref } from "./preferences";
-import { readPointerEnabled } from "./serverCapabilities";
-import type { ChannelType } from "./types";
-import type { WsClient } from "./ws";
+import { readPointerEnabled } from "../serverCapabilities";
+import type { ChannelType } from "../types";
+import type { WsClient } from "../ws";
 
 /** localStorage key (under the shared settings prefix). */
 const LAST_CHANNEL_KEY = "lastChannel";

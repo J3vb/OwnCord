@@ -15,7 +15,7 @@
  */
 
 import { loadPref, savePref } from "./preferences";
-import type { DetectPrefs } from "../platform/contracts/gameDetector";
+import type { DetectPrefs } from "../../platform/contracts/gameDetector";
 
 /** The pref holding `{ manual, hidden, renames }`. */
 export const GAME_PREFS_KEY = "gameActivityGames";

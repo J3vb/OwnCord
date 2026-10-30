@@ -22,7 +22,7 @@ import {
 } from "@lib/ws";
 import { wireDispatcher } from "@lib/dispatcher";
 import { setIdentityKeyProvider } from "@lib/ws";
-import { setLastChannelHost } from "@lib/last-channel";
+import { setLastChannelHost } from "@lib/prefs/lastChannel";
 import { authStore } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { leaveVoiceChannel } from "@stores/voice.store";

@@ -10,7 +10,7 @@
  * first use, never at startup.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";

@@ -1,4 +1,4 @@
-import { loadPref } from "./preferences";
+import { loadPref } from "./prefs/preferences";
 
 /** The device-local setting "Share the game you are playing". */
 export const GAME_ACTIVITY_PREF_KEY = "shareGameActivity";

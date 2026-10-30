@@ -37,7 +37,7 @@ vi.mock("../../lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
 }));
 let lastChannel: number | null = null;
-vi.mock("../../lib/last-channel", () => ({
+vi.mock("../../lib/prefs/lastChannel", () => ({
   loadLastChannel: () => lastChannel,
   rememberLastChannel: vi.fn(),
   setLastChannelHost: vi.fn(),

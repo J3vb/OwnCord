@@ -10,16 +10,16 @@
  * A11y: role="dialog", aria-label, focus trap, return focus on close.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { trapFocus } from "@lib/a11y";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { resolveDisplayName } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
-import { roleColorVar } from "@lib/formatting";
+import { roleColorVar } from "@lib/text/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
 import { statusLabel } from "../i18n/shell";
 import { NOTE_MAX_LENGTH, type NoteBinding } from "../features/profiles/userNotes";

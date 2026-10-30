@@ -30,7 +30,7 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 vi.mock("@stores/auth.store", () => ({
   getToken: () => "session-token",

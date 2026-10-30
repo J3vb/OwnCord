@@ -17,7 +17,7 @@ import {
   keyEventToVk,
   loadGlobalShortcutVks,
   type GlobalShortcutVks,
-} from "./voiceShortcuts";
+} from "../voiceShortcuts";
 
 export const KEYBINDS_PREF = "keybinds";
 const KEYBINDS_VERSION = 1;

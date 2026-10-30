@@ -19,7 +19,7 @@
 import {
   formatDiscordTimestamp,
   type TimestampStyle,
-} from "../features/messaging/discordTimestamp";
+} from "../../features/messaging/discordTimestamp";
 
 /** Emphasis-style wrappers, in the flavour Discord uses. */
 export type InlineStyle = "strong" | "em" | "underline" | "strike" | "spoiler";

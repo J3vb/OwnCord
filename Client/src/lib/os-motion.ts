@@ -5,7 +5,7 @@
  */
 
 import { Disposable } from "./disposable";
-import { readStored } from "./preferences";
+import { readStored } from "./prefs/preferences";
 
 let owner: Disposable | null = null;
 

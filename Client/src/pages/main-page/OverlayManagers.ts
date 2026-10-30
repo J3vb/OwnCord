@@ -3,7 +3,7 @@
  * Each factory returns an open/toggle + cleanup pair for use in MainPage.
  */
 
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setOwnedTimeout } from "@lib/dom";
@@ -24,7 +24,7 @@ import { navigateToChannel } from "@lib/channel-navigation";
 import { authStore } from "@stores/auth.store";
 import { errorText } from "@lib/api";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
-import { resolveAuthor } from "@lib/formatting";
+import { resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { formatInviteLink } from "@lib/deep-link";
 import { shellText } from "../../i18n/shell";

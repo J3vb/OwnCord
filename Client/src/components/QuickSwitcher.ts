@@ -2,7 +2,7 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { closeOnBackdropClick } from "@lib/modalFactory";
@@ -10,8 +10,8 @@ import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { isChannelMuted } from "@lib/channel-mutes";
-import type { MountableComponent } from "@lib/safe-render";
+import { isChannelMuted } from "@lib/prefs/channelMutes";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 
 export interface QuickSwitcherOptions {

@@ -11,7 +11,7 @@ import {
   type RemoteTrackPublication,
   type RemoteParticipant,
 } from "livekit-client";
-import { loadPref, savePref, STORAGE_PREFIX } from "@lib/preferences";
+import { loadPref, savePref, STORAGE_PREFIX } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
 import { parseUserId } from "../features/voice/sessionState";

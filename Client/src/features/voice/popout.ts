@@ -16,7 +16,7 @@
  * the opener's CSP (HTML policy-container inheritance), so it runs under the
  * app's policy; tests/e2e/stream-popout.spec.ts checks that.
  */
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon } from "../../lib/icons";

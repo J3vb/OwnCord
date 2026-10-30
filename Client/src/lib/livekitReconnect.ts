@@ -3,7 +3,7 @@
 
 import { Room } from "livekit-client";
 import { leaveVoiceChannel } from "@stores/voice.store";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { logIceConnectionInfo } from "@lib/livekitDiagnostics";
 import { setJoinedVoiceStatus } from "@lib/roomEventHandlers";

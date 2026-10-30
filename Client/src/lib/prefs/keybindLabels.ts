@@ -3,10 +3,10 @@
  * the Keybinds tab and the Ctrl+/ shortcuts overlay.
  */
 
-import { vkName } from "./ptt";
+import { vkName } from "../ptt";
 import type { ActionId, KeyCombo } from "./keybinds";
 import type { SettingsTextKey } from "./keybindCatalog";
-import { settingsText as t } from "../i18n/settings";
+import { settingsText as t } from "../../i18n/settings";
 
 /** The catalog key of each action's label. */
 const ACTION_LABEL_KEYS: Readonly<Record<ActionId, SettingsTextKey>> = {

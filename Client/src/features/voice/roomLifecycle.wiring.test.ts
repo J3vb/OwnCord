@@ -57,7 +57,7 @@ vi.mock("../../stores/voice.store", () => ({
   setLocalScreenshare: vi.fn(),
   setVoiceStatus: vi.fn(),
 }));
-vi.mock("../../lib/preferences", () => ({
+vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) =>
     env.prefs.has(key) ? env.prefs.get(key) : fallback,
 }));

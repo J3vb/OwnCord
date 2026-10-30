@@ -7,8 +7,8 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
-import { observeMedia } from "@lib/media-visibility";
-import { loadPref, onPrefChange } from "@lib/preferences";
+import { observeMedia } from "@lib/prefs/mediaVisibility";
+import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import {
   bindImageMenu,
   clearExternalImageCache,

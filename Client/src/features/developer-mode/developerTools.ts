@@ -3,7 +3,7 @@
  * channel): whether the preference is on, and a copy that reports its outcome.
  */
 
-import { loadPref, onPrefChange } from "../../lib/preferences";
+import { loadPref, onPrefChange } from "../../lib/prefs/preferences";
 import { messagingText } from "../../i18n/messaging";
 import { copyThenToast } from "../../lib/clipboard";
 

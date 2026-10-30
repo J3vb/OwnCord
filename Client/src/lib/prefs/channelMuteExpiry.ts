@@ -5,14 +5,14 @@
  * so nothing here is needed for the notify gates to be right.
  */
 
-import { Disposable } from "./disposable";
-import { setOwnedTimeout } from "./dom";
+import { Disposable } from "../disposable";
+import { setOwnedTimeout } from "../dom";
 import {
   CHANNEL_MUTE_CHANGED,
   announceMuteChange,
   readMutedEntries,
   replaceMutedEntries,
-} from "./channel-mutes";
+} from "./channelMutes";
 
 /** The longest a timed mute may have left. Only a clock set backwards can
  *  exceed it, and `pruneExpiredMutes` pulls such an entry back in. */

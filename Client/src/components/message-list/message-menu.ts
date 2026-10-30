@@ -21,7 +21,7 @@ import { Disposable } from "@lib/disposable";
 import { readPointerEnabled } from "@lib/serverCapabilities";
 import { wantsNativeMenu } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
-import { isServerRowKind } from "@lib/messageKind";
+import { isServerRowKind } from "@lib/text/messageKind";
 
 import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quick-reactions";
 import type { MessageListOptions } from "../MessageList";

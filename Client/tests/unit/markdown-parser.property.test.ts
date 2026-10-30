@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fc from "fast-check";
 
-import { parseInline, parseBlocks } from "../../src/lib/markdown";
+import { parseInline, parseBlocks } from "../../src/lib/text/markdown";
 import {
   renderInlineContent,
   renderMessageContent,

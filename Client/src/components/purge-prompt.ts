@@ -5,7 +5,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createMenuItem } from "@lib/context-menu";
 import { shellText } from "../i18n/shell";
 

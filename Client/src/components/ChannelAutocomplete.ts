@@ -15,7 +15,7 @@ import { messagingText } from "../i18n/messaging";
 /** Maximum rows shown at once, as for mentions. */
 export const MAX_CHANNEL_SUGGESTIONS = 10;
 
-/** Names the `#channel` grammar can express (lib/mentions CHANNEL_TOKEN_REGEX). */
+/** Names the `#channel` grammar can express (lib/text/mentions CHANNEL_TOKEN_REGEX). */
 const CHANNEL_NAME = /^[\p{L}\p{N}_-]{1,64}$/u;
 
 export interface ChannelSuggestion {

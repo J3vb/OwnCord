@@ -25,7 +25,7 @@
 
 import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { formatMessageTimestamp } from "@lib/formatting";
+import { formatMessageTimestamp } from "@lib/text/formatting";
 import { accountText } from "../i18n/account";
 
 const log = createLogger("session-notice");

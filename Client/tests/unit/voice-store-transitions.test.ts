@@ -27,7 +27,7 @@ import {
 import type { VoiceStatePayload } from "../../src/lib/types";
 import { authStore } from "../../src/stores/auth.store";
 import { isVoiceDeafened, setVoiceInSession } from "../../src/lib/voiceDeafened";
-import { loadPref, savePref } from "../../src/lib/preferences";
+import { loadPref, savePref } from "../../src/lib/prefs/preferences";
 
 const ME = 1;
 

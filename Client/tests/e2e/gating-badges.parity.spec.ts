@@ -190,7 +190,7 @@ test.describe("@parity per-channel mute", () => {
     });
 
     // Persistence: the mute lives in localStorage under the settings prefix,
-    // independent of any store/WS round-trip (see @lib/channel-mutes).
+    // independent of any store/WS round-trip (see @lib/prefs/channelMutes).
     //
     // The key is scoped by server host (`mutedChannels:<host>`) because channel
     // ids are per-server autoincrement integers and every profile shares one

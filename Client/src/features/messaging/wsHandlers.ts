@@ -37,9 +37,9 @@ import {
 import { blocksStore, setUserBlockedByThem } from "../../stores/blocks.store";
 import type { ConnectionState } from "../../lib/ws";
 import { clearReactionUsersCache, invalidateReactionUsers } from "./reactionUsers";
-import { parseTimestamp } from "@lib/formatting";
+import { parseTimestamp } from "@lib/text/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
-import { mentionsCurrentUser } from "../../lib/mentions";
+import { mentionsCurrentUser } from "../../lib/text/mentions";
 import { showToast } from "../../lib/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
