@@ -340,7 +340,7 @@ describe("ServerRail", () => {
 
 describe("web portal", () => {
   it("MainPage only creates the rail outside the web build", () => {
-    const src = readFileSync("src/pages/MainPage.ts", "utf8");
+    const src = readFileSync("src/pages/main-page/pageMountShell.ts", "utf8");
     expect(src).toMatch(
       /if \(!__OWNCORD_WEB__\) \{[\s\S]{0,400}import\("@components\/ServerRail"\)/,
     );
