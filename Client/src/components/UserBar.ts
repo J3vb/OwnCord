@@ -5,7 +5,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";

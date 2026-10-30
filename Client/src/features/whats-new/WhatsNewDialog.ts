@@ -4,7 +4,7 @@
  * live on Settings › About, which the dialog links to.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "../../lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/a11y";
 import { closeOnBackdropClick } from "../../lib/modalFactory";

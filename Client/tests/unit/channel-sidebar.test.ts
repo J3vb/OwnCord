@@ -82,9 +82,9 @@ import {
   muteChannel,
   unmuteChannel,
   invalidateMuteCache,
-} from "@lib/channel-mutes";
-import { STORAGE_PREFIX } from "@lib/preferences";
-import { setHideMutedChannels } from "@lib/hide-muted-channels";
+} from "@lib/prefs/channelMutes";
+import { STORAGE_PREFIX } from "@lib/prefs/preferences";
+import { setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 
 function resetStores(): void {
   channelsStore.setState(() => ({

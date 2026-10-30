@@ -17,7 +17,7 @@ import {
   setLocalGateSpeaking,
   restateSelfVoiceState,
 } from "@stores/voice.store";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { inputMode } from "@lib/inputMode";
 import { createLogger } from "@lib/logger";
 import { Disposable } from "@lib/disposable";

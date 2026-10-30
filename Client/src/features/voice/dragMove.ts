@@ -10,7 +10,7 @@
  * re-render often) cannot strand one.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "../../lib/disposable";
 import { setOwnedTimeout } from "../../lib/dom";
 import { channelsStore } from "../../stores/channels.store";

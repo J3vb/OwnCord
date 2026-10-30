@@ -35,7 +35,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...
 vi.mock("../../src/lib/appAudioTrack", () => ({
   openAppAudio: (...a: unknown[]) => openAppAudio(...a) as unknown,
 }));
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: vi.fn(),
 }));

@@ -16,7 +16,7 @@ import {
   type ContextMenuSeparator,
 } from "@lib/context-menu";
 import { canManageChannels, canManageInvites, canViewAuditLog } from "@lib/permissions";
-import { isHideMutedChannels, setHideMutedChannels } from "@lib/hide-muted-channels";
+import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { unreadChannelIds } from "@lib/read-state";
 import { shellText } from "../../i18n/shell";
 

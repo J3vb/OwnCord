@@ -27,8 +27,8 @@ import {
   resetThreadsStore,
 } from "../../src/stores/threads.store";
 import { followedThreadsStore } from "../../src/stores/followedThreads.store";
-import { muteChannel, unmuteChannel } from "../../src/lib/channel-mutes";
-import { setHideMutedChannels } from "../../src/lib/hide-muted-channels";
+import { muteChannel, unmuteChannel } from "../../src/lib/prefs/channelMutes";
+import { setHideMutedChannels } from "../../src/lib/prefs/hideMutedChannels";
 import type { ReadyChannel, ReadyThread } from "../../src/lib/types";
 import { makeThread } from "../helpers/thread-fixtures";
 

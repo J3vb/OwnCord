@@ -10,7 +10,7 @@ import { Track } from "livekit-client";
 import type { RemoteParticipant, RemoteTrack, RemoteTrackPublication, Room } from "livekit-client";
 
 import { createRoomEventHandlers, type RoomEventDeps } from "@lib/roomEventHandlers";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import { voiceStore } from "@stores/voice.store";
 import type { AudioElements } from "@lib/audioElements";
 import { RemoteTracks } from "../../src/features/voice/remoteTracks";

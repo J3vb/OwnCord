@@ -16,7 +16,7 @@
  */
 import type { Platform } from "../platform/contracts";
 import { settingsText } from "../i18n/settings";
-import { readStored } from "./preferences";
+import { readStored } from "./prefs/preferences";
 
 export const SETTINGS_PREFIX = "owncord:settings:";
 

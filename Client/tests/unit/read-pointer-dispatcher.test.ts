@@ -27,7 +27,7 @@ import {
   markMessageUnread,
   setMarkUnreadSender,
 } from "../../src/components/message-list/mark-unread";
-import { viewChannel } from "../../src/lib/last-channel";
+import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
@@ -55,6 +55,11 @@ vi.mock("@lib/livekitSession", () => ({
   disableScreenshare: vi.fn(async () => {}),
   reconcileVideoFlags: vi.fn(),
   resendWatching: vi.fn(),
+}));
+// voice/wsHandlers loads screenShare lazily on some frames. Left real, that
+// load can finish after this file's environment is torn down.
+vi.mock("@lib/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
 }));
 const mockShowToast = vi.fn();
 vi.mock("@lib/toast", () => ({

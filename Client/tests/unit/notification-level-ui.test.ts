@@ -17,8 +17,11 @@ vi.mock("../../src/platform/desktop", () => ({
 }));
 
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
-import { setChannelMutesHost } from "../../src/lib/channel-mutes";
-import { getGlobalNotificationLevel, setGlobalNotificationLevel } from "@lib/notificationLevel";
+import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
+import {
+  getGlobalNotificationLevel,
+  setGlobalNotificationLevel,
+} from "@lib/prefs/notificationLevel";
 
 let container: HTMLDivElement;
 let ac: AbortController;

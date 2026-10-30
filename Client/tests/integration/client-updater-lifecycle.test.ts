@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { DownloadProgress } from "@lib/updater";
 
 const { invoke, relaunch, listen, unlisten } = vi.hoisted(() => ({

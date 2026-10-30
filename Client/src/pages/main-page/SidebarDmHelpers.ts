@@ -19,8 +19,8 @@ import {
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { voiceStore } from "@stores/voice.store";
-import { getChannelMute, isChannelMuted } from "@lib/channel-mutes";
-import { markdownToPlainText } from "@lib/markdown";
+import { getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
+import { markdownToPlainText } from "@lib/text/markdown";
 import { connectText } from "../../i18n/connect";
 import { rowActivity } from "../../features/members/listeningLine";
 import { RestErrorCode } from "@lib/protocolTypes";

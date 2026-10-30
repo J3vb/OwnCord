@@ -4,9 +4,9 @@ import {
   rememberLastChannel,
   setLastChannelHost,
   viewChannel,
-} from "@lib/last-channel";
+} from "@lib/prefs/lastChannel";
 import type { WsClient } from "@lib/ws";
-import { focusPayload } from "@lib/last-channel";
+import { focusPayload } from "@lib/prefs/lastChannel";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { channelsStore, resetChannelsStore, setChannels } from "@stores/channels.store";
 

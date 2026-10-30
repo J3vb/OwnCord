@@ -147,6 +147,6 @@ page. Each kind of status has one owner:
 
 A CI job checks the counts in a few current summaries against the live
 ledger. To add a summary to that check, add its document to the allow-list in
-`scripts/check-doc-counts.mjs`. Dated baselines and signed scorecards keep the
+`scripts/checks/check-doc-counts.mjs`. Dated baselines and signed scorecards keep the
 numbers they measured at their source commits. Never change them to make the
 live count check pass.

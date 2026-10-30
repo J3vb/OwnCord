@@ -18,7 +18,7 @@ import { ApiClientError, type ApiClient, type UserNote } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { setOwnedTimeout } from "@lib/dom";
 import { migrateLegacyValue } from "@lib/legacyKeyMigration";
-import { readStored, removeStored, writeStored } from "@lib/preferences";
+import { readStored, removeStored, writeStored } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { userNotesEnabled } from "@lib/serverCapabilities";
 

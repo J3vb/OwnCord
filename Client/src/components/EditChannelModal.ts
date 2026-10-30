@@ -23,7 +23,7 @@ import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/moda
 import { errorText } from "@lib/api";
 import { canManageChannels } from "@lib/permissions";
 import { forumsEnabled } from "@lib/serverCapabilities";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
 import type { ForumSettingsSection } from "../features/forums/ForumSettingsSection";

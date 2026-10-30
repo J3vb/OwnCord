@@ -49,7 +49,7 @@ vi.mock("../../src/platform/desktop/globalShortcuts", () => ({
 }));
 
 import { buildKeybindsTab } from "../../src/components/settings/KeybindsTab";
-import { KEYBIND_GROUPS } from "../../src/lib/keybindCatalog";
+import { KEYBIND_GROUPS } from "../../src/lib/prefs/keybindCatalog";
 import { settingsText as t } from "../../src/i18n/settings";
 
 describe("KeybindsTab", () => {

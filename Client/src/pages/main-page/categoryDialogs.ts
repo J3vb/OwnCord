@@ -9,7 +9,7 @@
  */
 
 import { createLazyScreen } from "@components/lazyScreen";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { CategoryRef } from "@stores/channels.store";
 import {
   createCategory,

@@ -48,7 +48,7 @@ jobs:
   #
   # Selection is deliberately limited to a pull request INTO DEV. A PR into main,
   # a push to main and a push to dev all run every capability. A push to main is
-  # required because scripts/verify-gate-evidence.mjs (R-09 / RL-16) requires each
+  # required because scripts/release/verify-gate-evidence.mjs (R-09 / RL-16) requires each
   # context in docs/plans/b0-dev-branch-protection.sh to have concluded `success`
   # on the tagged commit and counts `skipped` as NOT success; releases are cut
   # from main, so a check legitimately skipped there would block the release
@@ -281,7 +281,7 @@ jobs:
     #
     # That is not what keeps release evidence sound; `--all` on main is. A
     # tagged commit lives on main, where the selector selects every capability,
-    # so the run scripts/verify-gate-evidence.mjs (R-09) reads at tag time is a
+    # so the run scripts/release/verify-gate-evidence.mjs (R-09) reads at tag time is a
     # full one. What this job must never do is fail to report at all, and that
     # is the property the comment above is about.
     #
@@ -666,8 +666,8 @@ jobs:
 
       - name: Check resolved Tauri npm and Rust versions
         run: |
-          node --test ../scripts/check-tauri-versions.test.mjs
-          node ../scripts/check-tauri-versions.mjs
+          node --test ../scripts/checks/check-tauri-versions.test.mjs
+          node ../scripts/checks/check-tauri-versions.mjs
 
       - name: Install npm dependencies
         run: npm ci
@@ -700,20 +700,20 @@ jobs:
       # vitest's coverage provider. Nothing here ships to users; revisit when
       # eslint and @vitest/coverage-v8 widen their minimatch ranges.
       #
-      # Run through scripts/npm-audit-gate.sh rather than bare: `npm audit`
+      # Run through scripts/checks/npm-audit-gate.sh rather than bare: `npm audit`
       # exits 1 both for a finding and for an unreachable audit endpoint, so
       # the bare command turned a registry outage ("audit endpoint returned an
       # error") into a red check on a pull request that never touched the
       # client. The script keeps the gate, retries a transport failure, and is
       # fail-closed — only a recognised outage signature is forgiven.
       - name: Security audit (npm, shipped deps)
-        run: bash ../scripts/npm-audit-gate.sh
+        run: bash ../scripts/checks/npm-audit-gate.sh
 
       # The forgiveness above is exactly the shape that rots into a gate that
       # never runs, so the classifier is self-tested on every PR, like the
       # count and migration matchers in Docs & Ledger Consistency.
       - name: Self-test the audit-outage classifier
-        run: bash ../scripts/npm-audit-gate.sh --selftest
+        run: bash ../scripts/checks/npm-audit-gate.sh --selftest
 
       - name: Oxlint (fast correctness checks)
         run: npx oxlint --deny-warnings src/
@@ -808,10 +808,10 @@ jobs:
         run: node --test Server/scripts/k6/ws-load.test.mjs
 
       - name: Self-test the count matcher
-        run: node --test scripts/check-doc-counts.test.mjs
+        run: node --test scripts/checks/check-doc-counts.test.mjs
 
       - name: Documents must agree with the findings ledger
-        run: node scripts/check-doc-counts.mjs
+        run: node scripts/checks/check-doc-counts.mjs
 
       # A reference document that cites a repository path which no longer
       # exists reads fine and proves nothing. This lived inside
@@ -824,28 +824,28 @@ jobs:
       # selection. Self-tested first, for the same reason the two matchers
       # above are.
       - name: Self-test the citation checker
-        run: node --test scripts/check-doc-citations.test.mjs
+        run: node --test scripts/checks/check-doc-citations.test.mjs
 
       - name: Watched documents must not cite paths that do not exist
-        run: node scripts/check-doc-citations.mjs
+        run: node scripts/checks/check-doc-citations.mjs
 
       # OC-0395. A migration is recorded by filename with no content hash, so
       # editing one that has already shipped repairs nothing for the
       # installations that applied it and no error is ever raised. Self-tested
       # first, for the same reason the count matcher is.
       - name: Self-test the migration-immutability matcher
-        run: node --test scripts/check-migrations.test.mjs
+        run: node --test scripts/checks/check-migrations.test.mjs
 
       - name: Shipped migrations must not be edited
-        run: node scripts/check-migrations.mjs
+        run: node scripts/checks/check-migrations.mjs
 
       # Plan and ticket ids in code comments are a shrink-only count per file
       # (docs/code-style.md, "Comments"). It reads only tracked source text.
       - name: Self-test the comment id counter
-        run: node --test scripts/check-comment-ids.test.mjs
+        run: node --test scripts/checks/check-comment-ids.test.mjs
 
       - name: Comment ids must not grow
-        run: node scripts/check-comment-ids.mjs
+        run: node scripts/checks/check-comment-ids.mjs
 
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
@@ -865,17 +865,17 @@ jobs:
       # b0-dev-branch-protection.sh, so a change to that list's shape fails here
       # rather than silently weakening the gate.
       - name: Self-test the release gate
-        run: node --test scripts/verify-gate-evidence.test.mjs
+        run: node --test scripts/release/verify-gate-evidence.test.mjs
 
       # The nightly-drills gate in release.yml, exercised on a recorded API
       # response for the same reason as the step above.
       - name: Self-test the nightly drills release gate
-        run: node --test scripts/verify-nightly-drills.test.mjs
+        run: node --test scripts/release/verify-nightly-drills.test.mjs
 
       # The release-status gate in release.yml, on fixtures and on the real
       # docs/STATUS.md, for the same reason.
       - name: Self-test the release status gate
-        run: node --test scripts/verify-release-status.test.mjs
+        run: node --test scripts/release/verify-release-status.test.mjs
 
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
@@ -884,10 +884,10 @@ jobs:
         run: node --test scripts/merge-ledger.test.mjs
 
       - name: Self-test the PR advisory diff
-        run: node --test scripts/osv-pr-diff.test.mjs
+        run: node --test scripts/checks/osv-pr-diff.test.mjs
 
       - name: Self-test the CI cost report
-        run: node --test scripts/ci-cost-report.test.mjs
+        run: node --test scripts/ci/ci-cost-report.test.mjs
 
       # RL-07. FINDINGS.md is not tracked, so it cannot drift -- but L-07 also
       # asks that the rendering be reproducible and that CI reject a generation
@@ -1023,7 +1023,7 @@ jobs:
   # cannot move a version, so it does not pay for this. A new advisory against
   # an untouched lockfile is caught by weekly-supply-chain.yml, which repeats
   # these steps on main every Monday; keep the two in sync
-  # (scripts/check-supply-chain-sync.test.mjs fails Repository Hygiene if not).
+  # (scripts/checks/check-supply-chain-sync.test.mjs fails Repository Hygiene if not).
   #
   # Both this job and workflow-lint are required checks on dev. Skipped by the
   # selector they count as passing; on main they always run.
@@ -1065,7 +1065,7 @@ jobs:
 
       # Every lockfile in the repository, named rather than globbed: a new
       # component's lockfile must be added here, to scripts/ci-select.mjs's
-      # DEPS_FILES and to scripts/osv-pr-diff.mjs's LOCKFILES, so it cannot be
+      # DEPS_FILES and to scripts/checks/osv-pr-diff.mjs's LOCKFILES, so it cannot be
       # silently unscanned. On a PR this step only warns and the next one
       # decides; on a push it is the verdict.
       - name: Scan the dependency manifests (osv-scanner)
@@ -1088,7 +1088,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          node scripts/osv-pr-diff.mjs "$BASE_SHA"
+          node scripts/checks/osv-pr-diff.mjs "$BASE_SHA"
 
       # cargo-deny reads the resolved graph through `cargo metadata`, so cargo
       # has to be on PATH. Pinned the same way rust-tests pins it.
@@ -1507,7 +1507,7 @@ jobs:
   #
   # Built without updater artifacts, so no signing key is needed: this job runs
   # PR-controlled npm and cargo build scripts, and the updater signing key is
-  # given to release.yml only (scripts/check-workflow-guards.mjs asserts it).
+  # given to release.yml only (scripts/checks/check-workflow-guards.mjs asserts it).
   tauri-build:
     name: Tauri Full Build (${{ matrix.os }})
     needs: client-check
@@ -1742,7 +1742,7 @@ jobs:
           cache: npm
           cache-dependency-path: Client/package-lock.json
       - name: Check resolved Tauri npm and Rust versions
-        run: node ../scripts/check-tauri-versions.mjs
+        run: node ../scripts/checks/check-tauri-versions.mjs
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -1832,7 +1832,7 @@ jobs:
   # before any pipe, for the same reason.
   #
   # Deliberately not on any required-checks list: it is a hard-failing job that
-  # is visible on every PR. `scripts/check-node-policy.mjs` skips this pin
+  # is visible on every PR. `scripts/checks/check-node-policy.mjs` skips this pin
   # because of its trailing comment, so the two do not contradict each other.
   node-policy:
     name: Node policy (refused major)

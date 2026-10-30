@@ -5,7 +5,7 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 
 **A release cannot be tagged until its version has a row in the
 [Releases](#releases) table below.** `release.yml` checks this before anything
-builds (`scripts/verify-release-status.mjs`), so add the row in the release PR,
+builds (`scripts/release/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
 _Last updated 2026-10-29._

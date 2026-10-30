@@ -2,7 +2,7 @@
 // same pattern), so this pins the CSS *source* rather than computed style.
 //
 // Three code paths write the `--font-size` custom property:
-//   - applyStoredAppearance() (lib/appearance.ts) at startup
+//   - applyStoredAppearance() (lib/prefs/appearance.ts) at startup
 //   - the Appearance-tab Font Size slider (components/settings/AppearanceTab.ts)
 //   - the Accessibility-tab "Large Font" toggle, which since OC-0319 goes
 //     through the same applyFontSize() writer rather than a `.large-font` CSS

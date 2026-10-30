@@ -11,7 +11,11 @@ import {
   saveGlobalShortcutVk,
   shortcutConflict,
 } from "../../src/lib/voiceShortcuts";
-import { globalShortcutTakenVks, inAppCtrlShiftVks, parseKeybinds } from "../../src/lib/keybinds";
+import {
+  globalShortcutTakenVks,
+  inAppCtrlShiftVks,
+  parseKeybinds,
+} from "../../src/lib/prefs/keybinds";
 
 function key(code: string, init: KeyboardEventInit = {}): KeyboardEvent {
   return new KeyboardEvent("keydown", { code, ...init });

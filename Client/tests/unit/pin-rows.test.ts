@@ -18,8 +18,8 @@ import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
 import { messageActionGates } from "@components/message-list/message-actions";
 import { pinRowTarget } from "@components/message-list/pinRows";
-import { shouldGroup } from "@lib/formatting";
-import { isPinRowKind, isServerRowKind } from "@lib/messageKind";
+import { shouldGroup } from "@lib/text/formatting";
+import { isPinRowKind, isServerRowKind } from "@lib/text/messageKind";
 import {
   bulkDeleteMessages,
   deleteMessage,

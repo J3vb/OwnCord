@@ -11,7 +11,7 @@ import type { UpdateCheckReason, UpdateOutcome } from "../features/updates/updat
 import { setAvailableUpdate } from "../features/updates/availableUpdate";
 import { openSettings, uiStore } from "@stores/ui.store";
 import type { DownloadProgress, UpdateInstallState } from "@lib/updater";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { connectText } from "../i18n/connect";
 
 const log = createLogger("update-notifier");

@@ -12,7 +12,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { reconcileModels, sameModel } from "@lib/reconcile";
 import { select, eventSource, type Selection } from "@lib/select";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import {
   channelsStore,
   NO_CATEGORY,
@@ -20,8 +20,8 @@ import {
   type CategoryRef,
 } from "@stores/channels.store";
 import { navigateToChannel } from "@lib/channel-navigation";
-import { isChannelMuted } from "@lib/channel-mutes";
-import { isHideMutedChannels } from "@lib/hide-muted-channels";
+import { isChannelMuted } from "@lib/prefs/channelMutes";
+import { isHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import type { Channel, ChannelsState } from "@stores/channels.store";
 import { authStore, type AuthState } from "@stores/auth.store";
 import { uiStore, toggleCategory, type UiState } from "@stores/ui.store";
@@ -87,7 +87,7 @@ import {
   type VoiceRowInputs,
   type VoiceUserContext,
 } from "../features/channels/voiceRowModel";
-import { PREF_CHANGE_EVENT } from "@lib/preferences";
+import { PREF_CHANGE_EVENT } from "@lib/prefs/preferences";
 
 // The per-user volume menu loads on its first open.
 const volumeMenuScreen = createLazyScreen(

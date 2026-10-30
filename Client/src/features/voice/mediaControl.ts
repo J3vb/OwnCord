@@ -23,7 +23,7 @@ import { CodecSwitchController } from "./codecSwitch";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
 import { setH264GpuProfiles } from "../../lib/h264Profile";
 import { h264GpuPublish } from "./videoCodec";
-import { savePref } from "../../lib/preferences";
+import { savePref } from "../../lib/prefs/preferences";
 import {
   type VideoTrackDeps,
   type CameraTrackState,

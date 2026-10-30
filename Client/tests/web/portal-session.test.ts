@@ -19,7 +19,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: hoisted.warn, error: vi.fn() }),
 }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
-vi.mock("@lib/last-channel", () => ({ setLastChannelHost: vi.fn() }));
+vi.mock("@lib/prefs/lastChannel", () => ({ setLastChannelHost: vi.fn() }));
 vi.mock("@lib/dispatcher", () => ({ wireDispatcher: vi.fn(() => () => undefined) }));
 vi.mock("@components/ConnectedOverlay", () => ({ createConnectedOverlay: vi.fn() }));
 

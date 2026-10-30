@@ -33,7 +33,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { errorText, TransportError, type BanMemberResponse } from "@lib/api";
 import { createElement, setOwnedTimeout, setText } from "@lib/dom";
 import { createModal, type ModalInstance } from "@lib/modalFactory";

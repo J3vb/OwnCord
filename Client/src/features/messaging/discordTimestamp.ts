@@ -3,7 +3,7 @@
  * time zone and clock preference. Pure: the renderer decides the element.
  */
 import { TEXT_LOCALE, formatDate } from "../../i18n/format";
-import { getTimeFormat } from "../../lib/timeFormat";
+import { getTimeFormat } from "../../lib/text/timeFormat";
 
 /** Discord's timestamp styles; `f` is the default. */
 export type TimestampStyle = "t" | "T" | "d" | "D" | "f" | "F" | "R";

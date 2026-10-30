@@ -31,7 +31,7 @@ import {
   stopRingChime,
   type VoiceSound,
 } from "@lib/notificationSound";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
 import type { NativeToneNote } from "../../src/platform/contracts/nativeVoice";
 

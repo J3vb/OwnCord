@@ -13,8 +13,8 @@ import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@li
 import { createLogger } from "@lib/logger";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import type { ProfileManager } from "@lib/profiles";
-import { safeMount } from "@lib/safe-render";
-import type { MountableComponent, RenderRecovery } from "@lib/safe-render";
+import { safeMount } from "@lib/text/safeRender";
+import type { MountableComponent, RenderRecovery } from "@lib/text/safeRender";
 import { SessionScope } from "@lib/sessionScope";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
 import type { AuthResponse } from "@lib/types";

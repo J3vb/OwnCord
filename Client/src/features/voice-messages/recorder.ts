@@ -13,7 +13,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { setOwnedTimeout } from "@lib/dom";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { publicAssetUrl } from "@lib/publicAssets";
 import { clipFilename, pickRecorderMime } from "./mime";
 import { encodeWaveform, reducePeaks, WAVEFORM_BARS } from "./waveform";

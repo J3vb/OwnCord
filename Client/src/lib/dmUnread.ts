@@ -1,4 +1,4 @@
-import { isChannelMuted } from "./channel-mutes";
+import { isChannelMuted } from "./prefs/channelMutes";
 
 interface DmUnreadCounts {
   readonly channelId: number;

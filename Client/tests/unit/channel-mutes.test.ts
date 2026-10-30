@@ -1,4 +1,4 @@
-import { pruneExpiredMutes } from "@lib/channel-mute-expiry";
+import { pruneExpiredMutes } from "@lib/prefs/channelMuteExpiry";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   isChannelMuted,
@@ -12,20 +12,20 @@ import {
   getChannelMute,
   CHANNEL_MUTE_CHANGED,
   MUTE_DURATIONS_MS,
-} from "@lib/channel-mutes";
-import { STORAGE_PREFIX } from "@lib/preferences";
+} from "@lib/prefs/channelMutes";
+import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 // The modules in the notifications graph that install an app-lifetime window
 // listener at load. loadNotifications() re-imports against these instances,
 // so its vi.resetModules() does not install a second copy of each listener.
 import * as attachments from "@components/message-list/attachments";
-import * as formatting from "@lib/formatting";
-import * as channelMutes from "@lib/channel-mutes";
+import * as formatting from "@lib/text/formatting";
+import * as channelMutes from "@lib/prefs/channelMutes";
 import * as appLogger from "@lib/logger";
 
 const APP_LIFETIME_MODULES = [
   ["@components/message-list/attachments", attachments],
-  ["@lib/formatting", formatting],
-  ["@lib/channel-mutes", channelMutes],
+  ["@lib/text/formatting", formatting],
+  ["@lib/prefs/channelMutes", channelMutes],
   ["@lib/logger", appLogger],
 ] as const;
 

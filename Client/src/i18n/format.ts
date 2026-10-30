@@ -25,7 +25,7 @@
  * download. The expansion transform exists for tests only.
  */
 
-import { getTimeFormat } from "../lib/timeFormat";
+import { getTimeFormat } from "../lib/text/timeFormat";
 
 /** The locale every catalog string, number and date is written in. */
 export const TEXT_LOCALE = "en-US";

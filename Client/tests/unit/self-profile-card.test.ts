@@ -11,7 +11,7 @@ import {
   saveUserStatus,
 } from "@lib/userStatus";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import { createPresenceSender } from "@lib/presence";
 import { createPresenceLimiter } from "@lib/rate-limiter";
 import type { WsClient } from "@lib/ws";

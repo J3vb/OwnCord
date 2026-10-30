@@ -5,10 +5,10 @@
  */
 
 import { clearChildren, createElement, setText } from "@lib/dom";
-import { isServerRowKind } from "@lib/messageKind";
+import { isServerRowKind } from "@lib/text/messageKind";
 import { createConfirmModal } from "../../features/dialogs/confirmModal";
 import { createLogger } from "@lib/logger";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import { ApiClientError, type ApiClient } from "@lib/api";
 import type { ChannelType, VoiceUploadMeta } from "@lib/types";
@@ -47,9 +47,9 @@ import {
   clearChannelContent,
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { resolveAuthor } from "@lib/formatting";
+import { resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/avatar";
-import { markdownToPlainText } from "@lib/markdown";
+import { markdownToPlainText } from "@lib/text/markdown";
 import { jumpToMessage } from "@lib/message-navigation";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
@@ -80,8 +80,8 @@ import { stickersText } from "../../i18n/stickers";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { membersStore } from "@stores/members.store";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
-import { viewChannel } from "@lib/last-channel";
-import { loadSavedDraft, saveDraft, type SavedDraft } from "@lib/savedDrafts";
+import { viewChannel } from "@lib/prefs/lastChannel";
+import { loadSavedDraft, saveDraft, type SavedDraft } from "@lib/prefs/savedDrafts";
 import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../features/safety/store";
 import { reportEntryText } from "../../i18n/reportEntry";

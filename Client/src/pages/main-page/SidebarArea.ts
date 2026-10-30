@@ -9,7 +9,7 @@ import { createElement, setText, clearChildren } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
 import { isTextLikeChannel, type ChannelType } from "@lib/types";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import { type ApiClient, errorText } from "@lib/api";
 import type { RateLimiterSet } from "@lib/rate-limiter";
@@ -61,7 +61,7 @@ import {
   muteChannel,
   toggleChannelMute,
   unmuteChannel,
-} from "@lib/channel-mutes";
+} from "@lib/prefs/channelMutes";
 import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
@@ -93,7 +93,7 @@ import {
   lineHintText,
   visibleLength,
   MAX_GROUP_DM_NAME_LEN,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 
 const log = createLogger("SidebarArea");
 

@@ -58,7 +58,7 @@ vi.mock("livekit-client", async (importOriginal) => {
   };
 });
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (...args: unknown[]) => loadPref(...args) as unknown,
   savePref: vi.fn(),
 }));

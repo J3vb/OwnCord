@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import * as markdown from "../../src/lib/markdown";
+import * as markdown from "../../src/lib/text/markdown";
 import {
   renderMessageContent,
   clearContentParseCache,

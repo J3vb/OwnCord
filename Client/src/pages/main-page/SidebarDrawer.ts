@@ -16,7 +16,7 @@
  * accessible name track the state for the keyboard model.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { focusDialog } from "@lib/a11y";

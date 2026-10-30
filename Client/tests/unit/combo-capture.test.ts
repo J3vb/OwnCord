@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { buildComboCapture } from "../../src/components/settings/comboCapture";
-import { comboLabel } from "../../src/lib/keybindLabels";
-import { loadEffectiveKeybinds, saveKeybind } from "../../src/lib/keybinds";
+import { comboLabel } from "../../src/lib/prefs/keybindLabels";
+import { loadEffectiveKeybinds, saveKeybind } from "../../src/lib/prefs/keybinds";
 
 describe("buildComboCapture", () => {
   let controller: AbortController;

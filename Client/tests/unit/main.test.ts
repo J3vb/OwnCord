@@ -41,7 +41,7 @@ const { mockOnOpenUrl } = vi.hoisted(() => ({
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
-vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
@@ -59,7 +59,9 @@ vi.mock("@lib/credentials", () => ({
   deleteCredential: vi.fn().mockResolvedValue(undefined),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@lib/prefs/windowState", () => ({
+  initWindowState: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
@@ -397,7 +399,7 @@ describe("main.ts notification-click opens the message (U1d)", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     setChannelMutesHost("a.example");
     vi.mocked(jumpToMessage).mockClear();
 
@@ -413,7 +415,7 @@ describe("main.ts notification-click opens the message (U1d)", () => {
     const { jumpToMessage } = await import("@lib/message-navigation");
     await Promise.resolve();
     await Promise.resolve();
-    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     setChannelMutesHost("a.example");
     vi.mocked(jumpToMessage).mockClear();
 
@@ -427,7 +429,7 @@ describe("main.ts notification-click opens the message (U1d)", () => {
     const { jumpToMessage } = await import("@lib/message-navigation");
     await Promise.resolve();
     await Promise.resolve();
-    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     setChannelMutesHost("b.example");
     vi.mocked(jumpToMessage).mockClear();
 
@@ -447,7 +449,7 @@ describe("main.ts clears the per-server notification scope on logout (F13)", () 
       server_name: "Scope Co",
       motd: "",
     });
-    const { getChannelMutesHost, setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { getChannelMutesHost, setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     // MainPage sets this on mount; stand in for that here.
     setChannelMutesHost("scope.example:8443");
 

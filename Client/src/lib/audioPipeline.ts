@@ -13,7 +13,7 @@
 // threshold go to its own gates.
 
 import { Track, TrackEvent, type Room, type LocalAudioTrack } from "livekit-client";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { publicAssetUrl } from "@lib/publicAssets";
 import {

@@ -11,7 +11,7 @@
  * keycodes are US physical positions, which `KeyboardEvent.code` names.
  */
 
-import { loadPref, savePref } from "./preferences";
+import { loadPref, savePref } from "./prefs/preferences";
 
 export type GlobalShortcutAction = "mute" | "deafen";
 
@@ -93,7 +93,7 @@ export function keyEventToVk(event: KeyboardEvent): number | null {
 /**
  * Why `vk` cannot be bound to `action`, or null when it is free. `inAppVks` is
  * every VK whose Ctrl+Shift combo something else already acts on
- * (`lib/keybinds.ts` `globalShortcutTakenVks`), which a global binding may not claim.
+ * (`lib/prefs/keybinds.ts` `globalShortcutTakenVks`), which a global binding may not claim.
  */
 export function shortcutConflict(
   vk: number,

@@ -13,9 +13,9 @@ import {
   parseKeybinds,
   saveKeybind,
   type KeyCombo,
-} from "../../src/lib/keybinds";
+} from "../../src/lib/prefs/keybinds";
 import { saveGlobalShortcutVk } from "../../src/lib/voiceShortcuts";
-import { STORAGE_PREFIX } from "../../src/lib/preferences";
+import { STORAGE_PREFIX } from "../../src/lib/prefs/preferences";
 
 const GLOBALS = { mute: 0x4d, deafen: 0x44 };
 const c = (vk: number, mods: Partial<Omit<KeyCombo, "vk">> = {}): KeyCombo => ({

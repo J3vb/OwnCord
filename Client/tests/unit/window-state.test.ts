@@ -21,7 +21,7 @@ describe("window-state", () => {
   });
 
   it("initWindowState resolves without throwing when Tauri is unavailable", async () => {
-    const { initWindowState } = await import("@lib/window-state");
+    const { initWindowState } = await import("@lib/prefs/windowState");
     await expect(initWindowState()).resolves.toBeUndefined();
   });
 });

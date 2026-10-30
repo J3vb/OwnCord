@@ -1,4 +1,4 @@
-import { startMuteExpiryWatch } from "@lib/channel-mute-expiry";
+import { startMuteExpiryWatch } from "@lib/prefs/channelMuteExpiry";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   CHANNEL_MUTE_CHANGED,
@@ -8,8 +8,8 @@ import {
   muteChannel,
   setChannelMutesHost,
   unmuteChannel,
-} from "@lib/channel-mutes";
-import { STORAGE_PREFIX } from "@lib/preferences";
+} from "@lib/prefs/channelMutes";
+import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 
 const KEY = `${STORAGE_PREFIX}mutedChannels`;
 const T0 = new Date(2026, 9, 17, 12, 0, 0).getTime();

@@ -9,7 +9,7 @@
  * the source. A static emoji passes through the same path and looks the same.
  */
 
-import { loadPref } from "../../lib/preferences";
+import { loadPref } from "../../lib/prefs/preferences";
 
 /** Whether custom emoji should animate. Read at render, so a new message follows the switch. */
 export function animateEmojiEnabled(): boolean {

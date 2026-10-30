@@ -5,7 +5,7 @@
  * Keybinds tab lists lives here so the panel and the behaviour can't drift.
  * Camera, screen share and disconnect are rebindable and no-op outside a voice
  * channel rather than firing signalling messages into a session that doesn't
- * exist (`lib/keybinds.ts` holds the table of rebindable actions; Meta never
+ * exist (`lib/prefs/keybinds.ts` holds the table of rebindable actions; Meta never
  * stands in for Ctrl on those). Mute and deafen work
  * anywhere, like the user panel's buttons: outside a call they only change the
  * saved state the next join starts with.
@@ -26,7 +26,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "@stores/voice.store";
@@ -45,9 +45,9 @@ import {
   loadEffectiveKeybinds,
   type ActionId,
   type EffectiveKeybinds,
-} from "@lib/keybinds";
+} from "@lib/prefs/keybinds";
 import { inputMode } from "@lib/inputMode";
-import { loadPref, onPrefChange } from "@lib/preferences";
+import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 
 const log = createLogger("global-keybinds");
 

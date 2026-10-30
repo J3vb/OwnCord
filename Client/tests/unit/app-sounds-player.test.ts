@@ -18,8 +18,8 @@ import {
   stopRingback,
   stopRingChime,
 } from "@lib/notificationSound";
-import { loadAppSoundsGain, soundSwitchOn } from "@lib/soundPrefs";
-import { savePref } from "@lib/preferences";
+import { loadAppSoundsGain, soundSwitchOn } from "@lib/prefs/soundPrefs";
+import { savePref } from "@lib/prefs/preferences";
 
 interface FakeGain {
   readonly connect: ReturnType<typeof vi.fn>;

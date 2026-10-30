@@ -60,7 +60,7 @@ paths at the 640×400 zoom viewport.
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares
 where its `THEMES` entry does not override them, and light's accent fills
 (`body.theme-light`). `theme-neon-glow.css` and the midnight and light entries
-in `lib/themes.ts` `THEMES` override them.
+in `lib/prefs/themes.ts` `THEMES` override them.
 `app/accessibility.css` holds High Contrast. A "surface" is any of
 `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-input`. The values
 are the owner's Q13 direction A, Refined Neon.
@@ -89,7 +89,7 @@ Rules:
 - An input's edge is `1px solid var(--border-control)`; a fill difference
   alone is not a boundary. Placeholders are `--text-muted`.
 - A role colour (server-set) is text only through `readableRoleColor()` in
-  `lib/themes.ts`: the colour where it reads at 4.5:1 on every surface,
+  `lib/prefs/themes.ts`: the colour where it reads at 4.5:1 on every surface,
   otherwise `--text-normal`, with the same math as `--accent-text`. The element
   keeps the raw colour in `data-role-color`, and a theme switch re-clamps it.
 - Style sheets use tokens, not literals: colours from the tables above,
@@ -107,8 +107,8 @@ Rules:
 
 ### Custom accent (Q8)
 
-`applyAccent()` in `Client/src/lib/themes.ts` is the only writer of the
-accent's inline tokens. The math lives in `Client/src/lib/color-contrast.ts`.
+`applyAccent()` in `Client/src/lib/prefs/themes.ts` is the only writer of the
+accent's inline tokens. The math lives in `Client/src/lib/text/colorContrast.ts`.
 
 - **Fills** always take the user's colour.
 - **`--on-accent`** is white or black, whichever contrasts more with the
@@ -194,7 +194,7 @@ Motion is reduced when the in-app **Reduce Motion** toggle is on, or when
 Either source can reduce motion, and neither can force it back on over the
 other. `syncOsMotionListener()` in `lib/os-motion.ts` derives the
 `reduced-motion` class on `<html>` (`applyStoredAppearance()` in
-`lib/appearance.ts` pre-sets it from the manual preference, then calls it), and
+`lib/prefs/appearance.ts` pre-sets it from the manual preference, then calls it), and
 `app/accessibility.css` zeroes animation and transition durations under it.
 Feedback never depends on an animation playing.
 

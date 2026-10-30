@@ -5,7 +5,7 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { createLazyVideoGrid } from "./lazyVideoGrid";

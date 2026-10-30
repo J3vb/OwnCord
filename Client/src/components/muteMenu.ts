@@ -4,8 +4,8 @@
  * menus cannot drift (D26).
  */
 
-import { MUTE_DURATIONS_MS } from "@lib/channel-mutes";
-import { formatClockTime, formatFullDate } from "@lib/formatting";
+import { MUTE_DURATIONS_MS } from "@lib/prefs/channelMutes";
+import { formatClockTime, formatFullDate } from "@lib/text/formatting";
 import { shellText } from "../i18n/shell";
 
 const DURATION_KEYS = {
