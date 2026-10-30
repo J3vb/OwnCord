@@ -124,7 +124,13 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 	if err != nil {
 		return nil, err
 	}
-	results, err = d.attachSearchMentions(ctx, results)
+	return d.enrichSearchResults(ctx, results)
+}
+
+// enrichSearchResults adds mentions, stickers and imported authors to a page
+// of search results.
+func (d *DB) enrichSearchResults(ctx context.Context, results []MessageSearchResult) ([]MessageSearchResult, error) {
+	results, err := d.attachSearchMentions(ctx, results)
 	if err != nil {
 		return nil, err
 	}
