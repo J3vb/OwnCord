@@ -100,6 +100,36 @@ describe("NoiseFloorTracker", () => {
     expect(db(tracker.threshold)).toBeCloseTo(-45, 5);
   });
 
+  it("one thump does not set the voice level, so a voice under it still clears the gate", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-50), 0, 3000);
+    // A desk thump: 150 ms at -6 dBFS.
+    t = feed(tracker, () => rmsAt(-6), t, 150);
+    feed(tracker, () => rmsAt(-50), t, 500);
+    expect(tracker.speechLevel).toBeNull();
+    expect(db(tracker.threshold)).toBeCloseTo(-40, 5);
+    expect(rmsAt(-30)).toBeGreaterThan(tracker.threshold);
+  });
+
+  it("a voice that turns quieter brings the gate back down", () => {
+    const tracker = new NoiseFloorTracker();
+    // Talking with a 100 ms pause back to the room every 1.5 s.
+    const talk = (level: number) => (now: number) => (now % 1500 < 100 ? rmsAt(-55) : rmsAt(level));
+    let t = feed(tracker, () => rmsAt(-55), 0, 3000);
+    t = feed(tracker, talk(-10), t, 3000);
+    // Halfway between -45 (the floor margin) and -25 (15 dB under the voice).
+    expect(db(tracker.threshold)).toBeCloseTo(-35, 0);
+    // The next sentences are 22 dB softer and never clear the gate by the
+    // 6 dB the estimate wants. Two seconds on, the estimate sinks 1.5 dB/s,
+    // and the gate with it, until the soft voice is well over it again.
+    t = feed(tracker, talk(-32), t, 2000);
+    expect(rmsAt(-32)).toBeGreaterThan(tracker.threshold);
+    feed(tracker, talk(-32), t, 8000);
+    expect(db(tracker.speechLevel!)).toBeLessThan(-20);
+    expect(db(tracker.threshold)).toBeLessThan(-38);
+    expect(rmsAt(-32)).toBeGreaterThan(tracker.threshold);
+  });
+
   it("an input-volume change forgets the voice level with the floor", () => {
     const tracker = new NoiseFloorTracker();
     let t = feed(tracker, () => rmsAt(-55), 0, 3000);

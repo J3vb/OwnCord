@@ -69,10 +69,18 @@ describe("migrateVoiceSensitivityScale", () => {
     expect(get("voiceSensitivity")).toBe(50);
   });
 
-  it("marks a fresh profile as on the scale without inventing a value", () => {
+  it("marks a profile on automatic sensitivity as on the scale without inventing a value", () => {
     migrateVoiceSensitivityScale();
     expect(get("voiceSensitivity")).toBeNull();
     expect(get("voiceSensitivityScale")).toBe("db");
+  });
+
+  it("keeps the old default's gate for a manual profile that never moved the slider", () => {
+    set("autoInputSensitivity", false);
+    migrateVoiceSensitivityScale();
+    // The old 50 gated at -26 dBFS; on this scale that is 27, not 50 (-40 dBFS).
+    expect(get("voiceSensitivity")).toBe(legacySensitivityToDbScale(50));
+    expect(vadThresholdDb(get("voiceSensitivity") as number)).toBeCloseTo(-26, 0);
   });
 
   it("leaves a value saved on the scale alone", () => {
