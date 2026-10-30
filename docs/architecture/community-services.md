@@ -125,7 +125,9 @@ permission, and is deleted with the channel or the account (lifecycle row 18e in
 `088_user_storage_quota.sql` adds one nullable column to `user_storage`, `quota_mb`: the
 member's own upload limit, set by a MANAGE_SERVER holder on the admin Storage page. It is
 part of the per-user counter row and shares its ownership, erasure (deleted with the
-account) and backup behaviour; no new data class. Other historical
+account) and backup behaviour; no new data class. **Amended 2026-10-30 (unread
+counts):** `089_messages_live_index.sql` adds the index `idx_messages_channel_live` on
+`messages`; it stores no data of its own, so no table, column or data class. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
