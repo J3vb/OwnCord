@@ -31,6 +31,10 @@ const (
 
 	searchRateLimitPerMinute = 30
 
+	// mediaRateLimitPerMinute covers the gallery's pages and month counts;
+	// a fast scroll asks for a page every few seconds.
+	mediaRateLimitPerMinute = 120
+
 	livekitProxyRateLimitPerMinute = 30
 
 	clientUpdateRateLimitPerMinute = 30
