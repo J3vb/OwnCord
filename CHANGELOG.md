@@ -71,6 +71,10 @@ and only when it changes something a contributor or fork holder must do
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
 - The emoji picker's category buttons (Recent, Smileys, People...) were squashed under a sideways scrollbar in the GIFs/Stickers/Emoji popup. Categories now sit in an icon column on the left, like Discord, and the current one lights up as you scroll.
 
+**Voice (Linux)**
+
+- Linux voice and video move to LiveKit's Rust SDK 0.10.0 and its newer WebRTC build: a full reconnect brings your published microphone, camera and share back, hardware video encoding no longer leaks memory per frame, and a crash path in sending audio is closed. Stereo screen-share audio keeps working.
+
 ### Fixed
 
 **Messages & files**

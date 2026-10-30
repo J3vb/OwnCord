@@ -40,6 +40,9 @@ const {
 } = await import("@lib/net/credentials");
 const { ApiClientError, TransportError } = await import("@lib/api");
 
+// Logger names are taken when the module loads, before the per-test mock clear.
+const loggerCallsAtLoad = [...createLoggerMock.mock.calls];
+
 // saveCredential (called from createUserUpdateCredentialSaver's listener) is
 // fire-and-forget: `void saveCredential(...)`. Its own body has no `await`
 // until the internal dynamic import settles, so a synchronous assertion right
@@ -121,7 +124,7 @@ describe("saveCredential", () => {
   });
 
   it("names its logger 'credentials' so these messages are filterable", () => {
-    expect(createLoggerMock).toHaveBeenCalledWith("credentials");
+    expect(loggerCallsAtLoad).toContainEqual(["credentials"]);
   });
 });
 

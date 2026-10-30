@@ -7,19 +7,21 @@ vi.mock("@lib/net/sessionRegistry", () => ({ registerSessionReset: register }));
 
 import { externalAllowed, requestExternalItem, setExternalConsentChoice } from "./external";
 
+// The module registers when it loads, before the per-test mock clear.
+const registrationsAtLoad = [...register.mock.calls];
+
 describe("external-content consent and the session reset", () => {
   it("registers once, in the cache phase", () => {
-    expect(register).toHaveBeenCalledTimes(1);
-    expect(register).toHaveBeenCalledWith("consent:admitted-items", expect.any(Function), {
-      phase: "cache",
-    });
+    expect(registrationsAtLoad).toEqual([
+      ["consent:admitted-items", expect.any(Function), { phase: "cache" }],
+    ]);
   });
 
   it("forgets admitted items when the reset runs", async () => {
     setExternalConsentChoice("ask");
     await requestExternalItem("url:a");
     expect(externalAllowed("url:a")).toBe(true);
-    const reset = register.mock.calls[0]![1] as () => void;
+    const reset = registrationsAtLoad[0]![1] as () => void;
     reset();
     expect(externalAllowed("url:a")).toBe(false);
   });
