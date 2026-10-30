@@ -11,6 +11,7 @@ const mockIsLinuxDesktop = vi.fn(() => false);
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => mockIsLinuxDesktop(),
   isWindowsDesktop: () => false,
+  canPublishScreen: () => true,
 }));
 vi.mock("@lib/voice/livekitSession", () => ({
   getLocalScreenshareStream: () => ({

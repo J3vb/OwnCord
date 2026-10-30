@@ -3153,6 +3153,89 @@ describe("VideoGrid", () => {
       expect(barButton("camera-device").disabled).toBe(true);
     });
 
+    describe("camera flip", () => {
+      const on = { muted: false, deafened: false, listenOnly: false, camera: true };
+      const off = { ...on, camera: false };
+      const settle = () => new Promise((r) => setTimeout(r, 0));
+
+      it("shows only while the camera is on and the device has both cameras", async () => {
+        const available = vi.fn().mockResolvedValue(true);
+        grid.setCallbacks({
+          callControls: { ...controls(), cameraFlip: { available, flip: vi.fn() } },
+        });
+        grid.setExitVisible(true);
+        expect(barButton("camera-flip").hidden).toBe(true);
+        expect(available).not.toHaveBeenCalled();
+
+        grid.setCallState(on);
+        await settle();
+        expect(barButton("camera-flip").hidden).toBe(false);
+        expect(barButton("camera-flip").getAttribute("aria-label")).toBe("Flip camera");
+
+        grid.setCallState(off);
+        expect(barButton("camera-flip").hidden).toBe(true);
+      });
+
+      it("stays hidden on a device without both cameras, and asks again next camera-on", async () => {
+        const available = vi.fn().mockResolvedValue(false);
+        grid.setCallbacks({
+          callControls: { ...controls(), cameraFlip: { available, flip: vi.fn() } },
+        });
+        grid.setExitVisible(true);
+        grid.setCallState(on);
+        await settle();
+        expect(barButton("camera-flip").hidden).toBe(true);
+
+        grid.setCallState(off);
+        available.mockResolvedValue(true);
+        grid.setCallState(on);
+        await settle();
+        expect(available).toHaveBeenCalledTimes(2);
+        expect(barButton("camera-flip").hidden).toBe(false);
+      });
+
+      it("drops an answer that lands after the camera went off and on again", async () => {
+        const answers: Array<(ok: boolean) => void> = [];
+        const available = vi.fn(() => new Promise<boolean>((r) => answers.push(r)));
+        grid.setCallbacks({
+          callControls: { ...controls(), cameraFlip: { available, flip: vi.fn() } },
+        });
+        grid.setExitVisible(true);
+        grid.setCallState(on);
+        grid.setCallState(off);
+        grid.setCallState(on);
+        expect(available).toHaveBeenCalledTimes(2);
+
+        answers[1]!(true);
+        await settle();
+        answers[0]!(false);
+        await settle();
+        expect(barButton("camera-flip").hidden).toBe(false);
+      });
+
+      it("ignores taps while a flip is still switching", async () => {
+        let finish!: () => void;
+        const flip = vi.fn(() => new Promise<void>((r) => (finish = r)));
+        grid.setCallbacks({
+          callControls: { ...controls(), cameraFlip: { available: async () => true, flip } },
+        });
+        grid.setExitVisible(true);
+        grid.setCallState(on);
+        await settle();
+
+        barButton("camera-flip").click();
+        expect(barButton("camera-flip").disabled).toBe(true);
+        barButton("camera-flip").click();
+        expect(flip).toHaveBeenCalledTimes(1);
+
+        finish();
+        await settle();
+        expect(barButton("camera-flip").disabled).toBe(false);
+        barButton("camera-flip").click();
+        expect(flip).toHaveBeenCalledTimes(2);
+      });
+    });
+
     it("builds the bar from callbacks set after the call view opened", () => {
       grid.setExitVisible(true);
       expect(bar()).toBeNull();

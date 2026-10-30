@@ -15,6 +15,7 @@ import (
 // CURRENTLY registered receives the frame; the one it replaced gets
 // nothing further, and no other connected user does either.
 func TestAppeal_StatusFrameReachesAppellantAndDeviceReplacement(t *testing.T) {
+	t.Parallel()
 	h := newEmitTestHub()
 	appellant := registerEmitTestClient(h, 42, 0)
 	bystander := registerEmitTestClient(h, 99, 0)

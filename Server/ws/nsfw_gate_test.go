@@ -349,6 +349,7 @@ func TestNSFW_UnacknowledgedGetsNoContentOnAnyPath(t *testing.T) {
 // to evict the seeded seq 98-100 window before the second dial, which would
 // make the control fail for a reason that has nothing to do with the gate.
 func TestReconnect_ReplaySkipsUnacknowledgedLabelledContent(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T, acknowledge bool) (hub *Hub, token string, chID int64) {
 		t.Helper()
 		database := newTeardownTestDB(t)
@@ -845,6 +846,7 @@ func TestNSFW_UnlabellingDeletesAcknowledgementsAndRelabellingReprompts(t *testi
 // back with the authoritative (revoked) nsfw_acknowledged state, with no
 // nsfw_ack frame involved at all.
 func TestNSFW_RevokeWhileDisconnectedForcesFullReadyOnResume(t *testing.T) {
+	t.Parallel()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 

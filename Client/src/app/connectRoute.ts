@@ -36,7 +36,8 @@ const log = createLogger("main");
  * Mounts the connect page and returns [page, rerunHealth, applyInvite] as a
  * tuple, not an object: object keys survive minification, and this runs in the
  * startup chunk. `page.destroy` tears the route down; `rerunHealth` re-checks
- * the profiles' servers; `applyInvite` pre-fills the register form. A link that
+ * the profiles' servers and, given the host of a just-trusted certificate,
+ * resubmits a sign-in that certificate refused; `applyInvite` pre-fills the register form. A link that
  * arrived before the page mounted is taken from `takePendingInvite`, which
  * hands it over once and forgets it.
  */
@@ -47,7 +48,11 @@ export function renderConnect(
   renderRecovery: RenderRecovery,
   handleUnauthorized: () => void,
   takePendingInvite: () => { code: string; host?: string } | null,
-): readonly [{ destroy(): void }, () => void, (code: string, host?: string) => void] {
+): readonly [
+  { destroy(): void },
+  (acceptedHost?: string) => void,
+  (code: string, host?: string) => void,
+] {
   // Track partial auth state for TOTP flow
   let pendingTotpHost = "";
   let pendingTotpPartialToken = "";
@@ -362,8 +367,12 @@ export function renderConnect(
   return [
     page,
     // A health-refresh hook so trusting a first-use certificate can re-check
-    // the now-reachable server without a full page navigation.
-    () => runHealthChecks(connectPage, getProfileList(), pageOwner),
+    // the now-reachable server without a full page navigation, and carry on
+    // with the sign-in that certificate refused.
+    (acceptedHost) => {
+      runHealthChecks(connectPage, getProfileList(), pageOwner);
+      if (acceptedHost !== undefined) connectPage.resubmitAfterCertAccept(acceptedHost);
+    },
     (code, host) => connectPage.applyInviteLink(code, host),
   ];
 }

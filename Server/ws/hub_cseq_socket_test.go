@@ -173,6 +173,7 @@ func assertContiguousFrom(t *testing.T, got []uint64, first uint64) {
 // 1, across the handshake-to-writePump handover, and a frame for a channel the
 // connection is not subscribed to uses no number.
 func TestCseqSocket_ReplayThenLiveContiguous(t *testing.T) {
+	t.Parallel()
 	f := newCseqSocketFixture(t)
 	f.pushReplay(98, 99, 100)
 	r := startWireReader(t, f.dial(t, 97))
@@ -192,6 +193,7 @@ func TestCseqSocket_ReplayThenLiveContiguous(t *testing.T) {
 
 // A new socket counts from 1 again.
 func TestCseqSocket_RestartsPerSocket(t *testing.T) {
+	t.Parallel()
 	f := newCseqSocketFixture(t)
 	first := f.dial(t, 0)
 	r1 := startWireReader(t, first)

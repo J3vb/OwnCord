@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { bindVideoZoom, createZoomPan, type ZoomPanOptions } from "../../src/lib/ui/zoomPan";
+import {
+  bindTouchZoom,
+  bindVideoZoom,
+  createZoomPan,
+  type ZoomPanOptions,
+} from "../../src/lib/ui/zoomPan";
 
 function view(overrides: Partial<ZoomPanOptions> = {}) {
   const apply = vi.fn();
@@ -233,5 +238,68 @@ describe("bindVideoZoom", () => {
     expect(el.classList.contains("video-panning")).toBe(false);
     el.dispatchEvent(wheel(-1, 0, 0, { ctrlKey: true }));
     expect(zp.scale).toBe(2);
+  });
+});
+
+describe("bindTouchZoom", () => {
+  function finger(type: string, id: number, x: number, y: number, pointerType = "touch"): Event {
+    const e = new MouseEvent(type, { clientX: x, clientY: y, bubbles: true });
+    Object.defineProperty(e, "pointerId", { value: id });
+    Object.defineProperty(e, "pointerType", { value: pointerType });
+    return e;
+  }
+
+  function setup() {
+    const { zp } = view();
+    const el = document.createElement("div");
+    const owner = new AbortController();
+    bindTouchZoom(el, zp, owner.signal);
+    return { zp, el, owner };
+  }
+
+  it("two fingers moving apart zoom in by the change in their distance", () => {
+    const { zp, el } = setup();
+    el.dispatchEvent(finger("pointerdown", 1, 90, 100));
+    el.dispatchEvent(finger("pointerdown", 2, 110, 100));
+    el.dispatchEvent(finger("pointermove", 2, 130, 100));
+    // 20 px apart became 40 px: twice the scale.
+    expect(zp.scale).toBeCloseTo(2);
+  });
+
+  it("one finger pans only once zoomed in", () => {
+    const { zp, el } = setup();
+    el.dispatchEvent(finger("pointerdown", 1, 100, 100));
+    el.dispatchEvent(finger("pointermove", 1, 140, 100));
+    expect(zp.x).toBe(0);
+    el.dispatchEvent(finger("pointerup", 1, 140, 100));
+
+    zp.setScale(3);
+    el.dispatchEvent(finger("pointerdown", 1, 100, 100));
+    el.dispatchEvent(finger("pointermove", 1, 140, 90));
+    expect(zp.x).toBe(40);
+    expect(zp.y).toBe(-10);
+  });
+
+  it("lifting one finger of a pinch ends it, and a mouse never pinches", () => {
+    const { zp, el } = setup();
+    el.dispatchEvent(finger("pointerdown", 1, 90, 100));
+    el.dispatchEvent(finger("pointerdown", 2, 110, 100));
+    el.dispatchEvent(finger("pointerup", 2, 110, 100));
+    el.dispatchEvent(finger("pointermove", 1, 50, 100));
+    expect(zp.scale).toBe(1);
+
+    el.dispatchEvent(finger("pointerdown", 7, 90, 100, "mouse"));
+    el.dispatchEvent(finger("pointermove", 7, 200, 100, "mouse"));
+    expect(zp.scale).toBe(1);
+    expect(zp.x).toBe(0);
+  });
+
+  it("stops listening when its signal aborts", () => {
+    const { zp, el, owner } = setup();
+    owner.abort();
+    el.dispatchEvent(finger("pointerdown", 1, 90, 100));
+    el.dispatchEvent(finger("pointerdown", 2, 110, 100));
+    el.dispatchEvent(finger("pointermove", 2, 130, 100));
+    expect(zp.scale).toBe(1);
   });
 });

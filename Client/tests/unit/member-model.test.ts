@@ -314,3 +314,320 @@ describe("memberModel with several roles", () => {
     expect(flattenModel(next, "").map((i) => i.key)).not.toContain("g:staff");
   });
 });
+
+describe("memberModel without a server role list", () => {
+  it("falls back to the seeded roles, in rank order, with their theme colours", () => {
+    const members = mapOf([
+      member(1, { role: "member", username: "m" }),
+      member(2, { role: "moderator", username: "mo" }),
+      member(3, { role: "admin", username: "ad" }),
+      member(4, { role: "owner", username: "ow" }),
+    ]);
+    const items = buildItems(members, [], "");
+    expect(items.map((i) => i.key)).toEqual([
+      "g:owner",
+      "u:4",
+      "g:admin",
+      "u:3",
+      "g:moderator",
+      "u:2",
+      "g:member",
+      "u:1",
+    ]);
+    expect(
+      items.filter((i) => i.kind === "header").map((i) => i.kind === "header" && i.text),
+    ).toEqual(["OWNER — 1", "ADMIN — 1", "MODERATOR — 1", "MEMBER — 1"]);
+    const colours = items.flatMap((i) => (i.kind === "row" ? [i.colorVar] : []));
+    expect(colours).toEqual([
+      "var(--role-owner, #e74c3c)",
+      "var(--role-admin, #f39c12)",
+      "var(--role-mod, #2ecc71)",
+      "var(--role-member, #949ba4)",
+    ]);
+  });
+
+  it("lists the member group before a role it does not know", () => {
+    const members = mapOf([
+      member(1, { role: "ghost", username: "g" }),
+      member(2, { role: "member", username: "m" }),
+    ]);
+    const items = buildItems(members, [], "");
+    expect(items.map((i) => i.key)).toEqual(["g:member", "u:2", "g:ghost", "u:1"]);
+  });
+});
+
+describe("memberModel ordering and search text", () => {
+  it("treats names that differ only by case or accent as equal and falls back to the id", () => {
+    const byCase = mapOf([member(1, { username: "Bob" }), member(2, { username: "bob" })]);
+    expect(names(byCase)).toEqual(["g:member", "u:1", "u:2"]);
+    const byAccent = mapOf([member(1, { username: "résumé" }), member(2, { username: "resume" })]);
+    expect(names(byAccent)).toEqual(["g:member", "u:1", "u:2"]);
+  });
+
+  it("sorts by display name when one is set", () => {
+    const members = mapOf([
+      member(1, { username: "aaa", displayName: "Zoe" }),
+      member(2, { username: "zzz", displayName: "Amy" }),
+    ]);
+    expect(names(members)).toEqual(["g:member", "u:2", "u:1"]);
+  });
+
+  it("matches ignoring case, accents and a leading @", () => {
+    const members = mapOf([
+      member(1, { username: "user1", displayName: "José" }),
+      member(2, { username: "other" }),
+    ]);
+    const rows = (query: string): string[] =>
+      buildItems(members, ROLES, query).flatMap((i) => (i.kind === "row" ? [i.key] : []));
+    expect(rows("josé")).toEqual(["u:1"]);
+    expect(rows("JOSE")).toEqual(["u:1"]);
+    expect(rows("@ jose")).toEqual(["u:1"]);
+    expect(rows("José")).toEqual(["u:1"]);
+  });
+
+  it("strips only a leading @ from the query", () => {
+    const members = mapOf([member(1, { username: "a@b" }), member(2, { username: "ab" })]);
+    const rows = (query: string): string[] =>
+      buildItems(members, ROLES, query).flatMap((i) => (i.kind === "row" ? [i.key] : []));
+    expect(rows("a@b")).toEqual(["u:1"]);
+    expect(rows("@ab")).toEqual(["u:2"]);
+  });
+
+  it("does not fold ß into ss", () => {
+    const members = mapOf([member(1, { username: "Straße" })]);
+    expect(buildItems(members, ROLES, "strasse")).toMatchObject([{ kind: "empty" }]);
+    expect(buildItems(members, ROLES, "straße")).toMatchObject([
+      { kind: "header" },
+      { key: "u:1" },
+    ]);
+  });
+
+  it("answers an empty list and a search with no match with the same empty row", () => {
+    const members = mapOf([member(1)]);
+    const none = buildItems(members, ROLES, "zzz");
+    expect(none).toHaveLength(1);
+    expect(none[0]).toMatchObject({ kind: "empty", key: "empty" });
+    expect(none[0]).toMatchObject({ text: "No members match your search" });
+    const nobody = buildItems(new Map(), ROLES, "");
+    expect(nobody[0]).toMatchObject({ kind: "empty", text: "No members online" });
+  });
+});
+
+describe("memberModel role resolution", () => {
+  const role = (id: number, name: string, over: Partial<ReadyRole> = {}): ReadyRole => ({
+    id,
+    name,
+    color: null,
+    permissions: 0,
+    ...over,
+  });
+
+  const colourOf = (
+    members: Map<number, Member>,
+    roles: readonly ReadyRole[],
+    id: number,
+  ): string | undefined => {
+    const row = buildItems(members, roles, "").find((i) => i.key === `u:${id}`);
+    return row?.kind === "row" ? row.colorVar : undefined;
+  };
+
+  it("does not group by a role marked as not hoisted", () => {
+    const roles = [
+      role(1, "Staff", { position: 30, hoist: false }),
+      role(2, "Helper", { position: 20, hoist: true }),
+    ];
+    const members = mapOf([member(1, { role: "staff", roleIds: [1, 2] })]);
+    expect(buildItems(members, roles, "").map((i) => i.key)).toEqual(["g:helper", "u:1"]);
+    const onlyUnhoisted = mapOf([member(1, { role: "staff", roleIds: [1] })]);
+    expect(buildItems(onlyUnhoisted, roles, "").map((i) => i.key)).toEqual(["online", "u:1"]);
+  });
+
+  it("falls back to the member's role name when none of its role ids are known", () => {
+    const roles = [role(1, "Admin", { color: "#ff0000" }), role(2, "Member")];
+    const members = mapOf([
+      member(1, { role: "admin", roleIds: [999] }),
+      member(2, { role: "admin", roleIds: [] }),
+    ]);
+    expect(buildItems(members, roles, "").map((i) => i.key)).toEqual(["g:admin", "u:1", "u:2"]);
+    expect(colourOf(members, roles, 1)).toBe("#ff0000");
+  });
+
+  it("ranks roles without a position by their place in the list, first highest", () => {
+    const roles = [role(1, "Owner"), role(2, "Staff"), role(3, "Crew")];
+    const lowFirst = mapOf([member(1, { role: "crew", roleIds: [3, 2] })]);
+    expect(buildItems(lowFirst, roles, "").map((i) => i.key)).toEqual(["g:staff", "u:1"]);
+    const highFirst = mapOf([member(1, { role: "owner", roleIds: [1, 3] })]);
+    expect(buildItems(highFirst, roles, "").map((i) => i.key)).toEqual(["g:owner", "u:1"]);
+  });
+
+  it.each([
+    ["lowest first", [3, 2, 1]],
+    ["highest first", [1, 2, 3]],
+    ["middle first", [2, 1, 3]],
+  ])("groups under the top hoisted role whatever the id order (%s)", (_label, roleIds) => {
+    const roles = [
+      role(1, "Owner", { position: 50 }),
+      role(2, "Staff", { position: 40 }),
+      role(3, "Crew", { position: 30 }),
+    ];
+    const members = mapOf([member(1, { role: "crew", roleIds })]);
+    expect(buildItems(members, roles, "").map((i) => i.key)).toEqual(["g:owner", "u:1"]);
+  });
+
+  it("keeps the first of two hoisted roles with the same rank", () => {
+    const roles = [role(1, "Alpha", { position: 30 }), role(2, "Beta", { position: 30 })];
+    const ab = mapOf([member(1, { role: "alpha", roleIds: [1, 2] })]);
+    expect(buildItems(ab, roles, "").map((i) => i.key)).toEqual(["g:alpha", "u:1"]);
+    const ba = mapOf([member(1, { role: "beta", roleIds: [2, 1] })]);
+    expect(buildItems(ba, roles, "").map((i) => i.key)).toEqual(["g:beta", "u:1"]);
+  });
+
+  it("colours a name by the highest-ranked role that has a colour", () => {
+    const roles = [
+      role(1, "Top", { position: 50 }),
+      role(2, "Mid", { position: 40, color: "#222222" }),
+      role(3, "Low", { position: 30, color: "#333333" }),
+      role(4, "Twin", { position: 40, color: "#444444" }),
+    ];
+    const m = (id: number, roleIds: number[]): Member => member(id, { role: "top", roleIds });
+    const members = mapOf([
+      m(1, [3, 2]),
+      m(2, [2, 3]),
+      m(3, [1, 3]),
+      m(4, [3, 1, 2]),
+      m(5, [2, 4]),
+      m(6, [4, 2]),
+    ]);
+    expect(colourOf(members, roles, 1)).toBe("#222222");
+    expect(colourOf(members, roles, 2)).toBe("#222222");
+    // An uncoloured higher role does not hide a coloured lower one.
+    expect(colourOf(members, roles, 3)).toBe("#333333");
+    expect(colourOf(members, roles, 4)).toBe("#222222");
+    // Equal rank: the first held wins.
+    expect(colourOf(members, roles, 5)).toBe("#222222");
+    expect(colourOf(members, roles, 6)).toBe("#444444");
+  });
+
+  it("with no coloured role, uses the seeded colour of the top held role", () => {
+    const roles = [
+      role(1, "Owner", { position: 50, hoist: false }),
+      role(2, "Admin", { position: 40, hoist: false }),
+      role(3, "Crew", { position: 30, hoist: false }),
+    ];
+    const m = (id: number, roleIds: number[]): Member => member(id, { role: "crew", roleIds });
+    const members = mapOf([m(1, [3, 2, 1]), m(2, [1, 2, 3]), m(3, [3, 2]), m(4, [2, 3])]);
+    expect(colourOf(members, roles, 1)).toBe("var(--role-owner, #e74c3c)");
+    expect(colourOf(members, roles, 2)).toBe("var(--role-owner, #e74c3c)");
+    expect(colourOf(members, roles, 3)).toBe("var(--role-admin, #f39c12)");
+    expect(colourOf(members, roles, 4)).toBe("var(--role-admin, #f39c12)");
+  });
+
+  it("breaks a tie between equally ranked uncoloured roles with the first held", () => {
+    const roles = [
+      role(1, "Admin", { position: 40, hoist: false }),
+      role(2, "Owner", { position: 40, hoist: false }),
+    ];
+    const members = mapOf([member(1, { role: "admin", roleIds: [1, 2] })]);
+    expect(colourOf(members, roles, 1)).toBe("var(--role-admin, #f39c12)");
+  });
+
+  it("uses the first role's colour when two roles share a name", () => {
+    const roles = [role(1, "Mod", { color: "#111111" }), role(2, "mod", { color: "#222222" })];
+    const members = mapOf([member(1, { role: "mod" })]);
+    expect(colourOf(members, roles, 1)).toBe("#111111");
+  });
+
+  it("renders one group for two roles that share a name", () => {
+    const roles = [role(1, "Mod"), role(2, "mod")];
+    const members = mapOf([member(1, { role: "mod" })]);
+    expect(buildItems(members, roles, "").map((i) => i.key)).toEqual(["g:mod", "u:1"]);
+  });
+
+  it("sorts the Online group by name", () => {
+    const roles = [role(1, "Crew", { hoist: false })];
+    const members = mapOf([
+      member(1, { username: "carol", role: "crew", roleIds: [1] }),
+      member(2, { username: "alice", role: "crew", roleIds: [1] }),
+      member(3, { username: "bob", role: "crew", roleIds: [1] }),
+    ]);
+    expect(buildItems(members, roles, "").map((i) => i.key)).toEqual([
+      "online",
+      "u:2",
+      "u:3",
+      "u:1",
+    ]);
+  });
+});
+
+describe("memberModel incremental update bounds", () => {
+  const SIZE = 2000;
+  const sameGroup = (): Map<number, Member> =>
+    mapOf(
+      Array.from({ length: SIZE }, (_, i) =>
+        member(i + 1, { username: `n${String(i).padStart(5, "0")}` }),
+      ),
+    );
+
+  it.each([
+    ["64 changed members are repositioned one by one", MAX_DELTA, true],
+    ["65 changed members rebuild the groups", MAX_DELTA + 1, false],
+  ])("%s", (_label, count, incremental) => {
+    const members = sameGroup();
+    const counter = countingCompare();
+    const model = buildModel(members, ROLES, counter.compare);
+    const next = new Map(members);
+    for (let id = 1; id <= count; id++) next.set(id, { ...members.get(id)!, avatar: "a.png" });
+    const before = counter.calls();
+    const updated = updateModel(model, next, ROLES, counter.compare);
+    const used = counter.calls() - before;
+    // Sorting 2,000 entries, even already in order, takes n-1 comparisons; a delta takes ~2·log2(n) each.
+    if (incremental) expect(used).toBeLessThan(SIZE - 200);
+    else expect(used).toBeGreaterThanOrEqual(SIZE - 1);
+    expect(flattenModel(updated, "")).toEqual(buildItems(next, ROLES, ""));
+  });
+
+  it.each([
+    ["64 removed members are spliced out one by one", MAX_DELTA, true],
+    ["65 removed members rebuild the groups", MAX_DELTA + 1, false],
+  ])("%s", (_label, count, incremental) => {
+    const members = sameGroup();
+    const counter = countingCompare();
+    const model = buildModel(members, ROLES, counter.compare);
+    const next = new Map(members);
+    for (let id = 1; id <= count; id++) next.delete(id);
+    const before = counter.calls();
+    const updated = updateModel(model, next, ROLES, counter.compare);
+    const used = counter.calls() - before;
+    if (incremental) expect(used).toBeLessThan(SIZE - 200);
+    else expect(used).toBeGreaterThanOrEqual(SIZE - count - 1);
+    expect(flattenModel(updated, "")).toEqual(buildItems(next, ROLES, ""));
+  });
+
+  it("a single removed member is not enough to rebuild", () => {
+    const members = sameGroup();
+    const counter = countingCompare();
+    const model = buildModel(members, ROLES, counter.compare);
+    const next = new Map(members);
+    next.delete(1000);
+    const before = counter.calls();
+    updateModel(model, next, ROLES, counter.compare);
+    expect(counter.calls() - before).toBeLessThan(40);
+  });
+
+  it("finds a member among equally ordered ones when it moves to another group", () => {
+    // Everyone compares equal, so the binary search lands on the first of them.
+    const tie: (a: Entry, b: Entry) => number = () => 0;
+    const members = mapOf([member(1), member(2), member(3)]);
+    const model = buildModel(members, ROLES, tie);
+    const next = new Map(members);
+    next.set(3, { ...members.get(3)!, status: "offline" });
+    const updated = updateModel(model, next, ROLES, tie);
+    expect(flattenModel(updated, "").map((i) => i.key)).toEqual([
+      "g:member",
+      "u:1",
+      "u:2",
+      "offline",
+      "u:3",
+    ]);
+  });
+});

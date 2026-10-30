@@ -49,6 +49,7 @@ func TestMultiDevice_ClosingTheActiveDeviceRebroadcastsPresence(t *testing.T) {
 
 // A device whose leaving changes nothing the others see sends no frame.
 func TestMultiDevice_ClosingAnUnseenDeviceSendsNothing(t *testing.T) {
+	t.Parallel()
 	f := newMDFix(t)
 	a := f.dev("session-a", f.text)
 	a.c.setLivePresence(db.StatusIdle, nil, "")
@@ -70,6 +71,7 @@ func TestMultiDevice_ClosingAnUnseenDeviceSendsNothing(t *testing.T) {
 // An invisible user's remaining devices hear the change; other members get
 // nothing, since a frame would show them the user is online.
 func TestMultiDevice_ClosingADeviceWhileInvisibleTellsOnlyTheUser(t *testing.T) {
+	t.Parallel()
 	f := newMDFix(t)
 	f.hub.gameActivity.on.Store(true)
 	a := f.dev("session-a", f.text)

@@ -934,6 +934,41 @@ export interface ChannelMediaQuery {
   readonly limit?: number;
 }
 
+/** GET /users/me/storage: the caller's upload usage; `quota_bytes` 0 means no limit. */
+export interface UserStorage {
+  readonly used_bytes: number;
+  readonly quota_bytes: number;
+}
+
+/** Where one of the caller's uploads lives; only the first three can be removed. */
+export type UserUploadState =
+  "message" | "deleted" | "pending" | "avatar" | "banner" | "group_icon";
+
+/** One of the caller's uploaded files and what holds it. */
+export interface UserUploadItem {
+  readonly attachment: Attachment;
+  /** Upload time, "YYYY-MM-DD HH:MM:SS" UTC. */
+  readonly uploaded_at: string;
+  readonly channel_id: number | null;
+  readonly message_id: number | null;
+  readonly state: UserUploadState;
+  readonly removable: boolean;
+}
+
+/** GET /users/me/uploads. `next_cursor` is opaque and omitted on the last page. */
+export interface UserUploadsPage {
+  readonly items: readonly UserUploadItem[];
+  readonly next_cursor?: string;
+}
+
+export interface UserUploadsQuery {
+  readonly sort?: "newest" | "largest";
+  /** File name contains. */
+  readonly q?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+}
+
 /** GET /channels/{id}/threads. `next_before` is opaque and "" on the last page. */
 export interface ThreadListResponse {
   readonly threads: readonly ThreadInfo[];
@@ -1026,6 +1061,12 @@ export interface ChatEditedPayload {
   readonly mentions_here?: boolean;
   readonly kind?: string;
   readonly call?: CallInfo;
+  /**
+   * The message's full remaining attachment list, `[]` when none are left.
+   * Present when a file was removed from the message; absent on a text edit,
+   * which leaves the attachments alone.
+   */
+  readonly attachments?: readonly Attachment[];
 }
 
 export interface ChatDeletedPayload {

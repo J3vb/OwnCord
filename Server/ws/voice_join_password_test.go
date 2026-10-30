@@ -274,6 +274,7 @@ func TestVoiceJoinPassword_BypassHoldersJoinWithoutPassword(t *testing.T) {
 }
 
 func TestVoiceJoinPassword_RateLimitedPerUserAndChannel(t *testing.T) {
+	t.Parallel()
 	hub, database, limiter := newPasswordHub(t)
 	chanID := seedVoiceChan(t, database, "pw-limit")
 	otherID := seedVoiceChan(t, database, "pw-limit-other")
@@ -396,6 +397,7 @@ func TestVoiceJoinPassword_PayloadsNeverCarryTheHash(t *testing.T) {
 
 // Attempts on different channels draw on one per-member budget.
 func TestVoiceJoinPassword_PerUserBudgetSpansChannels(t *testing.T) {
+	t.Parallel()
 	hub, database, limiter := newPasswordHub(t)
 	a := seedVoiceChan(t, database, "pw-user-a")
 	b := seedVoiceChan(t, database, "pw-user-b")

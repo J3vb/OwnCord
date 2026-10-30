@@ -54,6 +54,7 @@ func drainFor(ch <-chan float64, quiet time.Duration) []float64 {
 // from the graceful stop; a client must see one notice for the same reason
 // inside the dedupe window, while a different reason or a cancel still goes out.
 func TestBroadcastServerRestart_SameReasonWithinWindowIsSentOnce(t *testing.T) {
+	t.Parallel()
 	database := openServeTestDB(t)
 	hub := newTestHubDeps(t, database, auth.NewRateLimiter(), nil)
 	go hub.Run()

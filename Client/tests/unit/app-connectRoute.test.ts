@@ -89,6 +89,7 @@ const PAGE_METHODS = [
   "getRememberPassword",
   "getAutoConnect",
   "getPassword",
+  "resubmitAfterCertAccept",
   "destroy",
 ];
 
@@ -258,6 +259,14 @@ describe("renderConnect", () => {
         [{ id: "listed" }],
         expect.anything(),
       );
+      expect(hoisted.page["resubmitAfterCertAccept"]).not.toHaveBeenCalled();
+    });
+
+    it("rerunHealth with a trusted host also resubmits the sign-in it refused", () => {
+      const [, rerunHealth] = mount();
+      rerunHealth("chat.example:8443");
+      expect(hoisted.runHealthChecks).toHaveBeenCalledTimes(1);
+      expect(hoisted.page["resubmitAfterCertAccept"]).toHaveBeenCalledWith("chat.example:8443");
     });
   });
 

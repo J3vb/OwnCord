@@ -48,6 +48,7 @@ import {
 } from "@lib/prefs/keybinds";
 import { inputMode } from "@lib/ui/inputMode";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
+import { canPublishScreen } from "../../features/voice/native/platform";
 
 const log = createLogger("global-keybinds");
 
@@ -278,9 +279,7 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
         runGlobal(e, "toggle-camera", handlers.onToggleCamera);
         break;
       case "toggleScreenshare":
-        if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
-          break;
-        }
+        if (!canPublishScreen()) break;
         runGlobal(e, "toggle-screenshare", () => handlers.onToggleScreenshare?.());
         break;
       case "disconnect":

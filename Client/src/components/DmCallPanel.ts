@@ -46,6 +46,7 @@ import type { GridPerson, VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
 import { shareBlockReason } from "../features/voice/shareGate";
+import { canPublishScreen } from "../features/voice/native/platform";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -514,7 +515,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       ),
     };
     appendChildren(bar, controls.mute!, controls.deafen!, controls.camera!);
-    if (!(__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function")) {
+    if (canPublishScreen()) {
       bar.appendChild(controls.share!);
     }
     if (!compact)

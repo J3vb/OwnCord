@@ -1491,6 +1491,8 @@ ul.md-list-nested {
   align-items: center;
   justify-content: center;
   cursor: zoom-in;
+  /* Pinch and drag go to the viewer's own zoom (bindTouchZoom). */
+  touch-action: none;
   animation: fadeIn 0.2s ease;
 }
 .image-lightbox.dragging {
