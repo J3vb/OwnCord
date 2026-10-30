@@ -28,6 +28,7 @@ import {
   type VoiceModMenuOptions,
 } from "../channel-sidebar/volumeMenu";
 import { voiceText as t } from "../../i18n/voice";
+import { isAndroidApp } from "../../features/voice/native/platform";
 
 export interface TileMenuOptions {
   readonly x: number;
@@ -280,14 +281,19 @@ function buildTileMenu(menu: HTMLElement, opts: TileMenuOptions, closeMenu: () =
       closeMenu,
       view.onFullscreen,
     ),
-    actionItem(
-      view.poppedOut ? t("tile.popIn") : t("tile.popOut"),
-      "popout",
-      closeMenu,
-      view.onPopout,
-    ),
-    actionItem(t("tile.stopWatching"), "stop-watching", closeMenu, opts.onStopWatching),
   );
+  // The Android app has one window, so there is nothing to pop out to.
+  if (!isAndroidApp()) {
+    menu.append(
+      actionItem(
+        view.poppedOut ? t("tile.popIn") : t("tile.popOut"),
+        "popout",
+        closeMenu,
+        view.onPopout,
+      ),
+    );
+  }
+  menu.append(actionItem(t("tile.stopWatching"), "stop-watching", closeMenu, opts.onStopWatching));
 
   if (person?.moderation !== undefined) appendVoiceModeration(menu, person.moderation, closeMenu);
 }

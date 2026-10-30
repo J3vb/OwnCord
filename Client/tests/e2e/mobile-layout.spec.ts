@@ -217,6 +217,33 @@ for (const profile of PROFILES) {
       await expect(overlay).toHaveClass(/open/);
     });
 
+    test("settings has a Keybinds tab only outside the Android app", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await page.locator("button[aria-label='Settings']").click();
+      const overlay = page.locator("[data-testid='settings-overlay']");
+      await expect(overlay).toHaveClass(/open/);
+      await expect(
+        overlay.locator(".settings-nav-item[role='tab']", { hasText: "Appearance" }),
+      ).toBeInViewport();
+      const keybinds = overlay.locator(".settings-nav-item[role='tab']", { hasText: "Keybinds" });
+      // The Pixel 7 profile has an Android user agent and the Tauri mock, which is the app.
+      await expect(keybinds).toHaveCount(profile.name === "Pixel 7" ? 0 : 1);
+    });
+
+    test("My uploads opens its section", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await page.locator("button[aria-label='Settings']").click();
+      const overlay = page.locator("[data-testid='settings-overlay']");
+      await expect(overlay).toHaveClass(/open/);
+      await expect(overlay.locator(".settings-content")).toBeHidden();
+
+      await overlay.locator(".settings-nav-item[role='tab']", { hasText: "My uploads" }).click();
+      await expect(overlay.locator(".settings-content h1")).toHaveText("My uploads");
+      await expect(overlay.locator("[data-testid='settings-back']")).toBeVisible();
+    });
+
     test("long-press on a message opens the actions sheet, and only one", async ({ page }) => {
       await signIn(page);
       await holdFinger(page, "[data-testid='message-101'] .msg-text", 800);

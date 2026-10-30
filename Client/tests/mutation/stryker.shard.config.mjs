@@ -26,6 +26,7 @@ export const shards = {
     "src/features/voice/e2eeIdentity.ts",
     "src/features/voice/e2eeEpoch.ts",
     "src/features/voice/native/platform.ts",
+    "src/lib/hostPlatform.ts",
     "src/features/voice/native/nativeRoom.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/native/videoCodecs.ts",

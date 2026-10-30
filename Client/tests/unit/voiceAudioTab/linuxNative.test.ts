@@ -70,6 +70,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     vi.doMock("@lib/logger", () => appLogger);
     vi.doMock("../../../src/features/voice/native/platform", () => ({
       isLinuxDesktop: () => true,
+      isAndroidApp: () => false,
     }));
     vi.doMock("../../../src/features/voice/native/devices", () => ({
       nativeAudioDevices: async (kind: string) =>

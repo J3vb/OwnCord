@@ -32,7 +32,7 @@ import { viewersLabel } from "./video-grid/viewers";
 import type { StreamInfo } from "./video-grid/streamInfo";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volumeMenu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
-import { canPublishScreen } from "../features/voice/native/platform";
+import { canPublishScreen, isAndroidApp } from "../features/voice/native/platform";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import {
   openPopout,
@@ -1206,17 +1206,20 @@ export function createVideoGrid(): VideoGridComponent {
       btn.addEventListener("click", () => setView(key, !viewOn[key]));
       bar.appendChild(btn);
     }
-    popBtn = createElement("button", {
-      type: "button",
-      class: "video-grid__view",
-      "data-grid-control": "popout",
-    });
-    popBtn.appendChild(createIcon("external-link", 18));
-    popBtn.addEventListener("click", () => {
-      if (callPop === null) popOutCall();
-      else closeCallPopout(true);
-    });
-    bar.appendChild(popBtn);
+    // The Android app has one window, so there is nothing to pop out to.
+    if (!isAndroidApp()) {
+      popBtn = createElement("button", {
+        type: "button",
+        class: "video-grid__view",
+        "data-grid-control": "popout",
+      });
+      popBtn.appendChild(createIcon("external-link", 18));
+      popBtn.addEventListener("click", () => {
+        if (callPop === null) popOutCall();
+        else closeCallPopout(true);
+      });
+      bar.appendChild(popBtn);
+    }
     if (exitBtn !== null) bar.appendChild(exitBtn);
     syncPopButton();
     return bar;
