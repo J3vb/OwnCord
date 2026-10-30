@@ -60,7 +60,7 @@ describe("ShareDiagnosticsRecorder", () => {
     expect(snap.samples[0]).toMatchObject({
       shareGeneration: 1,
       policy: "legacy",
-      policyVersion: "2b-1",
+      policyVersion: "2c-1",
       sender: SENDER,
     });
     expect(snap.samples[0]?.viewers).toEqual([
