@@ -17,6 +17,7 @@ import type {
   UserProfilePopupComponent,
 } from "../../components/UserProfilePopup";
 import { showToast } from "../../lib/ui/toast";
+import { isPhoneLayout } from "../../lib/ui/bottomSheet";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { requestsText } from "../../i18n/requests";
 import { formatDate } from "../../i18n/format";
@@ -243,6 +244,7 @@ export function openUserProfilePopup(options: OpenUserProfilePopupOptions): () =
           if (activePopup === popup) activePopup = null;
         },
         ...(fallbackFocus === undefined ? {} : { fallbackFocus }),
+        sheet: isPhoneLayout(),
       });
       activePopup = popup;
       popup.mount(document.body);
