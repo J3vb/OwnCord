@@ -37,6 +37,9 @@ import {
 import { generateIdentityKeyPair, exportPublicKey, exportIdentityKeyPair } from "@lib/e2eeCrypto";
 import { authStore } from "@stores/auth.store";
 
+// Logger names are taken when the module loads, before the per-test mock clear.
+const loggerCallsAtLoad = [...createLoggerMock.mock.calls];
+
 /**
  * Stateful keyring double for the legacy-migration tests: a Map keyed by the
  * exact `host` string each command receives (the scoped account
@@ -127,7 +130,7 @@ describe("identity keyring wrappers", () => {
   });
 
   it("names its logger 'identity' so these messages are filterable", () => {
-    expect(createLoggerMock).toHaveBeenCalledWith("identity");
+    expect(loggerCallsAtLoad).toContainEqual(["identity"]);
   });
 });
 
