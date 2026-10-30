@@ -292,6 +292,30 @@ describe("SettingsOverlay", () => {
       overlay.destroy?.();
     });
 
+    it("Enter in search opens the picked section with focus on Back, and nothing on no match", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      const box = container.querySelector<HTMLInputElement>("[data-testid='settings-search']")!;
+      const enter = (): boolean =>
+        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      box.value = "zzzz";
+      box.dispatchEvent(new Event("input"));
+      enter();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      box.value = "appearance";
+      box.dispatchEvent(new Event("input"));
+      enter();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Appearance");
+      expect(document.activeElement).toBe(container.querySelector("[data-testid='settings-back']"));
+
+      overlay.destroy?.();
+    });
+
     it("reopening starts on the list again", () => {
       stubPhone(true);
       const overlay = createSettingsOverlay(defaultOptions);

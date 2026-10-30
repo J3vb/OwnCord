@@ -1693,12 +1693,13 @@
   .server-panel-toggle[aria-expanded="true"]::before {
     transform: translateY(2px) rotate(-135deg);
   }
-  .server-panel--collapsed .server-item:not(.active),
-  .server-panel--collapsed .server-list-empty,
-  .server-panel--collapsed .server-panel-footer {
+  /* Folded: the picked server, or the first one before any pick. With no
+     saved servers the empty note and Add Server stay in view. */
+  .server-panel--collapsed .server-list:has(.server-item.active) .server-item:not(.active),
+  .server-panel--collapsed
+    .server-list:not(:has(.server-item.active))
+    .server-item:not(:first-child),
+  .server-panel--collapsed:has(.server-item) .server-panel-footer {
     display: none;
-  }
-  .server-panel--collapsed .server-list:not(:has(.server-item.active)) {
-    padding: 0;
   }
 }

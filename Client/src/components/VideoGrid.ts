@@ -555,6 +555,7 @@ export function createVideoGrid(): VideoGridComponent {
   let callState: CallState = { muted: false, deafened: false, listenOnly: false };
   /** Whether the flip button may show: asked once per camera-on. */
   let flipCheck: "idle" | "checking" | "yes" | "no" = "idle";
+  let flipCheckGen = 0;
   let flipping = false;
   let exitBtn: HTMLButtonElement | null = null;
   /** The call view (setExitVisible): header toggles, control bar, filters. */
@@ -1146,20 +1147,20 @@ export function createVideoGrid(): VideoGridComponent {
   function syncFlipCheck(): void {
     const flip = callbacks.callControls?.cameraFlip;
     if (callState.camera !== true) {
-      if (flipCheck !== "checking") flipCheck = "idle";
+      // A check still running belongs to the camera-on that just ended.
+      if (flipCheck !== "idle") flipCheckGen++;
+      flipCheck = "idle";
       return;
     }
     if (flip === undefined || flipCheck !== "idle") return;
     flipCheck = "checking";
-    void flip.available().then(
-      (ok) => {
-        flipCheck = ok ? "yes" : "no";
-        redrawCallBars();
-      },
-      () => {
-        flipCheck = "no";
-      },
-    );
+    const gen = flipCheckGen;
+    const settle = (ok: boolean): void => {
+      if (gen !== flipCheckGen) return;
+      flipCheck = ok ? "yes" : "no";
+      redrawCallBars();
+    };
+    void flip.available().then(settle, () => settle(false));
   }
 
   /** Why camera and share are inert now, or null: the chat socket is down,

@@ -3194,6 +3194,25 @@ describe("VideoGrid", () => {
         expect(barButton("camera-flip").hidden).toBe(false);
       });
 
+      it("drops an answer that lands after the camera went off and on again", async () => {
+        const answers: Array<(ok: boolean) => void> = [];
+        const available = vi.fn(() => new Promise<boolean>((r) => answers.push(r)));
+        grid.setCallbacks({
+          callControls: { ...controls(), cameraFlip: { available, flip: vi.fn() } },
+        });
+        grid.setExitVisible(true);
+        grid.setCallState(on);
+        grid.setCallState(off);
+        grid.setCallState(on);
+        expect(available).toHaveBeenCalledTimes(2);
+
+        answers[1]!(true);
+        await settle();
+        answers[0]!(false);
+        await settle();
+        expect(barButton("camera-flip").hidden).toBe(false);
+      });
+
       it("ignores taps while a flip is still switching", async () => {
         let finish!: () => void;
         const flip = vi.fn(() => new Promise<void>((r) => (finish = r)));
