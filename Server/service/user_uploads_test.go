@@ -304,7 +304,7 @@ func TestListOwnUploads_PagingCursorAndValidation(t *testing.T) {
 	for _, sort := range []string{"", db.UploadSortNewest, db.UploadSortLargest} {
 		seen := map[string]bool{}
 		cursor := ""
-		for pages := 0; pages < 5; pages++ {
+		for range 5 {
 			page, err := f.uploads.ListOwnUploads(ctx, fwdBob, OwnUploadsRequest{Sort: sort, Limit: 2, Cursor: cursor})
 			if err != nil {
 				t.Fatalf("sort %q: %v", sort, err)

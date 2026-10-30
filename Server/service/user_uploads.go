@@ -159,13 +159,8 @@ func parseOwnUploadCursor(sort, raw string) (db.OwnUploadCursor, error) {
 		return db.OwnUploadCursor{}, bad
 	}
 	parts := strings.Split(string(dec), "|")
-	if len(parts) != 3 || parts[2] == "" {
+	if len(parts) != 3 || !validCursorID(parts[2]) {
 		return db.OwnUploadCursor{}, bad
-	}
-	for _, r := range parts[2] {
-		if r != '-' && (r < '0' || r > '9') && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
-			return db.OwnUploadCursor{}, bad
-		}
 	}
 	cur := db.OwnUploadCursor{ID: parts[2]}
 	switch {
@@ -184,6 +179,20 @@ func parseOwnUploadCursor(sort, raw string) (db.OwnUploadCursor, error) {
 		return db.OwnUploadCursor{}, bad
 	}
 	return cur, nil
+}
+
+// validCursorID reports whether id is non-empty and only letters, digits and
+// dashes, the characters of an attachment id.
+func validCursorID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, r := range id {
+		if r != '-' && (r < '0' || r > '9') && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // RemoveOwnUpload deletes a file userID uploaded, wherever it sits: unsent, in a
