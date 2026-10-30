@@ -1,10 +1,11 @@
 /**
  * The browser external-content broker asks the server that served the page
- * (`/api/v1/external/*`) with the page's saved session, and maps its answers
+ * (`/api/v1/external/*`) with this tab's own session, and maps its answers
  * onto the broker contract. Runs in the `web` project.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { externalContent } from "../../src/platform/browser/externalContent";
+import { holdSessionToken, releaseSessionToken } from "../../src/platform/browser/session";
 import type { ExternalImageHandle } from "../../src/platform/contracts/externalContent";
 
 const KEY = `owncord:credential:${location.host}`;
@@ -18,20 +19,22 @@ function jsonResponse(body: unknown): Response {
 
 describe("browser external-content broker", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
+  const owner = {};
 
   beforeEach(() => {
-    localStorage.setItem(KEY, JSON.stringify({ username: "alice", token: "tok-1" }));
+    holdSessionToken(owner, "tok-1");
     fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
+    releaseSessionToken(owner);
     vi.unstubAllGlobals();
     localStorage.clear();
     sessionStorage.clear();
   });
 
-  it("asks the server for a preview with the saved session", async () => {
+  it("asks the server for a preview with this tab's session", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
         ok: true,
@@ -109,8 +112,17 @@ describe("browser external-content broker", () => {
     ).resolves.toEqual({ ok: false, failure: "expired-handle" });
   });
 
-  it("fetches nothing without a saved session", async () => {
-    localStorage.clear();
+  it("uses this tab's session, not a credential another tab saved", async () => {
+    localStorage.setItem(KEY, JSON.stringify({ username: "bob", token: "tok-other" }));
+    fetchMock.mockResolvedValue(jsonResponse({ ok: false, failure: "wrong-type" }));
+    await externalContent.preview("p", "https://x/");
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toEqual({ Authorization: "Bearer tok-1" });
+  });
+
+  it("fetches nothing once this tab's session is released", async () => {
+    releaseSessionToken(owner);
+    localStorage.setItem(KEY, JSON.stringify({ username: "bob", token: "tok-other" }));
     await expect(externalContent.preview("p", "https://x/")).resolves.toEqual({
       ok: false,
       failure: "unavailable",

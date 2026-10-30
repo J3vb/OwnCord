@@ -6,9 +6,10 @@
 // policy and answers with the same typed minimum and failure names. The linked
 // host sees the server, never the viewer.
 //
-// The calls carry the session token the browser credential store keeps for
-// this page's host (the web build always keeps one while signed in). Without
-// one, or on any answer that is not the broker's, the result is `unavailable`.
+// The calls carry this tab's own session token (`./session`), not the saved
+// credential: another tab of the same host may have signed in as someone
+// else or signed out. Without a session, or on any answer that is not the
+// broker's, the result is `unavailable`.
 import type {
   ExternalContentBroker,
   ExternalContentFailure,
@@ -16,7 +17,7 @@ import type {
   ExternalImageHandle,
   ExternalPreview,
 } from "../contracts/externalContent";
-import { credentials } from "./credentials";
+import { sessionToken } from "./session";
 
 const BASE = "/api/v1/external";
 
@@ -70,13 +71,13 @@ function toPreview(value: unknown): ExternalPreview | null {
 /** GET a broker route with the page's session, or null when there is none
  *  or the request fails before an answer. */
 async function call(path: string, params: Record<string, string>): Promise<Response | null> {
-  const saved = await credentials.load(globalThis.location.host);
-  if (saved === null) return null;
+  const token = sessionToken();
+  if (token === null) return null;
   const query = new URLSearchParams(params).toString();
   try {
     return await globalThis.fetch(`${BASE}${path}?${query}`, {
       // i18n-exempt: protocol header, never rendered
-      headers: { Authorization: `Bearer ${saved.token}` },
+      headers: { Authorization: `Bearer ${token}` },
       credentials: "omit",
     });
   } catch {
