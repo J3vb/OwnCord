@@ -173,10 +173,12 @@ async function renderDashboard(){
   if(ownerOrHolds(PERM.MANAGE_UPDATES)){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the strip is optional; the Updates page reports the failure */}}
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">How your server is doing right now</div>';
-  /* Attention is server health detail: View Diagnostics (Administrator implies
-     it), like the route. */
+  /* Attention and the health row are server health detail: View Diagnostics
+     (Administrator implies it), like their routes. */
   let checks='';
   if(can(PERM.VIEW_DIAGNOSTICS)){
+    await startHealthPoll();
+    html+=healthRow();
     try{const a=renderAttention(await api('GET','/attention'),u&&u.update_available&&isDismissed('update',noticeSig(u.latest)));html+=a.head;checks=a.checks}
     catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
   }

@@ -293,6 +293,7 @@ var expectedGatedRoutes = []admin.GatedRoute{
 	{Method: http.MethodPost, Pattern: "/support-bundles/preview", Gate: "view_diagnostics"},
 	{Method: http.MethodPost, Pattern: "/support-bundles/download", Gate: "view_diagnostics"},
 	{Method: http.MethodGet, Pattern: "/attention", Gate: "view_diagnostics"},
+	{Method: http.MethodGet, Pattern: "/system/stats", Gate: "view_diagnostics"},
 	{Method: http.MethodDelete, Pattern: "/users/{id}", Gate: "erase_accounts"},
 }
 
