@@ -268,6 +268,31 @@ whose Tauri build step leaves them out.
 The client has no format script of its own. Prettier is set up once at the
 repository root, so run `npm run format` from the root.
 
+#### Android
+
+The Android app is the same client and Rust crate, built by Tauri into an APK.
+The Gradle project is committed under `Client/src-tauri/gen/android/`; edit it
+there (the manifest, `app/build.gradle.kts`), never regenerate it with
+`tauri android init`, which would overwrite those edits.
+
+- **Get an APK:** every PR that touches the client source or the Rust shell
+  runs the `Android APK` job in CI. It builds a signed arm64 APK and uploads it
+  as the `owncord-android-<sha>` artifact (kept 14 days) on the run's Summary
+  page. Runs from a fork or from Dependabot have no signing secrets, so they
+  build an unsigned APK as a compile check and upload nothing.
+- **Local development:** JDK 17, the Android SDK with an NDK, `ANDROID_HOME`
+  and `NDK_HOME` set, and `rustup target add aarch64-linux-android` (add
+  `x86_64-linux-android` for an emulator). Then `npx tauri android dev` from
+  `Client/` runs the app on an emulator or a USB-connected phone against the
+  vite dev server. Debug builds allow plain http so the phone can reach it.
+- **Release builds** are signed in CI only, with a keystore kept in repository
+  secrets. Never build a release APK locally for distribution, and never commit
+  a keystore or `keystore.properties` (both are gitignored).
+- **Rust:** code that only exists on desktop (tray, unread badge, window
+  helpers, game detection) is behind `#[cfg(desktop)]`. CI runs
+  `cargo clippy --target aarch64-linux-android -- -D warnings`, so an item that
+  is only used from desktop code needs the same gate.
+
 ### Git hooks (recommended)
 
 The hooks in `.githooks/` catch the most common CI failures on your machine.

@@ -3,7 +3,7 @@ dist/
 dist-web/
 src-tauri/target/
 src-tauri/target-e2e/
-src-tauri/gen/
+src-tauri/gen/schemas/
 *.tsbuildinfo
 .vite/
 coverage/
