@@ -59,6 +59,11 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Login & connection**
+
+- The server address was case-sensitive, so `Chat.Example.com` missed the saved `chat.example.com` server and its saved sign-in — the address is now lowercased, and a saved server typed in another case is matched.
+- Phone keyboards capitalised and auto-corrected the server address — the address boxes now turn that off.
+
 **Phones and touch screens**
 
 - Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
