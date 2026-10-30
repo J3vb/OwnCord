@@ -18,17 +18,28 @@ const (
 	msgReqBlocked  = "blocked"
 )
 
+// messageRequestStore is what MessageRequestService reads and writes. *db.DB satisfies it.
+type messageRequestStore interface {
+	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
+	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (db.MessageRequestOutcome, error)
+	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+	GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*db.MessageRequest, error)
+	ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]db.MessageRequestView, error)
+	TransitionMessageRequest(ctx context.Context, id, recipientID int64, to string) (bool, error)
+	AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
+}
+
 // MessageRequestService is the first-contact gate and trusted-sender bookkeeping:
 // it stages a message_requests row instead of opening a DM for a one-to-one
 // sender the recipient does not yet trust, and runs the recipient-only
 // transitions. See docs/architecture/community-services.md section S1.
 type MessageRequestService struct {
-	st     Store
+	st     messageRequestStore
 	blocks *BlockService
 }
 
 // NewMessageRequestService creates a MessageRequestService.
-func NewMessageRequestService(st Store, blocks *BlockService) *MessageRequestService {
+func NewMessageRequestService(st messageRequestStore, blocks *BlockService) *MessageRequestService {
 	return &MessageRequestService{st: st, blocks: blocks}
 }
 
