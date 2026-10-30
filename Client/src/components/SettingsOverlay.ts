@@ -113,11 +113,14 @@ export interface SettingsOverlayOptions {
   isAuthenticated?: boolean;
   /** Builds the Safety tab. Absent until its feature ships, and then no tab shows. */
   safetyTab?: (signal: AbortSignal) => HTMLDivElement;
+  /** Builds the My uploads tab. Absent when there is no signed-in server to ask, and then no tab shows. */
+  myUploadsTab?: (signal: AbortSignal) => HTMLDivElement;
 }
 
 export type TabName =
   | "Account"
   | "Safety"
+  | "My uploads"
   | "Appearance"
   | "Accessibility"
   | "Voice & Video"
@@ -131,6 +134,7 @@ export type TabName =
 const TAB_ICONS: Record<TabName, IconName> = {
   Account: "user",
   Safety: "shield",
+  "My uploads": "image",
   Appearance: "palette",
   Accessibility: "eye",
   "Voice & Video": "mic",
@@ -144,6 +148,8 @@ const TAB_ICONS: Record<TabName, IconName> = {
 
 // i18n-exempt: TabName key; its label is settingsText("tabs.safety")
 const SAFETY = "Safety" satisfies TabName;
+// i18n-exempt: TabName key; its label is settingsText("tabs.myUploads")
+const MY_UPLOADS = "My uploads" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.account")
 const ACCOUNT = "Account" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.about")
@@ -157,6 +163,7 @@ const ABOUT = "About" satisfies TabName;
 const TAB_LABEL_KEYS = {
   Account: "tabs.account",
   Safety: "tabs.safety",
+  "My uploads": "tabs.myUploads",
   Appearance: "tabs.appearance",
   Accessibility: "tabs.accessibility",
   "Voice & Video": "tabs.voice",
@@ -269,6 +276,8 @@ export function createSettingsOverlay(
     Safety: (signal) => options.safetyTab?.(signal) ?? createElement("div"),
     Appearance: (signal) => buildAppearanceTab(signal),
     Notifications: (signal) => buildNotificationsTab(signal),
+    // Only reachable through its tab button, which exists only with the option.
+    "My uploads": (signal) => options.myUploadsTab?.(signal) ?? createElement("div"),
     "Text & Images": (signal) => buildTextImagesTab(signal),
     Accessibility: (signal) => buildAccessibilityTab(signal),
     "Voice & Video": (signal) => voiceTab.build(signal),
@@ -457,6 +466,11 @@ export function createSettingsOverlay(
       // the caret there: focus lands on the active tab instead.
       if (document.activeElement === searchInput) tabButtons.get(activeTab)?.focus();
     }
+  }
+
+  /** A dialog sits inside the panel: the Log Out prompt or one a tab opened. */
+  function promptOpen(): boolean {
+    return closeLogoutPrompt !== null || root?.querySelector(".modal-overlay") != null;
   }
 
   function hide(): void {
@@ -692,6 +706,23 @@ export function createSettingsOverlay(
         tabButtons.set(SAFETY, safetyBtn);
         sidebar.appendChild(safetyBtn);
       }
+
+      if (options.myUploadsTab !== undefined) {
+        const uploadsBtn = createElement("button", {
+          class: "settings-nav-item",
+          id: tabId(MY_UPLOADS),
+          role: "tab",
+          "aria-selected": "false",
+          tabindex: "-1",
+        });
+        uploadsBtn.prepend(createIcon(TAB_ICONS[MY_UPLOADS], 18));
+        uploadsBtn.appendChild(document.createTextNode(tabLabel(MY_UPLOADS)));
+        uploadsBtn.addEventListener("click", () => setActiveTab(MY_UPLOADS), {
+          signal: disposable.signal,
+        });
+        tabButtons.set(MY_UPLOADS, uploadsBtn);
+        sidebar.appendChild(uploadsBtn);
+      }
     }
 
     // "App Settings" category — remaining tabs
@@ -703,7 +734,7 @@ export function createSettingsOverlay(
     sidebar.appendChild(appSettingsCat);
 
     const appTabs = (Object.keys(TAB_LABEL_KEYS) as TabName[]).filter(
-      (name) => name !== ACCOUNT && name !== SAFETY,
+      (name) => name !== ACCOUNT && name !== SAFETY && name !== MY_UPLOADS,
     );
     for (const name of appTabs) {
       const btn = createElement("button", {
@@ -805,18 +836,18 @@ export function createSettingsOverlay(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        // The Log Out prompt owns Escape while it is open.
+        // A prompt mounted in the panel (Log Out, a tab's confirmation) owns Escape while it is open.
         if (
           e.key === "Escape" &&
           !isImeCommit(e) &&
-          closeLogoutPrompt === null &&
+          !promptOpen() &&
           root?.classList.contains("open")
         ) {
           // On a phone, Back leaves the open section before it closes Settings.
           if (sectionOpen && phone?.matches === true) backToList();
           else requestClose();
         } else if (
-          closeLogoutPrompt === null &&
+          !promptOpen() &&
           root?.classList.contains("open") === true &&
           (e.ctrlKey || e.metaKey) &&
           !e.shiftKey &&

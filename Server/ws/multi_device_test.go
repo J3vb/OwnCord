@@ -592,10 +592,12 @@ func moveCall(t *testing.T, from, to func(f *mdFix) int64) {
 }
 
 func TestMultiDevice_VoiceJoinMovesCall_DifferentChannel(t *testing.T) {
+	t.Parallel()
 	moveCall(t, func(f *mdFix) int64 { return f.voiceA }, func(f *mdFix) int64 { return f.voiceB })
 }
 
 func TestMultiDevice_VoiceJoinMovesCall_SameChannel(t *testing.T) {
+	t.Parallel()
 	moveCall(t, func(f *mdFix) int64 { return f.voiceA }, func(f *mdFix) int64 { return f.voiceA })
 }
 
@@ -603,6 +605,7 @@ func TestMultiDevice_VoiceJoinMovesCall_SameChannel(t *testing.T) {
 // another device holds: current clients send voice_leave on ready when ready
 // shows their own user in voice but they hold no call locally.
 func TestMultiDevice_VoiceCommandsFromNonHoldingDeviceAreNoOps(t *testing.T) {
+	t.Parallel()
 	f := newMDFix(t)
 	obs := f.observer(f.voiceA)
 	a := f.dev("session-a", f.text)
@@ -827,6 +830,7 @@ func TestMultiDevice_FlushDropsQueuedOfflineForConnectedUser(t *testing.T) {
 }
 
 func TestMultiDevice_ModeratorFramesReachOnlyTheCallDevice(t *testing.T) {
+	t.Parallel()
 	t.Run("live call", func(t *testing.T) {
 		f := newMDFix(t)
 		b := f.dev("session-b", f.text)

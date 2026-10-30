@@ -15,6 +15,7 @@ import (
 // ready, and that ready computes can_pin from the current overrides. This is
 // the second edge case of 3A-13.
 func TestResume_AcrossOverrideChange_FullReadyCarriesNewPin(t *testing.T) {
+	t.Parallel()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 

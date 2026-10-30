@@ -200,6 +200,7 @@ func TestCallLogSink_PluginsNeverSeeCallRows(t *testing.T) {
 // The hub installs itself as the call log's sink, so a join noted on the
 // service layer reaches the DM's participants as a chat_message.
 func TestCallLog_JoinReachesDMThroughHub(t *testing.T) {
+	t.Parallel()
 	// The fully migrated schema: the call tables are not in the hand-written
 	// handler schema.
 	database, err := db.Open(":memory:")

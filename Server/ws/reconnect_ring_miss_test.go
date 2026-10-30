@@ -112,6 +112,7 @@ func TestReconnect_RingMiss_TailEvictedBeforeRegisterCountsFull(t *testing.T) {
 // Edge case 2: persistence off, a resume behind the ring. No EventStore, so
 // the resume takes a full ready: miss +1, full +1.
 func TestReconnect_RingMiss_CountedWithoutEventStore(t *testing.T) {
+	t.Parallel()
 	e := newRingMissEnv(t, false)
 	e.pushRing(11, 20)
 
@@ -125,6 +126,7 @@ func TestReconnect_RingMiss_CountedWithoutEventStore(t *testing.T) {
 // A resync watermark past last_seq forces a full ready before any tier is
 // tried, so the ring is never consulted and nothing is counted as a miss.
 func TestReconnect_RingMiss_NotCountedWhenWatermarkForcesFull(t *testing.T) {
+	t.Parallel()
 	e := newRingMissEnv(t, true)
 	e.pushRing(11, 20)
 	e.hub.SeedSeq(30)
@@ -176,6 +178,7 @@ func TestReconnect_RingMiss_NotCountedForClientAheadOrEmptyRing(t *testing.T) {
 
 // A ring hit is a buffer-tier resume and never a miss.
 func TestReconnect_RingMiss_NotCountedOnBufferHit(t *testing.T) {
+	t.Parallel()
 	e := newRingMissEnv(t, true)
 	e.pushRing(11, 20)
 

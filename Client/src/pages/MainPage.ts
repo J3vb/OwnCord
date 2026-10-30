@@ -78,8 +78,13 @@ import {
 } from "@lib/voice/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
+  fetchImageAsObjectUrl,
+  formatFileSize,
+  isImageMime,
   pruneAttachmentCacheScope,
+  resolveServerUrl,
   setAttachmentCacheScope,
+  thumbnailUrl,
 } from "@components/message-list/attachments";
 import { closeActiveLightbox } from "@components/message-list/media";
 import {
@@ -1104,6 +1109,16 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           offMany();
         };
       },
+      subscribeAttachments: (listener) =>
+        ws.on("chat_edited", (p) => {
+          if (p.attachments !== undefined) {
+            listener(
+              p.channel_id,
+              p.message_id,
+              p.attachments.map((a) => a.id),
+            );
+          }
+        }),
       onToggleDmProfile: () => {
         toggleDmProfile();
       },
@@ -1413,6 +1428,28 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onLogout: () => logout(api),
       getRetentionNotice: options.getRetentionNotice,
       ...(safety === undefined ? {} : { safetyTab: (signal) => safety.build(signal, api) }),
+      myUploadsTab: (signal) => {
+        // Loaded on first open, like the About tab: the list code stays out of this chunk.
+        const host = document.createElement("div");
+        host.className = "settings-pane active";
+        void import("../features/uploads/myUploadsTab").then(
+          ({ buildMyUploadsTab }) => {
+            if (!signal.aborted)
+              host.replaceWith(
+                buildMyUploadsTab(signal, api, {
+                  formatFileSize,
+                  isImage: isImageMime,
+                  thumbnail: (att) =>
+                    fetchImageAsObjectUrl(thumbnailUrl(resolveServerUrl(att.url), att.mime)),
+                }),
+              );
+          },
+          (err: unknown) => {
+            log.warn("My uploads tab failed to load", { error: String(err) });
+          },
+        );
+        return host;
+      },
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();

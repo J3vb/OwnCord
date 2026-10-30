@@ -404,6 +404,7 @@ func TestFreshConnect_GrantDuringReady_KeepsFullFlag(t *testing.T) {
 // list that connection held, which may be the full one: a later revoke must
 // still send the own-only list.
 func TestReplayResume_NoOldClient_RevokeSendsOwnOnly(t *testing.T) {
+	t.Parallel()
 	d := newTimeoutDialFixture(t)
 	rb := d.hub.ReplayBuffer()
 	for seq := uint64(96); seq <= 98; seq++ {

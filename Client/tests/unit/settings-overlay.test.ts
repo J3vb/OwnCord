@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
 import { ApiClientError } from "../../src/lib/api";
 // The modules in SettingsOverlay's graph that install an app-lifetime window
 // listener at load. The re-import below reuses these instances, so the
@@ -676,6 +677,59 @@ describe("SettingsOverlay", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(defaultOptions.onClose).toHaveBeenCalled();
 
+    overlay.destroy?.();
+  });
+
+  it("Escape with the My uploads remove confirmation open cancels only it", async () => {
+    const api = {
+      getUserStorage: vi.fn().mockResolvedValue({ used_bytes: 1, quota_bytes: 0 }),
+      listUserUploads: vi.fn().mockResolvedValue({
+        items: [
+          {
+            attachment: {
+              id: "a",
+              filename: "a.pdf",
+              size: 5,
+              mime: "application/pdf",
+              url: "/f/a",
+            },
+            uploaded_at: "2026-10-01 10:00:00",
+            channel_id: null,
+            message_id: null,
+            state: "pending",
+            removable: true,
+          },
+        ],
+      }),
+      removeUserUpload: vi.fn().mockResolvedValue(undefined),
+    };
+    const overlay = createSettingsOverlay({
+      ...defaultOptions,
+      myUploadsTab: (signal) =>
+        buildMyUploadsTab(signal, api, {
+          formatFileSize: (n: number) => `${n} B`,
+          isImage: (mime: string) => mime.startsWith("image/"),
+          thumbnail: () => Promise.resolve(null),
+        }),
+    });
+    overlay.mount(container);
+    overlay.open();
+    const tab = [...container.querySelectorAll<HTMLElement>(".settings-nav-item")].find(
+      (b) => b.textContent === "My uploads",
+    )!;
+    tab.click();
+    await vi.waitFor(() => expect(container.querySelector(".my-uploads__remove")).not.toBeNull());
+    container.querySelector<HTMLElement>(".my-uploads__remove")!.click();
+    expect(document.querySelector("[data-testid='uploads-remove-confirm']")).not.toBeNull();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(document.querySelector("[data-testid='uploads-remove-confirm']")).toBeNull();
+    expect(defaultOptions.onClose).not.toHaveBeenCalled();
+    expect(container.querySelectorAll(".my-uploads__row")).toHaveLength(1);
+    expect(api.removeUserUpload).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(defaultOptions.onClose).toHaveBeenCalled();
     overlay.destroy?.();
   });
 

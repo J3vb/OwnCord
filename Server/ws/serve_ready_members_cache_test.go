@@ -96,6 +96,7 @@ func TestReadyMembers_JoinBetweenReadiesIsVisible(t *testing.T) {
 }
 
 func TestReadyMembers_LapsedTemporaryBanReappears(t *testing.T) {
+	t.Parallel()
 	hub, database := newTestHub(t)
 	viewer := seedOwnerUser(t, database, "viewer")
 	banned := seedOwnerUser(t, database, "tempbanned")

@@ -200,8 +200,9 @@ const presenceCoalesceWindow = 300 * time.Millisecond
 // AfterFunc outlives the arming test (dropQueuedPresenceAndBroadcast clears the
 // queue without disarming the timer), so a sibling test's 300ms flush can fire
 // into whatever hook is installed by then; a hook that is safe to run only once
-// (closing a channel) would panic.
-var presenceFlushRaceHook func(*Hub)
+// (closing a channel) would panic. It is atomic because that stray flush reads
+// it from a timer goroutine while a test installs or clears it.
+var presenceFlushRaceHook atomic.Pointer[func(*Hub)]
 
 // dropQueuedPresenceAndBroadcast atomically removes any coalesced presence queued
 // for userID and runs broadcast, both under presenceMu. Called when a fresher
@@ -268,8 +269,8 @@ func (h *Hub) flushPresenceQueue() {
 	queued := h.presenceQueue
 	h.presenceQueue = nil
 	h.presenceFlushArmed = false
-	if presenceFlushRaceHook != nil {
-		presenceFlushRaceHook(h)
+	if hook := presenceFlushRaceHook.Load(); hook != nil {
+		(*hook)(h)
 	}
 	lost := false
 	// An offline entry for a user who has connected since is stale: the new
