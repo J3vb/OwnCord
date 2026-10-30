@@ -10,7 +10,7 @@ const run = (o) => runScript("bughunt-fix.js", o);
 export const rec = (id, over = {}) => ({
   id,
   title: `bug ${id}`,
-  file: "Client/src/lib/livekitE2EE.ts",
+  file: "Client/src/lib/voice/livekitE2EE.ts",
   line: 100,
   severity: "high",
   why: "w",
@@ -42,7 +42,7 @@ scenarios.f1_clusters_by_file = async () => {
   assert.equal(result.branch, "fix/test");
   assert.equal(result.clusters.length, 2);
   const byFile = Object.fromEntries(result.clusters.map((c) => [c.file, c.ids]));
-  assert.deepEqual(byFile["Client/src/lib/livekitE2EE.ts"], ["OC-0001", "OC-0002"]);
+  assert.deepEqual(byFile["Client/src/lib/voice/livekitE2EE.ts"], ["OC-0001", "OC-0002"]);
   assert.deepEqual(byFile["Server/ws/hub_sweep.go"], ["OC-0003"]);
 };
 
@@ -749,7 +749,7 @@ scenarios.f15_prove_prompt_names_every_touched_path = async () => {
 const FOUR_FILES = [
   rec("OC-0001"),
   rec("OC-0002", { file: "Server/ws/hub_sweep.go" }),
-  rec("OC-0003", { file: "Client/src/lib/livekitSession.ts" }),
+  rec("OC-0003", { file: "Client/src/lib/voice/livekitSession.ts" }),
   rec("OC-0004", { file: "Client/src/components/VoiceWidget.ts" }),
 ];
 // A fix stub that reports every id in its prompt as fixed. Ids go through a Set because rec()

@@ -7,7 +7,7 @@ import {
 } from "@lib/prefs/lastChannel";
 import type { WsClient } from "@lib/ws";
 import { focusPayload } from "@lib/prefs/lastChannel";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { channelsStore, resetChannelsStore, setChannels } from "@stores/channels.store";
 
 describe("last-channel", () => {

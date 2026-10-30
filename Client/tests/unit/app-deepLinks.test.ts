@@ -13,7 +13,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "@lib/api";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import type { WsClient } from "@lib/ws";
 
 type PendingInvite = { code: string; host?: string } | null;
@@ -42,7 +42,9 @@ vi.mock("@lib/pendingMessages", () => ({
   deactivatePendingMessages: hoisted.deactivatePendingMessages,
 }));
 vi.mock("@lib/notifications", () => ({ openMessageTarget: hoisted.openMessageTarget }));
-vi.mock("@lib/invite-navigation", () => ({ setInviteJoinHandler: hoisted.setInviteJoinHandler }));
+vi.mock("@lib/nav/inviteNavigation", () => ({
+  setInviteJoinHandler: hoisted.setInviteJoinHandler,
+}));
 vi.mock("../../src/platform/desktop", () => ({ desktop: { deepLinks: { init: hoisted.init } } }));
 vi.mock("../../src/app/serverHealth", () => ({ serverInfoFor: vi.fn(() => undefined) }));
 vi.mock("../../src/app/session", () => ({

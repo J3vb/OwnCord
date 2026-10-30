@@ -9,22 +9,22 @@ import type { UserStatus } from "@lib/types";
 import { ApiClientError, errorText } from "@lib/api";
 import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
-import { sessionDeviceLabel } from "@lib/session-notice";
+import { showToast } from "@lib/ui/toast";
+import { sessionDeviceLabel } from "@lib/net/sessionNotice";
 import { formatMessageTimestamp } from "@lib/text/formatting";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
-import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
-import { avatarInitial, resolveDisplayName } from "@lib/avatar";
+import { loadUserStatus, saveUserStatus } from "@lib/presence/userStatus";
+import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { isRenderableAvatar, setAvatarSource } from "@components/message-list/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
 } from "@components/message-list/attachments";
-import { cropImage, type CropResult } from "@lib/imageCrop";
-import { isAnimatedImage } from "@lib/animatedStill";
-import { profileBannersEnabled } from "@lib/serverCapabilities";
+import { cropImage, type CropResult } from "@lib/ui/imageCrop";
+import { isAnimatedImage } from "@lib/ui/animatedStill";
+import { profileBannersEnabled } from "@lib/net/serverCapabilities";
 import { isBannerColor, paintBanner } from "../../features/profiles/banner";
 import { bannerImages } from "../bannerImages";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";

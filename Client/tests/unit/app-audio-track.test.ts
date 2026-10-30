@@ -1,4 +1,4 @@
-// src/lib/appAudioTrack.ts: the host's loopback socket -> worklet -> track,
+// src/lib/voice/appAudioTrack.ts: the host's loopback socket -> worklet -> track,
 // with the WebSocket and the Web Audio graph mocked.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -91,7 +91,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const { openAppAudio } = await import("../../src/lib/appAudioTrack");
+const { openAppAudio } = await import("../../src/lib/voice/appAudioTrack");
 
 /** Open and complete the socket handshake. */
 async function open(url = "ws://127.0.0.1:7/t/app-audio") {

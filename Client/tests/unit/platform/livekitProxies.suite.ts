@@ -1,7 +1,7 @@
 // Behaviour suite for the LiveKit half of the `NativeProxies` contract
 // (`src/platform/contracts/nativeProxies.ts`): `setLiveKitServerHost`,
 // `resolveLiveKitUrl`, `stopLiveKitProxy`. Written in B7-5 against the
-// in-place seam (`LiveKitUrlResolver`, `lib/livekitUrlResolver.ts`) before
+// in-place seam (`LiveKitUrlResolver`, `lib/voice/livekitUrlResolver.ts`) before
 // the move, so it pins today's behaviour rather than the moved code's.
 //
 // No test for `stopLiveKitProxy` on its own: it is fire-and-forget and hands

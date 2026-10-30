@@ -26,7 +26,7 @@ import {
   type FetchFn,
   type PersistenceBackend,
   type ServerProfile,
-} from "../../src/lib/profiles";
+} from "../../src/lib/presence/profiles";
 
 const A: CreateProfileData = {
   name: "Alpha",

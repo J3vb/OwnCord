@@ -5,7 +5,7 @@ import {
   sameModel,
   type ModelValue,
   type RowModel,
-} from "../../src/lib/reconcile";
+} from "../../src/lib/net/reconcile";
 import { createElement } from "../../src/lib/dom";
 
 let mounted: HTMLElement[] = [];

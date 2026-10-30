@@ -14,7 +14,7 @@ import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
 import { createStatusRow, setStatusIcon, type StatusKind } from "../../features/settings/status";
-import { copyText } from "@lib/clipboard";
+import { copyText } from "@lib/ui/clipboard";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
 // --text-danger is the qualified error-text token; --red (the fill) reads

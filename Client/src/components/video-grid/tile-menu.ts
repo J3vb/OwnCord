@@ -10,7 +10,7 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { createMenuItem, openMenuShell } from "@lib/context-menu";
+import { createMenuItem, openMenuShell } from "@lib/ui/contextMenu";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -20,7 +20,7 @@ import {
   muteScreenshareAudio,
   setScreenshareAudioVolume,
   setUserVolume,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import type { TileConfig } from "../VideoGrid";
 import {
   appendVoiceModeration,

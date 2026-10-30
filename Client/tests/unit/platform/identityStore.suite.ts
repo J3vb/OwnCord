@@ -1,6 +1,6 @@
 // Behaviour suite for the `IdentityStore` contract
 // (`src/platform/contracts/identityStore.ts`). Run now against the legacy
-// binding (`identityStore.legacy.test.ts`, today's `lib/identity.ts`
+// binding (`identityStore.legacy.test.ts`, today's `lib/net/identity.ts`
 // exports) and again in B7-4 against `platform/desktop`.
 import { beforeEach, describe, expect, test } from "vitest";
 import type { IdentityStore } from "../../../src/platform/contracts/identityStore";

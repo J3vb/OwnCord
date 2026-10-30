@@ -1,6 +1,6 @@
 // How an imported message's author is shown. The export is untrusted: a name
 // is only ever text, and a colour is used only when it is a plain #rrggbb.
-import type { AvatarSubject } from "@lib/avatar";
+import type { AvatarSubject } from "@lib/ui/avatar";
 import type { ImportedAuthor } from "@lib/types";
 
 /** Longest name drawn, in code points; CSS clips what still overflows. */

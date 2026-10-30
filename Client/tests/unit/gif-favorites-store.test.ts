@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
-vi.mock("@lib/toast", () => toastMock);
+vi.mock("@lib/ui/toast", () => toastMock);
 
 import {
   gifFavoritesAvailable,
@@ -13,7 +13,7 @@ import {
 } from "@stores/gifFavorites.store";
 import { ApiClientError } from "@lib/api";
 import type { GifFavorite } from "@lib/types";
-import type { GifFavoritesApi } from "@lib/gifProvider";
+import type { GifFavoritesApi } from "@lib/media/gifProvider";
 
 const fav = (n: string): GifFavorite => ({
   url: `https://media.klipy.com/${n}.gif`,

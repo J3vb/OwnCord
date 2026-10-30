@@ -11,7 +11,7 @@ vi.mock("@components/GifPicker", () => ({
 }));
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 type UploadResult = { id: string; url: string; filename: string };
 

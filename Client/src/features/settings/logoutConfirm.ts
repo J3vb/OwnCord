@@ -10,7 +10,7 @@
  */
 
 import { createConfirmModal } from "../dialogs/confirmModal";
-import type { ModalInstance } from "../../lib/modalFactory";
+import type { ModalInstance } from "../../lib/ui/modalFactory";
 import { settingsText as t } from "../../i18n/settings";
 
 let openPrompt: ModalInstance | null = null;

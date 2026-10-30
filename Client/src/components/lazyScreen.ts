@@ -15,7 +15,7 @@
  */
 
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { shellText } from "../i18n/shell";
 
 const log = createLogger("lazy-screen");

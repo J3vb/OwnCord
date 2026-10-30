@@ -6,8 +6,8 @@
 
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "../../lib/disposable";
-import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/a11y";
-import { closeOnBackdropClick } from "../../lib/modalFactory";
+import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/ui/a11y";
+import { closeOnBackdropClick } from "../../lib/ui/modalFactory";
 import { createElement, appendChildren } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
 import { whatsNewText as t } from "../../i18n/whatsNew";

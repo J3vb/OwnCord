@@ -7,10 +7,10 @@
 
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
-import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
-import { createPromptModal, type ModalInstance } from "@lib/modalFactory";
+import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
+import { createPromptModal, type ModalInstance } from "@lib/ui/modalFactory";
 import type { MountableComponent } from "@lib/text/safeRender";
-import type { ServerProfile } from "@lib/profiles";
+import type { ServerProfile } from "@lib/presence/profiles";
 import {
   FOLDER_COLORS,
   FOLDER_NAME_MAX,

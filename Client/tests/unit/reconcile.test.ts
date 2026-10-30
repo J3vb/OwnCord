@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileChildren, reconcileModels, sameModel } from "../../src/lib/reconcile";
+import { reconcileChildren, reconcileModels, sameModel } from "../../src/lib/net/reconcile";
 import { createElement } from "../../src/lib/dom";
 
 interface Row {

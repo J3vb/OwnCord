@@ -59,7 +59,7 @@ import { highlightsCurrentUser } from "@lib/text/mentions";
 import { applyPickedMentions, tokensToPickedText } from "@lib/text/pickedMentions";
 import { canManageMessages } from "@lib/permissions";
 import { readableRoleColor } from "@lib/prefs/themes";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
@@ -102,7 +102,7 @@ import {
   onMarkUnreadFailed,
   setLiveTailInView,
 } from "@lib/read-state";
-import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
+import { idMentionsEnabled, readPointerEnabled } from "@lib/net/serverCapabilities";
 import { markMessageUnread } from "./message-list/mark-unread";
 import { onPrefChange } from "@lib/prefs/preferences";
 

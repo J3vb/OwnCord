@@ -6,7 +6,7 @@
  */
 
 import { beginMarkUnread, setMarkUnreadNotice } from "@lib/read-state";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { getChannelMessages } from "@stores/messages.store";
 import { messagingText } from "../../i18n/messaging";
 

@@ -9,7 +9,7 @@ const h = vi.hoisted(() => ({
   loads: { value: 0 },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
@@ -42,11 +42,11 @@ vi.mock("@lib/logger", () => ({
   setLogLevel: vi.fn(),
 }));
 
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createProfileManager: vi.fn().mockReturnValue({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockReturnValue([]),
@@ -204,12 +204,12 @@ describe("SidebarArea voice widget", () => {
   let result: ReturnType<SidebarModule["createSidebarArea"]> | null = null;
   let sidebar: SidebarModule;
   let voice: VoiceStore;
-  let toast: typeof import("@lib/toast");
+  let toast: typeof import("@lib/ui/toast");
 
   beforeAll(async () => {
     sidebar = await import("../../src/pages/main-page/SidebarArea");
     voice = await import("../../src/stores/voice.store");
-    toast = await import("@lib/toast");
+    toast = await import("@lib/ui/toast");
   });
   beforeEach(() => {
     voice.resetVoiceStore();

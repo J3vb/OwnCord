@@ -40,7 +40,7 @@ import {
   SCREENSHARE_SIMULCAST_LAYERS,
   SCREENSHARE_PUBLISH_BITRATES,
   type StreamQuality,
-} from "@lib/screenShare";
+} from "@lib/voice/screenShare";
 
 const SCREENSHARE_AUDIO_CAPTURE = {
   restrictOwnAudio: true,

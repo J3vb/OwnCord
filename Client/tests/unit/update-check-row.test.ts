@@ -10,7 +10,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../src/features/updates/updateChecker", () => ({ getActiveUpdateChecker: mockActive }));
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   downloadAndInstallUpdate: mockInstall,
   // Like the real one: replays the app-wide install state to a new subscriber.
   subscribeToUpdateInstall: (listener: (state: unknown) => void) => {

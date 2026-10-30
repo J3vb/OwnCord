@@ -9,7 +9,7 @@ import {
   getLocalCameraStream,
   getLocalScreenshareStream,
   hasLocalScreenshareAudio,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { shellText } from "../../i18n/shell";

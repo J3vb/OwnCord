@@ -4,8 +4,8 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
-import { registerRoleIdLookup } from "@lib/roleLookup";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { registerRoleIdLookup } from "@lib/presence/roleLookup";
 import { connectText } from "../i18n/connect";
 import type {
   ReadyChannel,

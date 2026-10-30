@@ -3,7 +3,7 @@
 // never from `content` (the server's English fallback for older clients). The
 // greeting is picked by message id, so every client shows the same line.
 import { createElement, setText } from "@lib/dom";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { channelsStore } from "@stores/channels.store";
 import { messagingText } from "../../i18n/messaging";
 

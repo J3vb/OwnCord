@@ -3,9 +3,9 @@
 
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
-import { closeOnBackdropClick } from "@lib/modalFactory";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";

@@ -14,7 +14,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 // stable origin. Returning `https://{host}` keeps the URL assertions below
 // unchanged — the proxy indirection is exercised by the Rust unit tests and by
 // httpProxy's own tests, not here.
-vi.mock("../../src/lib/httpProxy", () => ({
+vi.mock("../../src/lib/net/httpProxy", () => ({
   ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
   stopHttpProxy: () => Promise.resolve(),
 }));

@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/updater.ts.
+ * Tests for src/lib/net/updater.ts.
  *
  * Shared install ownership survives page changes. Failed downloads can be
  * retried; successful native installations remain guarded through relaunch.
@@ -23,9 +23,9 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => listen(...args) as unknown,
 }));
 
-let checkForUpdate: typeof import("@lib/updater").checkForUpdate;
-let downloadAndInstallUpdate: typeof import("@lib/updater").downloadAndInstallUpdate;
-let subscribeToUpdateInstall: typeof import("@lib/updater").subscribeToUpdateInstall;
+let checkForUpdate: typeof import("@lib/net/updater").checkForUpdate;
+let downloadAndInstallUpdate: typeof import("@lib/net/updater").downloadAndInstallUpdate;
+let subscribeToUpdateInstall: typeof import("@lib/net/updater").subscribeToUpdateInstall;
 
 const unlisten = vi.fn();
 
@@ -36,7 +36,7 @@ beforeEach(async () => {
   // level would default back to "debug", undoing tests/setup.ts's floor.
   vi.doMock("@lib/logger", () => appLogger);
   ({ checkForUpdate, downloadAndInstallUpdate, subscribeToUpdateInstall } =
-    await import("@lib/updater"));
+    await import("@lib/net/updater"));
   invoke.mockReset().mockResolvedValue(undefined);
   relaunch.mockReset().mockResolvedValue(undefined);
   unlisten.mockReset();

@@ -16,7 +16,7 @@ import type {
   ProfileRolesControl,
   UserProfilePopupComponent,
 } from "../../components/UserProfilePopup";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { requestsText } from "../../i18n/requests";
 import { formatDate } from "../../i18n/format";
@@ -24,7 +24,7 @@ import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
 import { memberRolesState, roleChangeChoices } from "../moderation/roleAssignment";
-import { multiRoleEnabled } from "../../lib/serverCapabilities";
+import { multiRoleEnabled } from "../../lib/net/serverCapabilities";
 import { createNoteBinding, currentNotesContext } from "./userNotes";
 
 /** What the popup's action buttons do. Each is omitted when the caller has no

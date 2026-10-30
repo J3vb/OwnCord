@@ -14,7 +14,7 @@ import {
 } from "./attachments";
 import { admitDerived } from "../../features/content-consent/external";
 import { contentText as t } from "../../i18n/content";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type {
   ExternalContentFailure,
   ExternalImageHandle,

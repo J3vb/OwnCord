@@ -1,6 +1,6 @@
 /**
  * Tests for the deep-link wiring, `initDeepLinks` until B7-5 moved it from
- * src/lib/deep-link.ts to src/platform/desktop/deepLinks.ts.
+ * src/lib/nav/deepLink.ts to src/platform/desktop/deepLinks.ts.
  *
  * deep-link.ts sat at 44% statements: the existing deep-link.test.ts covers the
  * pure parser, but initDeepLinks — the part that actually runs at startup and
@@ -23,7 +23,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   onOpenUrl: (...args: unknown[]) => onOpenUrl(...args) as unknown,
 }));
 
-const { parseInviteLink } = await import("@lib/deep-link");
+const { parseInviteLink } = await import("@lib/nav/deepLink");
 const {
   deepLinks: { init: initDeepLinks },
 } = await import("../../src/platform/desktop/deepLinks");

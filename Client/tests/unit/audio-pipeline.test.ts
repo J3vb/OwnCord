@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalAudioTrack, Track } from "livekit-client";
-import { AudioPipeline, startVadDetector, vadThreshold } from "../../src/lib/audioPipeline";
-import type { MicProcessor } from "../../src/lib/micProcessor";
+import { AudioPipeline, startVadDetector, vadThreshold } from "../../src/lib/voice/audioPipeline";
+import type { MicProcessor } from "../../src/lib/voice/micProcessor";
 import {
   FakeAudioContext,
   FakeAudioWorkletNode,

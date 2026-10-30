@@ -6,7 +6,7 @@ const { showToast, pickSaveLocation, writeFile } = vi.hoisted(() => ({
   writeFile: vi.fn<(path: string, data: Uint8Array) => Promise<void>>(),
 }));
 
-vi.mock("@lib/toast", () => ({ showToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast }));
 vi.mock("../../src/platform/desktop", () => ({
   desktop: { fileSaver: { pickSaveLocation, writeFile } },
 }));

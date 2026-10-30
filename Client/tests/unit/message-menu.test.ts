@@ -494,7 +494,7 @@ describe("message right-click menu", () => {
   });
 
   it("Copy Text and Copy show a success toast", async () => {
-    const { toasts } = await import("@lib/toast").then((m) => ({ toasts: m }));
+    const { toasts } = await import("@lib/ui/toast").then((m) => ({ toasts: m }));
     const spy = vi.spyOn(toasts, "showToast");
     mount([makeMessage({ content: "hello" })]);
     await open(text());

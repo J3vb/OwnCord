@@ -14,7 +14,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "@lib/api";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import type { WsClient } from "@lib/ws";
 import { connectText } from "../../src/i18n/connect";
 

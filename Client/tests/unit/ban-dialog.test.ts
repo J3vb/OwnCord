@@ -12,7 +12,7 @@ import {
   type BanRequest,
   readBanPurge,
 } from "../../src/features/moderation/BanDialog";
-import type { ModalInstance } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { ApiClientError, TransportError, errorText, type BanMemberResponse } from "@lib/api";
 
 const q = <T extends Element = HTMLElement>(testId: string): T =>

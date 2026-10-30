@@ -3,8 +3,8 @@
  * "Leave <current> to join <target>?" and hand the code to the invite flow.
  */
 
-import { normaliseInviteCode, parseInviteLink } from "@lib/deep-link";
-import { requestInviteJoin } from "@lib/invite-navigation";
+import { normaliseInviteCode, parseInviteLink } from "@lib/nav/deepLink";
+import { requestInviteJoin } from "@lib/nav/inviteNavigation";
 import { createLogger } from "@lib/logger";
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../../i18n/messaging";

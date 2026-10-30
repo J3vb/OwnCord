@@ -14,10 +14,10 @@
 
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
-import { dialogOpen } from "@lib/dialogOpen";
+import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { showContextMenu, openMenuOnKeyboard } from "@lib/context-menu";
+import { showContextMenu, openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";

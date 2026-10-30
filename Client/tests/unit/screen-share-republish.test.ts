@@ -17,11 +17,11 @@ import {
   type CameraTrackState,
   type ScreenTrackState,
   type VideoTrackDeps,
-} from "@lib/screenShare";
+} from "@lib/voice/screenShare";
 import { voiceStore } from "@stores/voice.store";
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
   h264GpuPublish: (codec: string) => codec === "h264",

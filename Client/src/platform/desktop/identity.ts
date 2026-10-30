@@ -1,6 +1,6 @@
 /**
  * Desktop identity-key storage: the native surface behind the `IdentityStore`
- * contract. Two backing stores, unchanged from `lib/identity.ts`:
+ * contract. Two backing stores, unchanged from `lib/net/identity.ts`:
  *
  *   - OS keyring  (save/load/delete_identity_key, account `identity:{userId}@{host}`):
  *     the client's own long-term identity PRIVATE key (base64 JWK blob),
@@ -8,7 +8,7 @@
  *   - identity_pins.json (store/get_identity_pin, key `{host}:{userId}`):
  *     peers' pinned identity PUBLIC keys (base64), for TOFU verification.
  *
- * Lifted verbatim from `lib/identity.ts`: same commands, same
+ * Lifted verbatim from `lib/net/identity.ts`: same commands, same
  * arguments, same error handling, same log lines. The tri-state results are
  * part of the contract precisely because collapsing them is a security bug —
  * see the comments below, which travel with the code.

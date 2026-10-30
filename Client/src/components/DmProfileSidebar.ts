@@ -13,12 +13,12 @@
 
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
-import { dialogOpen } from "@lib/dialogOpen";
+import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import { avatarInitial, resolveDisplayName } from "@lib/avatar";
+import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {
   fetchImageAsObjectUrl,

@@ -1,5 +1,5 @@
 /**
- * Push-to-talk. The four methods have the exact signatures of `lib/ptt.ts`'s
+ * Push-to-talk. The four methods have the exact signatures of `lib/voice/ptt.ts`'s
  * former `initPtt`, `stopPtt`, `updatePttKey` and `captureKeyPress`
  * (`vkName` is a pure display helper and stays there). `pushToTalk.suite.ts`
  * binds `init()` to the persisted key and `stop()`/`updateKey()` to the

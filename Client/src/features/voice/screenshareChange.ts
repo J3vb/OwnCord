@@ -39,12 +39,16 @@ import {
   type ScreenTrackState,
   type StreamQuality,
   type VideoTrackDeps,
-} from "../../lib/screenShare";
+} from "../../lib/voice/screenShare";
 import { bumpLocalShareRev } from "../../stores/voice.store";
 import { isLinuxDesktop } from "./native/platform";
-import { setH264GpuProfiles } from "../../lib/h264Profile";
+import { setH264GpuProfiles } from "../../lib/voice/h264Profile";
 import { h264GpuPublish } from "./videoCodec";
-import { startAppShareAudio, wantsAppAudio, type AppShareAudio } from "../../lib/appAudioShare";
+import {
+  startAppShareAudio,
+  wantsAppAudio,
+  type AppShareAudio,
+} from "../../lib/voice/appAudioShare";
 import { voiceText } from "../../i18n/voice";
 
 const log = createLogger("screenShare");

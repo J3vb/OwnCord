@@ -17,7 +17,7 @@ import {
   clearPeerWatching,
 } from "../../stores/voice.store";
 import { focusPayload } from "../../lib/prefs/lastChannel";
-import { deleteCredential } from "../../lib/credentials";
+import { deleteCredential } from "../../lib/net/credentials";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";

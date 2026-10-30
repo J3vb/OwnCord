@@ -19,10 +19,10 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { errorText } from "@lib/api";
 import { canManageChannels } from "@lib/permissions";
-import { forumsEnabled } from "@lib/serverCapabilities";
+import { forumsEnabled } from "@lib/net/serverCapabilities";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";

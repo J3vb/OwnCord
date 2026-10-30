@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { listSessionResets } from "@lib/sessionRegistry";
+import { listSessionResets } from "@lib/net/sessionRegistry";
 import {
   clearCustomEmoji,
   customEmojiLoaded,

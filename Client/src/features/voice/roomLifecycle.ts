@@ -9,11 +9,11 @@ import type { WsClient } from "../../lib/ws";
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "../../lib/logger";
-import { micProcessingOptions, type AudioPipeline } from "../../lib/audioPipeline";
-import type { AudioElements } from "../../lib/audioElements";
-import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
-import type { E2EEManager } from "../../lib/livekitE2EE";
-import type { VoiceTokenManager } from "../../lib/voiceTokenManager";
+import { micProcessingOptions, type AudioPipeline } from "../../lib/voice/audioPipeline";
+import type { AudioElements } from "../../lib/voice/audioElements";
+import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
+import type { E2EEManager } from "../../lib/voice/livekitE2EE";
+import type { VoiceTokenManager } from "../../lib/voice/voiceTokenManager";
 import {
   type CameraTrackState,
   type ScreenTrackState,
@@ -27,10 +27,10 @@ import {
   stopManualCameraTrack,
   stopManualScreenTracks,
   bumpGeneration,
-} from "../../lib/screenShare";
-import { attachDiagnosticListeners } from "../../lib/livekitDiagnostics";
+} from "../../lib/voice/screenShare";
+import { attachDiagnosticListeners } from "../../lib/voice/livekitDiagnostics";
 import { detachRoom, onRoom } from "./releaseRoom";
-import type { RoomEventHandlers } from "../../lib/roomEventHandlers";
+import type { RoomEventHandlers } from "../../lib/voice/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
 import { syncShareGrant } from "./mediaControl";

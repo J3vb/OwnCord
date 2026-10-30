@@ -16,7 +16,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: mockCheckForUpdate,
   downloadAndInstallUpdate: mockDownloadAndInstall,
   subscribeToUpdateInstall: mockSubscribeToUpdateInstall,
@@ -29,7 +29,7 @@ import {
 } from "../../src/components/UpdateNotifier";
 import { getAvailableUpdate } from "../../src/features/updates/availableUpdate";
 import { uiStore } from "../../src/stores/ui.store";
-import type { UpdateInstallState } from "../../src/lib/updater";
+import type { UpdateInstallState } from "../../src/lib/net/updater";
 
 let onInstallState: (state: UpdateInstallState) => void;
 const unsubscribeInstall = vi.fn();

@@ -7,7 +7,7 @@ vi.mock("@stores/auth.store", () => ({
   clearAuth: () => clearAuth(),
 }));
 
-import { logout } from "../../src/lib/logout";
+import { logout } from "../../src/lib/net/logout";
 
 function makeApi(logoutImpl: () => Promise<void>): { logout: Mock<() => Promise<void>> } {
   return { logout: vi.fn(logoutImpl) };

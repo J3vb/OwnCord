@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { exportPublicKey } from "../../src/lib/e2eeCrypto";
+import { exportPublicKey } from "../../src/lib/net/e2eeCrypto";
 import {
   MAX_PINS_PER_USER,
   decodePinSlot,
   encodePinSlot,
   trustedPins,
   withPin,
-} from "../../src/lib/identityPins";
+} from "../../src/lib/net/identityPins";
 
 describe("identity pin slot", () => {
   it("reads a bare legacy pin as a set of one", () => {

@@ -9,7 +9,7 @@
  */
 
 import { channelsStore } from "../../stores/channels.store";
-import { navigateToChannel } from "../../lib/channel-navigation";
+import { navigateToChannel } from "../../lib/nav/channelNavigation";
 
 export type ThreadNavigationRequest =
   | { readonly kind: "thread"; readonly threadId: number; readonly parentId: number }

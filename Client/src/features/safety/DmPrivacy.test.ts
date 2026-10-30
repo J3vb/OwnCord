@@ -8,7 +8,7 @@ import type { DmPrivacy } from "@lib/api";
 // Loaded here so the avatar module's app-lifetime listeners predate the first test.
 import "@components/message-list/avatar";
 import "../reports/myReports";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { buildSafetyPane } from "../reports/safetyPane";
 import { buildDmPrivacySection, type DmPrivacyApi } from "./DmPrivacy";
 

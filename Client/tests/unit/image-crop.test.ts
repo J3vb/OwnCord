@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { cropImage } from "../../src/lib/imageCrop";
+import { cropImage } from "../../src/lib/ui/imageCrop";
 import { cropGroupIcon } from "../../src/features/direct-messages/groupIcon";
 
 const realBitmap = globalThis.createImageBitmap;

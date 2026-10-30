@@ -5,7 +5,7 @@
  * startup chunk, the sounds are not.
  */
 
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 let pendingMoveChannelId: number | null = null;
 

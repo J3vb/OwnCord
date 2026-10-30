@@ -24,7 +24,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: showToastMock,
   initToast: vi.fn(),
   teardownToast: vi.fn(),

@@ -4,7 +4,7 @@
 //! getDisplayMedia capture and offers hosts no switch to turn it off: the
 //! ScreenCaptureStarting event can only allow or cancel the capture, and
 //! `--use-fake-ui-for-media-stream` (which skips it) breaks screen-share audio
-//! (see `src/lib/screenShare.ts`). The app's own stream card already has Stop,
+//! (see `src/lib/voice/screenShare.ts`). The app's own stream card already has Stop,
 //! so once a capture starts this finds that bar and hides its window, much as
 //! the bar's own Hide link does. Viewers never saw it (WebView2 keeps it out
 //! of the capture). If the bar is not found, it stays on screen as before and

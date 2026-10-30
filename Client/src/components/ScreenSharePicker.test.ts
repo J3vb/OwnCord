@@ -2,11 +2,11 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { showScreenSharePicker } from "./ScreenSharePicker";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
 
-// 120 fps is hidden for now (lib/shareFps). Most tests here offer it so the
+// 120 fps is hidden for now (lib/voice/shareFps). Most tests here offer it so the
 // picker's dormant 120 handling (monitor gate, Wayland cap, M-2 hint) keeps
 // its coverage; "offers only 60 while 120 is hidden" runs the shipped state.
 const offer120 = vi.hoisted(() => ({ value: true }));
-vi.mock("@lib/shareFps", () => ({
+vi.mock("@lib/voice/shareFps", () => ({
   get SHARE_FPS_OPTIONS(): readonly number[] {
     return offer120.value ? [60, 120] : [60];
   },

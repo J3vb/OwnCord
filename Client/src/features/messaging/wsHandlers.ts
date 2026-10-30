@@ -40,7 +40,7 @@ import { clearReactionUsersCache, invalidateReactionUsers } from "./reactionUser
 import { parseTimestamp } from "@lib/text/formatting";
 import { notifyIncomingMessage } from "../../lib/notifications";
 import { mentionsCurrentUser } from "../../lib/text/mentions";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
 import { isForwardRequest } from "./forwardRequests";

@@ -5,7 +5,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
-import { dialogOpen } from "@lib/dialogOpen";
+import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
@@ -34,7 +34,7 @@ import {
 } from "@components/SlashAutocomplete";
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
 import { applyPickedMentions, type PickedMention } from "@lib/text/pickedMentions";
-import { idMentionsEnabled } from "@lib/serverCapabilities";
+import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
@@ -52,7 +52,7 @@ const stickerPickerScreen = createLazyScreen(
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
-import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/serverCapabilities";
+import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
 import { onPrefChange } from "@lib/prefs/preferences";
 import {
   COMPOSER_BUTTON_PREF_KEYS,
@@ -70,7 +70,7 @@ import type { VoiceComposer } from "../features/voice-messages/voiceComposer";
 import { voiceMessagesText } from "../i18n/voiceMessages";
 import { messagingText } from "../i18n/messaging";
 import { stickersText } from "../i18n/stickers";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 export interface MessageInputOptions {
   readonly channelId: number;

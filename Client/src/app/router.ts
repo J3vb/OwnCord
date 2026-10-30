@@ -16,7 +16,7 @@
 import { renderFallback, safeMount, type RenderRecovery } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
@@ -134,7 +134,7 @@ async function reloadAfterVoiceLeave(): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
+        import("@lib/voice/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
         }),

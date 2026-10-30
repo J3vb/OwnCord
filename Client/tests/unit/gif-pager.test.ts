@@ -4,9 +4,9 @@ import {
   MAX_PAGES,
   RETRY_COOLDOWN_MAX_MS,
   RETRY_COOLDOWN_MS,
-} from "../../src/lib/gifPager";
+} from "../../src/lib/media/gifPager";
 import { ApiClientError } from "../../src/lib/api";
-import type { GifPage, GifResult } from "../../src/lib/gifProvider";
+import type { GifPage, GifResult } from "../../src/lib/media/gifProvider";
 
 function gif(id: string): GifResult {
   return {

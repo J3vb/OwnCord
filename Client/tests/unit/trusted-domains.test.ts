@@ -4,7 +4,7 @@ import {
   isDomainTrusted,
   linkDomain,
   trustDomain,
-} from "../../src/lib/trustedDomains";
+} from "../../src/lib/net/trustedDomains";
 
 const KEY = "owncord:trustedLinkDomains";
 

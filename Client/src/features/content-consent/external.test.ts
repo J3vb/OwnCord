@@ -13,7 +13,7 @@ const { previewMock, imageMock, searchGifsMock, trendingMock } = vi.hoisted(() =
 vi.mock("../../platform/desktop/externalContent", () => ({
   externalContent: { preview: previewMock, image: imageMock },
 }));
-vi.mock("@lib/gifProvider", () => ({
+vi.mock("@lib/media/gifProvider", () => ({
   searchGifs: searchGifsMock,
   getTrendingGifs: trendingMock,
   isAllowedGifUrl: () => true,

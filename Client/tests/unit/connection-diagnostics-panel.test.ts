@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
-import { SessionScope } from "@lib/sessionScope";
-import { configureConnectionDiagnostics } from "@lib/connectionDiagnostics";
+import { SessionScope } from "@lib/net/sessionScope";
+import { configureConnectionDiagnostics } from "@lib/net/connectionDiagnostics";
 import { createConnectionDiagnosticsPanel } from "@components/settings/ConnectionDiagnosticsPanel";
 
-vi.mock("@lib/livekitSession", () => ({ getRoomForStats: () => null }));
+vi.mock("@lib/voice/livekitSession", () => ({ getRoomForStats: () => null }));
 
 describe("connection diagnostics session ownership in settings", () => {
   let scope: SessionScope;

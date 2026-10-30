@@ -5,8 +5,8 @@
  */
 
 import { createConfirmModal } from "../features/dialogs/confirmModal";
-import type { ModalInstance } from "@lib/modalFactory";
-import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
+import type { ModalInstance } from "@lib/ui/modalFactory";
+import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
 import { muteChoices, mutedUntilLabel } from "./muteMenu";

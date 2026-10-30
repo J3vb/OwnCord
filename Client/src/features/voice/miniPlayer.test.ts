@@ -5,7 +5,7 @@ import {
   resetMiniPlayerPosition,
   type MiniPlayer,
 } from "./miniPlayer";
-import { registerVideoSurface } from "../../lib/videoSurface";
+import { registerVideoSurface } from "../../lib/voice/videoSurface";
 
 /** jsdom lays nothing out: give the player a size. */
 function sized(player: MiniPlayer, width: number, height: number): void {

@@ -5,7 +5,7 @@
  * does not close it.
  */
 
-import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/context-menu";
+import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
 import { shellText } from "../../i18n/shell";
 
 export interface ThreadMenuActions {

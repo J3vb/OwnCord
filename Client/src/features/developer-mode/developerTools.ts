@@ -5,7 +5,7 @@
 
 import { loadPref, onPrefChange } from "../../lib/prefs/preferences";
 import { messagingText } from "../../i18n/messaging";
-import { copyThenToast } from "../../lib/clipboard";
+import { copyThenToast } from "../../lib/ui/clipboard";
 
 /** Cached value of the developerMode preference. Invalidated on pref change. */
 let developerModeEnabled = loadPref<boolean>("developerMode", false);

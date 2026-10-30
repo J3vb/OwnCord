@@ -144,7 +144,7 @@ fn ring_toast_tag(target: &MessageTarget, ring: bool) -> Option<String> {
 /// The launch URI a Windows toast carries: the registered `owncord://` handler
 /// is launched with it on activation, and the app's deep-link path parses it
 /// back (the same `owncord://message/…?host=` and `owncord://channel/…?host=`
-/// shapes `lib/deep-link.ts` reads). The host is percent-encoded so a value
+/// shapes `lib/nav/deepLink.ts` reads). The host is percent-encoded so a value
 /// with `&` or `#` cannot forge extra query parameters or a fragment; the ids
 /// are integers, so they need none.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -162,7 +162,7 @@ fn message_launch_uri(target: &MessageTarget) -> String {
 /// The toast's XML: a protocol-activation toast whose title and body are the
 /// notification text and whose launch URI opens the message. `<audio
 /// silent="true"/>` keeps the OS from adding its own chime — the app plays its
-/// own (`lib/notificationSound.ts`), the same as the notify-rust path did.
+/// own (`lib/media/notificationSound.ts`), the same as the notify-rust path did.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn toast_xml(title: &str, body: &str, target: &MessageTarget) -> String {
     format!(
@@ -477,7 +477,7 @@ mod tests {
     fn the_launch_uri_names_the_message_and_the_server_it_came_from() {
         // The Windows toast's `launch` attribute. The deep-link path parses it
         // back with the same shape `owncord://message/<channel>/<message>?host=`
-        // links use (Client/src/lib/deep-link.ts).
+        // links use (Client/src/lib/nav/deepLink.ts).
         assert_eq!(
             message_launch_uri(&target("chat.example:8443", 7, 42)),
             "owncord://message/7/42?host=chat.example%3A8443"
@@ -488,7 +488,7 @@ mod tests {
     fn a_call_target_launch_uri_names_the_dm_and_the_server_it_came_from() {
         // A call notification has no message: it opens the DM. The deep-link
         // path parses `owncord://channel/<channel>?host=` back with the same
-        // id and host validation as a message link (Client/src/lib/deep-link.ts).
+        // id and host validation as a message link (Client/src/lib/nav/deepLink.ts).
         let call = MessageTarget {
             host: "chat.example:8443".into(),
             channel_id: 7,

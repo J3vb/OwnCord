@@ -8,7 +8,7 @@ import {
   markPortalBound,
   portalBoundBefore,
   portalHoldsShortcuts,
-} from "@lib/globalKeys";
+} from "@lib/ui/globalKeys";
 import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 import type { GlobalKeysStatus } from "../../src/platform/contracts/globalShortcuts";
 

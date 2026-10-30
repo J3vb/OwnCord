@@ -302,7 +302,7 @@ documents. Any disagreement is a bug in this page.
 - **Rule for contributors:** if you touch the E2EE code, keep the
   epoch/keypair staleness guards, and never show an unverified peer as
   verified. This is a security invariant, not a style choice. The E2EE code is
-  `Client/src/lib/e2eeCrypto.ts`, `livekitE2EE.ts`, the
+  `Client/src/lib/net/e2eeCrypto.ts`, `livekitE2EE.ts`, the
   `features/voice/e2ee*.ts` modules, `identity.ts`, the Linux native back end
   in `Client/src-tauri/src/native_voice/`, and the server's
   `Server/ws/voice_e2ee.go`.
@@ -452,5 +452,5 @@ documents. Any disagreement is a bug in this page.
 - [docs/architecture/voice-e2ee.md](docs/architecture/voice-e2ee.md), [docs/architecture/system-overview.md](docs/architecture/system-overview.md)
 - [Server/invariants/authz_chokepoint.go](Server/invariants/authz_chokepoint.go), [Server/invariants/egress_sites.go](Server/invariants/egress_sites.go), [Server/api/absence_contract_test.go](Server/api/absence_contract_test.go), [Server/auth/totp_encrypt.go](Server/auth/totp_encrypt.go), [Server/auth/totp.go](Server/auth/totp.go)
 - [Server/db/logvalue.go](Server/db/logvalue.go), [Server/config/logvalue.go](Server/config/logvalue.go), [Server/db/audittest/audittest.go](Server/db/audittest/audittest.go), [Server/db/models.go](Server/db/models.go), [Server/service/recovery.go](Server/service/recovery.go), [Server/storage/storage.go](Server/storage/storage.go)
-- [Client/src-tauri/src/tofu.rs](Client/src-tauri/src/tofu.rs), [Client/src-tauri/src/credentials.rs](Client/src-tauri/src/credentials.rs), [Client/src-tauri/src/external_content.rs](Client/src-tauri/src/external_content.rs), [Client/src/lib/identity.ts](Client/src/lib/identity.ts), [Client/src/platform/desktop/nativeProxies.ts](Client/src/platform/desktop/nativeProxies.ts)
+- [Client/src-tauri/src/tofu.rs](Client/src-tauri/src/tofu.rs), [Client/src-tauri/src/credentials.rs](Client/src-tauri/src/credentials.rs), [Client/src-tauri/src/external_content.rs](Client/src-tauri/src/external_content.rs), [Client/src/lib/net/identity.ts](Client/src/lib/net/identity.ts), [Client/src/platform/desktop/nativeProxies.ts](Client/src/platform/desktop/nativeProxies.ts)
 - [CLAUDE.md](CLAUDE.md), [Server/CLAUDE.md](Server/CLAUDE.md), [Client/CLAUDE.md](Client/CLAUDE.md)

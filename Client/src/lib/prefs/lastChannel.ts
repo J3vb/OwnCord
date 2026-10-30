@@ -13,7 +13,7 @@
 
 import { clearUnread } from "@stores/channels.store";
 import { loadPref, savePref } from "./preferences";
-import { readPointerEnabled } from "../serverCapabilities";
+import { readPointerEnabled } from "../net/serverCapabilities";
 import type { ChannelType } from "../types";
 import type { WsClient } from "../ws";
 

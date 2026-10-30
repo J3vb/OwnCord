@@ -33,12 +33,12 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   saveCredential: hoisted.saveCredential,
   deleteCredential: hoisted.deleteCredential,
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/livekitSession", () => ({ leaveVoice: hoisted.leaveVoice }));
+vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: hoisted.leaveVoice }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
     debug: vi.fn(),

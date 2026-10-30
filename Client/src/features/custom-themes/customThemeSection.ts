@@ -5,9 +5,9 @@
  */
 
 import { createElement, appendChildren, setText } from "../../lib/dom";
-import { copyThenToast } from "../../lib/clipboard";
+import { copyThenToast } from "../../lib/ui/clipboard";
 import { createLogger } from "../../lib/logger";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import {
   MAX_CUSTOM_THEMES,
   MAX_THEME_CSS_CHARS,

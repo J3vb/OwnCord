@@ -38,7 +38,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),
@@ -53,9 +53,9 @@ vi.mock("@lib/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
-vi.mock("@lib/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
+vi.mock("@lib/voice/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 
@@ -99,9 +99,9 @@ import {
 } from "../../src/features/moderation/store";
 import { safetyStore } from "../../src/features/safety/store";
 import type { ServerMessage } from "../../src/lib/types";
-import { showToast } from "@lib/toast";
-import * as livekitSession from "@lib/livekitSession";
-import { createOutgoingCall, createRingController } from "../../src/lib/call-ring";
+import { showToast } from "@lib/ui/toast";
+import * as livekitSession from "@lib/voice/livekitSession";
+import { createOutgoingCall, createRingController } from "../../src/lib/voice/callRing";
 
 // ─── fixture loading ─────────────────────────────────────────────────────────
 
@@ -690,7 +690,7 @@ describe("contract: epoch-1 fixtures through the client dispatcher", () => {
   // call_incoming / call_declined are not dispatcher frames: MainPage subscribes
   // to them itself (pages/MainPage.ts), and mounting the whole page is out of
   // scope for a contract test. So these two feed the fixture's payload through
-  // the same state machines MainPage hands it to (lib/call-ring.ts), mapping
+  // the same state machines MainPage hands it to (lib/voice/callRing.ts), mapping
   // the fields exactly as MainPage does with a caller no member store knows.
 
   it("call-ring-decline: call_incoming rings with the fixture's caller and channel", () => {

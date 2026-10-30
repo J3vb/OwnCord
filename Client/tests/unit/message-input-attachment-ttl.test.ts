@@ -12,7 +12,7 @@ vi.mock("@components/GifPicker", () => ({
 }));
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 const MIN = 60 * 1000;
 

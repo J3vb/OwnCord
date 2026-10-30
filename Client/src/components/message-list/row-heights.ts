@@ -13,7 +13,7 @@
  * different key.
  */
 
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 const MAX_ROWS = 4000;
 /** An empty list has no scrollbar and a filled one does: rows measured either

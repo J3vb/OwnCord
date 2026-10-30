@@ -6,7 +6,7 @@
  * immediately once it has.
  */
 
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { ApiClient } from "@lib/api";
 import type { ThreadInfo } from "@lib/types";
 import type { WsClient } from "@lib/ws";
