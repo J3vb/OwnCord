@@ -4394,7 +4394,7 @@
       "confidence": "high",
       "fix": {
         "commit": "9e8719dc",
-        "test": "Client/tests/unit/settings-overlay.test.ts",
+        "test": "Client/tests/unit/settingsOverlay/shellAndPreferences.test.ts, Client/tests/unit/settingsOverlay/profileAndOverlays.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Move the attach above the initial sync in mount(): do `container.appendChild(root);` first, then `if (uiStore.getState().settingsOpen) show();`. One reorder in the shared mount() fixes every caller.",
@@ -4555,7 +4555,7 @@
       "confidence": "high",
       "fix": {
         "commit": "2ce5879c",
-        "test": "Client/tests/unit/settings-overlay.test.ts",
+        "test": "Client/tests/unit/settingsOverlay/profileAndOverlays.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "At AccountTab.ts:1151 resolve the same way the initial build does instead of writing the raw username: `setText(headerName, resolveDisplayName({ username: newName, displayName: authStore.getState().user?.display_name ?? null }));` (resolveDisplayName is already imported at :11, and updateUser has run before this .then, so the store is fresh). Leave :1152 (usernameValue) as is.",
@@ -6363,7 +6363,7 @@
       "suggestedFix": "Smallest correct fix for the provable part: hoist the `devicechange` registration out of the per-build path. In `createVoiceAudioTab` (VoiceAudioTab.ts:21-80), keep `let repopulate: (() => void) | null = null`, have `buildVoiceAudioTabInner` hand its `populateDevices` back through a registrar the way it already does for the mic/camera, and register `navigator.mediaDevices.addEventListener(\"devicechange\", () => repopulate?.(), { signal })` exactly once in the factory \u2014 mirroring the single `signal.addEventListener(\"abort\", cleanupMic)` at line 77 that the comment at 490-494 already points to. Then delete lines 393-401 from `buildVoiceAudioTabInner`.\n\nThe general fix, if the per-render DOM retention is also to be closed in one place rather than nine: give `renderActiveTab()` a per-render `AbortController`, abort the previous one immediately before `clearChildren(contentArea)` (SettingsOverlay.ts:126), and pass `AbortSignal.any([ac.signal, renderAC.signal])` to the builders instead of `ac.signal` (110-120) \u2014 `voiceTab.build()`/`logsTab.build()` would need to take that signal as a parameter. `destroy()`'s `ac.abort()` still cascades through `AbortSignal.any`.",
       "fix": {
         "commit": "29a2d1c",
-        "test": "Client/tests/unit/settings-overlay.test.ts",
+        "test": "Client/tests/unit/settingsOverlay/profileAndOverlays.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -11962,7 +11962,7 @@
       "suggestedFix": "Pass countCharacters for both username inputs and restore the hint's own cap when Register re-bounds the field.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/name-limits.test.ts, Client/tests/unit/settings-overlay.test.ts (32-letter name outside the BMP)",
+        "test": "Client/tests/unit/name-limits.test.ts, Client/tests/unit/settingsOverlay/accountAndSecurity.test.ts (32-letter name outside the BMP)",
         "revertProof": "fail (maxlength 32, name cut)"
       },
       "confidence": "high",
