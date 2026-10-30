@@ -209,6 +209,78 @@ describe("composer polish (3A-3)", () => {
     });
   });
 
+  describe("long draft", () => {
+    const action = (): HTMLButtonElement | null =>
+      container.querySelector('[data-testid="too-long-as-file"]');
+
+    it("offers to send a typed draft past the limit as message.txt", async () => {
+      const onUploadFile = upload();
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+      type("y".repeat(4001));
+      enter();
+      expect(container.querySelector(".attachment-upload-error-text")).not.toBeNull();
+      const btn = action();
+      expect(btn).not.toBeNull();
+      btn!.click();
+      await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(1));
+      const file = vi.mocked(onUploadFile).mock.calls[0]![0];
+      expect(file.name).toBe("message.txt");
+      expect(await file.text()).toBe("y".repeat(4001));
+      expect(textarea().value).toBe("");
+      expect(container.querySelector(".attachment-upload-error")).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("shows the refusal without the action when uploads are not wired", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+      type("y".repeat(4001));
+      enter();
+      expect(container.querySelector(".attachment-upload-error-text")).not.toBeNull();
+      expect(action()).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("sends the text as it is when clicked, not as it was refused", async () => {
+      const onUploadFile = upload();
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+      type("y".repeat(4001));
+      enter();
+      textarea().value = `${"y".repeat(4001)}z`;
+      action()!.click();
+      await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(1));
+      expect(await vi.mocked(onUploadFile).mock.calls[0]![0].text()).toBe(`${"y".repeat(4001)}z`);
+      comp.destroy?.();
+    });
+
+    it("puts the draft back when the file fails to upload", async () => {
+      const onUploadFile = vi.fn(async () => {
+        throw new Error("offline");
+      });
+      const comp = createMessageInput(makeOptions({ onUploadFile }));
+      comp.mount(container);
+      type("y".repeat(4001));
+      enter();
+      action()!.click();
+      expect(textarea().value).toBe("");
+      await vi.waitFor(() => expect(textarea().value).toBe("y".repeat(4001)));
+      expect(container.querySelector(".attachment-preview-item")).toBeNull();
+      comp.destroy?.();
+    });
+
+    it("keeps one action button when the refusal shows twice", () => {
+      const comp = createMessageInput(makeOptions({ onUploadFile: upload() }));
+      comp.mount(container);
+      type("y".repeat(4001));
+      enter();
+      enter();
+      expect(container.querySelectorAll('[data-testid="too-long-as-file"]')).toHaveLength(1);
+      comp.destroy?.();
+    });
+  });
+
   describe("draft hooks", () => {
     it("reports text and reply changes, and the send that clears them", () => {
       vi.useFakeTimers({ toFake: ["Date"] });

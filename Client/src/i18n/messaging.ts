@@ -46,6 +46,7 @@ export const messagingText = defineCatalog("messaging", {
   "composer.slowMode": "Slow mode — {seconds}s",
   "composer.slowModeNote": "Slow mode is on: one message every {seconds}s",
   "error.tooLong": "Messages are limited to {max} characters",
+  "error.tooLongAsFile": "Send as {name}",
   "error.fileTooLarge": "File too large: {filename} exceeds {limit} MB limit",
   "error.fileTypeBlocked": "{filename} can't be uploaded: this server doesn't allow .{ext} files",
   "error.fileTypeNoExtension":
