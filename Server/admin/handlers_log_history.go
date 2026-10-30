@@ -26,6 +26,11 @@ const (
 	logHistoryChunk     = 64 << 10
 	logHistoryMaxLine   = 1 << 20
 	logHistoryScanLimit = 64 << 20
+	// logHistoryOrderSlack is how far a line may sit out of time order in a
+	// file: a record keeps its creation time but reaches the writer after
+	// any record logged at the same moment by another goroutine. The scan
+	// only stops once a line is this far before "from".
+	logHistoryOrderSlack = time.Minute
 	// logHistoryDaySlack lets a file dated the day after "to" still be read:
 	// a line logged just before midnight can land in the next day's file.
 	logHistoryDaySlack = 24 * time.Hour
@@ -301,8 +306,11 @@ func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *
 			return nil
 		}
 		if !q.from.IsZero() && ts.Before(q.from) {
-			pastFrom = true
-			return errLogScanStop
+			if ts.Before(q.from.Add(-logHistoryOrderSlack)) {
+				pastFrom = true
+				return errLogScanStop
+			}
+			return nil
 		}
 		if q.levelTags != nil && !slices.ContainsFunc(q.levelTags, func(tag []byte) bool { return bytes.Contains(line, tag) }) {
 			return nil

@@ -259,3 +259,20 @@ func TestScanLinesBackward_LongLinesAcrossChunks(t *testing.T) {
 		t.Fatalf("lines = %d, first %q", len(got), got[0])
 	}
 }
+
+// Lines reach the file a little out of time order when two goroutines log at
+// once. A line just before "from" must not end the scan early.
+func TestLogHistory_OutOfOrderLineBeforeFromDoesNotEndTheScan(t *testing.T) {
+	dir := t.TempDir()
+	at := func(h, m int) time.Time { return time.Date(2026, 10, 30, h, m, 0, 0, time.UTC) }
+	writeHistoryFile(t, dir, "owncord-2026-10-30.log", []LogEntry{
+		entryAt(at(9, 0), "INFO", "long before"),
+		entryAt(at(10, 0).Add(time.Second), "INFO", "in range a"),
+		entryAt(at(10, 0).Add(-time.Second), "INFO", "just before"),
+		entryAt(at(10, 2), "INFO", "in range b"),
+	}, "")
+	all, _ := readAll(t, dir, historyQuery(t, "from=2026-10-30T10:00:00Z&to=2026-10-30T11:00:00Z"))
+	if len(all) != 2 || all[0].Message != "in range b" || all[1].Message != "in range a" {
+		t.Fatalf("entries = %+v", all)
+	}
+}

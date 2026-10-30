@@ -782,6 +782,30 @@ describe("Server/admin/static — saved log history", () => {
     expect(shownLines(doc)).toEqual(["two", "three"]);
   });
 
+  it("drops live lines still waiting to paint when switching to History", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls, undefined, () => ({
+      enabled: true,
+      entries: [savedEntry(1, "saved")],
+    }));
+    const { window } = dom;
+    await settle(window);
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await settle(window);
+    const live = FakeEventSource.instances[0]!;
+    live.onopen?.();
+    live.onmessage?.({ data: JSON.stringify(backfillEntry(1)) });
+
+    tab(doc, "History").click();
+    await settle(window);
+    await nextFrame(window);
+    await nextFrame(window);
+    expect(shownLines(doc)).toEqual(["saved"]);
+  });
+
   // Edge case: the server is slow to answer a search the operator has since
   // changed. The late answer must not replace the newer search's lines.
   it("drops a late answer to a search that was replaced", async () => {

@@ -644,6 +644,7 @@ function trimLogEntries(){
 function scheduleLogPaint(){if(!state.logPaintFrame)state.logPaintFrame=requestAnimationFrame(flushLogPaint)}
 function flushLogPaint(){
   state.logPaintFrame=0;
+  if(state.logMode!=='live')return;
   trimLogEntries();
   const pending=state.logPending;state.logPending=[];
   if(state.logRepaint){state.logRepaint=false;renderLogLines();return}
@@ -738,6 +739,8 @@ function logModeTabs(){
 
 function stopLogStream(){
   state.logConnectSeq++;
+  if(state.logPaintFrame){cancelAnimationFrame(state.logPaintFrame);state.logPaintFrame=0}
+  state.logPending=[];state.logRepaint=false;
   if(state.logEventSource){state.logEventSource.close();state.logEventSource=null}
   if(state.logReconnectTimer){clearTimeout(state.logReconnectTimer);state.logReconnectTimer=null}
 }
