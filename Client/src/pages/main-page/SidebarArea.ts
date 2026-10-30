@@ -62,7 +62,7 @@ import {
   toggleChannelMute,
   unmuteChannel,
 } from "@lib/prefs/channelMutes";
-import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/read-state";
+import { markAllRead, markChannelRead, unreadChannelIds } from "@lib/readState";
 import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";

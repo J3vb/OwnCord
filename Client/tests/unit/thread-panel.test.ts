@@ -18,8 +18,8 @@ vi.mock("@lib/pendingMessages", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@lib/pendingMessages")>()),
   supportsMessageDeduplication: () => true,
 }));
-vi.mock("@lib/read-state", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/read-state")>()),
+vi.mock("@lib/readState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/readState")>()),
   noteMessageSeen: noteSeen,
 }));
 

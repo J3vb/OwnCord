@@ -4,7 +4,7 @@
  * message, this module waits for its uploads and hands the settled ids back
  * through `deps.dispatch`, which posts it as one ordinary `chat_send`. It writes
  * no store and never touches the socket; the controller's deps do both, so a
- * channel switch changes nothing here. Loaded through sendQueue-loader.ts.
+ * channel switch changes nothing here. Loaded through sendQueueLoader.ts.
  */
 
 import { Disposable } from "../../lib/disposable";

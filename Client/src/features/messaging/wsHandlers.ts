@@ -47,7 +47,7 @@ import { isForwardRequest } from "./forwardRequests";
 import { isPollRequest } from "./pollRequests";
 import { handleThreadState } from "./threadFrames";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
-import { isChannelAway, noteAwayUnread } from "@lib/read-state";
+import { isChannelAway, noteAwayUnread } from "@lib/readState";
 import {
   activatePendingMessages,
   acknowledgePendingMessage,
@@ -152,7 +152,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     }) ||
       (payload.mentions_everyone === true && !(payload.mentions_here === true && isReplayFrame)));
   // "active" only means "the reader is watching" while the window is
-  // focused (isChannelAway, lib/read-state.ts). A minimised or unfocused window
+  // focused (isChannelAway, lib/readState.ts). A minimised or unfocused window
   // shows nothing, so a message landing in the active channel then must count
   // like one in any other channel (badge, taskbar, divider) — the same
   // predicate the ready-time mark-read uses.
@@ -169,7 +169,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
     // as a queued chat_message) does not double-count.
     noteChannelMessage(payload.channel_id, payload.id, isMention, isAway);
     // Counted unread in the channel on screen: the reader was away, so after a
-    // Mark Unread a later live arrival may release the hold (read-state.ts).
+    // Mark Unread a later live arrival may release the hold (readState.ts).
     if (isAway && payload.channel_id === activeId) noteAwayUnread(payload.channel_id);
   }
 

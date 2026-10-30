@@ -15,7 +15,7 @@ import {
   noteLiveMessageSeen,
   setMarkReadSender,
   unreadChannelIds,
-} from "@lib/read-state";
+} from "@lib/readState";
 import {
   channelsStore,
   setChannels,

@@ -34,8 +34,8 @@ import {
   setLiveTailInView,
   setMarkReadSender,
   writeReadPointer,
-} from "@lib/read-state";
-import { setMarkUnreadSender } from "../../src/components/message-list/mark-unread";
+} from "@lib/readState";
+import { setMarkUnreadSender } from "../../src/components/message-list/markUnread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";

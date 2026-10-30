@@ -17,7 +17,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { isChannelAway } from "@lib/read-state";
+import { isChannelAway } from "@lib/readState";
 import {
   messagesStore,
   addMessage,

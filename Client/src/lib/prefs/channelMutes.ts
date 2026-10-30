@@ -82,7 +82,7 @@ let cache: ReadonlyMap<number, number | null> | null = null;
  * Point mute reads/writes at a specific server's key and drop the cache so
  * the next read re-parses under the new key instead of returning the
  * previous server's set. Call on connect and on server switch — mirroring
- * how `read-state.ts`'s `setMarkReadSender` and `ui.store.ts`'s
+ * how `readState.ts`'s `setMarkReadSender` and `ui.store.ts`'s
  * `loadCollapsedCategories` are wired from MainPage per-connection.
  */
 export function setChannelMutesHost(host: string | null): void {

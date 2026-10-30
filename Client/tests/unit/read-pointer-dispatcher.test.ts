@@ -21,12 +21,12 @@ import {
   noteMessageSeen,
   setLiveTailInView,
   setMarkReadSender,
-} from "../../src/lib/read-state";
+} from "../../src/lib/readState";
 import type { WsClient } from "../../src/lib/ws";
 import {
   markMessageUnread,
   setMarkUnreadSender,
-} from "../../src/components/message-list/mark-unread";
+} from "../../src/components/message-list/markUnread";
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";

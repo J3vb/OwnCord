@@ -44,7 +44,7 @@ vi.mock("@components/TypingIndicator", () => ({
   createTypingIndicator: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("../../src/pages/main-page/ChatHeader", () => ({ updateChatHeaderForDm: vi.fn() }));
-vi.mock("@lib/read-state", () => ({
+vi.mock("@lib/readState", () => ({
   setKnownThreadCheck: vi.fn(),
   setThreadReadPointer: vi.fn(),
   markChannelRead: vi.fn(),
@@ -53,10 +53,10 @@ vi.mock("@lib/read-state", () => ({
 }));
 vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 // The chunk can fail to load: the real loader, with a switch to make it reject.
-vi.mock("../../src/features/messaging/sendQueue-loader", async () => {
+vi.mock("../../src/features/messaging/sendQueueLoader", async () => {
   const actual = await vi.importActual<
-    typeof import("../../src/features/messaging/sendQueue-loader")
-  >("../../src/features/messaging/sendQueue-loader");
+    typeof import("../../src/features/messaging/sendQueueLoader")
+  >("../../src/features/messaging/sendQueueLoader");
   return {
     ...actual,
     loadSendQueue: () =>
