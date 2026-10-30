@@ -46,7 +46,45 @@ describe("rangeFor", () => {
   });
 });
 
+describe("rangeFor pinned boundaries", () => {
+  // Window for top 450 / viewport 100 / no overscan is [45, 55).
+  it("pins the first item of the list when it is outside the window", () => {
+    expect(rangeFor(offsets, 450, 100, 0, [0])).toEqual({ start: 45, end: 55, pinned: [0] });
+  });
+
+  it("pins the item right at the end of the window but not the one at its start", () => {
+    expect(rangeFor(offsets, 450, 100, 0, [45, 55])).toEqual({
+      start: 45,
+      end: 55,
+      pinned: [55],
+    });
+  });
+
+  it("pins the last item and ignores an index one past it", () => {
+    expect(rangeFor(offsets, 450, 100, 0, [99, 100])).toEqual({
+      start: 45,
+      end: 55,
+      pinned: [99],
+    });
+  });
+
+  it("pins the item just before the window start", () => {
+    expect(rangeFor(offsets, 450, 100, 0, [44])).toEqual({ start: 45, end: 55, pinned: [44] });
+  });
+
+  it("drops fractional pinned indices", () => {
+    expect(rangeFor(offsets, 450, 100, 0, [3.5])).toEqual({ start: 45, end: 55, pinned: [] });
+  });
+});
+
 describe("indexAt", () => {
+  it("returns the first item for a zero or negative offset even when leading items have no height", () => {
+    const leadingEmpty = buildOffsets([0, 0, 10]);
+    expect(indexAt(leadingEmpty, 0)).toBe(0);
+    expect(indexAt(leadingEmpty, -3)).toBe(0);
+    expect(indexAt(leadingEmpty, 5)).toBe(2);
+  });
+
   it("returns the item whose top is at or below y, on boundaries", () => {
     expect(indexAt(offsets, 0)).toBe(0);
     expect(indexAt(offsets, 9.99)).toBe(0);
