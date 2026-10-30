@@ -565,9 +565,9 @@ pub struct ScreenOptions {
 /// one lower layer (`SCREENSHARE_SIMULCAST_LAYERS`): 720p at 15 fps and at
 /// most 1.2 Mbps, so a viewer who cannot take the full stream still gets
 /// readable text instead of a frozen frame, and the top layer keeps most of
-/// the budget. Like the web path's `screenShareDegradation`, a 120 fps share
-/// degrades `Balanced` (resolution before frame rate); lower rates keep
-/// resolution.
+/// the budget. Like the web path's `screenShareDegradation`, every rate keeps
+/// its frame rate and gives up resolution when the encoder or link falls
+/// behind.
 fn screen_publish_options(opts: &ScreenOptions) -> TrackPublishOptions {
     let scalability_mode = opts.codec.svc();
     let simulcast = opts.simulcast && scalability_mode.is_none();
