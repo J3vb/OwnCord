@@ -16,7 +16,7 @@
       "lens": "crypto-primitives",
       "fix": {
         "commit": "84033139",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "pass"
       }
     },
@@ -56,7 +56,7 @@
       "lens": "tofu-trust-chain",
       "fix": {
         "commit": "bf7612fb",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "pass"
       }
     },
@@ -75,7 +75,7 @@
       "lens": "keyholder-election",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass",
         "branchCommit": "9e375c93"
       },
@@ -96,7 +96,7 @@
       "lens": "rotation-forward-secrecy",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass",
         "branchCommit": "9e375c93"
       },
@@ -117,7 +117,7 @@
       "lens": "rotation-forward-secrecy",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass",
         "branchCommit": "9e375c93"
       },
@@ -138,7 +138,7 @@
       "lens": "degradation-observability",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass",
         "branchCommit": "9e375c93"
       },
@@ -201,7 +201,7 @@
       "lens": "reconnect-stale-continuations",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass",
         "branchCommit": "15d3c9c2"
       },
@@ -222,7 +222,7 @@
       "lens": "tofu-trust-chain",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass",
         "branchCommit": "15d3c9c2"
       },
@@ -2406,7 +2406,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass",
         "branchCommit": "9e375c93"
       },
@@ -3798,7 +3798,7 @@
       "confidence": "high",
       "fix": {
         "commit": "5db10850",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Make the budget an instance-level sliding window instead of a per-call counter, and funnel every offer send through it. Add a private field `_offerSendTimes: number[] = []` and a single `private async sendOfferPaced(targetUserId, encryptedKey, iv)` that prunes entries older than OFFER_RATE_WINDOW_MS, sleeps until the oldest falls out when `_offerSendTimes.length >= OFFER_RATE_LIMIT_PER_SEC`, then pushes `Date.now()` and does the `getWs()?.send(...)`. Replace distributeRoomKey's local `sentInWindow` bookkeeping (lines 976, 984-996, 1006) with a call to it; reset `_offerSendTimes.length = 0` in clearState(). One shared gate covers the rotation, become-holder, and H3 paths at once.",
@@ -4072,7 +4072,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "5db10850",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/rotationAndOrdering.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Same single fix as candidate 1 \u2014 route livekitE2EE.ts:806-810's `getWs()?.send({type: \"voice_e2ee_offer\", ...})` through the shared instance-level `sendOfferPaced(...)` helper rather than calling `getWs()?.send` directly, so announce-driven offers draw from the same sliding-window budget as rotation offers. No per-caller pacing and no change to the drain loop at 244-249 is needed.",
@@ -5039,7 +5039,7 @@
       "confidence": "high",
       "fix": {
         "commit": "ccd9f39b69b202dc2858c8b02e97104e67f81aec",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Hoist the replay check ahead of verification: in handleAnnounceInner, immediately after the `_ecdhKeyPair` queue check / generation capture (~line 741), add `if (this.isRetiredPeerKey(userId, publicKeyBase64)) { log.error(...); return; }` and delete the two later duplicates at 779-783 and 790-793. Safe because a retired key is never the live key \u2014 retirePeerKey is only called for a key being replaced (785) or for a departing peer whose entry is deleted (1200/1214) \u2014 so the dedupe branch at 764-769 cannot be starved.",
@@ -5108,7 +5108,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "ccd9f39b69b202dc2858c8b02e97104e67f81aec",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Buffer the rejected announce instead of discarding it: in verifyPeerAnnounce's mismatch branch (livekitE2EE.ts:536-547) record `{userId -> {publicKeyBase64, signatureBase64}}` in a new `_blockedAnnounces` map (cleared in clearState alongside _pendingAnnounces), and in rePinPeerIdentity, after the successful storeIdentityPin and before clearPeerVerification, replay it: `const pending = this._blockedAnnounces.get(userId); if (pending) { this._blockedAnnounces.delete(userId); await this.handleAnnounce(userId, pending.publicKeyBase64, pending.signatureBase64); }`. That re-runs the normal verifying path against the new pin, re-populates _peerPublicKeys, sends the offer if we are the holder, and lets setPeerVerification write the real \"verified\" badge rather than leaving the row blank.",
@@ -5131,7 +5131,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "ccd9f39b69b202dc2858c8b02e97104e67f81aec",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Carry the leaver's join instance in the broadcast and make the client's leave handling instance-conditional. finishVoiceLeave already holds `oldJoinToken` (voice_leave.go:56), so add it to voiceLeavePayload/buildVoiceLeave (via the protocol-change skill, since protocol/schema.json is the source of truth) and record each peer's join token from voice_state in the client. Then guard the top of handleParticipantLeft: if the payload's join token is not the one currently recorded for that peer, ignore the event entirely \u2014 one guard in the shared function covers the delete, the retirement and the election at once. A client-only stopgap that removes the permanent half of the damage is to skip the `retirePeerKey` call at :1213-1215 whenever the peer is still present in `voiceStore.voiceUsers.get(channelId)`, which leaves the peer re-announceable instead of permanently blocked.",
@@ -5725,7 +5725,7 @@
       "suggestedFix": "Snapshot roster presence before the store mutation and pass it in, rather than re-deriving it after. In dispatcher.ts, before line 967: const stillPresent = voiceStore.getState().voiceUsers.get(payload.channel_id)?.has(payload.user_id) ?? false; then removeVoiceUser(payload); and call handleParticipantLeft(payload.user_id, stillPresent). In livekitE2EE.ts:1226 add a `stillInRoster = false` parameter and change line 1261 to `if (departingKey && !stillInRoster)`; the ready-resync caller at dispatcher.ts:344 passes false (correct there by construction, since it only fires for uids absent from the new roster). Keeping the default false preserves current behavior for every other caller and leaves the decision in one place.",
       "fix": {
         "commit": "c518032",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -6121,7 +6121,7 @@
       "suggestedFix": "One guard in the shared error handler: in dispatcher.ts's ws.on(S.ERROR) branch, add `if (payload.code === \"NOT_KEY_HOLDER\") { return; }` (log-only) ahead of the catch-all showToast at :1249 \u2014 this refusal is a benign, self-healing election race the client already recovers from via handleOfferInner's stand-down. Optionally also stop emitting the doomed offer at all: in handleAnnounceInner, gate the holder branch on `userId > myUserId` (the server always elects the lowest connected uid, the same rule handleParticipantLeft already applies at :1286).",
       "fix": {
         "commit": "c518032",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -9737,7 +9737,7 @@
       "finder": "opus",
       "fix": {
         "commit": "04659e8",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Scope the bail-out to the retirement write instead of returning from the method: replace lines 1365-1369 with `if (departingKey && !channelUsers?.has(userId)) { const departingKeyBase64 = await exportPublicKey(departingKey); if (isCurrent()) this.retirePeerKey(userId, departingKeyBase64); }` so the invocation that actually observed hadPeerKey=true still reaches the election / `else if (wasKeyHolder && hadPeerKey)` rekey. The duplicate invocation (hadPeerKey=false) remains a no-op, so this cannot double-rotate."
@@ -10280,7 +10280,7 @@
       "finder": "codex-review-pr-1591",
       "fix": {
         "commit": "60a5140",
-        "test": "Client/tests/unit/livekit-e2ee.test.ts",
+        "test": "Client/tests/unit/livekitE2ee/epochsAndOwnership.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Capture _sessionGeneration separately at method entry and return outright when it has moved, keeping the OC-0416 scoped guard for the peer-generation case only."
