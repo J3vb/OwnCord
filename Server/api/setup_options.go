@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
+
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/diskutil"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -20,8 +23,8 @@ type Lifecycle struct {
 // adminSetupOptions is what the router hands the admin API: the running
 // config, the setup token, the log-level controller and the app's lifecycle
 // handles (the background group and the shutdown signal) the update apply
-// tail needs.
-func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImporter) admin.SetupOptions {
+// tail needs, and the Dashboard health row's sources.
+func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImporter, uploadBytes func(context.Context) (int64, error)) admin.SetupOptions {
 	return admin.SetupOptions{
 		ConfigPath: config.DefaultPath,
 		RunningCfg: cfg,
@@ -37,5 +40,13 @@ func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImp
 		ImportDir:      importTempDir(cfg),
 		ImportMaxBytes: cfg.Upload.ImportMaxBytes(),
 		BeginTransfer:  beginImportTransfer,
+
+		System: admin.SystemSources{
+			Sampler:     rt.SystemStats,
+			DiskSpace:   func() (uint64, uint64, error) { return diskutil.Space(cfg.Server.DataDir) },
+			DiskMinFree: cfg.Server.MinFreeDiskBytes(),
+			UploadBytes: uploadBytes,
+			Started:     serverStartTime,
+		},
 	}
 }

@@ -73,6 +73,7 @@ export const settingsText = defineCatalog("settings", {
   "appearance.fontSize": "Font Size",
   "appearance.fontSize.value": "{size}px",
   "appearance.theme.system": "Sync with computer",
+  "appearance.theme.system.android": "Sync with system",
   "appearance.compactMode": "Compact Mode",
   "appearance.zoom": "Zoom Level",
   "appearance.zoom.value": "{percent}%",
@@ -93,6 +94,8 @@ export const settingsText = defineCatalog("settings", {
   "appearance.customThemes": "Custom Themes",
   "appearance.customThemes.desc":
     "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed. Ctrl+Shift+Backspace turns a custom theme off.",
+  "appearance.customThemes.desc.android":
+    "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed.",
   "appearance.customThemes.empty": "No custom themes yet.",
   "appearance.customThemes.new": "New theme",
   "appearance.customThemes.import": "Import .css",
@@ -134,6 +137,8 @@ export const settingsText = defineCatalog("settings", {
 
   "notifications.desktop.label": "Desktop Notifications",
   "notifications.desktop.desc": "Show desktop notifications for messages",
+  "notifications.desktop.label.android": "Notifications",
+  "notifications.desktop.desc.android": "Show notifications for messages",
   "notifications.permission.label": "System Notification Permission",
   "notifications.permission.allowed": "Allowed",
   "notifications.permission.blocked": "Blocked",
@@ -219,10 +224,12 @@ export const settingsText = defineCatalog("settings", {
   "images.chatBar.emoji.label": "Show emoji button",
   "images.chatBar.emoji.desc":
     "Show the emoji button in the chat bar. Ctrl+E still opens the picker",
+  "images.chatBar.emoji.desc.android": "Show the emoji button in the chat bar",
   "images.chatBar.sticker.label": "Show sticker button",
   "images.chatBar.sticker.desc": "Show the sticker button in the chat bar",
   "images.chatBar.gif.label": "Show GIF button",
   "images.chatBar.gif.desc": "Show the GIF button in the chat bar. Ctrl+G still opens the picker",
+  "images.chatBar.gif.desc.android": "Show the GIF button in the chat bar",
   "images.chatBar.poll.label": "Show Poll button",
   "images.chatBar.poll.desc": "Show the Poll button in the chat bar",
   "images.chatBar.voice.label": "Show voice message button",
@@ -529,6 +536,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.card.microphone": "Microphone",
   "voiceAudio.card.speakers": "Speakers",
   "voiceAudio.card.camera": "Camera & screen share",
+  "voiceAudio.card.camera.android": "Camera",
   "voiceAudio.card.processing": "Voice processing",
   "voiceAudio.mic.hearing": "Hearing you",
   "voiceAudio.mic.noInput": "No input",
@@ -580,19 +588,20 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.videoCodec": "Video Codec",
   "voiceAudio.videoCodecDesc":
     "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. H.264 falls back to VP8 when your graphics card can't encode it. Takes effect the next time you turn on your camera or start sharing.",
-  "voiceAudio.videoCodec.vp8": "VP8 (default, most compatible)",
+  "voiceAudio.videoCodec.vp8": "VP8 (most compatible)",
   "voiceAudio.videoCodec.vp9": "VP9 (sharper text)",
   "voiceAudio.videoCodec.h265": "H.265 (hardware only)",
   "voiceAudio.videoCodec.h264": "H.264 (uses your graphics card when it can)",
   "voiceAudio.videoCodec.h264Linux": "H.264 (software)",
-  "voiceAudio.videoCodec.autoLinux": "Auto (VP8)",
+  "voiceAudio.videoCodec.autoLinux": "Auto (default, VP8)",
   "voiceAudio.videoCodec.h264Unavailable": "H.264 (not available in this build)",
   "voiceAudio.videoCodecDescLinux":
     "Used for your camera and screen share. Everyone watching has to be able to play it, and VP8 is the safe choice. Takes effect the next time you turn on your camera or start sharing.",
   "voiceAudio.videoCodecLinux": "Linux encodes video in software; VP8 uses the least CPU.",
   "voiceAudio.videoCodecIntel":
     "H.264 from Intel graphics cannot be played by viewers yet. Auto avoids it.",
-  "voiceAudio.videoCodec.auto": "Auto (H.264 when your graphics card can encode it, otherwise VP8)",
+  "voiceAudio.videoCodec.auto":
+    "Auto (default: H.264 when your graphics card can encode it, otherwise VP8)",
   "voiceAudio.videoDevice": "Video Device",
   "voiceAudio.kind.microphone": "Microphone",
   "voiceAudio.kind.speaker": "Speaker",

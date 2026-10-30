@@ -53,6 +53,14 @@ and only when it changes something a contributor or fork holder must do
 
 - The Android app is on the release page: download `OwnCord_<version>_arm64.apk` and install it (Android asks once to allow installs from your browser). After that the app updates itself: it shows "Update available", downloads the new version and opens Android's installer, where you tap Install. Your sign-in and settings stay.
 
+**Voice**
+
+- On Linux, one failed connection on the local video preview socket stopped every camera, screen and remote video preview until the call was rejoined — the socket now keeps accepting connections.
+
+**Desktop UI**
+
+- Sign-in checks on incoming server messages in the desktop app no longer read every message in full — they skip messages that cannot be the sign-in reply.
+
 **Phones and touch screens**
 
 - Message actions, the emoji/GIF/sticker picker and member profiles open as bottom sheets on phones: big reaction buttons, full-width picker, large Message and Call buttons. Swipe down, tap outside or press Back to close. The header search box is a search icon.
@@ -62,24 +70,45 @@ and only when it changes something a contributor or fork holder must do
 - Picking another server in the server rail or the switch list asks "Switch to (server name)?" first, so a stray click no longer drops you out of a call. Tick "Don't ask again" to skip it; turn it back on in Settings > Advanced > Ask before switching servers.
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
 
+### Changed
+
+**Phones and touch screens**
+
+- The Android app hides desktop-only settings and buttons (pop-out, Keybinds, tray, taskbar and screen share options), and Enter adds a new line in the message box there; the send button sends.
+
 **Admin panel**
 
+- The admin panel's Dashboard opens with a health row: CPU (OwnCord's share and the whole machine's), RAM, free disk space and uptime, each with a one-hour line, refreshed every 5 seconds. Inside Docker with a memory limit, RAM is measured against the container's limit. Tiles turn yellow or red when CPU stays high, memory is nearly full or the disk runs low. Shown to admins with View Diagnostics.
 - Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
 
 ### Fixed
 
 **Admin panel**
 
+- "Back up now" and "Restore" showed an error after 30 seconds on a big database even though the work finished (and a retried backup made a second copy) — both now run to completion.
+- A database error while deciding an appeal told the moderator it was "already decided or withdrawn" — it now reports a server error.
 - Server logs opened slowly once many lines were collected. A full log now opens in a fraction of a second, and the page keeps the last 10,000 lines instead of 2,000.
 
 **Login & connection**
 
+- Very large `event_persistence` numbers in `config.yaml` or the environment could stop the server from starting — they are now brought into range with a warning, like the same settings in the admin panel.
 - The server address was case-sensitive, so `Chat.Example.com` missed the saved `chat.example.com` server and its saved sign-in — the address is now lowercased, and a saved server typed in another case is matched.
 - Phone keyboards capitalised and auto-corrected the server address — the address boxes now turn that off.
+- Pasting a server link such as `https://chat.example.com/` failed with "Invalid host format" — the link's host is used.
+- A mistyped server address was sent anyway and came back as a bare "Invalid host format" — the form now says what a server address looks like before it sends anything.
+- The example in the empty server address box looked like a filled-in address — it now reads "e.g. chat.example.com:8443".
+- On phones the keyboard popped up over the saved servers as soon as the login page opened — the page no longer focuses the address box on a touch screen.
+- Password managers offered the saved password when creating an account — Register now asks for a new one, and phone keyboards no longer capitalise the username or invite code.
 
 **Phones and touch screens**
 
 - Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
+
+### Changed
+
+**Voice**
+
+- The video codec for camera and screen share now defaults to Auto: H.264 when your graphics card can encode it, otherwise VP8. In the Windows app on an NVIDIA or AMD graphics card, Auto now uses the graphics card's H.264 encoder (before, it always ended up on VP8). If you picked a codec yourself in Settings > Voice & Audio, that choice is kept.
 
 ## v2.6.0
 

@@ -9,6 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/syncutil"
+	"github.com/J3vb/OwnCord/Server/sysstats"
 )
 
 // The router must hand the app's background group and shutdown signal to the
@@ -17,7 +18,7 @@ func TestAdminSetupOptions_CarryBackgroundAndShutdown(t *testing.T) {
 	bg := syncutil.NewGroup(context.Background())
 	shutdown := make(chan struct{})
 	rt := Runtime{Background: bg, Shutdown: shutdown, SetupToken: "tok"}
-	got := adminSetupOptions(&config.Config{}, rt, nil)
+	got := adminSetupOptions(&config.Config{}, rt, nil, nil)
 	if got.Background != bg {
 		t.Error("SetupOptions.Background is not Runtime.Background")
 	}
@@ -35,7 +36,7 @@ func TestAdminSetupOptions_CarryDiscordImportSettings(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Upload.ImportMaxMB = 7
 	cfg.Server.DataDir = t.TempDir()
-	got := adminSetupOptions(cfg, Runtime{}, nil)
+	got := adminSetupOptions(cfg, Runtime{}, nil, nil)
 	if got.ImportMaxBytes != 7<<20 {
 		t.Errorf("ImportMaxBytes = %d, want %d", got.ImportMaxBytes, 7<<20)
 	}
@@ -44,6 +45,30 @@ func TestAdminSetupOptions_CarryDiscordImportSettings(t *testing.T) {
 	}
 	if want := filepath.Join(cfg.Server.DataDir, admin.ImportDirName); got.ImportDir != want {
 		t.Errorf("ImportDir = %q, want %q", got.ImportDir, want)
+	}
+}
+
+// The Dashboard health row gets the runtime's sampler, the data volume and the
+// start time.
+func TestAdminSetupOptions_CarrySystemSources(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Server.DataDir = t.TempDir()
+	sampler := sysstats.NewSampler()
+	got := adminSetupOptions(cfg, Runtime{SystemStats: sampler}, nil, nil).System
+	if got.Sampler != sampler {
+		t.Error("System.Sampler is not Runtime.SystemStats")
+	}
+	if got.Started.IsZero() {
+		t.Error("System.Started is not set")
+	}
+	if got.DiskSpace == nil {
+		t.Fatal("System.DiskSpace is not set")
+	}
+	if _, total, err := got.DiskSpace(); err != nil || total == 0 {
+		t.Errorf("DiskSpace() = total %d, err %v; want the data volume", total, err)
+	}
+	if got.UploadBytes != nil {
+		t.Error("UploadBytes set without a source")
 	}
 }
 

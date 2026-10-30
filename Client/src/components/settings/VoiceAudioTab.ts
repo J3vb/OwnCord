@@ -37,7 +37,7 @@ import {
   nativeCameraSupport,
   onNativeDevicesChanged,
 } from "../../features/voice/native/devices";
-import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { isAndroidApp, isLinuxDesktop } from "../../features/voice/native/platform";
 import {
   getVideoCodecPref,
   h264Offered,
@@ -221,6 +221,12 @@ function buildVoiceAudioTabInner(
   // and in the capture-only monitor the meter runs outside a call. The
   // webview's microphone is not the engine's, so the meter opens none there.
   const nativeAudio = isLinuxDesktop();
+  // The Android app has no key service for Push to Talk, no output device
+  // choice and no screen sharing, so those controls are left out.
+  const android = isAndroidApp();
+  // The mode the gate runs in. The saved choice is kept as it is, but a phone
+  // always gates on the sensitivity, as a call there does.
+  const currentMode = (): InputMode => (android ? "vad" : inputMode());
 
   // Five cards: when you transmit, what you speak into, what you hear, what
   // you show, and how your voice is processed.
@@ -235,7 +241,7 @@ function buildVoiceAudioTabInner(
   const inputModeCard = card(t("voiceAudio.card.inputMode"));
   const micCard = card(t("voiceAudio.card.microphone"));
   const speakersCard = card(t("voiceAudio.card.speakers"));
-  const cameraCard = card(t("voiceAudio.card.camera"));
+  const cameraCard = card(t(android ? "voiceAudio.card.camera.android" : "voiceAudio.card.camera"));
   const processingCard = card(t("voiceAudio.card.processing"));
 
   // The microphone's state at a glance, from the live meter below.
@@ -425,10 +431,10 @@ function buildVoiceAudioTabInner(
     "data-testid": "input-mode",
   });
   const pttBox = createElement("div", { class: "input-mode-ptt", "data-testid": "ptt-controls" });
-  pttBox.append(...buildPttControls(signal));
+  if (!android) pttBox.append(...buildPttControls(signal));
   const modeButtons = new Map<InputMode, HTMLButtonElement>();
   const paintMode = (): void => {
-    const mode = inputMode();
+    const mode = currentMode();
     for (const [value, button] of modeButtons) {
       button.classList.toggle("active", value === mode);
       button.setAttribute("aria-checked", String(value === mode));
@@ -479,7 +485,8 @@ function buildVoiceAudioTabInner(
   paintMode();
   setRovingTabindex(modeGroup, "[role='radio']");
   enableRovingNavigation(modeGroup, "[role='radio']", signal);
-  appendChildren(inputModeCard, modeGroup, pttBox);
+  if (android) inputModeCard.remove();
+  else appendChildren(inputModeCard, modeGroup, pttBox);
 
   function updateThresholdIndicator(sensitivity: number): void {
     // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),
@@ -541,13 +548,13 @@ function buildVoiceAudioTabInner(
   /** The test's gate threshold, as the web meter gates its test playback:
    *  none in Push to Talk, the tab's sensitivity in Voice Activity. */
   function nativeTestThreshold(): number {
-    if (inputMode() !== "vad") return 0;
+    if (currentMode() !== "vad") return 0;
     if (autoSensitivity) return nativeTestFloor?.threshold ?? 0;
     return vadThreshold(currentSensitivity);
   }
 
   function makeNativeTestFloor(): void {
-    nativeTestFloor = inputMode() === "vad" && autoSensitivity ? new NoiseFloorTracker() : null;
+    nativeTestFloor = currentMode() === "vad" && autoSensitivity ? new NoiseFloorTracker() : null;
   }
 
   function updateNativeTest(update: NativeMicTestUpdate): void {
@@ -698,7 +705,7 @@ function buildVoiceAudioTabInner(
    *  Activity, open in Push to Talk (there the key decides, not the level). */
   function syncMeterGate(): void {
     if (meterProcessor === null) return;
-    const vad = inputMode() === "vad";
+    const vad = currentMode() === "vad";
     meterProcessor.setLookahead(vad ? GATE_LOOKAHEAD_S : 0);
     meterProcessor.setGate("vad", vad && meterGated);
   }
@@ -749,7 +756,7 @@ function buildVoiceAudioTabInner(
     currentSensitivity = val;
     updateThresholdIndicator(val);
     meterThresholdSetter?.(vadThreshold(val));
-    if (inputMode() === "vad" && !autoSensitivity) {
+    if (currentMode() === "vad" && !autoSensitivity) {
       updateNativeTest({ kind: "voiceGate", threshold: vadThreshold(val), retune: true });
     }
   }
@@ -835,8 +842,7 @@ function buildVoiceAudioTabInner(
   });
   const defaultOutputOpt = createElement("option", { value: "" }, t("voiceAudio.default"));
   outputSelect.appendChild(defaultOutputOpt);
-  speakersCard.appendChild(outputHeader);
-  speakersCard.appendChild(outputSelect);
+  if (!android) speakersCard.append(outputHeader, outputSelect);
 
   // Output Volume slider
   const outputVolumeHeader = createElement(
@@ -1036,7 +1042,8 @@ function buildVoiceAudioTabInner(
   previewVideo.playsInline = true;
   previewWrap.append(previewVideo, previewLabel);
   cameraCard.appendChild(previewWrap);
-  cameraCard.append(...cameraQualityGroup, ...screenQualityGroup, ...fpsGroup);
+  cameraCard.append(...cameraQualityGroup);
+  if (!android) cameraCard.append(...screenQualityGroup, ...fpsGroup);
   // The codec choice. Off Linux the webview's own encoders decide what is
   // offered; on Linux the native engine offers VP8, Auto (VP8), and H.264 and
   // VP9 only when its probe says it can encode them.
@@ -1086,7 +1093,7 @@ function buildVoiceAudioTabInner(
     void Promise.all([h264Offered(), vp9Available()]).then(([h264, vp9]) => {
       if (!signal.aborted) slot.append(...codecGroup(h264, vp9));
     });
-  } else {
+  } else if (!android) {
     cameraCard.append(...codecGroup(true));
   }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
+	"github.com/J3vb/OwnCord/Server/sysstats"
 	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
@@ -133,7 +134,8 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 
 	return api.Runtime{
 		Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows,
-		Auth: authSvc, Storage: in.Storage,
+		SystemStats: sysstats.NewSampler(),
+		Auth:        authSvc, Storage: in.Storage,
 		Updater: updater.NewUpdater(in.Version, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo),
 	}, nil
 }

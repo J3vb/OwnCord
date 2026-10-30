@@ -15,6 +15,7 @@ import {
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
+import { isAndroidApp } from "../../features/voice/native/platform";
 import { removeStored, storedKeys } from "@lib/prefs/preferences";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
@@ -54,13 +55,17 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
 
   appendToggleRows(section, toggles, signal);
 
+  // Launch on login, close to tray and start minimized are desktop window
+  // features: the Android app has no login item, tray or window to hide.
+  const android = isAndroidApp();
+
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
   // Not drawn where the platform has no autostart (the web build).
-  if (desktop.autostart.available) section.appendChild(buildAutostartRow(signal));
+  if (!android && desktop.autostart.available) section.appendChild(buildAutostartRow(signal));
 
   // Close to tray / Start minimized — owned by the native host, which reads
   // both before the webview exists. Not drawn where there is no host window.
-  if (desktop.window.available) {
+  if (!android && desktop.window.available) {
     for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
   }
 

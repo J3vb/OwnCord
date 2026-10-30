@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -108,10 +110,80 @@ type ReactionResult struct {
 	ParticipantIDs []int64
 }
 
+// messageStore is what MessageService reads and writes. *db.DB satisfies it.
+type messageStore interface {
+	db.Auditor
+	mentionBatchStore
+	readAdmitStore
+	subjectStore
+	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*db.Message, error)
+	FindMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
+	CreateMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
+	MessageDeliveryFloorMS() int64
+	GetMessage(ctx context.Context, id int64) (*db.Message, error)
+	GetMessagesForAPI(ctx context.Context, channelID, before int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	GetMessagesAfterForAPI(ctx context.Context, channelID, after int64, limit int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	GetMessagesAroundForAPI(ctx context.Context, channelID, centerID int64, beforeCount, afterCount int, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	EditMessage(ctx context.Context, id, userID int64, content string) (*db.Message, error)
+	DeleteMessage(ctx context.Context, id, userID int64, isMod bool) error
+	SearchMessagesFiltered(ctx context.Context, q db.SearchQuery, page db.SearchPage) ([]db.MessageSearchResult, error)
+	GetPinnedMessages(ctx context.Context, channelID, requestingUserID int64) ([]db.MessageAPIResponse, error)
+	SetMessagePinned(ctx context.Context, p db.SetPinnedParams) (*db.PinEventRow, error)
+	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
+	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
+	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
+	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
+	// MoveReadPointer moves a reader's pointer and recomputes mention_count from the
+	// receipts in one writer transaction. The caller holds mentionEmitMu across it and
+	// the frame it sends.
+	MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error)
+	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (replyPingUserID int64, err error)
+	// DecrementMentionCounts reverses the bumps msgIDs made and returns userID to
+	// mention_count for exactly the readers the guards admitted, the live-badge signal
+	// for a removal path.
+	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) (map[int64]int64, error)
+	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
+	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
+	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
+	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	GetChannelUserOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
+	ListMentionTargetsByUserIDs(ctx context.Context, userIDs []int64) ([]db.MentionTarget, error)
+	GetLatestMessageID(ctx context.Context, channelID int64) (int64, error)
+	LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error)
+	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
+	GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*db.ReferencedMessage, error)
+	ListChannels(ctx context.Context) ([]db.Channel, error)
+	// GetMemberGrants fetches every held role's override and the per-user layer for
+	// one member in batch queries: the single fetch behind every "what can this
+	// member do here" site, so none pays an N+1.
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	ListRoles(ctx context.Context) ([]*db.Role, error)
+	GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error)
+	OpenDM(ctx context.Context, userID, channelID int64) (bool, error)
+	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
+	GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64, iconID string, err error)
+	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
+	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are DeleteMessage/
+	// PurgeChannelMessages plus a removal ledger row in the same transaction, when
+	// the deleter is not the author. DeleteMessageWithRemoval's reason is the row's
+	// text; empty falls back to "message removed".
+	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
+	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
+	// PurgeUserChannelMessagesSince/ListUserMessageChannelsSince are the ban purge's
+	// author-and-window-scoped counterparts of PurgeChannelMessagesWithAction;
+	// RecordRemovalAction writes the one removal ledger row (targeting the author).
+	PurgeUserChannelMessagesSince(ctx context.Context, channelID, userID int64, since string, limit int) ([]int64, error)
+	ListUserMessageChannelsSince(ctx context.Context, userID int64, since string) ([]int64, error)
+}
+
 // MessageService handles message business logic: send, edit, delete, reactions,
 // pins and search.
 type MessageService struct {
-	st      Store
+	st      messageStore
 	perms   *PermissionService
 	limiter *auth.RateLimiter
 	// mentionIDs backs the <@id> and <@&id> forms; nil leaves those as plain text.
@@ -207,7 +279,7 @@ func (s *MessageService) SetPushNotifier(n PushNotifier) {
 var backgroundJobTimeout = pushDispatchTimeout
 
 // NewMessageService creates a MessageService.
-func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
+func NewMessageService(st messageStore, perms *PermissionService, limiter *auth.RateLimiter) *MessageService {
 	s := &MessageService{
 		st:      st,
 		perms:   perms,

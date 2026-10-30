@@ -1,7 +1,10 @@
 // Where voice runs natively. The Linux desktop webview (WebKitGTK) has no
 // WebRTC, so `livekitSession` swaps the browser Room for the Rust backend's
 // (`src-tauri/src/native_voice/`) behind this one check. A leaf module: it is
-// imported statically from the voice chunk, so it must stay dependency-free.
+// imported statically from the voice chunk, so it must stay dependency-free
+// (its one import is itself a leaf).
+
+import { isAndroidHost } from "../../../lib/hostPlatform";
 
 /** Chromium's (so WebView2's) `NotAllowedError` message for a screen picker
  *  the user dismissed. Any other `NotAllowedError` is a real refusal (the OS,
@@ -36,8 +39,7 @@ export function isWindowsDesktop(): boolean {
 
 /** True in the Tauri app on Android, whose WebView has no screen capture. */
 export function isAndroidApp(): boolean {
-  if (typeof navigator === "undefined" || !("__TAURI_INTERNALS__" in globalThis)) return false;
-  return /Android/.test(navigator.userAgent);
+  return isAndroidHost();
 }
 
 /** True where this build can start a screen share. The desktop app always

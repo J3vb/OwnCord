@@ -5,6 +5,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
+import { isAndroidApp } from "../features/voice/native/platform";
 import { dialogOpen } from "@lib/ui/dialogOpen";
 import { isPhoneLayout, openBottomSheet, type BottomSheet } from "@lib/ui/bottomSheet";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
@@ -1717,6 +1718,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       placeholder: idlePlaceholder(),
       rows: "1",
       "data-testid": "msg-textarea",
+      // The Android app's Enter key adds a line; the send button sends.
+      ...(isAndroidApp() ? { enterkeyhint: "enter" } : {}),
     });
     const emojiBtn = createElement("button", {
       class: "input-btn emoji-btn",
@@ -1837,6 +1840,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           // with isComposing true (or the legacy keyCode 229). Sending here
           // would ship the raw composition text instead of the committed word.
           if (isImeCommit(e)) return;
+          // On the Android app Enter adds a new line, and the send button sends.
+          if (isAndroidApp()) return;
           e.preventDefault();
           handleSend();
         }

@@ -2,7 +2,10 @@
 
 package diskutil
 
-import "syscall"
+import (
+	"fmt"
+	"syscall"
+)
 
 // FreeBytes returns the bytes available to unprivileged processes on the
 // filesystem containing path.
@@ -13,4 +16,15 @@ func FreeBytes(path string) (uint64, error) {
 	}
 	// Bavail is what non-root can use; Bsize is the fundamental block size.
 	return st.Bavail * uint64(st.Bsize), nil //nolint:gosec // Bsize is a positive block size
+}
+
+// Space returns the bytes available to unprivileged processes and the total
+// size of the filesystem containing path.
+func Space(path string) (free, total uint64, err error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, 0, fmt.Errorf("diskutil: statfs: %w", err)
+	}
+	bsize := uint64(st.Bsize) //nolint:gosec // Bsize is a positive block size
+	return st.Bavail * bsize, st.Blocks * bsize, nil
 }
