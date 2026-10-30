@@ -118,6 +118,7 @@ export const shards = {
     "src/features/voice-messages/wav.ts",
     "src/features/voice-messages/mime.ts",
     "src/features/voice-messages/recorder.ts",
+    "src/features/voice-messages/linuxMic.ts",
     "src/features/voice-messages/voiceComposer.ts",
     "src/features/voice-messages/player.ts",
   ],
