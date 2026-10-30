@@ -5,7 +5,7 @@
  * so every viewer must decode the one chosen here or see a black tile. VP8 and
  * H.264 are the two every shipped client decodes; VP9 and H.265 are options
  * picked only when every peer reports decoding them (H.265 also needs a
- * hardware encoder and a non-Intel GPU). VP8 is the default; H.264
+ * hardware encoder and a non-Intel GPU). Auto is the default; H.264
  * lets Windows encode on the graphics card, and a saved H.264 the browser does
  * not report as hardware at the captured size publishes VP8 (the software
  * encoder is single-threaded and a large share drops to a few fps). The Linux
@@ -25,12 +25,13 @@ import { nativeVideoCodecs } from "./native/videoCodecs";
 export type VideoCodecPref = "vp8" | "h264" | "vp9" | "h265" | "auto";
 export type PublishCodec = "vp8" | "h264" | "vp9" | "h265";
 
-/** The saved choice, VP8 unless the user picked another. */
+/** The saved choice, Auto unless the user picked another. Nothing is saved
+ *  until the user changes the select, so an untouched setting follows this. */
 export function getVideoCodecPref(): VideoCodecPref {
-  const saved = loadPref<string>("videoCodec", "vp8");
-  return saved === "h264" || saved === "vp9" || saved === "h265" || saved === "auto"
+  const saved = loadPref<string>("videoCodec", "auto");
+  return saved === "vp8" || saved === "h264" || saved === "vp9" || saved === "h265"
     ? saved
-    : "vp8";
+    : "auto";
 }
 
 /** Whether this webview can publish VP9. livekit-client's check throws where

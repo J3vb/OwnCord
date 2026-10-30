@@ -394,8 +394,8 @@ trust action entirely (a blind accept is refused).
   (`tests/unit/rnnoise-click-suppression.test.ts` pins it). If the worklet
   cannot start, the processor runs without it.
 - **Video codec:** one setting in Settings → Voice & Audio (`videoCodec`,
-  `features/voice/videoCodec.ts`) covers camera and screen share: VP8
-  (default), H.264 or Auto. E2EE is always on, so livekit-client publishes no
+  `features/voice/videoCodec.ts`) covers camera and screen share: VP8,
+  H.264 or Auto (the default; nothing is saved until the user picks). E2EE is always on, so livekit-client publishes no
   backup codec and every viewer must decode the chosen one. Auto picks H.264
   only when `MediaCapabilities.encodingInfo` reports it supported and
   power-efficient at that publish's size, frame rate and bitrate and WebGL's
