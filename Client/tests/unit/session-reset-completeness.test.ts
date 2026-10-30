@@ -630,6 +630,10 @@ const EXEMPT: readonly string[] = [
   // Playing <audio> elements, not store state; features/voice-messages/player.test.ts
   // ("pauses every playing clip when the session ends") runs the reset.
   "voice-messages:player",
+  // A DOM sheet, not store state, and mounting one here starts unrelated
+  // body-observer timers the timer-count probes read; bottomSheet.test.ts
+  // ("closes from closeBottomSheet and from a session reset") runs the reset.
+  "bottomSheet:open",
   // Per-subscriber names built from a counter in auth.store (onAuthCleared);
   // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",

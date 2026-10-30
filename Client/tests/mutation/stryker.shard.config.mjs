@@ -111,6 +111,7 @@ export const shards = {
     "src/lib/media/publicAssets.ts",
     "src/lib/voice/deviceManager.ts",
     "src/lib/ui/touchInput.ts",
+    "src/lib/ui/bottomSheet.ts",
     "src/lib/ui/zoomPan.ts",
     "src/lib/voice/ptt.ts",
     "src/lib/voice/voiceTokenManager.ts",

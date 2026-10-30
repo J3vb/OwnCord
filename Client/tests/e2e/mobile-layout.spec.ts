@@ -1,6 +1,8 @@
 /**
- * Touch input (WP 6.13f2): long-press opens the message and channel menus and a
- * tap shows a message's action bar.
+ * Touch input: long-press opens the message actions sheet and the channel menu,
+ * and a tap on a message shows nothing (the hold is the only way to its
+ * actions, as in Discord). The emoji/GIF picker and member profiles open as
+ * bottom sheets too.
  *
  * Phone layout (WP 6.13f1): no horizontal scroll, a reachable drawer, a
  * full-width member overlay and 44 px touch targets in the user bar. Both
@@ -113,12 +115,23 @@ for (const profile of PROFILES) {
     test("the header keeps search reachable at 360 px without overflow", async ({ page }) => {
       await signIn(page);
       await page.setViewportSize({ width: 360, height: 740 });
-      const search = page.locator("[data-testid='search-input']");
+      await expect(page.locator("[data-testid='search-input']")).toBeHidden();
+      const search = page.locator("[data-testid='search-btn']");
       await expect(search).toBeVisible();
       const box = await search.boundingBox();
-      expect(box?.width ?? 0).toBeGreaterThan(40);
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
       expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(360);
       await noHorizontalScroll(page);
+    });
+
+    test("the search icon opens the search overlay, and typing lands in it", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='search-btn']").tap();
+      const input = page.locator("[data-testid='search-overlay-input']");
+      await expect(input).toBeFocused();
+      await page.keyboard.type("hello");
+      await expect(input).toHaveValue("hello");
+      await expect(page.locator(".msg-textarea")).toHaveValue("");
     });
 
     test("the composer clears a gesture bar reported only as the max bottom inset", async ({
@@ -204,12 +217,51 @@ for (const profile of PROFILES) {
       await expect(overlay).toHaveClass(/open/);
     });
 
-    test("long-press on a message opens the message menu, and only one", async ({ page }) => {
+    test("long-press on a message opens the actions sheet, and only one", async ({ page }) => {
       await signIn(page);
-      const row = "[data-testid='message-101'] .msg-text";
-      await holdFinger(page, row, 800);
-      await expect(page.locator(".message-context-menu")).toHaveCount(1);
-      await expect(page.locator(".message-context-menu")).toBeVisible();
+      await holdFinger(page, "[data-testid='message-101'] .msg-text", 800);
+      const sheet = page.locator("[data-testid='message-sheet']");
+      await expect(sheet).toHaveCount(1);
+      await expect(sheet).toBeVisible();
+      await expect(page.locator(".message-context-menu")).toHaveCount(0);
+      const add = sheet.locator("[data-testid='msg-menu-add-reaction']");
+      await expect(add).toBeVisible();
+      const box = await add.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(48);
+      // The sheet runs edge to edge and sits on the bottom of the screen.
+      const panel = await sheet.boundingBox();
+      const viewport = page.viewportSize();
+      expect(Math.round(panel?.width ?? 0)).toBe(viewport?.width);
+      expect(Math.round((panel?.y ?? 0) + (panel?.height ?? 0))).toBe(viewport?.height);
+    });
+
+    test("the sheet closes on a backdrop tap and on Back", async ({ page }) => {
+      await signIn(page);
+      const sheet = page.locator("[data-testid='message-sheet']");
+      await holdFinger(page, "[data-testid='message-101'] .msg-text", 800);
+      await expect(sheet).toBeVisible();
+      await page.locator(".bottom-sheet-overlay").tap({ position: { x: 20, y: 20 } });
+      await expect(sheet).toHaveCount(0);
+
+      await holdFinger(page, "[data-testid='message-101'] .msg-text", 800);
+      await expect(sheet).toBeVisible();
+      await page.evaluate(() => history.back());
+      await expect(sheet).toHaveCount(0);
+      await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
+    });
+
+    test("Add Reaction in the sheet opens a full-width emoji sheet", async ({ page }) => {
+      await signIn(page);
+      await holdFinger(page, "[data-testid='message-101'] .msg-text", 800);
+      await page
+        .locator("[data-testid='message-sheet'] [data-testid='msg-menu-add-reaction']")
+        .tap();
+      await expect(page.locator("[data-testid='message-sheet']")).toHaveCount(0);
+      const picker = page.locator("[data-testid='reaction-picker-sheet']");
+      await expect(picker).toBeVisible();
+      await expect(picker.locator(".ep-search")).toBeVisible();
+      const box = await picker.boundingBox();
+      expect(Math.round(box?.width ?? 0)).toBe(page.viewportSize()?.width);
     });
 
     test("a short press on a message opens no menu", async ({ page }) => {
@@ -217,6 +269,34 @@ for (const profile of PROFILES) {
       await holdFinger(page, "[data-testid='message-101']", 150);
       await page.waitForTimeout(700);
       await expect(page.locator(".message-context-menu")).toHaveCount(0);
+      await expect(page.locator("[data-testid='message-sheet']")).toHaveCount(0);
+    });
+
+    test("the composer's emoji button opens the picker as a full-width sheet", async ({ page }) => {
+      await signIn(page);
+      await page.locator(".emoji-btn").tap();
+      const sheet = page.locator("[data-testid='expression-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator("[data-testid='xp-tab-emoji']")).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      const box = await sheet.boundingBox();
+      const viewport = page.viewportSize();
+      expect(Math.round(box?.width ?? 0)).toBe(viewport?.width);
+      expect(box?.height ?? 0).toBeGreaterThan((viewport?.height ?? 0) * 0.4);
+      await noHorizontalScroll(page);
+    });
+
+    test("a tap on a member opens the profile sheet", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='member-list-toggle']").click();
+      await page.locator("#member-column .member-item").first().tap();
+      const sheet = page.locator("[data-testid='profile-sheet']");
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator(".upp-username")).toBeVisible();
+      const box = await sheet.boundingBox();
+      expect(Math.round(box?.width ?? 0)).toBe(page.viewportSize()?.width);
     });
 
     test("long-press on a channel row opens the channel menu", async ({ page }) => {
@@ -227,18 +307,16 @@ for (const profile of PROFILES) {
       await expect(page.locator("[data-testid='channel-context-menu']")).toBeVisible();
     });
 
-    test("a tap on a message shows its action bar and a tap elsewhere hides it", async ({
-      page,
-    }) => {
+    test("a tap on a message shows no action bar and opens no menu", async ({ page }) => {
       await signIn(page);
       const message = page.locator("[data-testid='message-101']");
       const bar = message.locator(".msg-actions-bar");
       await expect(bar).toHaveCSS("opacity", "0");
       await message.locator(".msg-text").first().tap();
-      await expect(message).toHaveClass(/msg-touch-active/);
-      await expect(bar).toHaveCSS("opacity", "1");
-      await page.locator("[data-testid='chat-header-name']").tap();
-      await expect(message).not.toHaveClass(/msg-touch-active/);
+      await page.waitForTimeout(700);
+      await expect(bar).toHaveCSS("opacity", "0");
+      await expect(page.locator(".message-context-menu")).toHaveCount(0);
+      await expect(page.locator("[data-testid='message-sheet']")).toHaveCount(0);
     });
   });
 }

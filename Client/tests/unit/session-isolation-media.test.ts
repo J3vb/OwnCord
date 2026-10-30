@@ -5,7 +5,7 @@
  * profile switch tears it down with `cleanupAll` (MainPage.destroy calls it),
  * and the next profile's join must start from nothing: the first room is
  * disconnected before the second is built, and the liveness predicate reads
- * false in between. The harness is livekit-session.test.ts's, except that
+ * false in between. The harness is the livekitSession/ tests' (helpers/livekitSessionMocks.ts), except that
  * every `new Room()` is a distinct object so live rooms can be counted.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";

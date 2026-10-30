@@ -56,7 +56,9 @@ mod shortcuts;
 mod sync;
 mod text;
 mod tofu;
+#[cfg(desktop)]
 mod tray;
+#[cfg(desktop)]
 mod unread_badge;
 mod update_commands;
 #[cfg(target_os = "linux")]
@@ -256,6 +258,7 @@ pub fn run() {
             message_notification::notify_message,
             #[cfg(desktop)]
             message_notification::clear_call_notification,
+            #[cfg(desktop)]
             unread_badge::set_unread_badge,
             commands::store_identity_pin,
             commands::get_identity_pin,
@@ -299,6 +302,7 @@ pub fn run() {
             windows_app_audio::app_audio_available,
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,
+            #[cfg(desktop)]
             tray::open_log_folder,
             external_open::open_external_url,
             #[cfg(target_os = "linux")]
@@ -498,12 +502,14 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         );
         #[cfg(target_os = "linux")]
         exit_watch::watch_webview(&window);
+        #[cfg(desktop)]
         let handle = app.handle().clone();
         #[cfg(desktop)]
         let main = window.clone();
         window.on_window_event(move |event| match event {
             tauri::WindowEvent::Destroyed => {
                 log::info!("[exit] main window destroyed");
+                #[cfg(desktop)]
                 popout::close_all(&handle);
             }
             // The window's close button, Alt+F4, or the desktop
@@ -521,6 +527,7 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         });
     }
     diagnostics::spawn_frontend_watchdog(app.handle());
+    #[cfg(desktop)]
     tray::create_tray(app.handle())?;
     // WebKitGTK denies mic/camera access by default — grant it so
     // voice/video works on Linux (no-op elsewhere; see linux_media).
@@ -541,7 +548,7 @@ fn show_startup_failure(error: &str) {
         exit_watch::note_exit("startup failed");
         show_linux_startup_dialog(error);
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(desktop, not(target_os = "linux")))]
     rfd::MessageDialog::new()
         .set_title(text::STARTUP_DIALOG_TITLE)
         .set_description(text::startup_dialog_body(error))

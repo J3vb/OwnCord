@@ -77,6 +77,7 @@ export const CAPABILITIES = [
   "deps", // Supply-chain Scan (osv-scanner + cargo-deny over the lockfiles)
   "permissions", // the permissions.ts mutation hotspot step inside Client Static Checks
   "changelog", // TestBundledChangelog alone, without the race legs (see CHANGELOG_PATH)
+  "android", // Android APK (signed arm64 build of the client, uploaded as an artifact)
 ];
 
 /** Server paths outside the Client/Server pair that a Server test reads. */
@@ -183,6 +184,23 @@ const WEBCLIENT_PREFIXES = [
   "Server/webclient/",
   "Server/api/portal",
   "protocol/",
+];
+
+/**
+ * What goes into the Android APK: the client source and its build configs,
+ * and the whole Rust shell including the generated Gradle project under
+ * Client/src-tauri/gen/android/. Tests and e2e harnesses are not in the APK,
+ * so a test-only change does not spend the 6-10 minute NDK build.
+ */
+const ANDROID_PREFIXES = [
+  "Client/src/",
+  "Client/src-tauri/",
+  "Client/public/",
+  "Client/index.html",
+  "Client/package.json",
+  "Client/package-lock.json",
+  "Client/vite.config",
+  "Client/tsconfig",
 ];
 
 /**
@@ -319,6 +337,7 @@ export function classify(paths) {
     if (PERMISSIONS_MUTATION_PATHS.has(path)) add("permissions");
     if (DEPS_FILES.has(path)) add("deps");
     if (WEBCLIENT_PREFIXES.some((p) => path.startsWith(p))) add("webclient");
+    if (ANDROID_PREFIXES.some((p) => path.startsWith(p))) add("android");
 
     if (path.startsWith("Server/")) {
       // `integration` because the real-server suites drive this server, and

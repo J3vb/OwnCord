@@ -10,6 +10,8 @@
  *
  * Lazy: message-menu-loader.ts imports it on the first right-click, so the
  * menu and its copy stay out of the main-page chunk.
+ *
+ * On a phone the same rows open as a bottom sheet (messageSheet.ts) instead.
  */
 
 import {
@@ -40,6 +42,13 @@ import {
 } from "./messageActions";
 import { atReactionLimit } from "./reactions";
 import { copyThenToast } from "@lib/ui/clipboard";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { openMessageSheet } from "./messageSheet";
+
+/** The phone sheet's quick row has room for one more emoji than the menu's. */
+const PHONE_QUICK_REACTIONS = QUICK_REACTIONS + 1;
+/** Marks the row a phone sheet is acting on, so it stands out behind the backdrop. */
+const SHEET_TARGET_CLASS = "msg-sheet-target";
 
 export interface MessageMenuRequest {
   readonly msg: Message;
@@ -88,6 +97,7 @@ function selectionIn(row: HTMLElement | null): string {
 function buildItems(
   req: MessageMenuRequest,
   row: HTMLElement | null,
+  quickCount: number,
 ): {
   items: (ContextMenuItem | ContextMenuSeparator)[];
   group: { start: number; count: number } | null;
@@ -174,7 +184,7 @@ function buildItems(
   // -- Reactions ---------------------------------------------------------------
   const reactLock = gates.react.reason;
   const group: { start: number; count: number } = { start: items.length, count: 0 };
-  for (const emoji of quickReactionEmoji(QUICK_REACTIONS)) {
+  for (const emoji of quickReactionEmoji(quickCount)) {
     if (atReactionLimit(msg.reactions, emoji)) continue;
     const { node, name } = emojiNode(emoji);
     items.push({
@@ -436,7 +446,24 @@ export function openMessageMenu(req: MessageMenuRequest): void {
     }
   });
 
-  const { items, group } = buildItems(req, row);
+  if (isPhoneLayout()) {
+    const { items, group } = buildItems(req, row, PHONE_QUICK_REACTIONS);
+    row?.classList.add(SHEET_TARGET_CLASS);
+    owner.addCleanup(() => rowOf(msg.id)?.classList.remove(SHEET_TARGET_CLASS));
+    openMessageSheet({
+      items,
+      group,
+      label: messageMenuText("label"),
+      groupLabel: messageMenuText("quickReactions"),
+      signal: owner.signal,
+      fallbackFocus: () =>
+        rowOf(msg.id)?.querySelector<HTMLElement>(ROW_FOCUSABLE_SELECTOR) ?? null,
+      onClosed: () => owner.destroy(),
+    });
+    return;
+  }
+
+  const { items, group } = buildItems(req, row, QUICK_REACTIONS);
   showContextMenu({
     x,
     y,

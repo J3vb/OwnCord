@@ -307,6 +307,43 @@ describe("ChannelMediaGallery", () => {
     await flush();
     expect(container.querySelectorAll(".media-gallery__tile")).toHaveLength(1);
   });
+
+  it("waits for Retry after a later page fails while the sentinel is on screen", async () => {
+    const rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 0,
+      bottom: 500,
+      height: 500,
+      left: 0,
+      right: 300,
+      width: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    loadPage.mockResolvedValueOnce({
+      items: [item(2, "b.png", "image/png", "2026-02-03 10:00:00")],
+      next_cursor: "2_x",
+    });
+    loadPage.mockRejectedValue(new Error("offline"));
+    panel = createChannelMediaGallery({
+      channelName: "photos",
+      loadPage,
+      loadMonths,
+      uploaders: () => [],
+      onJumpToMessage: onJump,
+      onClose: vi.fn(),
+      timeZone: "UTC",
+    });
+    try {
+      panel.mount(container);
+      for (let i = 0; i < 4; i++) await flush();
+
+      expect(loadPage).toHaveBeenCalledTimes(2);
+      expect(container.querySelector(".media-gallery__retry")).not.toBeNull();
+    } finally {
+      rect.mockRestore();
+    }
+  });
 });
 
 describe("localMonthKey", () => {

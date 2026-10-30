@@ -6,6 +6,7 @@
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { dialogOpen } from "@lib/ui/dialogOpen";
+import { isPhoneLayout, openBottomSheet, type BottomSheet } from "@lib/ui/bottomSheet";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
@@ -1933,6 +1934,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     let popup: ExpressionPopup | null = null;
     // One outside-click owner for the open popup, destroyed when it closes.
     let popupDismiss: Disposable | null = null;
+    // On a phone the popup lives in a bottom sheet instead, which owns dismissal.
+    let popupSheet: BottomSheet | null = null;
 
     function tabButton(tab: ExpressionTab): HTMLButtonElement | null {
       if (tab === "gif") return gifBtn;
@@ -1947,6 +1950,9 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       popup = null;
       popupDismiss?.destroy();
       popupDismiss = null;
+      const sheet = popupSheet;
+      popupSheet = null;
+      sheet?.close();
       closing.element.remove();
       closing.destroy();
       if (!returnFocus) return;
@@ -2072,6 +2078,24 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         onClose: () => closePopup(true),
       });
       popup = opened;
+      if (isPhoneLayout()) {
+        opened.element.classList.add("in-sheet");
+        const sheet = openBottomSheet({
+          label: stickersText("popup.label"),
+          content: opened.element,
+          size: "tall",
+          className: "picker-sheet",
+          testId: "expression-sheet",
+          focusFirst: false,
+          signal,
+          onClosed: () => {
+            if (popupSheet === sheet) closePopup();
+          },
+        });
+        popupSheet = sheet;
+        opened.element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+        return;
+      }
       root?.appendChild(opened.element);
       // Focus starts inside the popup, so Escape closes it even before the
       // lazy picker has mounted and moved focus to its search box.
