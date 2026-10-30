@@ -114,6 +114,10 @@ input,select,textarea{font-family:inherit;border:none}
 .health-meter{display:flex;height:6px;margin-top:auto;background:var(--bg-input);border-radius:var(--radius-pill);overflow:hidden}
 .health-meter span{display:block;height:100%}
 .health-meter .m-other{background:var(--border-control)}.health-meter .m-uploads{background:var(--accent)}
+#slowRequests:has(.tbl){padding:0}
+.slow-tbl th.num,.slow-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.slow-tbl .slow-route{overflow-wrap:anywhere}.slow-tbl .slow-route .badge{min-width:44px;text-align:center}.slow-tbl .slow-route code{font-family:var(--font-mono);font-size:12px}
+.slow-tbl td.slow-warn{color:var(--text-warning)}.slow-tbl td.slow-crit{color:var(--text-danger);font-weight:600}
 
 .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
 .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
