@@ -89,6 +89,10 @@ and only when it changes something a contributor or fork holder must do
 - A database error while deciding an appeal told the moderator it was "already decided or withdrawn" — it now reports a server error.
 - Server logs opened slowly once many lines were collected. A full log now opens in a fraction of a second, and the page keeps the last 10,000 lines instead of 2,000.
 
+**Forums & threads**
+
+- The thread list of a big forum or channel got slower the more threads it had, even for the first page. Each page now only counts messages for the threads it shows.
+
 **Login & connection**
 
 - Very large `event_persistence` numbers in `config.yaml` or the environment could stop the server from starting — they are now brought into range with a warning, like the same settings in the admin panel.

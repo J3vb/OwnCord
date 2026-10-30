@@ -1,5 +1,5 @@
 {
-  "nextId": 532,
+  "nextId": 533,
   "findings": [
     {
       "id": "OC-0001",
@@ -12284,6 +12284,29 @@
       "found": "2026-10-30",
       "hunt": "nightly-bughunt-2026-10-30",
       "lens": "integer-bounds",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0532",
+      "title": "Forum and thread list counted messages for every thread before taking the page",
+      "file": "Server/db/queries/sqlite/threads.sql",
+      "line": 54,
+      "severity": "medium",
+      "why": "The activity-ordered thread list worked out each thread's message count and last message time for every thread of the parent, then sorted and took the page, so each page cost the size of the forum instead of the page.",
+      "repro": "List a forum or channel with thousands of threads by recent activity: every page, including the first, takes as long as counting all their messages.",
+      "evidence": "3,000 threads with 300,000 messages: 0.40 s for a page against 0.007 s when ordered without the counts (about 55x). Same shape measured here with 400 threads and 16,000 messages: a 10-row page took 16.5 ms against 21.8 ms for the whole forum.",
+      "suggestedFix": "Pick the page of thread ids first with the same filter, order and limit, then compute the counts for those rows only.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/thread_list_cost_test.go",
+        "revertProof": "fail (a 10-row page took 16.5 ms against 21.8 ms for all 400 threads; after the change 1.1 ms against 18 ms)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "server-api",
       "finder": "claude",
       "fixedDate": "2026-10-30"
     }
