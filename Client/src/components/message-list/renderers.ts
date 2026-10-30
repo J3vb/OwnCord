@@ -16,8 +16,8 @@ import { renderPollCard } from "./pollCard";
 import { renderStickerBody, stickerReplyPreview, stickerReplyText } from "./sticker";
 import { renderThreadChip } from "./threadChip";
 import { threadOfMessage } from "@stores/threads.store";
-import { connectionLockReason, messageActionGates } from "./message-actions";
-import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
+import { connectionLockReason, messageActionGates } from "./messageActions";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quickReactions";
 import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messageStatusText } from "../../i18n/messageStatus";
@@ -48,7 +48,7 @@ export {
   renderMentions,
   renderMentionSegment,
   renderMessageContent,
-} from "./content-parser";
+} from "./contentParser";
 
 export { setServerHost } from "./attachments";
 import { isVoiceAttachment } from "../../features/voice-messages/player";
@@ -67,7 +67,7 @@ import { createAvatarElement, pickAvatarColor } from "./avatar";
 import { importedAuthorKey } from "../../features/messaging/importedAuthor";
 import { createImportedAvatar, createImportedName, createImportedTag } from "./importedAuthor";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import { renderMentions, renderMessageContent } from "./content-parser";
+import { renderMentions, renderMessageContent } from "./contentParser";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { highlightsCurrentUser } from "@lib/text/mentions";
 import { readableRoleColor } from "@lib/prefs/themes";

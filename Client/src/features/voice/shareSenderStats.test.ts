@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readSenderSample, senderSample, senderSampleFromReport } from "./shareSenderStats";
-import { layersText, senderText } from "../../components/video-grid/stream-info";
+import { layersText, senderText } from "../../components/video-grid/streamInfo";
 
 const shareTrack = (entries: Array<[string, Record<string, unknown>]>) => ({
   sender: { getStats: async () => new Map(entries) as unknown as RTCStatsReport },

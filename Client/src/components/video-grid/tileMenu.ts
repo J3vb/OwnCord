@@ -6,7 +6,7 @@
  * Stop watching and, where the server allows it, voice moderation. Your own
  * camera tile gets a small one: Hide my camera and Turn off camera. Same
  * keyboard model and dismissal as the voice-roster volume menu
- * (channel-sidebar/volume-menu.ts), whose Mute and moderation rows it reuses.
+ * (channel-sidebar/volumeMenu.ts), whose Mute and moderation rows it reuses.
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
@@ -26,7 +26,7 @@ import {
   appendVoiceModeration,
   createLocalMuteItem,
   type VoiceModMenuOptions,
-} from "../channel-sidebar/volume-menu";
+} from "../channel-sidebar/volumeMenu";
 import { voiceText as t } from "../../i18n/voice";
 
 export interface TileMenuOptions {

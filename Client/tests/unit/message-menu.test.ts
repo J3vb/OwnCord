@@ -69,7 +69,7 @@ const item = (testId: string): HTMLElement | null =>
 
 /** Let the lazy `import()` and any microtasks land, so "no menu" is not vacuous. */
 async function settled(): Promise<void> {
-  await import("@components/message-list/message-menu");
+  await import("@components/message-list/messageMenu");
   await new Promise((r) => setTimeout(r, 0));
   await new Promise((r) => setTimeout(r, 0));
 }
@@ -572,7 +572,7 @@ describe("message menu module", () => {
   it("opening for a vanished message opens nothing", async () => {
     resetGateStores();
     seed([]);
-    const { openMessageMenu } = await import("@components/message-list/message-menu");
+    const { openMessageMenu } = await import("@components/message-list/messageMenu");
     openMessageMenu({
       msg: OTHER_MSG(),
       opts: makeOpts(),
@@ -593,7 +593,7 @@ describe("message menu module", () => {
     document.body.appendChild(invoker);
     invoker.focus();
     const { openMessageMenu, closeMessageMenu } =
-      await import("@components/message-list/message-menu");
+      await import("@components/message-list/messageMenu");
     const ac = new AbortController();
     openMessageMenu({
       msg: OTHER_MSG(),

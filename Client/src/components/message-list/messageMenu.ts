@@ -23,7 +23,7 @@ import { wantsNativeMenu } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
 import { isServerRowKind } from "@lib/text/messageKind";
 
-import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quick-reactions";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmoji } from "./quickReactions";
 import type { MessageListOptions } from "../MessageList";
 import { connectText } from "../../i18n/connect";
 import { imageMenuText } from "../../i18n/imageMenu";
@@ -37,7 +37,7 @@ import {
   copyMessageLink,
   isActionableMessage,
   messageActionGates,
-} from "./message-actions";
+} from "./messageActions";
 import { atReactionLimit } from "./reactions";
 import { copyThenToast } from "@lib/ui/clipboard";
 

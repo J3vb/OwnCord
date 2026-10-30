@@ -93,7 +93,7 @@ import {
   clearExternalImageCache,
   fetchExternalImage,
 } from "../../src/components/message-list/attachments";
-import { blobImageSize } from "../../src/components/message-list/image-sizes";
+import { blobImageSize } from "../../src/components/message-list/imageSizes";
 
 // ---------------------------------------------------------------------------
 // Helpers

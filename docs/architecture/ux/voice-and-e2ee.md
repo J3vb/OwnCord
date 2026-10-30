@@ -170,7 +170,7 @@ A remote tile's volume slider is named for whose it is ("Otto stream volume"
 for screen-share audio, 0–100 %; "Otto voice volume" for the mic, 0–200 %; its mute
 button is the same local Mute as the sidebar menu's) and
 shows its value. The tile menu (right-click, the Menu key, Shift+F10;
-`components/video-grid/tile-menu.ts`, loaded on first use) is the person's
+`components/video-grid/tileMenu.ts`, loaded on first use) is the person's
 menu: Profile, Message, the two volumes kept apart, Mute stream, the local
 Mute, Focus (Back to grid when focused), Full screen, Pop out, **Stop
 watching**, and the voice roster's moderation section where the channel's

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { attachChannelContextMenu } from "@components/channel-sidebar/context-menu";
+import { attachChannelContextMenu } from "@components/channel-sidebar/contextMenu";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, type Channel } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";

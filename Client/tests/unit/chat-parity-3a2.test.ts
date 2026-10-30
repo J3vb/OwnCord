@@ -23,7 +23,7 @@ import { createMessageInput, type MessageInputOptions } from "../../src/componen
 import {
   relabelInlineTimestamps,
   renderMessageContent,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 import { extractUrls } from "../../src/components/message-list/media";
 import { markdownToPlainText, parseBlocks, parseInline } from "../../src/lib/text/markdown";
 import { formatDiscordTimestamp } from "../../src/features/messaging/discordTimestamp";

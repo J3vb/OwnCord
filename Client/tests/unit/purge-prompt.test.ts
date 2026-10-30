@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { appendPurgeSection } from "@components/purge-prompt";
+import { appendPurgeSection } from "@components/purgePrompt";
 
 describe("appendPurgeSection", () => {
   let menu: HTMLDivElement;

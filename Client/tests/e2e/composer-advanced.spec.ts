@@ -9,7 +9,7 @@
  *     markers and unwrap it on a second press.
  *   - attachment preview / remove and clipboard paste-upload
  *     (`MessageInput.ts` handlePasteFile).
- *   - the who-reacted tooltip (`message-list/reaction-tooltip.ts`) — hover a
+ *   - the who-reacted tooltip (`message-list/reactionTooltip.ts`) — hover a
  *     reaction pill fetches the reactor list and renders it, and the list is
  *     cached per message+emoji.
  *

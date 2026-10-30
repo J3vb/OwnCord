@@ -37,11 +37,11 @@ import {
 } from "../../src/components/message-list/attachments";
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { renderInlineImage } from "../../src/components/message-list/media";
-import { getImageBox, setImageBox } from "../../src/components/message-list/image-sizes";
+import { getImageBox, setImageBox } from "../../src/components/message-list/imageSizes";
 import {
   rememberRowHeight,
   rememberedRowHeight,
-} from "../../src/components/message-list/row-heights";
+} from "../../src/components/message-list/rowHeights";
 import { discardMedia, observeMedia } from "../../src/lib/prefs/mediaVisibility";
 import {
   EXTERNAL_CONSENT_PREF,
