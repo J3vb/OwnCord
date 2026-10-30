@@ -1,4 +1,4 @@
--- Discord channel import (migration 086). The importer builds a channel with
+-- Discord channel import (migration 087). The importer builds a channel with
 -- import_pending = 1, fills it chunk by chunk, then publishes it in one
 -- transaction. See db/discord_import.go.
 

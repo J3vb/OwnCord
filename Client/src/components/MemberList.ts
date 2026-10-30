@@ -4,14 +4,14 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
 import { reconcileModels } from "@lib/reconcile";
 import { select } from "@lib/select";
 import { shallowEqual } from "@lib/store";
 import { buildOffsets, rangeFor } from "@lib/virtualRange";
 import { registerSessionReset } from "@lib/sessionRegistry";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { resolveDisplayName } from "@lib/avatar";
 import { membersStore, memberDisplayName, type Member } from "@stores/members.store";

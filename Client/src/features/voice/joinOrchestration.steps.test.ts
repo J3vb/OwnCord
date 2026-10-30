@@ -11,8 +11,8 @@ import { expectConsole } from "../../../tests/helpers/console";
 import type { SessionState } from "./sessionState";
 
 const prefs = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/preferences")>()),
+vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/preferences")>()),
   loadPref: (key: string, fallback: unknown) => (prefs.has(key) ? prefs.get(key) : fallback),
 }));
 vi.mock("../../stores/voice.store", async (importOriginal) => {

@@ -1,0 +1,231 @@
+#!/usr/bin/env node
+// Fail when the commit being released does not carry green evidence for every
+// required check (R-09 / RL-16).
+//
+//   node scripts/release/verify-gate-evidence.mjs <sha>   # assert, using $GITHUB_TOKEN
+//   node --test scripts/release/verify-gate-evidence.test.mjs
+//
+// A tag push starts release.yml and nothing else. ci.yml has no `tags:` trigger,
+// so the tagged commit is only ever covered by the CI that ran when that same
+// commit sat on a branch — and until this script existed, nothing checked that
+// it had. release.yml re-runs none of the required contexts: it builds, smokes
+// and signs, which is a different question from "did the gate pass".
+//
+// This is deliberately a script and not a `run:` block. .claude/skills/ci-check
+// states the rule: a step that exists only in release.yml first executes at tag
+// time, so its own bugs surface on the release. Server/scripts/docker-smoke.sh
+// is the worked example — one script, called from both workflows. Here the
+// second call site is `node --test scripts/release/verify-gate-evidence.test.mjs` in
+// ci.yml, which exercises the decision logic on fixtures every PR without
+// needing a tag or a network call.
+//
+// The required set is read from b0-dev-branch-protection.sh rather than
+// duplicated, so pinning a new check cannot leave this gate behind.
+//
+// ── What a green required check means, and where ────────────────────────────
+// Since `dfa5f66a`, ci.yml selects which jobs run from the diff, but ONLY on a
+// pull request into `dev`. On a push to `main`, a push to `dev` and a PR into
+// `main` the selector answers `--all`, so every required context really does run
+// there — and that is what keeps this gate sound, because a tagged commit sits
+// on `main` and its latest run for each context is that full one.
+//
+// On a pull request into `dev` the same names mean less. A gated job that was
+// not selected reports `skipped`, which evaluate() already refuses. The two
+// `Server Build & Test` legs are the ones to know about: they cannot carry a
+// job-level `if:` without destroying their matrix-expanded contexts, so they
+// always run and gate their STEPS instead — and a leg that ran no step still
+// reports `success`. A green `Server Build & Test` on a dev PR therefore means
+// "the server legs were not selected for this diff" just as often as it means
+// "the server was tested".
+//
+// The gate enforces that rather than assuming it: main() drops every check run
+// that belongs to a pull_request workflow run of the same SHA, and refuses a
+// commit that has no push-to-main ci.yml run at all. Do not relax this to trust
+// dev-PR evidence for those two contexts without changing how they report.
+
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const CI_WORKFLOW = ".github/workflows/ci.yml";
+const PROTECTION_SCRIPT = "docs/plans/b0-dev-branch-protection.sh";
+
+// The contexts array in the protection script is the single source of truth for
+// what "the gate" means. Parsed out of the heredoc rather than re-listed.
+export function requiredContexts(scriptSrc) {
+  const block = scriptSrc.match(/"contexts"\s*:\s*\[([^\]]*)\]/);
+  if (!block) throw new Error(`no "contexts" array found in ${PROTECTION_SCRIPT}`);
+  return [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
+// The identical-tree evidence model (G-03 as amended 2026-08-31) leans on
+// required_status_checks.strict: with strict off, a PR that is behind dev can
+// be squash-merged into a tree no CI run ever saw, and the PR-head evidence
+// this gate trusts stops describing what actually landed. strict: true is what
+// makes "the required matrix ran on the merged tree" a construction rather
+// than a habit — scripts/release/verify-integration-tree.sh spot-proves it per squash
+// SHA — so losing the flag must fail on a pull request, not in a later audit.
+export function strictUpToDate(scriptSrc) {
+  const block = scriptSrc.match(/"required_status_checks"\s*:\s*\{([\s\S]*?)\}/);
+  if (!block) {
+    throw new Error(`no "required_status_checks" object found in ${PROTECTION_SCRIPT}`);
+  }
+  const strict = block[1].match(/"strict"\s*:\s*(true|false)/);
+  if (!strict) {
+    throw new Error(`no "strict" key found under required_status_checks in ${PROTECTION_SCRIPT}`);
+  }
+  return strict[1] === "true";
+}
+
+// checkRuns is the API's check_runs array, already collected across pages.
+// excludedSuites: check_suite ids whose runs are not trusted (pull request runs).
+// mainRunFound: whether a push-to-main ci.yml run exists for the commit.
+// Returns the reasons this commit is not releasable; empty means it is.
+export function evaluate(
+  required,
+  checkRuns,
+  { excludedSuites = new Set(), mainRunFound = true } = {},
+) {
+  const problems = [];
+  if (!mainRunFound) problems.push("no push-to-main CI run for this commit");
+  const byName = new Map();
+  for (const run of checkRuns) {
+    if (excludedSuites.has(run.check_suite?.id)) continue;
+    // A context can report more than once (a re-run). The latest attempt wins,
+    // which is what the branch-protection UI shows and what a human would read.
+    const prev = byName.get(run.name);
+    if (!prev || (run.started_at ?? "") >= (prev.started_at ?? "")) byName.set(run.name, run);
+  }
+
+  for (const name of required) {
+    const run = byName.get(name);
+    if (!run) {
+      problems.push(`${name}: never reported on this commit`);
+      continue;
+    }
+    if (run.status !== "completed") {
+      problems.push(`${name}: still ${run.status} — the gate is not finished`);
+      continue;
+    }
+    // `neutral` and `skipped` are not success. A required check that skipped on
+    // the tagged commit proves nothing about it — which is exactly how a
+    // selection that legitimately skipped a job on a dev PR is refused here.
+    //
+    // The converse does NOT hold for every context: see the header. `success`
+    // proves the check ran only because a tagged commit lives on `main`, where
+    // the selector answers `--all`.
+    if (run.conclusion !== "success") {
+      problems.push(`${name}: ${run.conclusion}`);
+    }
+  }
+  return problems;
+}
+
+async function fetchCheckRuns(repo, sha, token) {
+  const runs = [];
+  for (let page = 1; ; page++) {
+    const url = `https://api.github.com/repos/${repo}/commits/${sha}/check-runs?per_page=100&page=${page}`;
+    const res = await fetch(url, {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
+    const body = await res.json();
+    runs.push(...body.check_runs);
+    // total_count is the count for the whole commit, not the page.
+    if (runs.length >= body.total_count || body.check_runs.length === 0) break;
+  }
+  return runs;
+}
+
+// A ci.yml run counts only as the push-to-main one; every other ci.yml suite
+// (pull request, workflow_dispatch, schedule) is distrusted, as is any pull
+// request run. CodeQL default-setup suites are not ci.yml, so they stay eligible.
+export function classifyRuns(workflowRuns) {
+  // The API may report `path` with a ref suffix (`ci.yml@refs/heads/main`).
+  const isCi = (r) => r.path?.split("@")[0] === CI_WORKFLOW;
+  const isMainPush = (r) => r.event === "push" && r.head_branch === "main";
+  return {
+    excludedSuites: new Set(
+      workflowRuns
+        .filter(
+          (r) =>
+            r.event === "pull_request" ||
+            r.event === "pull_request_target" ||
+            (isCi(r) && !isMainPush(r)),
+        )
+        .map((r) => r.check_suite_id),
+    ),
+    mainRunFound: workflowRuns.some((r) => isCi(r) && isMainPush(r)),
+  };
+}
+
+async function fetchRunTrust(repo, sha, token) {
+  const runs = [];
+  for (let page = 1; ; page++) {
+    const url = `https://api.github.com/repos/${repo}/actions/runs?head_sha=${sha}&per_page=100&page=${page}`;
+    const res = await fetch(url, {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+    if (!res.ok) throw new Error(`GET ${url} → ${res.status} ${res.statusText}`);
+    const body = await res.json();
+    runs.push(...body.workflow_runs);
+    if (runs.length >= body.total_count || body.workflow_runs.length === 0) break;
+  }
+  return classifyRuns(runs);
+}
+
+async function main() {
+  const sha = process.argv[2];
+  if (!sha) {
+    console.error("usage: node scripts/release/verify-gate-evidence.mjs <sha>");
+    process.exit(2);
+  }
+  const repo = process.env.GITHUB_REPOSITORY;
+  const token = process.env.GITHUB_TOKEN;
+  if (!repo || !token) {
+    console.error("GITHUB_REPOSITORY and GITHUB_TOKEN must be set");
+    process.exit(2);
+  }
+
+  const p = join(ROOT, PROTECTION_SCRIPT);
+  if (!existsSync(p)) {
+    console.error(`missing ${PROTECTION_SCRIPT} — it defines the required set`);
+    process.exit(2);
+  }
+  const required = requiredContexts(readFileSync(p, "utf8"));
+
+  const runs = await fetchCheckRuns(repo, sha, token);
+  const problems = evaluate(required, runs, await fetchRunTrust(repo, sha, token));
+
+  console.log(`commit ${sha}: ${runs.length} check run(s), ${required.length} required`);
+  if (problems.length) {
+    console.error(`\n${problems.length} required check(s) do not evidence a green gate:\n`);
+    for (const x of problems) console.error(`  ${x}`);
+    console.error(
+      "\nThis commit is not releasable. Publication consumes exact-SHA gate\n" +
+        "evidence: the tag must point at a commit whose required checks all passed.",
+    );
+    process.exit(1);
+  }
+  console.log(`all ${required.length} required check(s) green — releasable`);
+}
+
+// Run only when invoked directly, so `evaluate` and `requiredContexts` can be
+// imported and exercised without the module trying to reach the network.
+// Compared against argv[1] rather than the newer `import.meta.main`: the
+// engines floor is `^26`, where `import.meta.main` is defined, so the two are
+// equivalent here — the guard is spelled the way every other check in
+// `scripts/` spells it.
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) await main();

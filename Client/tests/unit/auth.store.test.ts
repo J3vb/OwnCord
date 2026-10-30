@@ -385,7 +385,10 @@ describe("auth store", () => {
 
       expect(authStore.getState().logoutWasInVoice).toBe(true);
       // The snapshot must reflect voice state as it was BEFORE this same
-      // call reset it — not the (already-idle) state read afterward.
+      // call reset it — not the (already-idle) state read afterward. The reset
+      // itself comes from the teardown voice.store registers at load (auth.store
+      // does not import voice.store), so this also fails if that registration
+      // is dropped.
       expect(voiceStore.getState().currentChannelId).toBeNull();
     });
   });

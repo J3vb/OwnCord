@@ -3,7 +3,7 @@ import { defineCatalog } from "./format";
 /**
  * The startup-safe slice of the messaging journey: the message date
  * stamps, the attachment download labels and the who-reacted tooltip.
- * `lib/formatting.ts` is statically reachable from the entry through its many
+ * `lib/text/formatting.ts` is statically reachable from the entry through its many
  * callers, so its copy lives here rather than in the main-page catalog
  * `messaging.ts`, the same way `mediaControls.ts` is split from `content.ts`.
  *

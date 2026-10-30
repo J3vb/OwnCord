@@ -5,7 +5,7 @@
  */
 
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { membersStore, getTypingUsers, memberDisplayName } from "@stores/members.store";
 import type { Member } from "@stores/members.store";

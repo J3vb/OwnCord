@@ -4,7 +4,7 @@
  * button still has its keyboard shortcut; only the icon leaves the bar.
  */
 
-import { loadPref } from "../../lib/preferences";
+import { loadPref } from "../../lib/prefs/preferences";
 
 export type ComposerButton = "emoji" | "sticker" | "gif" | "poll" | "voice";
 

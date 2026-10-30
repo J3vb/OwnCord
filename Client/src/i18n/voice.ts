@@ -277,4 +277,11 @@ export const voiceText = defineCatalog("voice", {
   "device.micFailed": "Failed to switch microphone",
   "device.speakerFailed": "Failed to switch speaker",
   "audio.settingsFailed": "Failed to update audio settings",
+
+  "passwordDialog.title": "Password required",
+  "passwordDialog.body": "{channel} is protected by a password. Enter it to join.",
+  "passwordDialog.label": "Password",
+  "passwordDialog.join": "Join",
+  "passwordDialog.wrong": "Wrong password",
+  "passwordDialog.rateLimited": "Too many tries, wait a minute",
 });

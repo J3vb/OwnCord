@@ -10,11 +10,11 @@ says exactly what the beta does and does not claim about who can read what.
 
 ## Certificates and TLS
 
-- **The built-in certificate handling is not fully tested.** We accept this
-  for the beta.
+- **The built-in certificate handling has three limits.** They are
+  limitations of the product as it stands, not unfinished beta work.
   - `self_signed` is the tested default.
-  - `acme` (for a domain name) works, but it has not been tested through
-    expiry, rotation and restart.
+  - `acme` (for a domain name) works, but it is not tested through expiry,
+    rotation and restart.
   - There is no HTTPS on a bare public IP address.
   - There is no guided way to install trust on devices for a LAN or offline
     server.

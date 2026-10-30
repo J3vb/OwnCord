@@ -45,7 +45,7 @@ nothing errors (OC-0395: 039 was rewritten in place and cost those installs
 lexicographic order, so a number that skips ahead of an unwritten one gives
 two installations two different orders (OC-0414). Write a new migration
 numbered one past the last on `dev`, and add its row to the Migration History
-table in `docs/schema.md`. `node scripts/check-migrations.mjs` enforces both.
+table in `docs/schema.md`. `node scripts/checks/check-migrations.mjs` enforces both.
 
 **Regenerate from a tree where the query files carry only YOUR change.**
 sqlc regenerates every `dbgen/` file from every query file on each run, so

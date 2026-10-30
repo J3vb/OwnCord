@@ -27,6 +27,11 @@ type channelPayload struct {
 	// sent, and identical for every recipient, so the shared channel_update
 	// frame stays shared. Members in it can listen but not publish.
 	AFK bool `json:"afk"`
+	// JoinLocked is whether a voice channel has a password (migration
+	// 086). Always sent and identical for every recipient, so the shared
+	// channel_update frame stays shared. It is not a per-viewer unlocked flag:
+	// a client tries the join and reacts to PASSWORD_REQUIRED.
+	JoinLocked bool `json:"password_protected"`
 	// Private is the channel-level lock flag (3D-6): the default role cannot
 	// read the channel after its override is applied. Always sent, like NSFW,
 	// and identical for every recipient — never per-viewer — so the shared
@@ -86,6 +91,7 @@ func channelPayloadFrom(ch *db.Channel, private bool) channelPayload {
 		SlowMode:         ch.SlowMode,
 		NSFW:             ch.NSFW,
 		AFK:              ch.AFK,
+		JoinLocked:       ch.JoinLocked,
 		Private:          private,
 		VoiceMaxUsers:    ch.VoiceMaxUsers,
 		VoiceMaxVideo:    ch.VoiceMaxVideo,

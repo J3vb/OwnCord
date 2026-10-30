@@ -6,7 +6,7 @@ import {
   muteChannel,
   toggleChannelMute,
   unmuteChannel,
-} from "@lib/channel-mutes";
+} from "@lib/prefs/channelMutes";
 import { createDmSidebar } from "@components/DmSidebar";
 import type { DmConversation } from "@components/DmSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";

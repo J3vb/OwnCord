@@ -260,6 +260,11 @@ export interface ReadyChannel {
    */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /**
+   * A voice channel that asks for a password on join. Absent from older
+   * servers, which read as unprotected. The password itself is never sent.
+   */
+  readonly password_protected?: boolean;
 }
 
 /** Member object in the ready payload. */
@@ -1044,6 +1049,8 @@ export interface ChannelCreatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.password_protected — absent means unchanged. */
+  readonly password_protected?: boolean;
   /** See ReadyChannel.afk — absent means unchanged. */
   readonly afk?: boolean;
   /**
@@ -1095,6 +1102,8 @@ export interface ChannelUpdatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.password_protected — absent means unchanged. */
+  readonly password_protected?: boolean;
   /** See ReadyChannel.afk — absent means unchanged. */
   readonly afk?: boolean;
 }
@@ -1623,6 +1632,8 @@ export interface VoiceJoinPayload {
   readonly channel_id: number;
   /** Set on the user's own join; automatic rejoins (reconnect, voice_moved) omit it. */
   readonly user_initiated?: boolean;
+  /** The channel's password, sent once by the user for a protected channel; never stored. */
+  readonly password?: string;
 }
 
 /** Client → Server: leave current voice channel (no payload needed). */

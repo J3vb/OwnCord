@@ -6,14 +6,14 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
+import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
 import { reconcileChildren } from "@lib/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { totalDmUnread } from "@lib/dmUnread";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
-import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
 import { trackCurrentView } from "../../features/navigation/contentView";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
@@ -31,7 +31,7 @@ import {
 import { voiceText } from "../../i18n/voice";
 import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
 import { rowActivity } from "../../features/members/listeningLine";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -286,7 +286,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     }
     // A mention badge outranks the plain unread badge, and a mute never
     // dims or suppresses it: a mute silences chatter, never something
-    // addressed to the reader directly (see lib/channel-mutes.ts).
+    // addressed to the reader directly (see lib/prefs/channelMutes.ts).
     if (dm.mentionCount > 0) {
       const mentionBadge = createElement(
         "span",

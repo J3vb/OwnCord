@@ -14,7 +14,7 @@ const { testPrefs, playVoiceSound } = vi.hoisted(() => ({
   playVoiceSound: vi.fn(),
 }));
 
-vi.mock("../../src/lib/preferences", () => ({
+vi.mock("../../src/lib/prefs/preferences", () => ({
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),

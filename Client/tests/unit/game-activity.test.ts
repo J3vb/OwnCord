@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGameActivity, GAME_ACTIVITY_POLL_MS, type GameActivityLoop } from "@lib/gameActivity";
 import { handleActivityRefusal, GAME_ACTIVITY_PREF_KEY } from "@lib/gameActivityBridge";
 import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/serverCapabilities";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import {
   GAME_PREFS_KEY,
   GAME_SEEN_KEY,
@@ -13,7 +13,7 @@ import {
   withHidden,
   withManual,
   withRename,
-} from "@lib/gameActivityPrefs";
+} from "@lib/prefs/gameActivityPrefs";
 import type { ConnectionState } from "@lib/ws";
 import type { DetectedGame } from "../../src/platform/contracts/gameDetector";
 

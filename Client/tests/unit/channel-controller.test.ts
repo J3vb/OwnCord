@@ -364,7 +364,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
-import { loadLastChannel } from "@lib/last-channel";
+import { loadLastChannel } from "@lib/prefs/lastChannel";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { Disposable } from "@lib/disposable";
 import { messagingText } from "../../src/i18n/messaging";
@@ -379,7 +379,7 @@ import {
   setNsfwAcknowledged,
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
-import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
+import { loadSavedDraft, saveDraft } from "@lib/prefs/savedDrafts";
 import {
   clearReactionUsersCache,
   getCachedReactionUsers,

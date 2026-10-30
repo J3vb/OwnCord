@@ -37,6 +37,10 @@ var ErrNSFWUnacknowledged = errors.New("nsfw content not acknowledged")
 // from a ban.
 var ErrTimedOut = errors.New("user is timed out")
 
+// ErrPasswordRequired is returned by CanPassChannelPassword for a voice channel
+// that has a password the subject has not entered yet.
+var ErrPasswordRequired = errors.New("channel password required")
+
 // Subject is everything a channel predicate consults: the actor's role bits,
 // both override layers for the one channel in question, the channel's flags,
 // and — for a DM — the membership and block state the caller looked up. The
@@ -262,6 +266,21 @@ func CanMentionRole(s Subject, mentionable bool) error {
 		return nil
 	}
 	return missing(MentionEveryone)
+}
+
+// CanPassChannelPassword is the extra lock on a password-protected voice
+// channel, asked only when a member joins on their own (not for a moderator's
+// move, the AFK move or a token refresh). It passes when the channel has no
+// password, when the subject already entered the current one (granted), or
+// when the subject holds MANAGE_CHANNELS in the channel (Subject.Has includes
+// the Administrator bypass), since they can read and change the password
+// anyway. Otherwise it answers ErrPasswordRequired. The role rules still
+// decide whether the subject may join at all (CanJoinVoice).
+func CanPassChannelPassword(s Subject, protected, granted bool) error {
+	if !protected || granted || s.Has(ManageChannels) {
+		return nil
+	}
+	return ErrPasswordRequired
 }
 
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel

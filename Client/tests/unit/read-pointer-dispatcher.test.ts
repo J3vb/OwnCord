@@ -3,7 +3,7 @@
  * `ready`, the `read_state` frame, a refused `mark_unread`, and the focus
  * frame's `read` flag. Server events reach the stores only here.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -27,7 +27,7 @@ import {
   markMessageUnread,
   setMarkUnreadSender,
 } from "../../src/components/message-list/mark-unread";
-import { viewChannel } from "../../src/lib/last-channel";
+import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
@@ -55,6 +55,11 @@ vi.mock("@lib/livekitSession", () => ({
   disableScreenshare: vi.fn(async () => {}),
   reconcileVideoFlags: vi.fn(),
   resendWatching: vi.fn(),
+}));
+// voice/wsHandlers loads screenShare lazily on some frames. Left real, that
+// load can finish after this file's environment is torn down.
+vi.mock("@lib/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
 }));
 const mockShowToast = vi.fn();
 vi.mock("@lib/toast", () => ({
@@ -135,6 +140,14 @@ const dmRow = (over: Partial<DmChannel> = {}): DmChannel => ({
 });
 
 const chan = (id: number) => channelsStore.getState().channels.get(id);
+
+// A refused frame makes the voice handlers load screenShare lazily and
+// fire-and-forget. If that load is still in flight when the file's environment
+// is torn down, vitest throws an unhandled EnvironmentTeardownError even though
+// every test passed. Loading it once up front makes the later import a cache hit.
+beforeAll(async () => {
+  await import("../../src/lib/screenShare");
+});
 
 describe("read pointer through the dispatcher", () => {
   let mock: ReturnType<typeof createMockWsClient>;

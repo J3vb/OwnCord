@@ -335,7 +335,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
   },
 }));
 
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 
 // The remembered-open pref must never leak between tests, whatever their order.
 afterEach(() => {

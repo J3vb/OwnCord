@@ -7,7 +7,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
 import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
 import { canWaveIn, renderWaveButton, welcomeGreeting } from "./welcomeRows";
@@ -41,7 +41,7 @@ export {
   shouldGroup,
   getUserRole,
   roleColorVar,
-} from "@lib/formatting";
+} from "@lib/text/formatting";
 
 export {
   renderInlineContent,
@@ -60,15 +60,15 @@ import {
   formatFullDate,
   formatMessageTimestamp,
   parseTimestamp,
-} from "@lib/formatting";
+} from "@lib/text/formatting";
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
-import { resolveAuthor, userRoleColorVar } from "@lib/formatting";
+import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
 import { createAvatarElement, pickAvatarColor } from "./avatar";
 import { resolveDisplayName } from "@lib/avatar";
 import { renderMentions, renderMessageContent } from "./content-parser";
-import { markdownToPlainText } from "@lib/markdown";
-import { highlightsCurrentUser } from "@lib/mentions";
-import { readableRoleColor } from "@lib/themes";
+import { markdownToPlainText } from "@lib/text/markdown";
+import { highlightsCurrentUser } from "@lib/text/mentions";
+import { readableRoleColor } from "@lib/prefs/themes";
 import { isLoneImageEmbed, renderUrlEmbeds } from "./media";
 import {
   isGalleryImage,

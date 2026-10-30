@@ -11,7 +11,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { resolveDisplayName } from "@lib/avatar";
@@ -22,7 +22,7 @@ import {
   clearAfterSeconds,
   isClearAfterId,
   type ClearAfterId,
-} from "@lib/statusChoices";
+} from "@lib/text/statusChoices";
 import {
   MAX_CUSTOM_STATUS_LEN,
   isTimedStatus,
@@ -46,7 +46,7 @@ import { createAvatarElement } from "@components/message-list/avatar";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 import { shellText } from "../i18n/shell";
 import { connectText } from "../i18n/connect";
-import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/nameLimits";
+import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/text/nameLimits";
 
 // The picker loads on its first open, so its code stays out of the main-page chunk.
 const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));

@@ -291,7 +291,7 @@ the only indicator. Both clear at 0 and on logout.
 `src/components/SettingsOverlay.ts` (+ `settings/*`), `src/components/AdminActions.ts`,
 `src/components/InviteManager.ts`, `CreateChannelModal.ts`, `EditChannelModal.ts`,
 `DeleteChannelModal.ts`, `src/components/UpdateNotifier.ts`, `src/lib/updater.ts`,
-`src/lib/api.ts`, `src/lib/themes.ts`, `src/lib/preferences.ts`,
+`src/lib/api.ts`, `src/lib/prefs/themes.ts`, `src/lib/prefs/preferences.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `OverlayManagers.ts`, `src-tauri/src/commands.rs`, `src-tauri/src/update_commands.rs`;
 server `Server/admin/api.go`, `Server/api/profile_handler.go`, `totp_handler.go`.

@@ -343,7 +343,7 @@ test("a workflow file selects every capability", () => {
 });
 
 test("a shared script selects every capability", () => {
-  const sel = picked("M\tscripts/check-tauri-versions.mjs");
+  const sel = picked("M\tscripts/checks/check-tauri-versions.mjs");
   for (const cap of CAPABILITIES) assert.equal(sel[cap], true);
 });
 

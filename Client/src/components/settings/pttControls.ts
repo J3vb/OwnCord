@@ -22,9 +22,9 @@ import {
 } from "@lib/globalKeys";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { desktop } from "../../platform/desktop";
-import { REBINDABLE_ACTIONS, loadEffectiveKeybinds } from "@lib/keybinds";
+import { REBINDABLE_ACTIONS, loadEffectiveKeybinds } from "@lib/prefs/keybinds";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
-import { actionLabel } from "@lib/keybindLabels";
+import { actionLabel } from "@lib/prefs/keybindLabels";
 import { beginCapture } from "./comboCapture";
 import { settingsText as t } from "../../i18n/settings";
 

@@ -20,7 +20,7 @@ import {
   toggleCollapsed,
   ungroupFolder,
   type RailLayout,
-} from "@lib/serverRailLayout";
+} from "@lib/prefs/serverRailLayout";
 
 const s = (host: string) => ({ kind: "server" as const, host });
 const folder = (id: string, hosts: string[], extra: { collapsed?: boolean } = {}) => ({

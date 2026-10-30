@@ -580,3 +580,29 @@ func TestCanChangeOwnerGrantOnly_AdministratorTierBits(t *testing.T) {
 		t.Error("a MANAGE_ROLES holder of the bits must not change administrator-tier bits")
 	}
 }
+
+func TestCanPassChannelPassword(t *testing.T) {
+	member := Subject{RolePerms: memberBits, Channel: voice(false)}
+	cases := []struct {
+		name      string
+		s         Subject
+		protected bool
+		granted   bool
+		want      error
+	}{
+		{"unprotected channel", member, false, false, nil},
+		{"granted member", member, true, true, nil},
+		{"plain member without a grant", member, true, false, ErrPasswordRequired},
+		{"administrator", Subject{RolePerms: Administrator, Channel: voice(false)}, true, false, nil},
+		{"manage channels by role", Subject{RolePerms: memberBits | ManageChannels, Channel: voice(false)}, true, false, nil},
+		{"manage channels by member override", Subject{RolePerms: memberBits, Override: userAllow(ManageChannels), Channel: voice(false)}, true, false, nil},
+		{"manage channels denied in this channel", Subject{RolePerms: memberBits | ManageChannels, Override: userDeny(ManageChannels), Channel: voice(false)}, true, false, ErrPasswordRequired},
+		{"zero subject", Subject{}, true, false, ErrPasswordRequired},
+	}
+	for _, c := range cases {
+		got := CanPassChannelPassword(c.s, c.protected, c.granted)
+		if !errors.Is(got, c.want) || (c.want == nil) != (got == nil) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}

@@ -22,11 +22,11 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import type { IconName } from "@lib/icons";
 import type { AvatarSubject } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { RingState, OutgoingCallState } from "@lib/call-ring";
 import { voiceStore, isSelfMuted } from "@stores/voice.store";
 import type { PeerVerification, VoiceState, VoiceStatus, VoiceUser } from "@stores/voice.store";

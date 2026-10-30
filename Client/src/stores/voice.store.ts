@@ -18,7 +18,7 @@ import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 import { registerSessionReset } from "@lib/sessionRegistry";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 
 export interface VoiceUser {
   readonly userId: number;

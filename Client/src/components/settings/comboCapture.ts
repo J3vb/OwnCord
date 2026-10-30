@@ -10,8 +10,8 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { actionLabel, comboOrNotSet } from "@lib/keybindLabels";
-import { loadPref } from "@lib/preferences";
+import { actionLabel, comboOrNotSet } from "@lib/prefs/keybindLabels";
+import { loadPref } from "@lib/prefs/preferences";
 import { keyEventToVk } from "@lib/voiceShortcuts";
 import {
   REBINDABLE_ACTIONS,
@@ -24,8 +24,8 @@ import {
   type KeyCombo,
   type KeybindConflict,
   type RebindableId,
-} from "@lib/keybinds";
-import type { SettingsTextKey } from "@lib/keybindCatalog";
+} from "@lib/prefs/keybinds";
+import type { SettingsTextKey } from "@lib/prefs/keybindCatalog";
 import { settingsText as t } from "../../i18n/settings";
 
 /** The alert text of each refusal that names no other action. */

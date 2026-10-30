@@ -79,7 +79,7 @@ Not touched: `scripts/run.mjs`, `scripts/ci-select.mjs`, `scripts/ci-select.test
 
 ### Checks
 
-- **Focused:** `node --test scripts/run.test.mjs`; `node --test scripts/ci-select.test.mjs`; `npx prettier --check docs/contributing.md docs/architecture/server.md docs/plans`; `node scripts/check-doc-citations.mjs`; `node scripts/check-doc-counts.mjs`.
+- **Focused:** `node --test scripts/run.test.mjs`; `node --test scripts/ci-select.test.mjs`; `npx prettier --check docs/contributing.md docs/architecture/server.md docs/plans`; `node scripts/checks/check-doc-citations.mjs`; `node scripts/checks/check-doc-counts.mjs`.
 - **Complete, required before the PR leaves draft:** `node scripts/run.mjs check:docs` and `node scripts/run.mjs check:hygiene`. Say which optional tools were missing. If row 3 or 4 touched anything the selector maps to the server, also run `go test -count=1 ./cmd/dbinventory/` in `Server/`.
 - **CI** is the authority; local runs shorten feedback only.
 

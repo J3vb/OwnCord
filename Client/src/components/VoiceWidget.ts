@@ -9,7 +9,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, createSignalIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceStore, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -27,7 +27,7 @@ import {
   reapplyEnhancedNoiseSuppression,
   retryMicPermission,
 } from "@lib/livekitSession";
-import { loadPref, onPrefChange, savePref } from "@lib/preferences";
+import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../i18n/voice";
 import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
 import { shareBlockReason } from "../features/voice/shareGate";

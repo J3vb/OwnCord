@@ -22,7 +22,13 @@ import { ensureIdentityKeyPublished } from "../../lib/identity";
 import { showToast } from "../../lib/toast";
 import { noteJoinFailed } from "./joinBackoff";
 import { takeWatchRefusal } from "../../lib/watchRequest";
-import { noteJoinSent, takeJoinRefusal } from "./joinRequest";
+import {
+  joinSequence,
+  noteJoinSent,
+  refusalWasPasswordRetry,
+  takeJoinRefusal,
+  takeRefusedJoin,
+} from "./joinRequest";
 import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore, memberDisplayName } from "../../stores/members.store";
@@ -555,18 +561,66 @@ export function handleVoiceJoinRollback(payload: Payload<"error">, id: string | 
   // also covers "connecting"/"reconnecting", and leaveVoice() itself
   // already tolerates a null Room, aborting the in-flight attempt at its
   // next checkpoint.
-  if (voiceStore.getState().voiceStatus === "joining" && takeJoinRefusal(payload.code, id)) {
+  const { voiceStatus, currentChannelId } = voiceStore.getState();
+  if (voiceStatus === "joining" && takeJoinRefusal(payload.code, id, currentChannelId)) {
     // A refused join abandons an AFK move: nothing to explain.
     clearAfkMove();
     // A refused join (often before any voice token) is a failed join: back
-    // off the next one, or every click re-sends voice_join.
-    noteJoinFailed();
+    // off the next one, or every click re-sends voice_join. A password refusal
+    // (and the rate limit on a password try) is the exception: the dialog it
+    // opens is the retry, and a backoff would turn the user's next try away.
+    // Any other refusal of a retry backs off as usual.
+    const passwordRefusal =
+      isPasswordCode(payload.code) ||
+      (payload.code === WsErrorCode.RATE_LIMITED && refusalWasPasswordRetry(id));
+    if (!passwordRefusal) noteJoinFailed();
     void livekitSession().then(({ isVoiceSessionActive, leaveVoice, failPendingRejoin }) => {
       failPendingRejoin();
       if (isVoiceSessionActive()) void leaveVoice(true);
     });
     leaveVoiceChannel();
   }
+}
+
+function isPasswordCode(code: string): boolean {
+  return code === WsErrorCode.PASSWORD_REQUIRED || code === WsErrorCode.WRONG_PASSWORD;
+}
+
+/**
+ * A join refused for its password: open the dialog for that channel. Runs
+ * after the rollback, which already cleared the optimistic join. Acts only on
+ * the refusal of the join this client sent last, so a stale or foreign error
+ * never opens a dialog. Returns true when the frame was a password refusal (or
+ * a retry's rate limit), so no generic toast follows.
+ */
+export function handleVoicePasswordRefusal(
+  ws: DispatchWs,
+  payload: Payload<"error">,
+  id: string | undefined,
+): boolean {
+  const refused = takeRefusedJoin(id);
+  if (refused === null || refused.channelId === null) return isPasswordCode(payload.code);
+  const channelId = refused.channelId;
+  let problem: "wrong" | "rateLimited" | null = null;
+  if (payload.code === WsErrorCode.WRONG_PASSWORD) problem = "wrong";
+  else if (payload.code === WsErrorCode.RATE_LIMITED && refused.passwordRetry)
+    problem = "rateLimited";
+  else if (payload.code !== WsErrorCode.PASSWORD_REQUIRED) return false;
+  // Only this refusal needs the dialog, so it loads on demand. The prompt
+  // registers its sign-out reset and its new-join listener only once loaded,
+  // so a session that ended, or a join started, while the chunk was loading
+  // must not get a dialog from it.
+  const owner = authStore.getState().user?.id;
+  const seq = joinSequence();
+  void import("./passwordPrompt").then(
+    ({ promptForChannelPassword }) => {
+      if (owner === undefined || authStore.getState().user?.id !== owner) return;
+      if (joinSequence() !== seq) return;
+      promptForChannelPassword(ws, channelId, problem);
+    },
+    (err: unknown) => log.error("Password prompt failed to load", err),
+  );
+  return true;
 }
 
 /** The voice capacity refusals of `error`. Returns true when the frame was one. */

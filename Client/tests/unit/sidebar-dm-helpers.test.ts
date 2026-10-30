@@ -1,4 +1,4 @@
-import { muteChannel, unmuteChannel } from "@lib/channel-mutes";
+import { muteChannel, unmuteChannel } from "@lib/prefs/channelMutes";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ApiClientError } from "@lib/api";
 import {

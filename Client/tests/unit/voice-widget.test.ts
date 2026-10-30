@@ -61,7 +61,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
-import { loadPref, savePref } from "../../src/lib/preferences";
+import { loadPref, savePref } from "../../src/lib/prefs/preferences";
 
 function resetStores(): void {
   voiceStore.setState(() => ({

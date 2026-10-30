@@ -4,12 +4,12 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { dialogOpen } from "@lib/dialogOpen";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { createLazyScreen } from "@components/lazyScreen";
 import {
   createMentionAutocomplete,
@@ -33,7 +33,7 @@ import {
   type SlashAutocompleteComponent,
 } from "@components/SlashAutocomplete";
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
-import { applyPickedMentions, type PickedMention } from "@lib/pickedMentions";
+import { applyPickedMentions, type PickedMention } from "@lib/text/pickedMentions";
 import { idMentionsEnabled } from "@lib/serverCapabilities";
 import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
@@ -53,7 +53,7 @@ const stickerPickerScreen = createLazyScreen(
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
 import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/serverCapabilities";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 import {
   COMPOSER_BUTTON_PREF_KEYS,
   composerButtonShown,

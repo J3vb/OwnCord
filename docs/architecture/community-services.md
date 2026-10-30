@@ -107,7 +107,7 @@ identity key):** `085_session_identity_key.sql` adds one nullable column to `ses
 `identity_public_key`: the voice E2EE public key a device sent in its WebSocket auth frame.
 It is part of the session row and shares its ownership, retention, erasure (deleted with the
 session) and backup behaviour; no new data class. **Amended 2026-10-29 (Discord
-import):** `086_discord_import.sql` adds `channels.import_pending`, `import_jobs` and
+import):** `087_discord_import.sql` adds `channels.import_pending`, `import_jobs` and
 `message_import_authors`. `message_import_authors` is a side row of an ordinary message
 like `polls`: it holds the Discord display name and colour, no user id, and goes with its
 message by cascade. `import_jobs` is an admin-started job record: `created_by` and
@@ -115,7 +115,13 @@ message by cascade. `import_jobs` is an admin-started job record: `created_by` a
 row carries counts and an error text, never message content. Imported messages belong to
 one hidden `users` row (`registration_status = 'system'`, created by the first import),
 which has no role, session or token and is outside every member listing, so erasure,
-retention and backup treat its messages as any other message in a channel. Other historical
+retention and backup treat its messages as any other message in a channel. **Amended 2026-10-29 (channel
+password):** `086_channel_password.sql` adds `password_hash` and `password_version` to
+`channels` and the table `channel_password_grants(channel_id, user_id, password_version,
+granted_at)`. The hash is channel configuration and never leaves the server; a grant only
+records that a member entered a voice channel's current password, is never read as
+permission, and is deleted with the channel or the account (lifecycle row 18e in
+`data-lifecycle.md`). Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
@@ -1019,7 +1025,7 @@ describes the control it adds, never the gap it closes.
 `Server/migrations/community_services_doc_test.go`
 (`TestCommunityServicesDocIsCurrent`) reads this file and fails when it drifts
 from the tree. It checks four of these; the fourth is checked by
-`scripts/check-doc-citations.mjs` (Docs & Ledger Consistency job):
+`scripts/checks/check-doc-citations.mjs` (Docs & Ledger Consistency job):
 
 1. **All seven services are present**, each as an `## S`_n_ heading, pinned by
    name — including any that later has nothing to say, for the same reason

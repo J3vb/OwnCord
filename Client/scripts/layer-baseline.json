@@ -54,14 +54,14 @@
       "stores/channels.store.ts": 1,
       "stores/ui.store.ts": 1
     },
-    "lib/formatting.ts": {
+    "lib/text/formatting.ts": {
       "stores/channels.store.ts": 1,
       "stores/members.store.ts": 1
     },
     "lib/identity.ts": {
       "stores/auth.store.ts": 1
     },
-    "lib/last-channel.ts": {
+    "lib/prefs/lastChannel.ts": {
       "stores/channels.store.ts": 1
     },
     "lib/livekitDiagnostics.ts": {
@@ -102,10 +102,10 @@
     "lib/logout.ts": {
       "stores/auth.store.ts": 1
     },
-    "lib/markdown.ts": {
+    "lib/text/markdown.ts": {
       "features/messaging/discordTimestamp.ts": 1
     },
-    "lib/mentions.ts": {
+    "lib/text/mentions.ts": {
       "stores/auth.store.ts": 1,
       "stores/members.store.ts": 1
     },

@@ -1183,21 +1183,22 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field               | Type   | Description                                                                                                               |
-| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `id`                | int64  | Channel ID                                                                                                                |
-| `name`              | string | Channel name                                                                                                              |
-| `type`              | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
-| `topic`             | string | Channel topic/description                                                                                                 |
-| `category`          | string | Name of the channel's category, `""` when none                                                                            |
-| `category_id`       | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
-| `category_position` | int    | The category's position in the category order, `0` when none                                                              |
-| `position`          | int    | Sort order within category                                                                                                |
-| `slow_mode`         | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
-| `archived`          | bool   | Whether the channel is archived                                                                                           |
-| `nsfw`              | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
-| `voice_max_users`   | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
-| `voice_max_video`   | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| Field                | Type   | Description                                                                                                               |
+| -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | int64  | Channel ID                                                                                                                |
+| `name`               | string | Channel name                                                                                                              |
+| `type`               | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`              | string | Channel topic/description                                                                                                 |
+| `category`           | string | Name of the channel's category, `""` when none                                                                            |
+| `category_id`        | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
+| `category_position`  | int    | The category's position in the category order, `0` when none                                                              |
+| `position`           | int    | Sort order within category                                                                                                |
+| `slow_mode`          | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`           | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`               | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users`    | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video`    | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| `password_protected` | bool   | `true` for a voice channel that has a password (checked on `voice_join`). The password and its hash are never returned    |
 
 #### The `nsfw` flag
 
@@ -5829,7 +5830,7 @@ The full role list after the reorder, position descending.
 
 `POST /admin/api/channels` takes `{name, type, category_id, category, topic, position}`;
 `PATCH /admin/api/channels/{id}` takes `{name, topic, category_id, category, slow_mode,
-position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
+position, archived, nsfw, voice_max_users, voice_max_video, password}` and seeds every
 omitted field from the current row, so a partial body is safe.
 
 The numeric fields are bounds-checked before anything is written, and an
@@ -5847,6 +5848,16 @@ refused body writes nothing at all:
 on every content path (see "NSFW Acknowledgement"). The
 audit detail names the transition: `updated #foo (marked NSFW)` /
 `(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
+
+`password` (string) on the `PATCH` sets, changes or removes a voice channel's
+password: absent leaves it alone, `""` removes it, anything else (1 to 64
+characters, no control characters) becomes the password and is stored only as a
+bcrypt hash. On a channel that is not a voice channel any value answers `400`.
+Every set, change or removal makes members enter the new password on their next
+join but removes nobody already inside, and the audit detail reads `updated #foo
+(password set)` / `(password changed)` / `(password removed)`, never the password.
+No response, list or broadcast carries the password or its hash; they show
+`password_protected` only.
 
 The voice limits are stored on a channel of any type but are only meaningful on
 a voice one; the desktop client offers them for voice channels alone and omits

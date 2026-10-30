@@ -98,6 +98,12 @@ export interface Channel {
   readonly voiceMaxUsers: number;
   readonly voiceMaxVideo: number;
   /**
+   * A voice channel that asks for a password on join. Only the flag is ever
+   * held: the password is typed into the join dialog and never stored. Absent
+   * reads as unprotected (an older server, a DM).
+   */
+  readonly passwordProtected?: boolean | undefined;
+  /**
    * The server's AFK voice channel: idle members are moved here and it is
    * listen-only. Absent from older servers, which is read as false.
    */
@@ -130,7 +136,7 @@ export const channelsStore = createStore<ChannelsState>(INITIAL_STATE);
 
 // A server that sends no `role_ids` names the user's one role only; mention
 // matching finds its id through the roster (registered here because
-// lib/mentions sits below the stores).
+// lib/text/mentions sits below the stores).
 registerRoleIdLookup((name) => {
   const lower = name.toLowerCase();
   return channelsStore.getState().roles.find((r) => r.name.toLowerCase() === lower)?.id;
@@ -203,6 +209,7 @@ export function setChannels(channels: readonly ReadyChannel[]): void {
       nsfwAcknowledged: (ch.nsfw ?? false) && ch.nsfw_acknowledged === true,
       voiceMaxUsers: ch.voice_max_users ?? 0,
       voiceMaxVideo: ch.voice_max_video ?? 0,
+      passwordProtected: ch.password_protected,
       afk: ch.afk ?? false,
       forum: ch.forum,
     });
@@ -298,6 +305,7 @@ export function addChannel(channel: ChannelCreatePayload): void {
       nsfwAcknowledged: (channel.nsfw ?? false) && existing?.nsfwAcknowledged === true,
       voiceMaxUsers: channel.voice_max_users ?? 0,
       voiceMaxVideo: channel.voice_max_video ?? 0,
+      passwordProtected: channel.password_protected ?? existing?.passwordProtected,
       afk: channel.afk ?? existing?.afk ?? false,
       forum: channel.forum ?? existing?.forum,
     });
@@ -340,6 +348,9 @@ export function updateChannel(update: ChannelUpdatePayload): void {
       ...(update.private !== undefined ? { isPrivate: update.private } : {}),
       ...(update.voice_max_users !== undefined ? { voiceMaxUsers: update.voice_max_users } : {}),
       ...(update.voice_max_video !== undefined ? { voiceMaxVideo: update.voice_max_video } : {}),
+      ...(update.password_protected !== undefined
+        ? { passwordProtected: update.password_protected }
+        : {}),
       ...(update.afk !== undefined ? { afk: update.afk } : {}),
       ...(update.forum !== undefined ? { forum: update.forum } : {}),
     };

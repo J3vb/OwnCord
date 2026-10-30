@@ -28,7 +28,7 @@ import {
   setLocalScreenshare,
   voiceStore,
 } from "@stores/voice.store";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { offeredShareFps } from "@lib/shareFps";
 import { setH264GpuProfiles } from "@lib/h264Profile";
 import { createLogger } from "@lib/logger";

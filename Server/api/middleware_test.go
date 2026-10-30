@@ -1547,6 +1547,8 @@ CREATE TABLE IF NOT EXISTS channels (
     forum_require_tag INTEGER NOT NULL DEFAULT 0,
     forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
     import_pending INTEGER NOT NULL DEFAULT 0,
+    password_hash TEXT,
+    password_version INTEGER NOT NULL DEFAULT 0,
     is_group         INTEGER NOT NULL DEFAULT 0,
     dm_owner_id      INTEGER,
     dm_icon      TEXT

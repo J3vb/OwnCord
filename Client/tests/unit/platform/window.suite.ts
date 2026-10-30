@@ -1,9 +1,9 @@
 // Behaviour suite for the `WindowControl` contract
 // (`src/platform/contracts/window.ts`). Written in B7-5 against the in-place
-// seam in `lib/window-state.ts` before the move, so it pins today's behaviour
+// seam in `lib/prefs/windowState.ts` before the move, so it pins today's behaviour
 // rather than the moved code's. The seam is the window operations, not
 // `initWindowState` — the off-screen guard is behaviour and stays in
-// `lib/window-state.ts`, covered by `tests/unit/window-state-restore.test.ts`.
+// `lib/prefs/windowState.ts`, covered by `tests/unit/window-state-restore.test.ts`.
 import { beforeEach, describe, expect, test } from "vitest";
 import type { MonitorRect, WindowControl } from "../../../src/platform/contracts/window";
 

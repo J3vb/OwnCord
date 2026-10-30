@@ -3,7 +3,7 @@ import { createMemberColumn, type MemberColumn } from "../../src/pages/main-page
 import type { MemberPanel } from "../../src/features/members/memberPanel";
 import { channelsStore, type Channel } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 import {
   MEMBER_LAYOUT_PREF,
   MEMBER_OPEN_PREF,

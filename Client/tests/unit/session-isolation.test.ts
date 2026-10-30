@@ -27,7 +27,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
-vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
@@ -43,7 +43,9 @@ vi.mock("@lib/credentials", () => ({
   deleteCredential: vi.fn().mockResolvedValue(undefined),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@lib/prefs/windowState", () => ({
+  initWindowState: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),

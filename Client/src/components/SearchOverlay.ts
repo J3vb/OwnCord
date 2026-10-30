@@ -6,18 +6,18 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { closeOnBackdropClick } from "@lib/modalFactory";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { SearchResultItem, SearchResponse } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
-import { parseTimestamp, resolveAuthor } from "@lib/formatting";
+import { parseTimestamp, resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/avatar";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
-import { markdownToPlainText } from "@lib/markdown";
+import { markdownToPlainText } from "@lib/text/markdown";
 import { formatDate } from "../i18n/format";
 import { messagingText } from "../i18n/messaging";
 

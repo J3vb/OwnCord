@@ -20,7 +20,8 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.thread_archived,
        c.thread_locked,
        c.forum_require_tag,
-       c.forum_default_auto_archive_minutes
+       c.forum_default_auto_archive_minutes,
+       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id
@@ -46,7 +47,8 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.thread_archived,
        c.thread_locked,
        c.forum_require_tag,
-       c.forum_default_auto_archive_minutes
+       c.forum_default_auto_archive_minutes,
+       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ? AND c.import_pending = 0;
@@ -70,7 +72,8 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        c.thread_archived,
        c.thread_locked,
        c.forum_require_tag,
-       c.forum_default_auto_archive_minutes
+       c.forum_default_auto_archive_minutes,
+       CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1 AND c.import_pending = 0;

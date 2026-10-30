@@ -7,7 +7,7 @@
  * or popup first asks, and `emojiCatalog()` is null until then.
  */
 
-import { loadPref, savePref } from "../../lib/preferences";
+import { loadPref, savePref } from "../../lib/prefs/preferences";
 import type { EMOJI_GROUPS } from "./emojiData";
 
 export type EmojiGroupKey = (typeof EMOJI_GROUPS)[number][0];

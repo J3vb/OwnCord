@@ -262,7 +262,7 @@ vi.mock("../../../platform/desktop", () => ({
 
 import { createNativeRoom } from "./nativeRoom";
 import { desktop } from "../../../platform/desktop";
-import { savePref } from "../../../lib/preferences";
+import { savePref } from "../../../lib/prefs/preferences";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
 import type { NativeScreenTrack } from "./screenTrack";
 import { nativeCounters } from "./counters";

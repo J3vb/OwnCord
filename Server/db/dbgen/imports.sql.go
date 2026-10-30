@@ -93,7 +93,7 @@ const getImportAccountID = `-- name: GetImportAccountID :one
 SELECT id FROM users WHERE registration_status = 'system'
 `
 
-// Discord channel import (migration 086). The importer builds a channel with
+// Discord channel import (migration 087). The importer builds a channel with
 // import_pending = 1, fills it chunk by chunk, then publishes it in one
 // transaction. See db/discord_import.go.
 // The hidden import account is the one users row whose registration_status is

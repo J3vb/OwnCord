@@ -8,7 +8,7 @@
 // keeps loading on first use and the owner keeps every behaviour that depends
 // on the composer (inserting an emoji, sending a GIF or a sticker).
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { stickersText } from "../i18n/stickers";

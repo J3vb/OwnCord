@@ -218,6 +218,9 @@ type ChannelUpdate struct {
 	// changes.
 	VoiceMaxUsers int
 	VoiceMaxVideo int
+	// Password, when non-nil, sets or clears the channel's password in the same
+	// transaction as the rest of the update. Nil leaves it alone.
+	Password *ChannelPasswordChange
 	// SyncGuard, when non-nil, replaces the channel's override rows with the
 	// template of the category it ends up in and marks it synced, in the update's
 	// transaction, so a refusal leaves the channel where it was. ErrUncategorized
@@ -281,6 +284,9 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		}); err != nil {
 			return err
 		}
+		if err := applyChannelPasswordTx(ctx, q, id, u.Password); err != nil {
+			return err
+		}
 		if err := applyPermissionSyncTx(ctx, q, id, catID, moved, u); err != nil {
 			return err
 		}
@@ -289,38 +295,6 @@ func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, 
 		}
 		return nil
 	})
-}
-
-func sameCategory(a, b *int64) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return *a == *b
-}
-
-// applyPermissionSyncTx applies a channel update's sync rules inside its
-// transaction. Moving to another category unsyncs the channel and keeps its
-// own override rows; an update that asked for a sync replaces them with the
-// target category's template and marks it synced. moved was read in this
-// transaction, not from an earlier snapshot.
-func applyPermissionSyncTx(ctx context.Context, q *dbgen.Queries, id int64, catID *int64, moved bool, u ChannelUpdate) error {
-	if u.SyncGuard != nil {
-		if catID == nil {
-			return ErrUncategorized
-		}
-		plan, err := replaceWithTemplateTx(ctx, q, id, *catID, u.SyncGuard)
-		if err != nil {
-			return err
-		}
-		if u.SyncPlan != nil {
-			*u.SyncPlan = plan
-		}
-		return nil
-	}
-	if moved {
-		return q.UnsyncChannelPermissions(ctx, id)
-	}
-	return nil
 }
 
 // AdminDeleteChannel removes a channel by ID (cascades to messages, etc.).

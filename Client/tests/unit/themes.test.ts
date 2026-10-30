@@ -7,7 +7,7 @@ import {
   getActiveThemeName,
   readableRoleColor,
   restoreTheme,
-} from "@lib/themes";
+} from "@lib/prefs/themes";
 
 describe("themes", () => {
   beforeEach(() => {

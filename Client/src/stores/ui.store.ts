@@ -5,7 +5,7 @@
 
 import { createStore } from "@lib/store";
 import { registerSessionReset } from "@lib/sessionRegistry";
-import { loadStoredJson, saveStoredJson } from "@lib/preferences";
+import { loadStoredJson, saveStoredJson } from "@lib/prefs/preferences";
 import type { ContentViewId } from "../features/navigation/destinations";
 
 export interface UiState {

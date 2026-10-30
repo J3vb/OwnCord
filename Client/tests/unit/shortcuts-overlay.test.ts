@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { closeShortcutsOverlay, openShortcutsOverlay } from "../../src/components/ShortcutsOverlay";
 import { saveGlobalShortcutVk } from "../../src/lib/voiceShortcuts";
-import { saveKeybind } from "../../src/lib/keybinds";
-import { KEYBIND_GROUPS } from "../../src/lib/keybindCatalog";
+import { saveKeybind } from "../../src/lib/prefs/keybinds";
+import { KEYBIND_GROUPS } from "../../src/lib/prefs/keybindCatalog";
 import { dialogOpen } from "../../src/lib/dialogOpen";
 import { settingsText as t } from "../../src/i18n/settings";
 

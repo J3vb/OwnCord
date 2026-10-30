@@ -28,7 +28,7 @@
 // disconnect().
 import { DisconnectReason, RoomEvent, type VideoQuality } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
-import { loadPref } from "../../../lib/preferences";
+import { loadPref } from "../../../lib/prefs/preferences";
 import { NoiseFloorTracker } from "../../../lib/noiseFloor";
 import { voiceStore } from "../../../stores/voice.store";
 import { desktop } from "../../../platform/desktop";
