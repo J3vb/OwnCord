@@ -19,6 +19,12 @@
 // swings ~4 dB inside voiced speech; ~10 ms does not.
 const SMOOTH_QUANTA = 4;
 
+// Hysteresis: the gate opens at the threshold and closes only this far
+// below it, so the quieter stretches of a word do not count as silence and a
+// voice hovering at the line does not chatter.
+const HYSTERESIS_DB = 6;
+const CLOSE_RATIO = 10 ** (-HYSTERESIS_DB / 20);
+
 class VadProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
@@ -28,9 +34,11 @@ class VadProcessor extends AudioWorkletProcessor {
     // once per ~16ms poll like the setTimeout fallback. These frame counts
     // are therefore ~6x the fallback's, so both paths gate on the same
     // wall-clock timing.
-    this._gateOnFrames = 120; // ~320ms below the threshold before gating: bridges a 250ms pause and its quiet tails
+    this._gateOnFrames = 188; // ~500ms below the close level before gating: bridges the pauses inside a sentence
     this._gateOffFrames = 12; // ~32ms of speech before ungating
     this._silentFrames = 0;
+    // Counts up on a quantum at the threshold and down on one below it, so a
+    // single dip inside an onset does not start the attack over.
     this._speechFrames = 0;
     this._gated = false;
     this._active = true;
@@ -106,21 +114,26 @@ class VadProcessor extends AudioWorkletProcessor {
       this._rmsPeak = 0;
     }
 
-    // Gate logic (identical to the setTimeout version)
-    if (rms < this._threshold) {
-      this._speechFrames = 0;
+    // Gate logic (the setTimeout fallback in audioPipeline.ts mirrors it)
+    if (this._gated) {
+      if (rms >= this._threshold) this._speechFrames++;
+      else if (this._speechFrames > 0) this._speechFrames--;
+      if (this._speechFrames >= this._gateOffFrames) {
+        this._gated = false;
+        this._speechFrames = 0;
+        this._silentFrames = 0;
+        this.port.postMessage({ type: "gate", gated: false });
+      }
+    } else if (rms < this._threshold * CLOSE_RATIO) {
       this._silentFrames++;
-      if (!this._gated && this._silentFrames >= this._gateOnFrames) {
+      if (this._silentFrames >= this._gateOnFrames) {
         this._gated = true;
+        this._silentFrames = 0;
+        this._speechFrames = 0;
         this.port.postMessage({ type: "gate", gated: true });
       }
     } else {
       this._silentFrames = 0;
-      this._speechFrames++;
-      if (this._gated && this._speechFrames >= this._gateOffFrames) {
-        this._gated = false;
-        this.port.postMessage({ type: "gate", gated: false });
-      }
     }
 
     return true;

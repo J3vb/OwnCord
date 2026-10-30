@@ -905,10 +905,12 @@ and RNNoise ran, so the stream and their state stay up and the indicator
 stays lit while PTT is armed. The input-sensitivity gate
 (`native_voice_set_voice_gate`, `VoiceGate` in `capture.rs`) zeroes frames the
 same way: it is the web detector (`vad-worklet.js`) on the same scale, the RMS
-of each processed 10 ms frame against `vadThreshold`, with its ~32 ms attack,
-~320 ms hold, ~500 ms start-up grace and a 50 ms lookahead, and its
-`voiceGate` events drive the local speaking ring as the web detector's
-verdicts do. The capture shares the
+of each processed 10 ms frame against `vadThreshold`, with a ~32 ms attack,
+~500 ms start-up grace and a 50 ms lookahead, and its `voiceGate` events
+drive the local speaking ring as the web detector's verdicts do. The web
+detector opens at the threshold and closes only 6 dB under it, after ~500 ms
+there (`lib/voice/gateScale.ts` holds the slider's decibel scale); the native
+gate still closes at the threshold after ~320 ms until it follows. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
 sound server tore down, switches back to a chosen microphone once it is listed
 again, and, while "System default" is selected, follows the default source as

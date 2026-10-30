@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalAudioTrack, Track, TrackEvent } from "livekit-client";
+import { AUTO_MAX_THRESHOLD } from "../../src/lib/voice/noiseFloor";
 import {
   AudioPipeline,
   isMissingDeviceError,
@@ -315,7 +316,7 @@ describe("AudioPipeline", () => {
         const first = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
         expect(first.port.postMessage).toHaveBeenCalledWith({
           type: "config",
-          threshold: vadThreshold(50),
+          threshold: AUTO_MAX_THRESHOLD,
         });
 
         // A second of a -60 dBFS room moves the gate 10 dB above it.
@@ -701,7 +702,7 @@ describe("startVadDetector", () => {
     await vi.advanceTimersByTimeAsync(16); // the first quiet poll starts the hold
     expect(onGate).not.toHaveBeenCalled();
     // A hidden window runs the next poll a second later, not 16 ms: it is
-    // already past the 320 ms hold.
+    // already past the 500 ms hold.
     vi.setSystemTime(Date.now() + 1000);
     await vi.advanceTimersByTimeAsync(16);
     expect(onGate).toHaveBeenLastCalledWith(true);
@@ -723,11 +724,11 @@ describe("startVadDetector", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(onStarted).toHaveBeenCalledWith(false);
 
-    // Start-up grace (30 polls) then 320 ms below the threshold (the
+    // Start-up grace (30 polls) then 500 ms below the threshold (the
     // worklet's hold) close the gate.
     await vi.advanceTimersByTimeAsync(16 * 30);
     expect(onGate).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(16 * 20);
+    await vi.advanceTimersByTimeAsync(16 * 31);
     expect(onGate).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(16 * 2);
     expect(onGate).toHaveBeenLastCalledWith(true);
@@ -1466,7 +1467,7 @@ describe("startVadDetector details", () => {
     it("closes the gate on the poll where the quiet has lasted exactly the hold", async () => {
       const { onGate, detector } = await polling(0);
       // 30 polls of start-up grace, then the first quiet poll starts the hold.
-      await vi.advanceTimersByTimeAsync(16 * 50);
+      await vi.advanceTimersByTimeAsync(16 * 62);
       expect(onGate).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(16);
       expect(onGate.mock.calls).toEqual([[true]]);
@@ -1496,7 +1497,7 @@ describe("startVadDetector details", () => {
         void detector?.stop();
       });
       detector = startVadDetector(ctx as never, analyser as never, 0.05, { onGate });
-      await vi.advanceTimersByTimeAsync(16 * 60);
+      await vi.advanceTimersByTimeAsync(16 * 70);
       expect(onGate).toHaveBeenCalledTimes(1);
       const polls = analyser.getFloatTimeDomainData.mock.calls.length;
 

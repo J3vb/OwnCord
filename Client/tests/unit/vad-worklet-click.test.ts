@@ -60,7 +60,9 @@ describe("voice gate on recorded audio", () => {
   // which is what the browser's automatic gain control makes of it in a quiet
   // room.
   describe.each([1, 2.5])("a mouse click at x%f level", (boost) => {
-    it.each([0, 25, 50, 75, 90, 95])("does not open the gate at sensitivity %i", async (s) => {
+    // Up to 50 (-40 dBFS): a gate set under the room tone's own level
+    // (-51 dBFS, or 6 dB over it with the hysteresis) never closes.
+    it.each([0, 20, 35, 45, 50])("does not open the gate at sensitivity %i", async (s) => {
       const click = readAudioFixture("mouse-click.wav").map((v) => v * boost);
       const messages = await gate(s, placeInRoomTone(click, 1.5, 2.5));
 
@@ -70,7 +72,7 @@ describe("voice gate on recorded audio", () => {
     });
   });
 
-  it.each([50, 75, 90])("opens for speech within the lookahead at sensitivity %i", async (s) => {
+  it.each([30, 40, 50])("opens for speech within the lookahead at sensitivity %i", async (s) => {
     const speechAtMs = 1500;
     const input = placeInRoomTone(readAudioFixture("speech.wav"), speechAtMs / 1000, 3);
     // Where the speech first reaches the threshold: the earliest the gate
