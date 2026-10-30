@@ -10,22 +10,20 @@ import (
 	"time"
 )
 
-// pprofAddr is the pprof listener's loopback address. A variable only so tests
-// can bind a free loopback port.
+// pprofAddr is the pprof listener's loopback address; a variable only so tests
+// can bind a free port.
 var pprofAddr = "127.0.0.1:6060"
 
-// startPprof starts the opt-in pprof listener (SRE-M1). It is off by default,
-// on its own socket bound to loopback, and deliberately never mounted on the
-// main router: a profiling endpoint exposes heap contents and can burn CPU, so
-// the operator must ask for it and must reach the host to use it. The address
-// is fixed to loopback, not configurable, so enabling it can never expose the
-// profiler off-host. Nothing runs when the key is unset.
+// startPprof starts the opt-in pprof listener. It is off by default, on its own
+// loopback socket, and never mounted on the main router: a profiling endpoint
+// exposes heap contents and can burn CPU, so the operator must ask for it and
+// reach the host to use it. The address is fixed to loopback so enabling it
+// can never expose the profiler off-host.
 //
-// Enabling it also turns on the block and mutex samplers (P5-O09): a CPU
-// profile alone cannot see contention on the single SQLite writer, and the
-// rates default to a useful value but are operator-overridable. They are set
-// only here, so a disabled profiler leaves runtime.SetBlockProfileRate and
-// runtime.SetMutexProfileFraction at their zero-overhead defaults.
+// Enabling it also turns on the block and mutex samplers, since a CPU profile
+// cannot see contention on the single SQLite writer; the rates are
+// operator-overridable and set only here, so a disabled profiler leaves the
+// zero-overhead defaults.
 func (a *App) startPprof() error {
 	if !a.cfg.Server.PprofEnabled {
 		return nil
@@ -58,9 +56,9 @@ func (a *App) startPprof() error {
 	return nil
 }
 
-// pprofMux mounts exactly Go's net/http/pprof handlers. It is built here rather
-// than via a blank import of net/http/pprof, which would register them on the
-// DefaultServeMux and risk surfacing them on the main router.
+// pprofMux mounts exactly Go's net/http/pprof handlers, not via a blank import,
+// which would register them on the DefaultServeMux and risk surfacing them on
+// the main router.
 func pprofMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/pprof/", pprof.Index)

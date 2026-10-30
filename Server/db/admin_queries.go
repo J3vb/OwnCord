@@ -11,8 +11,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ─── Setup ───────────────────────────────────────────────────────────────────
-
 // UserCount returns the total number of registered users.
 func (d *DB) UserCount(ctx context.Context) (int64, error) {
 	count, err := d.q.UserCount(ctx)
@@ -22,11 +20,9 @@ func (d *DB) UserCount(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
-// ─── Server Stats ─────────────────────────────────────────────────────────────
-
 // GetServerStats returns aggregate counts for the admin dashboard.
-// DBSizeBytes is 0 for in-memory databases (page_count * page_size returns
-// a meaningful value only for file-backed databases).
+// GetServerStats returns aggregate counts for the admin dashboard.
+// DBSizeBytes is 0 for in-memory databases.
 func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 	stats := &ServerStats{}
 	var err error
@@ -48,10 +44,8 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 		return nil, fmt.Errorf("GetServerStats invites: %w", err)
 	}
 
-	// page_count * page_size gives the database size in bytes. PRAGMAs are not
-	// expressible as sqlc queries, so they stay on the raw connection.
-	// For :memory: databases this still works (returns the in-memory size).
-	// Both values are DB-wide, so reading them on the reader pool is fine.
+	// page_count * page_size gives the size in bytes. PRAGMAs are not expressible
+	// as sqlc queries, and both values are DB-wide, so the reader pool is fine.
 	var pageCount, pageSize int64
 	if err := d.reader.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&pageCount); err != nil {
 		return nil, fmt.Errorf("GetServerStats page_count: %w", err)
@@ -63,8 +57,6 @@ func (d *DB) GetServerStats(ctx context.Context) (*ServerStats, error) {
 
 	return stats, nil
 }
-
-// ─── User Management ──────────────────────────────────────────────────────────
 
 // UserListFilter narrows ListAllUsers for the admin Members page. The zero
 // value lists everyone.
@@ -180,8 +172,6 @@ func (d *DB) GetUserSessions(ctx context.Context, userID int64) ([]Session, erro
 	return sessions, nil
 }
 
-// ─── Channel Management (admin) ───────────────────────────────────────────────
-
 // AdminCreateChannel creates a channel with full field control including
 // position. A non-empty category is resolved by name ignoring case and created
 // when missing, in the same transaction as the insert (CreateChannelIn).
@@ -195,62 +185,54 @@ func (d *DB) AdminCreateChannel(ctx context.Context, name, chanType, category, t
 	})
 }
 
-// ChannelUpdate is the full set of mutable channel fields an admin edit writes.
-//
-// A struct rather than a positional argument list: the update covers nine
-// fields now, four of them ints, and `AdminUpdateChannel(ctx, id, name, topic,
-// category, slowMode, position, archived, nsfw, maxUsers, maxVideo)` invites
-// exactly the silent transposition (slow mode into user limit) that no test
-// would catch. Every field is written unconditionally, so callers must start
-// from the channel's current values — the handler does, which is what makes a
-// partial PATCH body safe.
+// ChannelUpdate is the full set of mutable channel fields an admin edit
+// writes. A struct rather than a positional list because ten fields, four of
+// them ints, invite a silent transposition (slow mode into user limit). Every
+// field is written unconditionally, so callers must start from the channel's
+// current values, as the handler does, which keeps a partial PATCH safe.
 type ChannelUpdate struct {
 	Name  string
 	Topic string
-	// CategoryID is the category the channel ends up in, 0 for none. It must
-	// exist (ErrNotFound otherwise). CategoryName, when non-nil, overrides it:
-	// the name is resolved ignoring case and the category created when missing,
-	// in the same transaction as the update (the legacy free-text field).
+	// CategoryID is the category the channel ends up in, 0 for none; it must exist
+	// (ErrNotFound otherwise). A non-nil CategoryName overrides it: the name is
+	// resolved ignoring case and the category created when missing, in the
+	// update's transaction (the legacy free-text field).
 	CategoryID   int64
 	CategoryName *string
 	// CategoryIfExists makes a CategoryID that no longer exists mean "no
-	// category" instead of ErrNotFound. It is for writes that carry the
-	// channel's own current category forward (a PATCH that names none, the
-	// archive step of a delete), where losing a race with a category delete
-	// must not fail the write.
+	// category" instead of ErrNotFound, for writes that carry the channel's
+	// current category forward (a PATCH naming none, the archive step of a
+	// delete), where losing a race with a category delete must not fail the write.
 	CategoryIfExists bool
-	// CreatedCategory, when non-nil, receives the id of a category this
-	// write created because CategoryName matched none. See NewChannel.
+	// CreatedCategory, when non-nil, receives the id of a category this write
+	// created because CategoryName matched none. See NewChannel.
 	CreatedCategory *int64
 	SlowMode        int
 	Position        int
 	Archived        bool
-	// NSFW is stored and broadcast only; it drives no server-side content
-	// behaviour (see migration 025).
+	// NSFW is stored and broadcast only; it drives no server-side behaviour.
 	NSFW bool
-	// VoiceMaxUsers / VoiceMaxVideo are the voice capacity limits the ws
-	// voice-join path already enforces (0 = unlimited). They are meaningless
-	// on a text channel but are still written there, because refusing them
-	// would make the value depend on a type that can never change anyway.
+	// VoiceMaxUsers / VoiceMaxVideo are the voice capacity limits the ws voice-join
+	// path enforces (0 = unlimited). They are written on text channels too,
+	// because refusing them would make the value depend on a type that never
+	// changes.
 	VoiceMaxUsers int
 	VoiceMaxVideo int
 	// Password, when non-nil, sets or clears the channel's password in the same
 	// transaction as the rest of the update. Nil leaves it alone.
 	Password *ChannelPasswordChange
-	// SyncGuard, when non-nil, asks for the channel's override rows to be
-	// replaced by the template of the category it ends up in, and for it to be
-	// marked synced. It runs in the same transaction as the update,
-	// so a refusal leaves the channel where it was. ErrUncategorized when the
-	// update leaves the channel with no category. Without it, a move to
-	// another category keeps the channel's rows and unsyncs it.
+	// SyncGuard, when non-nil, replaces the channel's override rows with the
+	// template of the category it ends up in and marks it synced, in the update's
+	// transaction, so a refusal leaves the channel where it was. ErrUncategorized
+	// when the update leaves no category. Without it, a move to another category
+	// keeps the channel's rows and unsyncs it.
 	SyncGuard ChannelSyncGuard
 	// SyncPlan, when non-nil and SyncGuard ran, receives the rows replaced.
 	SyncPlan *ChannelSyncPlan
 }
 
-// AdminUpdateChannel updates all mutable channel fields, category included.
-// The category resolve (when it is by name) and the update share one
-// transaction.
+// AdminUpdateChannel updates all mutable channel fields, category included;
+// a by-name category resolve and the update share one transaction.
 func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) error {
 	if err := d.adminUpdateChannel(ctx, id, u, false); err != nil {
 		return fmt.Errorf("AdminUpdateChannel: %w", err)
@@ -259,8 +241,8 @@ func (d *DB) AdminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate) 
 }
 
 // adminUpdateChannel is the one write behind AdminUpdateChannel and
-// AdminUpdateChannelClearingNSFW. With clearNSFW it also deletes the channel's
-// standing NSFW acknowledgements, in the same transaction as the flag write.
+// AdminUpdateChannelClearingNSFW; clearNSFW also deletes the channel's
+// standing NSFW acknowledgements in the same transaction.
 func (d *DB) adminUpdateChannel(ctx context.Context, id int64, u ChannelUpdate, clearNSFW bool) error {
 	return d.inWriteTx(ctx, "update", func(q *dbgen.Queries) error {
 		var catID *int64
@@ -323,8 +305,6 @@ func (d *DB) AdminDeleteChannel(ctx context.Context, id int64) error {
 	return nil
 }
 
-// ─── Audit Log ────────────────────────────────────────────────────────────────
-
 // LogAudit inserts an audit log entry.
 func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType string, targetID int64, detail string) error {
 	if err := d.q.LogAudit(ctx, dbgen.LogAuditParams{
@@ -339,11 +319,10 @@ func (d *DB) LogAudit(ctx context.Context, actorID int64, action, targetType str
 	return nil
 }
 
-// LogAuditEntry inserts an audit entry with every field, the tokens
-// included; LogAudit is the token-less form the rest of the server
-// writes. The erasure's unlinking rules are applied under the writer
-// connection, once it is held: an entry about a subject whose erasure
-// committed while this call waited for the connection is written unlinked.
+// LogAuditEntry inserts an audit entry with every field, tokens included
+// (LogAudit is the token-less form). The erasure's unlinking rules are applied
+// once the writer connection is held, so an entry about a subject whose
+// erasure committed while this call waited is written unlinked.
 func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -368,15 +347,13 @@ func (d *DB) LogAuditEntry(ctx context.Context, e AuditEntry) error {
 	return nil
 }
 
-// PersistAudits inserts a batch of audit entries in a single transaction with
-// one prepared insert, so the audit writer's flush pays for one fsync instead
-// of one per entry. Only the LogAudit-shaped fields are written — ID, ActorName
-// and CreatedAt on the input rows are ignored (the id autoincrements, the
-// created_at column defaults, and actor_name is a join product).
-//
-// Best-effort semantics mirror PersistEvents: if the batched transaction fails,
-// it falls back to per-row inserts so the good rows still land. Returns the
-// number of rows persisted and, when any row was lost, the first per-row error.
+// PersistAudits inserts a batch of audit entries in one transaction with one
+// prepared insert, so the audit writer's flush costs one fsync instead of one
+// per entry. Only LogAudit-shaped fields are written; ID, ActorName and
+// CreatedAt on the input are ignored (id autoincrements, created_at defaults,
+// actor_name is a join product). Like PersistEvents, a failed batch falls back
+// to per-row inserts so the good rows land. It returns the rows persisted and,
+// if any was lost, the first per-row error.
 func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, error) {
 	if len(entries) == 0 {
 		return 0, nil
@@ -384,7 +361,7 @@ func (d *DB) PersistAudits(ctx context.Context, entries []AuditEntry) (int, erro
 	if err := d.persistAuditsTx(ctx, entries); err == nil {
 		return len(entries), nil
 	}
-	// Fallback: insert rows individually so one bad row doesn't drop the batch.
+	// Fallback: insert rows individually so one bad row does not drop the batch.
 	persisted := 0
 	var firstErr error
 	for i := range entries {
@@ -415,10 +392,9 @@ func (d *DB) persistAuditsTx(ctx context.Context, entries []AuditEntry) error {
 		return fmt.Errorf("PersistAudits prepare: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
-	// The erasure's unlinking rules, read now that the writer connection is
-	// held: an erasure that committed while this batch waited for it has
-	// installed its rule, and the batch's entries about the subject go down
-	// unlinked instead of raw after the transaction's UPDATE.
+	// The erasure's unlinking rules, read now that the writer connection is held:
+	// an erasure that committed while this batch waited has installed its rule,
+	// and entries about the subject go down unlinked, not raw after its UPDATE.
 	rules := d.auditUnlinkRules()
 	for i := range entries {
 		e := unlinkEntry(entries[i], rules)
@@ -498,10 +474,8 @@ func nullableToken(token string) *string {
 	return &token
 }
 
-// ─── Settings ─────────────────────────────────────────────────────────────────
-
-// GetSetting returns the value for the given settings key.
-// Returns an error (wrapping sql.ErrNoRows) when the key does not exist.
+// GetSetting returns the value for key, or an error wrapping sql.ErrNoRows
+// when the key does not exist.
 func (d *DB) GetSetting(ctx context.Context, key string) (string, error) {
 	value, err := d.q.GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -524,9 +498,9 @@ func (d *DB) SetSetting(ctx context.Context, key, value string) error {
 	return nil
 }
 
-// ApplySettings upserts every key→value pair in one transaction, so a
-// mid-loop failure leaves no partial update behind. Keys are applied in
-// sorted order for deterministic behaviour under test.
+// ApplySettings upserts every key/value pair in one transaction, so a
+// mid-loop failure leaves no partial update. Keys apply in sorted order for
+// determinism under test.
 func (d *DB) ApplySettings(ctx context.Context, updates map[string]string) error {
 	if len(updates) == 0 {
 		return nil
@@ -561,9 +535,8 @@ func (d *DB) GetAllSettings(ctx context.Context) (map[string]string, error) {
 	return result, nil
 }
 
-// CountUsersWithoutTOTP returns the number of users who are not effectively
-// banned (unbanned, or serving a temporary ban whose ban_expires has already
-// lapsed) and do not currently have a confirmed TOTP secret.
+// CountUsersWithoutTOTP returns the users who are not effectively banned
+// (unbanned, or past a lapsed temporary ban) and have no confirmed TOTP secret.
 func (d *DB) CountUsersWithoutTOTP(ctx context.Context) (int, error) {
 	count, err := d.q.CountUsersWithoutTOTP(ctx)
 	if err != nil {

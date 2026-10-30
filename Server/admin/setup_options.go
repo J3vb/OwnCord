@@ -5,8 +5,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// ─── SetupOptions ────────────────────────────────────────────────────────────
-
 // SetupOptions wires the first-run setup wizard to the running server. The
 // zero value disables everything beyond legacy owner-account creation, which
 // keeps every existing NewAdminAPI/NewHandler call site behaving as before.

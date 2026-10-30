@@ -14,18 +14,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Channel Handlers ────────────────────────────────────────────────────────
-//
-// Thin adapters over service.ChannelService: the
-// name/topic/category contract, the type whitelist, the numeric bounds, the
-// audit rows and the delete ordering all live in the service. The handlers
-// decode, resolve through the one guild-channel policy, delegate, and fan out to the
-// hub from the rows the service returns.
+// Thin adapters over service.ChannelService: the name/topic/category contract,
+// type whitelist, numeric bounds, audit rows and delete ordering all live in
+// the service. The handlers decode, resolve through the one guild-channel
+// policy, delegate, and fan out to the hub from the rows the service returns.
 
-// resolveGuildChannel adapts service.ChannelService.ResolveGuildChannel — the
-// one non-DM resolution policy — to this surface: a missing channel
-// and a DM id answer an identical 404 (A-2026-08-02). Returns nil when a
-// response has already been written.
+// resolveGuildChannel adapts service.ChannelService.ResolveGuildChannel (the
+// one non-DM resolution policy) to this surface: a missing channel and a DM id
+// answer an identical 404. Returns nil when a response has already been
+// written.
 func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
 	if channels == nil {
 		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
@@ -45,8 +42,7 @@ func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter
 }
 
 // writeChannelErr maps ChannelService errors onto admin API responses.
-// Validation failures answer INVALID_INPUT with the service's own message —
-// the service's validation wording is the response body.
+// Validation failures answer INVALID_INPUT with the service's own message.
 func writeChannelErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrPermsChanged) {
 		writeErr(w, http.StatusConflict, httperr.CodePermissionsChanged, err.Error())
@@ -88,9 +84,9 @@ type createChannelRequest struct {
 	Position   int    `json:"position"`
 }
 
-// createChannelPostCommitHook, when non-nil, runs synchronously right after
-// the create commit, before the post-commit re-read and hub fan-out — so
-// tests can land a caller cancellation in that exact window.
+// createChannelPostCommitHook, when non-nil, runs synchronously right after the
+// create commit, before the post-commit re-read and hub fan-out, so tests can
+// land a caller cancellation in that window.
 var createChannelPostCommitHook func()
 
 func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
@@ -223,10 +219,10 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 				hub.BroadcastChannelCategories(newCats)
 			}
 			// Archiving/unarchiving changes who sees the channel, not just its
-			// metadata — send targeted channel_create/channel_delete so
-			// connected clients re-sync without a reconnect. Archiving also
-			// hides a voice channel the way deleting does, so live
-			// participants are evicted first, matching the delete ordering.
+			// metadata: send targeted channel_create/channel_delete so clients
+			// re-sync without a reconnect. Archiving hides a voice channel the way
+			// deleting does, so live participants are evicted first, matching the
+			// delete ordering.
 			if existing.Archived != updated.Archived {
 				if !existing.Archived && updated.Archived {
 					hub.CleanupVoiceForChannel(existing.ID)

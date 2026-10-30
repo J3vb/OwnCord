@@ -10,8 +10,7 @@ import (
 
 // MentionBatchEntry is one message's mention fan-out inside a multi-message
 // writer transaction: the recipients to bump and the message id their
-// read-state guard compares against. It is the batched form of
-// IncrementMentionCounts' arguments — the mention worker coalesces a window's
+// read-state guard compares against. The mention worker coalesces a window's
 // jobs into one entry per message, then one transaction per channel.
 type MentionBatchEntry struct {
 	MsgID   int64
@@ -19,50 +18,41 @@ type MentionBatchEntry struct {
 }
 
 // IncrementMentionCounts bumps read_states.mention_count by one for each user
-// in a channel, creating the read-state row when the user has none yet.
-// last_message_id stays 0 for a created row: the user has read nothing, and the
-// mention they were just given is unread by definition.
+// in a channel, creating the read-state row when missing. A created row has
+// last_message_id 0: the user has read nothing, so the mention is unread.
 //
-// msgID is the id of the message that triggered this fan-out. The increment
-// is skipped for a recipient whose read state already covers msgID
-// (last_message_id >= msgID): a mark_read that lands between the message
-// commit and this deferred call already zeroed their mention_count, and an
-// unconditional increment would leave a permanent phantom badge on a channel
-// with zero unread — nothing else ever zeroes it again. The guard is atomic
-// with the increment itself (part of the same ON CONFLICT ... DO UPDATE ...
-// WHERE), so there is no separate check-then-write race window.
+// msgID is the message that triggered the fan-out. A recipient whose read state
+// already covers it (last_message_id >= msgID) is skipped: a mark_read landing
+// between the message commit and this deferred call already zeroed their count,
+// and an unconditional increment would leave a permanent phantom badge. The
+// guard is part of the same ON CONFLICT ... DO UPDATE ... WHERE, so there is
+// no check-then-write window.
 //
-// Batched into one multi-row INSERT per chunk of mentionCountChunkSize
-// recipients instead of one exec per recipient: an @everyone mention fans out
-// to every reader of a channel, and the writer txn used to pay one round trip
-// per reader for that. The caller has already excluded the author, so
-// semantics are unchanged — each listed user id still gets exactly one
-// increment (or a fresh row seeded at 1), unless the guard above skips it.
+// Recipients go in one multi-row INSERT per mentionCountChunkSize chunk, since
+// an @everyone mention fans out to every reader of a channel. The caller has
+// already excluded the author; each listed user gets exactly one increment (or
+// a fresh row seeded at 1) unless the guard skips it.
 func (d *DB) IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error {
 	_, err := d.IncrementMentionCountsBatch(ctx, channelID, []MentionBatchEntry{{MsgID: msgID, UserIDs: userIDs}})
 	return err
 }
 
-// IncrementMentionCountsBatch applies every entry in one writer transaction, so
-// a coalesced window of messages costs one commit instead of one per message
-// (P5-O05). Each entry's semantics are exactly IncrementMentionCounts' (see its
-// doc); batching only shares the transaction, and entries for distinct messages
-// keep their own read-state guard (last_message_id < entry.MsgID).
+// IncrementMentionCountsBatch applies every entry in one writer transaction,
+// so a coalesced window costs one commit instead of one per message. Each
+// entry behaves as IncrementMentionCounts, with its own read-state guard
+// (last_message_id < entry.MsgID).
 //
-// An entry whose message is no longer live — soft-deleted by a delete/purge
-// that ran while the job was still in the coalesce window, or hard-deleted by
-// an account erasure — is skipped. Those reversal paths run synchronously at
-// removal time and their statement can only reverse a bump that already
-// landed, so a deferred increment for an already-removed message would raise a
-// badge nothing ever takes back. The liveness check is inside the writer
-// transaction, which is serialized against every removal (the writer pool is a
-// single connection), so it sees a stable state.
+// An entry whose message is no longer live (soft-deleted by a delete/purge
+// during the coalesce window, or hard-deleted by an erasure) is skipped: the
+// reversal paths run synchronously and can only reverse a bump that already
+// landed, so a deferred increment for a removed message would raise a badge
+// nothing takes back. The liveness check runs in the writer transaction, which
+// is serialized against every removal, so it sees stable state.
 //
-// The returned map is userID → mention_count after the bump, holding exactly
-// the recipients whose read-state guard admitted it (the RETURNING rows). It
-// is the live-badge signal the mention worker pushes as a per-user frame: a
-// reader the guard skipped (already read the message) or a removed message's
-// recipients are absent, so no frame resurrects a badge the guard dropped.
+// The returned map is userID to mention_count after the bump, holding exactly
+// the recipients the guard admitted (the RETURNING rows). It is the live-badge
+// signal the mention worker pushes per user; skipped readers and removed
+// messages' recipients are absent, so no frame resurrects a dropped badge.
 func (d *DB) IncrementMentionCountsBatch(ctx context.Context, channelID int64, entries []MentionBatchEntry) (map[int64]int64, error) {
 	if len(entries) == 0 {
 		return nil, nil
@@ -92,9 +82,8 @@ func (d *DB) IncrementMentionCountsBatch(ctx context.Context, channelID int64, e
 	return bumped, nil
 }
 
-// messageLiveForMention reports whether msgID is still a live, undeleted
-// message. A missing row (erased) and a tombstones row (deleted = 1) are both
-// not live; the increment is skipped for either.
+// messageLiveForMention reports whether msgID is a live message; a missing
+// (erased) or tombstoned (deleted = 1) row is not, and the increment is skipped.
 func messageLiveForMention(ctx context.Context, tx *sql.Tx, msgID int64) (bool, error) {
 	var one int
 	err := tx.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE id = ? AND deleted = 0`, msgID).Scan(&one)
@@ -108,15 +97,13 @@ func messageLiveForMention(ctx context.Context, tx *sql.Tx, msgID int64) (bool, 
 }
 
 // insertMentionCountChunks writes one message's per-recipient upserts inside
-// tx, chunked so the bound-parameter count (2 per row) stays well below
-// SQLite's limit. msgID is a bound parameter of the WHERE clause, not a VALUES
-// column: every conflicting row in a chunk shares the one message, so one
-// trailing arg covers the whole batch.
+// tx, chunked to keep bound parameters (2 per row) well below SQLite's limit.
+// msgID is a bound parameter of the WHERE clause, not a VALUES column, since
+// every conflicting row in a chunk shares the one message.
 //
-// The statement carries RETURNING so the caller learns exactly whose bump the
-// read-state guard admitted and their new total; each returned row is folded
-// into bumped. A conflicting row the WHERE clause rejects updates nothing and
-// therefore returns no row (SQLite's upsert RETURNING), so a skipped reader
+// RETURNING tells the caller whose bump the read-state guard admitted and their
+// new total, folded into bumped. A conflicting row the WHERE rejects updates
+// nothing and returns no row (SQLite's upsert RETURNING), so a skipped reader
 // never appears.
 func insertMentionCountChunks(ctx context.Context, tx *sql.Tx, channelID, msgID int64, userIDs []int64, bumped map[int64]int64) error {
 	for start := 0; start < len(userIDs); start += mentionCountChunkSize {
@@ -158,8 +145,8 @@ func insertMentionCountChunks(ctx context.Context, tx *sql.Tx, channelID, msgID 
 			return fmt.Errorf("IncrementMentionCounts rows: %w", err)
 		}
 		rows.Close() //nolint:errcheck // read path; a close error adds nothing over the committed txn
-		// The writer is one connection, so no statement may run while rows are
-		// open: the receipts go in only after the RETURNING set is drained.
+		// The writer is one connection, so no statement may run while rows are open:
+		// receipts go in only after the RETURNING set is drained.
 		if err := insertMentionReceipts(ctx, tx, channelID, msgID, admitted); err != nil {
 			return err
 		}
@@ -167,10 +154,10 @@ func insertMentionCountChunks(ctx context.Context, tx *sql.Tx, channelID, msgID 
 	return nil
 }
 
-// insertMentionReceipts records, in the same transaction as the increment, one
+// insertMentionReceipts records, in the increment's transaction, one
 // mention_receipts row per recipient whose badge the guard admitted for msgID.
-// A reader the guard skipped is not in userIDs, so they get no receipt, which
-// matches the counter. OR IGNORE keeps a repeated entry idempotent.
+// A skipped reader gets no receipt, matching the counter. OR IGNORE keeps a
+// repeated entry idempotent.
 func insertMentionReceipts(ctx context.Context, tx *sql.Tx, channelID, msgID int64, userIDs []int64) error {
 	if len(userIDs) == 0 {
 		return nil

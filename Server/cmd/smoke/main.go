@@ -9,27 +9,20 @@
 //  5. with -browser-client, boot once more with the browser client enabled and
 //     GET / (an HTML page with a module script) and that script from /assets/.
 //
-// Phase 4 is the one phase 1 cannot cover: a non-idempotent migration, a lock
-// the drain failed to release, or state only a first boot creates. That is the
-// difference between "the asset runs" and "an owner can operate it", which is
-// what this smoke run has to prove.
+// Phase 4 covers what phase 1 cannot: a non-idempotent migration, a lock the
+// drain failed to release, or state only a first boot creates. Phase 5 makes a
+// release asset provably carry the browser client, which is embedded at build
+// time; a build that missed it still boots and drains cleanly.
 //
 // It is a Go program rather than a shell script because the graceful stop is
-// the whole point and Windows has no SIGTERM. MSYS `kill -TERM` cannot deliver
-// a POSIX signal to a native Windows binary — it terminates it, and the drain
-// never runs (observed: exit status 143). Sending the console control event the
-// OS actually offers needs process-group control, so the harness lives where
-// that is expressible. See stop_windows.go and stop_other.go.
+// the point and Windows has no SIGTERM: MSYS `kill -TERM` terminates a native
+// Windows binary without running the drain (exit status 143), so the harness
+// uses the console control event via process-group control. See
+// stop_windows.go and stop_other.go.
 //
-// With -upgrade it instead rehearses the upgrade an owner actually performs —
-// install the new version over a populated install, then roll back out of it —
-// which is a different question from "does the new asset boot". Both
-// deployment modes share one fixture through the target seam in target.go.
-//
-// Phase 5 is what makes a release asset provably carry the browser client: the
-// bundle is embedded at build time, and a build that missed it still boots and
-// drains cleanly, serving a not-found note at /.
-//
+// With -upgrade it instead rehearses the upgrade an owner performs (install
+// the new version over a populated install, then roll back), sharing one
+// fixture across both deployment modes through the target seam in target.go.
 // Usage: go run ./cmd/smoke <path-to-server-binary>
 //
 //	go run ./cmd/smoke -browser-client <path-to-server-binary>
@@ -69,9 +62,8 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	// One positional argument in every mode: the binary (or image) under test.
-	// The mode's own flags only mean anything to that mode, so accepting them
-	// without it would silently run something else instead.
+	// One positional argument in every mode; a mode's own flags without it
+	// would silently run something else.
 	if err := (invocation{
 		args:       flag.Args(),
 		upgrade:    *upgrade,
@@ -96,17 +88,16 @@ func main() {
 		summary = "upgrade rehearsal passed"
 	}
 	if *drills {
-		// Both of these are usage errors rather than warnings: a -phases spec
-		// that selects nothing would run no drill and exit 0, and an unknown
-		// ledger id would downgrade nothing and read like a flag that worked.
+		// Usage errors, not warnings: a -phases spec selecting nothing would
+		// run no drill and exit 0, and an unknown ledger id would read like a
+		// flag that worked.
 		selected, err := parsePhases(*phases)
 		if err != nil {
 			usageError("%v", err)
 		}
 		if *useDocker && phaseLetters(selected) != "D" {
-			// The container leg is the disk-pressure half: it has no install
-			// directory on the host, no port to restart through and no child
-			// process this harness can address (D8).
+			// The container leg is the disk-pressure half: no host install
+			// directory, no port to restart through, no addressable child.
 			usageError("-docker runs phase D only, got -phases %s", phaseLetters(selected))
 		}
 		k, err := knownFindings(*findings)
@@ -114,14 +105,12 @@ func main() {
 			usageError("%v", err)
 		}
 		action = func() error { return runDrills(args[0], *useDocker, selected, *dataFS, k) }
-		// runDrills prints the drills summary itself: it is the only place that
-		// knows which phases skipped, and a phase that skipped must not be
-		// reported as one that passed.
+		// runDrills prints the summary itself: only it knows which phases
+		// skipped, and a skip must not be reported as a pass.
 		summary = ""
 	}
 	if err := action(); err != nil {
-		// ::error:: is the GitHub Actions annotation prefix, matching
-		// docker-smoke.sh so a failure is surfaced on the run summary.
+		// ::error:: is the GitHub Actions annotation prefix, as in docker-smoke.sh.
 		fmt.Printf("::error::%v\n", err)
 		os.Exit(1)
 	}
@@ -130,9 +119,8 @@ func main() {
 	}
 }
 
-// invocation is the command line as the caller typed it, checked as a whole
-// rather than flag by flag: every one of these combinations would otherwise run
-// something the caller did not ask for.
+// invocation is the command line as typed, checked as a whole: each of these
+// combinations would otherwise run something the caller did not ask for.
 type invocation struct {
 	args       []string
 	upgrade    bool
@@ -144,9 +132,8 @@ type invocation struct {
 	browserClient bool // -browser-client
 }
 
-// validate names the first thing wrong with the invocation, or nil. Returning
-// an error rather than exiting keeps the exit code in main, beside every other
-// way the command line can be rejected.
+// validate names the first thing wrong with the invocation, or nil. It returns
+// an error so the exit code stays in main.
 func (in invocation) validate() error {
 	switch {
 	case len(in.args) != 1:
@@ -176,8 +163,8 @@ func usage() {
 	flag.PrintDefaults()
 }
 
-// usageError exits 2, the code the flag package already uses for a bad command
-// line, so a CI step can tell "you invoked me wrong" from "the smoke failed".
+// usageError exits 2, as the flag package does, so CI can tell a bad
+// invocation from a smoke failure.
 func usageError(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "smoke: "+format+"\n", args...)
 	usage()
@@ -200,7 +187,6 @@ func run(binArg string, browserClient bool) error {
 	fmt.Println("binary:", bin)
 	fmt.Println("graceful stop:", gracefulStopName)
 
-	// --- Phases 1 and 2: cold boot into an empty directory, reach healthy ---
 	first, err := start(bin, dir, "boot1.log")
 	if err != nil {
 		return err
@@ -219,7 +205,6 @@ func run(binArg string, browserClient bool) error {
 	}
 	fmt.Println("cold boot: config.yaml and a migrated database exist")
 
-	// --- Phase 3: graceful drain -------------------------------------------
 	if err := first.drain("drain"); err != nil {
 		return err
 	}
@@ -227,7 +212,6 @@ func run(binArg string, browserClient bool) error {
 		return first.annotate("drain", errors.New("healthcheck still passes after shutdown"))
 	}
 
-	// --- Phase 4: restart on the SAME data directory ------------------------
 	second, err := start(bin, dir, "boot2.log")
 	if err != nil {
 		return err
@@ -236,8 +220,7 @@ func run(binArg string, browserClient bool) error {
 		return err
 	}
 	// A restart that rewrote config.yaml or re-created the database would be a
-	// first boot wearing a restart's clothes, and would pass this phase for the
-	// wrong reason. Both must be the files phase 1 left behind.
+	// first boot passing for the wrong reason.
 	configAfter, err := hashFile(filepath.Join(dir, "config.yaml"))
 	if err != nil {
 		return err
@@ -257,7 +240,6 @@ func run(binArg string, browserClient bool) error {
 		return nil
 	}
 
-	// --- Phase 5: the binary serves the browser client ----------------------
 	return runBrowserClient(bin, dir)
 }
 
@@ -267,21 +249,19 @@ type server struct {
 	dir     string
 	logPath string
 	cmd     *exec.Cmd
-	// waitErr carries the single permitted os/exec Wait result. Wait may only
-	// be called once, so it runs in one goroutine and every phase reads here.
+	// waitErr carries the single os/exec Wait result; Wait may be called once,
+	// so one goroutine runs it and every phase reads here.
 	waitErr chan error
 	exited  bool
-	// adopted marks a server this harness did not spawn: the replacement a
-	// self-restart left behind, which shares the log file and the install
-	// directory with the boot but has no *exec.Cmd behind it. Healthcheck
-	// polling is all it can support — see drills.go's awaitRestart.
+	// adopted marks a server this harness did not spawn: the self-restart
+	// replacement, which shares the log file and install directory but has no
+	// *exec.Cmd. Healthcheck polling is all it supports (see awaitRestart).
 	adopted bool
 }
 
-// start launches the server. extraEnv is variadic so the plain smoke keeps
-// inheriting the harness environment untouched — that is the deployment the
-// release asset is tested as — while the rehearsal can add the settings it
-// needs (see noLiveKitDownload).
+// start launches the server. extraEnv is variadic so the plain smoke inherits
+// the harness environment untouched, as the release asset is deployed, while
+// the rehearsal can add settings (see noLiveKitDownload).
 func start(bin, dir, logName string, extraEnv ...string) (*server, error) {
 	logPath := filepath.Join(dir, logName)
 	logFile, err := os.Create(logPath)
@@ -309,8 +289,7 @@ func start(bin, dir, logName string, extraEnv ...string) (*server, error) {
 }
 
 // waitHealthy polls the binary's own healthcheck until it passes, failing early
-// if the process dies first — a server that exits during boot would otherwise
-// only be reported once the whole timeout elapsed.
+// if the process dies rather than after the whole timeout.
 func (s *server) waitHealthy(phase string) error {
 	deadline := time.Now().Add(bootTimeout)
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
@@ -329,10 +308,9 @@ func (s *server) waitHealthy(phase string) error {
 }
 
 // drain sends the platform's graceful stop and asserts a clean exit inside the
-// budget. A clean exit is the assertion that matters: the lifecycle installs
-// signal.NotifyContext(os.Interrupt, syscall.SIGTERM) (internal/app/lifecycle.go)
-// and returns nil on a graceful teardown, so a killed-by-signal status would
-// mean the drain never ran.
+// budget. The lifecycle installs signal.NotifyContext (internal/app/lifecycle.go)
+// and returns nil on graceful teardown, so a killed-by-signal status means the
+// drain never ran.
 func (s *server) drain(phase string) error {
 	started := time.Now()
 	if err := stopGracefully(s.cmd.Process); err != nil {
@@ -359,11 +337,10 @@ func (s *server) log() (string, error) {
 }
 
 // annotate wraps a phase failure with the server's log, so a CI failure carries
-// the reason rather than only the symptom.
+// the reason.
 func (s *server) annotate(phase string, cause error) error {
-	// An adopted server has no cmd (it is another process's child), and the
-	// kill is only here to stop a server still writing to the log being read —
-	// which the adopted one already did or it would not be reachable here.
+	// An adopted server has no cmd; the kill only stops a server still writing
+	// to the log being read.
 	if !s.exited && s.cmd != nil {
 		_ = s.cmd.Process.Kill()
 	}

@@ -1,10 +1,9 @@
-// Phase C Step 9 — `ui` host capability.
+// `ui` host capability.
 //
-// A plugin that declares the `ui` capability ships HTML/CSS/JS assets and a
-// list of tabs. This file is the host-side half only: AssetHandler and
-// RegisterUI are implemented and tested, but no route is mounted for them
-// yet and no client bridge exists — wiring them up is part of the pending
-// host-function work tracked in sandbox_wazero.go.
+// A plugin that declares `ui` ships HTML/CSS/JS assets and a list of tabs. This
+// file is the host-side half only: AssetHandler and RegisterUI are implemented
+// and tested, but no route is mounted and no client bridge exists yet; wiring
+// them is part of the pending host-function work in sandbox_wazero.go.
 
 package plugin
 
@@ -17,8 +16,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// RegisterUI binds inst's declared tabs into the registry. Called from the
-// activation path; safe to call multiple times (idempotent on inst).
+// RegisterUI binds inst's declared tabs into the registry; idempotent on inst.
 func (r *Registry) RegisterUI(inst *Instance) error {
 	if !inst.Manifest.HasCapability(CapUI) {
 		return ErrCapabilityNotGranted
@@ -43,29 +41,26 @@ func (r *Registry) RegisterUI(inst *Instance) error {
 	return nil
 }
 
-// AssetHandler returns an http.Handler that serves the on-disk assets for
-// inst, rooted at the plugin's directory. Defense in depth:
+// AssetHandler returns an http.Handler that serves the on-disk assets for inst,
+// rooted at the plugin's directory. Defense in depth:
 //  1. Manifest validation rejects absolute paths and "..".
-//  2. The handler only serves files explicitly declared by a manifest tab.
-//  3. Asset paths are resolved once at construction, not per request: the
-//     request path is used solely as a map key, so no on-disk path is ever
-//     built from user input. Each declared asset is checked with
-//     filepath.Rel and dropped if the result contains ".." or is absolute,
-//     which catches symlink escapes and the prefix-without-separator bug.
-//  4. A serve-time os.Lstat check rejects symlinks that were created AFTER
-//     install (the install-time rejectSymlinksUnder walk only runs once).
-//     This closes the TOCTOU window where a malicious or buggy process
-//     swaps a regular file for a symlink post-install — http.ServeFile
-//     would otherwise follow the link and leak host files.
+//  2. The handler serves only files explicitly declared by a manifest tab.
+//  3. Asset paths are resolved once at construction and the request path is
+//     only a map key, so no on-disk path is built from user input. Each
+//     declared asset is checked with filepath.Rel and dropped if the result
+//     contains ".." or is absolute, catching symlink escapes and the
+//     prefix-without-separator bug.
+//  4. A serve-time os.Lstat rejects symlinks created after install (the
+//     install-time rejectSymlinksUnder walk runs once), closing the TOCTOU
+//     window where a process swaps a regular file for a symlink and
+//     http.ServeFile would follow it to host files.
 func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 	pluginDir, dirErr := filepath.Abs(filepath.Dir(inst.WASMPath))
 
-	// Resolve and traversal-check every declared asset ONCE, here at
-	// construction, mapping the manifest's asset name to its absolute path.
-	// At serve time the request path is only ever used as a map key, never
-	// as a path component, so no filesystem path is built from user input
-	// at all. An asset that fails validation is simply absent from the map
-	// and 404s, exactly as an undeclared file does.
+	// Resolve and traversal-check every declared asset once, mapping the
+	// manifest's asset name to its absolute path. At serve time the request
+	// path is only a map key, never a path component. An asset failing
+	// validation is absent from the map and 404s like an undeclared file.
 	allowed := make(map[string]string, len(inst.Manifest.UI.Tabs))
 	if dirErr == nil {
 		for _, t := range inst.Manifest.UI.Tabs {
@@ -92,10 +87,9 @@ func (r *Registry) AssetHandler(inst *Instance) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
-		// Lstat (not Stat) so a symlink is detected instead of followed.
-		// This runs on every request — cheap relative to the file read —
-		// and closes the TOCTOU gap between install-time validation and
-		// runtime serving.
+		// Lstat (not Stat) so a symlink is detected, not followed. It runs on
+		// every request, cheap relative to the file read, closing the TOCTOU gap
+		// between install-time validation and serving.
 		info, lerr := os.Lstat(full) //nolint:gosec // not user input: full comes from the construction-time allowlist
 		if lerr != nil {
 			http.NotFound(w, req)

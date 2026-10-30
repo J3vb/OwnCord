@@ -9,29 +9,24 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// MessageRequest is one row of message_requests (migration 046): a
-// staged first contact between a stranger sender and a recipient who does
-// not yet trust them. See the migration's own comment for the full shape.
+// MessageRequest is one row of message_requests: a staged first contact
+// between a stranger sender and a recipient who does not yet trust them.
 type MessageRequest struct {
 	ID          int64
 	SenderID    int64
 	RecipientID int64
 	ChannelID   int64
-	// FirstMessageID is the message this request was created for, set once
-	// at creation. nil for a grandfathered installation's pre-existing rows,
-	// which cannot happen today since nothing grandfathers message_requests
-	// itself, only trusted_senders.
+	// FirstMessageID is the message this request was created for, set once at
+	// creation; nil for rows that predate it.
 	FirstMessageID *int64
 	State          string
 	CreatedAt      string
 	DecidedAt      *string
 }
 
-// MessageRequestView is one pending request the way GET /api/v1/dm-requests
-// lists it: joined to the sender's profile and a preview of the channel's
-// first message (the one the request was created for — a resend while the
-// request is pending/ignored/deleted creates no second row, so the preview
-// always names the original message).
+// MessageRequestView is one pending request as GET /api/v1/dm-requests lists
+// it: joined to the sender's profile and a preview of the channel's first
+// message. A resend creates no second row, so the preview names the original.
 type MessageRequestView struct {
 	MessageRequest
 	SenderUsername    string
@@ -55,9 +50,8 @@ func fromDBGenMessageRequest(r dbgen.MessageRequest) *MessageRequest {
 	}
 }
 
-// IsTrustedSender reports whether recipientID has a standing trust row for
-// senderID. The row's source (accepted / sent_first / grandfathered) does
-// not change what trust means to the gate — any row at all is trust.
+// IsTrustedSender reports whether recipientID has a trust row for senderID;
+// the row's source does not matter, any row is trust.
 func (d *DB) IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
 	n, err := d.q.IsTrustedSender(ctx, dbgen.IsTrustedSenderParams{RecipientID: recipientID, SenderID: senderID})
 	if err != nil {
@@ -66,10 +60,9 @@ func (d *DB) IsTrustedSender(ctx context.Context, recipientID, senderID int64) (
 	return n > 0, nil
 }
 
-// TrustSender writes a trust row. INSERT OR IGNORE: a pair that already
-// trusts each other keeps its original source rather than being overwritten
-// by a later call with a different one (e.g. a resend re-affirming
-// "sent_first" after acceptance already recorded "accepted" would be wrong).
+// TrustSender writes a trust row with INSERT OR IGNORE, so a pair that already
+// trusts keeps its original source (a resend's "sent_first" must not overwrite
+// "accepted").
 func (d *DB) TrustSender(ctx context.Context, recipientID, senderID int64, source string) error {
 	if err := d.q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: recipientID, SenderID: senderID, Source: source}); err != nil {
 		return fmt.Errorf("TrustSender: %w", err)
@@ -77,57 +70,43 @@ func (d *DB) TrustSender(ctx context.Context, recipientID, senderID int64, sourc
 	return nil
 }
 
-// MessageRequestOutcome is what CreateMessageRequest decided for one first
-// send.
+// MessageRequestOutcome is what CreateMessageRequest decided for one first send.
 type MessageRequestOutcome struct {
 	// Created is true when this call inserted the pair's request row.
 	Created bool
-	// AutoAccepted is true when the recipient has message requests off (and
-	// direct messages on) and trusts the sender after this call: the message
-	// is delivered, not staged.
+	// AutoAccepted is true when the recipient has message requests off (and direct
+	// messages on) and trusts the sender after this call: the message is
+	// delivered, not staged.
 	AutoAccepted bool
 	// Opened is true when this call opened the DM for the recipient.
 	Opened bool
 }
 
 // CreateMessageRequest stages first contact for (senderID, recipientID) in
-// channelID, naming firstMessageID as the held message, and — in the SAME
-// transaction — marks senderID as a trusted sender of recipientID (source
-// "sent_first"): senderID initiated, so recipientID's eventual reply is a
-// reply, not a first-contact request back. The two writes used
-// to be separate calls, so a request insert that committed followed by a
-// failed trust write left a pending row with no reverse trust and no way to
-// repair it — a resend finds the row already there (INSERT OR IGNORE) and
-// stays silent forever, so nothing ever retries the trust
-// write either.
+// channelID, naming firstMessageID as the held message, and in the same
+// transaction marks senderID a trusted sender of recipientID (source
+// "sent_first"), since senderID initiated and the reply is not a first-contact
+// request back. Separate writes could commit the request and fail the trust
+// write, and a resend finds the row (INSERT OR IGNORE) and never retries it.
 //
-// The request insert is INSERT OR IGNORE against the UNIQUE(sender_id,
-// recipient_id) constraint: one row per pair EVER, so a request already
-// existing in ANY state — pending, ignored, deleted, blocked, even
-// accepted, though an accepted pair is trusted and should never reach here
-// — leaves Created false and changes nothing. That is what makes a resend
-// after "ignored" silent: there is only ever one row to have
-// created. The trust write itself is unconditional (also INSERT OR IGNORE)
-// regardless of Created: a repeat send while the request is still pending
-// (or already ignored/deleted) just re-affirms a trust row that may already
-// be there, and skipping it on a race would leave the loser of two
-// concurrent first messages without it. Under two concurrent first sends
-// only one request INSERT wins, so first_message_id always names the
-// winner's own message — the same one its dm_request frame carries as a
-// preview.
+// The request insert is INSERT OR IGNORE on UNIQUE(sender_id, recipient_id):
+// one row per pair ever, so a request in any state leaves Created false and
+// changes nothing, which keeps a resend after "ignored" silent. The trust write
+// is unconditional regardless of Created: skipping it on a race would leave the
+// loser of two concurrent first messages without it. Only one request INSERT
+// wins, so first_message_id names the winner's message, the preview its
+// dm_request frame carries.
 //
-// The transaction reads recipientID's user_privacy itself, so a
-// settings change racing the send is decided by this read and by nothing the
-// caller saw earlier. With direct messages allowed and message requests off
-// the row is born "accepted" (decided_at set), recipientID trusts senderID
-// ("accepted") and the DM opens for recipientID, all in this transaction;
-// AutoAccepted is then true and the caller delivers the message instead of
-// staging a request. Any other setting (including direct messages off) takes
-// the staging path above untouched. A caller that finds the pair's row
-// already there reports AutoAccepted whenever recipientID trusts senderID
-// (trust, not the request's state or the current setting, decides delivery),
-// so a racing loser is delivered too; Opened is true for exactly one of them.
-// A block between the pair always takes the staging path.
+// The transaction reads recipientID's user_privacy itself, so a settings
+// change racing the send is decided by this read. With direct messages allowed
+// and message requests off, the row is born "accepted" (decided_at set),
+// recipientID trusts senderID and the DM opens for them, all in this
+// transaction; AutoAccepted is then true and the message is delivered. Any
+// other setting stages as above. A caller that finds the pair's row already
+// there reports AutoAccepted whenever recipientID trusts senderID (trust, not
+// request state or current setting, decides delivery), so a racing loser is
+// delivered too; Opened is true for exactly one of them. A block between the
+// pair always stages.
 func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (MessageRequestOutcome, error) {
 	var out MessageRequestOutcome
 	tx, err := d.writer.BeginTx(ctx, nil)
@@ -143,13 +122,12 @@ func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, ch
 	case err == nil:
 		priv = UserPrivacy{AllowMemberDMs: row.AllowMemberDms != 0, MessageRequests: row.MessageRequests != 0}
 	case errors.Is(err, sql.ErrNoRows):
-		// No saved settings: both on, so requests are staged as before.
+		// No saved settings: both on, so requests are staged.
 	default:
 		return out, fmt.Errorf("CreateMessageRequest privacy: %w", err)
 	}
-	// A block between the pair, read in this transaction, always stages: a
-	// recipient who blocks the sender while the send is in flight never
-	// ends up trusting them.
+	// A block between the pair, read in this transaction, always stages, so a
+	// recipient who blocks the sender mid-send never ends up trusting them.
 	blocked := true
 	if _, err := q.IsEitherBlocked(ctx, dbgen.IsEitherBlockedParams{
 		BlockerID: senderID, BlockedID: recipientID, BlockerID_2: recipientID, BlockedID_2: senderID,
@@ -189,9 +167,8 @@ func (d *DB) CreateMessageRequest(ctx context.Context, senderID, recipientID, ch
 	return out, nil
 }
 
-// GetMessageRequest reads request id, scoped to recipientID so one user can
-// never read another's inbox row by guessing an id. ErrNotFound when no such
-// row exists for this recipient.
+// GetMessageRequest reads request id scoped to recipientID, so a guessed id
+// never reads another's inbox row. ErrNotFound when none exists for them.
 func (d *DB) GetMessageRequest(ctx context.Context, id, recipientID int64) (*MessageRequest, error) {
 	row, err := d.q.GetMessageRequestForRecipient(ctx, dbgen.GetMessageRequestForRecipientParams{
 		ID: id, RecipientID: recipientID,
@@ -205,8 +182,8 @@ func (d *DB) GetMessageRequest(ctx context.Context, id, recipientID int64) (*Mes
 	return fromDBGenMessageRequest(row), nil
 }
 
-// GetMessageRequestByPair reads the (at most one, UNIQUE-enforced) request
-// for a (senderID, recipientID) pair. ErrNotFound when none exists.
+// GetMessageRequestByPair reads the (UNIQUE, so at most one) request for a
+// pair, or ErrNotFound.
 func (d *DB) GetMessageRequestByPair(ctx context.Context, senderID, recipientID int64) (*MessageRequest, error) {
 	row, err := d.q.GetMessageRequestByPair(ctx, dbgen.GetMessageRequestByPairParams{
 		SenderID: senderID, RecipientID: recipientID,
@@ -220,9 +197,8 @@ func (d *DB) GetMessageRequestByPair(ctx context.Context, senderID, recipientID 
 	return fromDBGenMessageRequest(row), nil
 }
 
-// ListPendingMessageRequests lists recipientID's inbox, newest first: every
-// pending request joined to the sender's profile and a preview of the
-// channel's first message.
+// ListPendingMessageRequests lists recipientID's inbox, newest first: pending
+// requests joined to the sender's profile and a first-message preview.
 func (d *DB) ListPendingMessageRequests(ctx context.Context, recipientID int64) ([]MessageRequestView, error) {
 	rows, err := d.q.ListPendingMessageRequests(ctx, recipientID)
 	if err != nil {
@@ -246,10 +222,9 @@ func (d *DB) ListPendingMessageRequests(ctx context.Context, recipientID int64) 
 }
 
 // TransitionMessageRequest moves id from pending to `to`, scoped to
-// recipientID. Reports whether the guarded UPDATE matched a row; false means
-// either the row does not belong to this recipient or it was not pending —
-// the caller (service.MessageRequestService) tells the two apart with a
-// GetMessageRequest read (404 vs. 409).
+// recipientID. False means the row is not this recipient's or was not pending;
+// service.MessageRequestService tells them apart with GetMessageRequest (404
+// vs 409).
 func (d *DB) TransitionMessageRequest(ctx context.Context, id, recipientID int64, to string) (bool, error) {
 	n, err := d.q.TransitionMessageRequest(ctx, dbgen.TransitionMessageRequestParams{
 		State: to, ID: id, RecipientID: recipientID,
@@ -260,13 +235,11 @@ func (d *DB) TransitionMessageRequest(ctx context.Context, id, recipientID int64
 	return n > 0, nil
 }
 
-// AcceptMessageRequest is Accept's single transaction: load+guard (must be
-// pending, scoped to recipientID), TrustSender(recipient, sender,
-// "accepted"), OpenDM(recipient, channel), then the state transition — all
-// or nothing, mirroring UpsertPushSubscription's writer-tx shape
-// (db/push_subscription_queries.go). Returns ErrNotFound when the row is not
-// this recipient's and ErrConflict when it exists but is no longer pending
-// (a race with another transition, including a concurrent Accept).
+// AcceptMessageRequest is Accept's single transaction: load and guard (pending,
+// scoped to recipientID), TrustSender(recipient, sender, "accepted"),
+// OpenDM(recipient, channel), then the state transition, all or nothing. It
+// returns ErrNotFound when the row is not this recipient's and ErrConflict
+// when it is no longer pending (including a concurrent Accept).
 func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*MessageRequest, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -300,9 +273,8 @@ func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*
 		return nil, fmt.Errorf("AcceptMessageRequest transition: %w", err)
 	}
 	if n == 0 {
-		// Cannot happen on the single writer connection this transaction runs
-		// on (nothing else can have changed row's state between the read
-		// above and here) — kept as a defensive guard, not an assumption.
+		// Cannot happen on the single writer connection (nothing can change row's
+		// state since the read above); kept as a defensive guard.
 		return nil, ErrConflict
 	}
 
@@ -318,13 +290,12 @@ func (d *DB) AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*
 }
 
 // acceptFirstContact finishes a first send that may be delivered, inside
-// CreateMessageRequest's transaction. The caller that inserted an accepted
-// row writes the recipient's accepted trust edge first. Either way the
-// recipient's trust of the sender decides delivery, not the request's state
-// or the setting as it reads now: a caller that found the pair's row already
-// there is delivered when the recipient trusts the sender, and then (re)opens
-// the DM with INSERT OR IGNORE, so a recipient who closed it meanwhile gets
-// dm_channel_open and exactly one caller reports Opened.
+// CreateMessageRequest's transaction. The caller that inserted an accepted row
+// writes the recipient's trust edge first. The recipient's trust of the
+// sender, not the request's state or the current setting, decides delivery; a
+// caller that found the row already there is delivered when trusted, then
+// (re)opens the DM with INSERT OR IGNORE, so a recipient who closed it
+// meanwhile gets dm_channel_open and exactly one caller reports Opened.
 func acceptFirstContact(ctx context.Context, q *dbgen.Queries, senderID, recipientID, channelID int64, out *MessageRequestOutcome) error {
 	if out.Created {
 		if err := q.TrustSender(ctx, dbgen.TrustSenderParams{RecipientID: recipientID, SenderID: senderID, Source: "accepted"}); err != nil {

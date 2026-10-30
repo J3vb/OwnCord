@@ -1,35 +1,30 @@
 // The alpha-shaped profile.
 //
-// `go run ./cmd/seed -confirm-dev -profile alpha` fills an EMPTY database with
-// a deterministic dataset shaped like a real 1.2.0-alpha.4 server after a
-// month of use. The same profile, scrubbed and vacuumed, is the committed
-// snapshot at Server/testdata/snapshots/v1.2.0-alpha.4.sqlite that the recovery
-// drills, the upgrade rehearsal and the in-place upgrade consume — the
-// schema has not changed since the v1.2.0-alpha.4 tag (zero migrations added),
-// so a database seeded on today's migrations IS an alpha.4-schema database.
+// `go run ./cmd/seed -confirm-dev -profile alpha` fills an empty database with
+// a deterministic dataset shaped like a real 1.2.0-alpha.4 server after a month
+// of use. Scrubbed and vacuumed, the same profile is the committed snapshot at
+// Server/testdata/snapshots/v1.2.0-alpha.4.sqlite that the recovery drills, the
+// upgrade rehearsal and the in-place upgrade consume. The schema has not
+// changed since that tag, so a database seeded on today's migrations is an
+// alpha.4-schema database.
 //
 // Determinism is the contract: fixed rng seed, fixed clock, a constant bcrypt
 // hash (live hashing salts every run), explicit ids and timestamps on every
 // row, one insert order, and `VACUUM INTO` as the byte-canonical output.
-// TestAlphaProfileByteIdentical holds it: two runs, two files, bytes.Equal.
+// TestAlphaProfileByteIdentical holds it.
 //
-// The numbers below are the plan's
-// (docs/archive/plans/b3-server-architecture-guardrails-2026-08-29.md). A number
-// found unrepresentative is changed HERE with the reason in
-// the evidence block of that plan — never silently. Two constants
-// deliberately leave no rows, recorded rather than hidden:
+// A number found unrepresentative is changed here, never silently. Two
+// constants deliberately leave no rows:
 //
-//   - alphaVoiceSessions: voice is LiveKit-ephemeral. A finished session
-//     leaves no at-rest row in this schema (voice_states is live presence and
-//     empties on disconnect), so a cold snapshot of a quiescent server
-//     carries none. The constant stays because the load harness and any
-//     future voice-history feature consume the same shape.
+//   - alphaVoiceSessions: voice is LiveKit-ephemeral and a finished session
+//     leaves no at-rest row (voice_states is live presence), so a cold snapshot
+//     carries none. The constant stays because the load harness and any future
+//     voice-history feature consume the same shape.
 //   - events: the replay log is empty, as on any server restarted for an
-//     upgrade — exactly the state the snapshot's consumers rehearse.
-//     Fabricated frames would be replayed verbatim to real clients.
+//     upgrade; fabricated frames would be replayed verbatim to real clients.
 //
-// The seeded accounts all use the password "alpha-dev-password" (constant
-// hash below), which is why -confirm-dev stays mandatory.
+// The seeded accounts all use the password "alpha-dev-password" (constant hash
+// below), which is why -confirm-dev stays mandatory.
 package main
 
 import (
@@ -47,8 +42,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
-
-// ─── The profile, as constants ──────────────────────────────────────────────
 
 const (
 	alphaSeed = 20260831 // fixed rng seed; changing it is changing the dataset
@@ -69,8 +62,8 @@ const (
 	alphaInvitesRevkd = 10
 	alphaPluginRows   = 1 // disabled
 
-	// alphaVoiceSessions is a shape parameter with no at-rest rows — see the
-	// package comment. 1–45 min, 2–6 participants when a live harness uses it.
+	// alphaVoiceSessions is a shape parameter with no at-rest rows (see the
+	// package comment): 1–45 min, 2–6 participants when a live harness uses it.
 	alphaVoiceSessions = 200
 
 	// alphaPasswordHash is bcrypt("alpha-dev-password"), fixed so two seed
@@ -82,8 +75,8 @@ const (
 // alphaWindowEnd is the fixed clock: the last instant of the simulated month.
 var alphaWindowEnd = time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 
-// alphaHourWeights shapes the diurnal curve — quiet nights, an evening peak.
-// Relative weights per UTC hour; largest-remainder allocation makes the
+// alphaHourWeights shapes the diurnal curve (quiet nights, an evening peak) as
+// relative weights per UTC hour; largest-remainder allocation makes the
 // per-bucket counts sum exactly to the day's total.
 var alphaHourWeights = [24]int{
 	1, 1, 1, 1, 1, 2, // 00–05
@@ -92,8 +85,8 @@ var alphaHourWeights = [24]int{
 	11, 12, 11, 8, 5, 2, // 18–23
 }
 
-// alphaLexicon feeds the message generator. Plain words only: the content is
-// synthetic on purpose and never pretends to be a real person's text.
+// alphaLexicon feeds the message generator: plain words only, synthetic on
+// purpose.
 var alphaLexicon = []string{
 	"the", "a", "we", "you", "it", "that", "this", "just", "really", "pretty",
 	"server", "channel", "voice", "call", "message", "update", "build", "bug",
@@ -106,17 +99,14 @@ var alphaLexicon = []string{
 	"lol", "nice", "thanks", "ok", "sure", "maybe", "yes", "no", "brb", "gg",
 }
 
-// ─── Channel definitions ────────────────────────────────────────────────────
-
 type alphaChannel struct {
 	name, ctype, category, topic string
 	position                     int
 	archived                     bool
 }
 
-// Ten text and two voice channels. Indices are ids-1; the overrides below
-// refer to them by id. Channel 10 is the archived one and only carries
-// early-window history.
+// Ten text and two voice channels; the overrides refer to them by id (index+1).
+// Channel 10 is the archived one and carries only early-window history.
 var alphaChannelDefs = []alphaChannel{
 	{"welcome", "text", "Information", "Start here — rules and invites", 0, false},
 	{"announcements", "text", "Information", "Server news; staff post, everyone reads", 1, false},
@@ -131,8 +121,6 @@ var alphaChannelDefs = []alphaChannel{
 	{"Lounge", "voice", "Voice", "", 10, false},
 	{"Game Night", "voice", "Voice", "", 11, false},
 }
-
-// ─── Entry point ────────────────────────────────────────────────────────────
 
 // runAlpha is the -profile alpha path: migrate, seed, optionally scrub and
 // write the byte-canonical snapshot.
@@ -167,9 +155,8 @@ func runAlpha(database *db.DB, snapshotPath, scrubPath string) int {
 	return 0
 }
 
-// seedAlpha fills an empty database with the profile. It refuses a non-empty
-// one: determinism is per-database-lifetime, and "empty" is the only state
-// two runs can share.
+// seedAlpha fills an empty database with the profile and refuses a non-empty
+// one, since only "empty" is a state two runs can share.
 func seedAlpha(database *db.DB) error {
 	var users int
 	if err := database.QueryRowContext(context.Background(),
@@ -230,16 +217,16 @@ func seedAlpha(database *db.DB) error {
 }
 
 // writeSnapshot applies the scrub script and writes the byte-canonical
-// snapshot via VACUUM INTO (which refuses to overwrite; remove a stale
-// target first so regeneration is one command).
+// snapshot via VACUUM INTO, which refuses to overwrite, so a stale target is
+// removed first.
 func writeSnapshot(database *db.DB, scrubPath, outPath string) error {
 	scrub, err := os.ReadFile(scrubPath)
 	if err != nil {
 		return fmt.Errorf("alpha: reading scrub script: %w", err)
 	}
-	// Strip comment lines first, then split on ";" — a ";" inside a comment
-	// must not end a statement. The scrub script holds no string literal
-	// containing ";", which is the simplicity this parser is allowed.
+	// Strip comment lines first, then split on ";" so a ";" inside a comment
+	// does not end a statement; the scrub script holds no string literal
+	// containing ";".
 	var sqlOnly []string
 	for line := range strings.SplitSeq(string(scrub), "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "--") {
@@ -266,15 +253,12 @@ func writeSnapshot(database *db.DB, scrubPath, outPath string) error {
 	return nil
 }
 
-// ─── Users ──────────────────────────────────────────────────────────────────
-
-// alphaJoinTimes computes every user's created_at once — the message and DM
-// generators consult it so nothing is authored before its author joined (a
-// fixture with time-travelling rows would poison the retention and
-// account-age rehearsals that consume it). Monotonic in
-// the user id — the first forty accounts predate the window (an established
-// server; all staff are among them), the remaining sixty join during it in
-// id order — so "who exists at time t" is always the prefix 1..N.
+// alphaJoinTimes computes every user's created_at once, so the message and DM
+// generators never author a message before its author joined (time-travelling
+// rows would poison the retention and account-age rehearsals). It is monotonic
+// in the user id: the first forty accounts (all staff among them) predate the
+// window and the remaining sixty join during it in id order, so "who exists at
+// time t" is always the prefix 1..N.
 func alphaJoinTimes(rng *rand.Rand, windowStart time.Time) []time.Time {
 	joined := make([]time.Time, alphaUsers+1)
 	for i := 1; i <= alphaUsers; i++ {
@@ -334,12 +318,10 @@ func alphaInsertUsers(tx *sql.Tx, rng *rand.Rand, joined []time.Time) error {
 	return nil
 }
 
-// ─── Channels and overrides ─────────────────────────────────────────────────
-
 func alphaInsertChannels(tx *sql.Tx, windowStart time.Time) error {
 	created := windowStart.AddDate(0, 0, -60)
-	// One category row per distinct name, in order of first appearance, so
-	// ids and positions are deterministic (migration 072).
+	// One category row per distinct name, in order of first appearance, so ids
+	// and positions are deterministic.
 	categoryIDs := map[string]int64{}
 	for _, c := range alphaChannelDefs {
 		if _, seen := categoryIDs[c.category]; seen || c.category == "" {
@@ -375,9 +357,8 @@ func alphaInsertChannels(tx *sql.Tx, windowStart time.Time) error {
 		}
 	}
 
-	// Three channels carry role overrides (ids 1, 2, 9), two carry user
-	// overrides (ids 9 and 4) — the plan's 3/2 split, with the layered case
-	// (channel 9 has both) included deliberately.
+	// Three channels carry role overrides (ids 1, 2, 9) and two user overrides
+	// (ids 9 and 4); channel 9 has both, deliberately layered.
 	roleOverrides := []struct {
 		channel, role int64
 		allow, deny   int64
@@ -413,22 +394,19 @@ func alphaInsertChannels(tx *sql.Tx, windowStart time.Time) error {
 	return nil
 }
 
-// ─── DMs ────────────────────────────────────────────────────────────────────
-
 type dmPair struct {
 	channelID int64
 	a, b      int64
-	// ready is when both members exist — no message in the pair may precede
-	// it, and it is the channel's created_at / opened_at, matching
+	// ready is when both members exist: no message in the pair may precede it,
+	// and it is the channel's created_at / opened_at, as in
 	// GetOrCreateDMChannel's create-on-first-contact shape.
 	ready time.Time
 }
 
-// alphaInsertDMs creates the 40 DM channels exactly as GetOrCreateDMChannel
-// would (type 'dm', empty name, both participants, both open). The first
-// twelve pairs are drawn from the pre-window accounts so DM traffic exists
-// from the window's first hour; the rest may involve joiners and only carry
-// messages once both members exist.
+// alphaInsertDMs creates the 40 DM channels as GetOrCreateDMChannel would
+// (type 'dm', empty name, both participants, both open). The first twelve
+// pairs are drawn from pre-window accounts so DM traffic exists from the first
+// hour; the rest carry messages only once both members exist.
 func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, joined []time.Time) ([]dmPair, error) {
 	seen := map[[2]int64]bool{}
 	pairs := make([]dmPair, 0, alphaDMPairs)
@@ -477,8 +455,6 @@ func alphaInsertDMs(tx *sql.Tx, rng *rand.Rand, joined []time.Time) ([]dmPair, e
 	return pairs, nil
 }
 
-// ─── Messages ───────────────────────────────────────────────────────────────
-
 // alphaChannelWeights is the relative traffic per text channel (ids 1..10):
 // #announcements and #welcome are quiet, #general and #gaming busy, #staff
 // small, the archive early-only.
@@ -505,10 +481,10 @@ func alphaChannelFor(rng *rand.Rand, day int) int64 {
 	return 3
 }
 
-// alphaAuthorFor picks a message author. Staff channels (#welcome,
-// #announcements) are staff-posted; #staff adds the override-listed user009;
-// everywhere else, anyone who has joined by the message's time — maxUser is
-// the eligibility prefix (staff and user009 are all pre-window).
+// alphaAuthorFor picks a message author. #welcome and #announcements are
+// staff-posted; #staff adds the override-listed user009; elsewhere anyone who
+// has joined by the message's time (maxUser is the eligibility prefix; staff
+// and user009 are all pre-window).
 func alphaAuthorFor(rng *rand.Rand, ch int64, maxUser int) int64 {
 	switch ch {
 	case 1, 2:
@@ -521,9 +497,8 @@ func alphaAuthorFor(rng *rand.Rand, ch int64, maxUser int) int64 {
 	}
 }
 
-// sqlBatch accumulates multi-row VALUES groups and flushes them in chunks —
-// one statement per chunk instead of one per row, inside the caller's
-// transaction.
+// sqlBatch accumulates multi-row VALUES groups and flushes them in chunks, one
+// statement per chunk, inside the caller's transaction.
 type sqlBatch struct {
 	b    strings.Builder
 	args []any
@@ -548,14 +523,13 @@ func (sb *sqlBatch) flush(tx *sql.Tx, prefix string) error {
 	return err
 }
 
-// alphaInsertMessages writes all 20,000 messages in chronological order —
-// per-bucket second offsets are sorted before ids are assigned, so ascending
-// ids follow ascending timestamps exactly as insertion order does on a live
-// server — and returns each message's timestamp and
-// author (indexed by id-1) for the attachment rows. Authors are drawn only
-// from users who exist at the message's time: the eligible set is always the
-// prefix 1..maxUser because alphaJoinTimes is monotonic, and a DM pair
-// carries traffic only from its ready time.
+// alphaInsertMessages writes all 20,000 messages in chronological order
+// (per-bucket second offsets are sorted before ids are assigned, so ascending
+// ids follow ascending timestamps as on a live server) and returns each
+// message's timestamp and author (indexed by id-1) for the attachment rows.
+// Authors come only from users who exist at the message's time, the prefix
+// 1..maxUser since alphaJoinTimes is monotonic; a DM pair carries traffic only
+// from its ready time.
 func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, joined []time.Time, pairs []dmPair) ([]time.Time, []int64, error) {
 	// Exactly 15% of message ids are DM messages.
 	dmCount := int(float64(alphaMessages) * alphaDMShare)
@@ -566,9 +540,8 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, join
 
 	perDay := largestRemainder(onesSlice(alphaWindowDays), alphaMessages)
 
-	// Pairs sorted by readiness, so the eligible set at any time is a prefix;
-	// skewedIndex over that prefix keeps the earliest (all-pre-window) pairs
-	// the chattiest, which is also the realistic shape.
+	// Pairs sorted by readiness so the eligible set at any time is a prefix;
+	// skewedIndex keeps the earliest pairs the chattiest, the realistic shape.
 	byReady := make([]dmPair, len(pairs))
 	copy(byReady, pairs)
 	sort.Slice(byReady, func(i, j int) bool { return byReady[i].ready.Before(byReady[j].ready) })
@@ -631,8 +604,6 @@ func alphaInsertMessages(tx *sql.Tx, rng *rand.Rand, windowStart time.Time, join
 	return times, authors, nil
 }
 
-// ─── Attachments, reactions, invites ────────────────────────────────────────
-
 func alphaInsertAttachments(tx *sql.Tx, rng *rand.Rand, messageTimes []time.Time, messageAuthors []int64) error {
 	type class struct {
 		count        int
@@ -653,8 +624,8 @@ func alphaInsertAttachments(tx *sql.Tx, rng *rand.Rand, messageTimes []time.Time
 			msgID := rng.Intn(alphaMessages) + 1
 			id := fmt.Sprintf("%08x%08x%08x%08x", rng.Uint32(), rng.Uint32(), rng.Uint32(), rng.Uint32())
 			size := (c.minKB + rng.Intn(c.maxKB-c.minKB+1)) * 1024
-			// The uploader is the message's author — CreateAttachment always
-			// records one on the current schema.
+			// The uploader is the message's author; CreateAttachment always
+			// records one.
 			if _, err := tx.Exec(
 				`INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploaded_at, uploader_id)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -725,8 +696,6 @@ func alphaInsertInvites(tx *sql.Tx, rng *rand.Rand, windowStart time.Time) error
 	}
 	return nil
 }
-
-// ─── Small helpers ──────────────────────────────────────────────────────────
 
 // ts renders a time the way the schema's datetime('now') defaults do.
 func ts(t time.Time) string { return t.UTC().Format(dbtime.SQLiteLayout) }

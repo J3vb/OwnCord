@@ -8,7 +8,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Access explanation and override preview ─────────────────────────
 //
 // Read-only adapters over service.ChannelService: the decision comes from the
 // canonical predicates on the server, never from the panel, and no request

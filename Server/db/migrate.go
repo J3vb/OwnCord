@@ -1,25 +1,16 @@
 package db
 
-// migrate.go — tracked migration runner for the OwnCord server.
+// Tracked migration runner. Each .sql file in the FS is applied exactly once;
+// schema_versions records every applied filename and its UTC timestamp. Every
+// statement, including the schema_versions bookkeeping reads, runs on the
+// writer pool so DDL and its tracking records are applied and observed on the
+// single write connection.
 //
-// Each .sql file in the provided FS is applied exactly once.  The
-// schema_versions table records every applied migration filename and the UTC
-// timestamp at which it was applied.
-//
-// Every statement here — including the schema_versions bookkeeping reads —
-// runs on the writer pool so migration DDL and its tracking records are
-// applied and observed on the single write connection.
-//
-// Seeding for existing databases
-// --------------------------------
-// When the server is first upgraded to include migration tracking, existing
-// databases will have all schema tables in place but no schema_versions table.
-// Without seeding, every migration would re-run and could destroy data.
-//
-// The seeding heuristic: if schema_versions does not exist AND the "users"
-// table already exists, we assume all migrations in the current FS have
-// already been applied.  We create schema_versions and insert every migration
-// filename without executing the SQL, so subsequent runs treat them as done.
+// Seeding: a database that predates tracking has its tables but no
+// schema_versions. Without seeding every migration would re-run and could
+// destroy data, so if schema_versions is absent and the "users" table exists,
+// all migrations in the FS are assumed applied and their filenames are
+// inserted without executing the SQL.
 
 import (
 	"context"
@@ -36,18 +27,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/migrations"
 )
 
-// ErrSchemaAhead is returned when schema_versions records a migration the
-// running binary does not carry — the database was migrated by a NEWER server.
-// Continuing would run this older binary against a schema it has never seen,
-// which is the documented way to lose the database (docs/deployment.md), so
-// start-up and backup restore both refuse it.
+// ErrSchemaAhead is returned when schema_versions records a migration this
+// binary does not carry, i.e. a NEWER server migrated the database. Running an
+// older binary against it is the documented way to lose the database
+// (docs/deployment.md), so start-up and backup restore both refuse.
 var ErrSchemaAhead = errors.New("database schema is newer than this server")
 
-// schemaVersionsAheadOf returns the recorded migration filenames the given
-// set does not contain, sorted. A database with no schema_versions table yet
-// (pre-tracking, or a fresh file) has nothing ahead of it. Both start-up
-// (migrateFSCount) and the restore guard (CheckBackupSchemaAhead) compare
-// through it.
+// schemaVersionsAheadOf returns the recorded migration filenames the given set
+// lacks, sorted. A database with no schema_versions table has nothing ahead.
+// Start-up (migrateFSCount) and the restore guard (CheckBackupSchemaAhead)
+// both compare through it.
 func schemaVersionsAheadOf(versions []string, filenames []string) []string {
 	known := make(map[string]struct{}, len(filenames))
 	for _, name := range filenames {
@@ -70,13 +59,11 @@ func schemaAheadError(ahead []string) error {
 		ErrSchemaAhead, strings.Join(ahead, ", "))
 }
 
-// CheckBackupSchemaAhead opens the SQLite file at path read-only and reports
-// whether its schema_versions names migrations that are absent from the
-// running binary's embedded migration set — the database was migrated by a
-// NEWER server. The admin restore path uses it to refuse such a backup BEFORE
-// it replaces the live database. A missing schema_versions table (a
-// pre-tracking or corrupt file) returns no unknowns — integrity_check has
-// already rejected a file SQLite cannot read.
+// CheckBackupSchemaAhead opens the SQLite file at path read-only and returns
+// the migrations its schema_versions names that this binary lacks (a NEWER
+// server migrated it), so the admin restore refuses it before replacing the
+// live database. A missing schema_versions table returns none; integrity_check
+// has already rejected a file SQLite cannot read.
 func CheckBackupSchemaAhead(ctx context.Context, path string) ([]string, error) {
 	abs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -225,15 +212,11 @@ func sqlFilenames(fsys fs.FS) ([]string, error) {
 }
 
 // seedExistingDatabase creates schema_versions (if absent) and inserts all
-// migration filenames into it without executing them, atomically. This is
-// called once when upgrading a pre-tracking database.
-//
-// The CREATE TABLE runs inside the same transaction as the INSERTs — SQLite
-// DDL is transactional — so a failure or interruption partway through
-// leaves no schema_versions table behind at all, rather than an empty one.
-// An empty-but-present table would make the next MigrateFS call believe
-// tracking is already in place, permanently skip seeding, and replay every
-// migration against the live, already-populated database.
+// migration filenames without executing them, atomically, when upgrading a
+// pre-tracking database. The CREATE TABLE shares the INSERTs' transaction
+// (SQLite DDL is transactional): an interruption leaves no schema_versions
+// table, whereas an empty one would make the next MigrateFS skip seeding for
+// good and replay every migration against the populated database.
 func seedExistingDatabase(d *DB, filenames []string) error {
 	tx, err := d.writer.Begin()
 	if err != nil {
@@ -257,45 +240,40 @@ func seedExistingDatabase(d *DB, filenames []string) error {
 	return nil
 }
 
-// MigrateFS runs tracked migrations from the provided FS.
+// MigrateFS runs tracked migrations from the FS.
 //
-// Behaviour:
-//  1. If this is the first run with tracking on an existing database (no
-//     schema_versions table yet, but the "users" table already exists),
-//     atomically create schema_versions and seed it with every filename so
-//     none of them are re-executed. Creation and seeding happen in one
-//     transaction: a failure or interruption partway through leaves no
-//     schema_versions table behind, so the next run retries seeding instead
-//     of silently treating tracking as already in place.
-//  2. Otherwise, create schema_versions if absent (idempotent — the correct
-//     state for a fresh database is an empty tracking table) and apply any
-//     .sql file in lexicographic order that is not yet recorded.
+//  1. First run with tracking on an existing database (no schema_versions but
+//     a "users" table): atomically create schema_versions and seed every
+//     filename so none re-executes. One transaction, so an interruption leaves
+//     no table and the next run retries seeding.
+//  2. Otherwise create schema_versions if absent (idempotent; a fresh database
+//     gets an empty one) and apply, in lexicographic order, each .sql file not
+//     yet recorded.
 func MigrateFS(database *DB, fsys fs.FS) error {
 	_, err := migrateFSCount(database, fsys)
 	return err
 }
 
-// migrateFSCount is MigrateFS reporting how many migrations actually
-// executed, so Migrate can skip the boot-time ANALYZE when the schema did not
-// change. The seeding path reports 0 — it records filenames without running
-// any SQL.
+// migrateFSCount is MigrateFS reporting how many migrations executed, so
+// Migrate can skip the boot-time ANALYZE when the schema did not change. The
+// seeding path reports 0 since it runs no SQL.
 func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
-	// Determine tracking state before touching schema_versions at all — the
-	// seeding path below must be the one to create it, atomically with the
-	// seed rows, so do not call ensureSchemaVersions before this check.
+	// Determine tracking state before touching schema_versions: the seeding path
+	// must create it atomically with the seed rows, so ensureSchemaVersions must
+	// not run first.
 	svExists, err := schemaVersionsExists(database)
 	if err != nil {
 		return 0, err
 	}
 
-	// Collect filenames first — needed for both seeding and normal application.
+	// Filenames are needed for both seeding and normal application.
 	filenames, err := sqlFilenames(fsys)
 	if err != nil {
 		return 0, err
 	}
 
-	// Seeding path: schema_versions did not exist AND users table does, which
-	// means this is an existing database being upgraded to tracked migrations.
+	// Seeding path: schema_versions absent and users present means an existing
+	// database being upgraded to tracked migrations.
 	if !svExists {
 		existing, checkErr := isExistingDatabase(database)
 		if checkErr != nil {
@@ -306,18 +284,15 @@ func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 		}
 	}
 
-	// Non-seeding paths: schema_versions already exists, or this is a fresh
-	// database with no prior schema — either way, an idempotent create is
-	// the correct next step before applying migrations normally.
+	// Non-seeding paths: schema_versions exists, or the database is fresh; an
+	// idempotent create precedes normal application.
 	if err := ensureSchemaVersions(database); err != nil {
 		return 0, err
 	}
 
-	// Refuse a schema a newer server produced. migrateFSCount only
-	// looked at embedded files before, so an older binary booted silently on a
-	// newer database and could corrupt it. The manual rollback reversals each
-	// delete their own schema_versions row, so the supported path is not
-	// blocked by this.
+	// Refuse a schema a newer server produced, or an older binary would boot
+	// silently on it and could corrupt it. The manual rollback reversals delete
+	// their own schema_versions row, so the supported path is not blocked.
 	recorded, err := recordedSchemaVersions(database)
 	if err != nil {
 		return 0, err
@@ -354,18 +329,16 @@ func migrateFSCount(database *DB, fsys fs.FS) (int, error) {
 	}
 
 	// A boot with nothing to apply stays silent; a failed migration returned
-	// above, so the summary is only ever printed for a clean run.
+	// above, so the summary prints only for a clean run.
 	if appliedCount > 0 {
 		slog.Info("db: migrations applied", "count", appliedCount, "ms", totalElapsed.Milliseconds())
 	}
 	return appliedCount, nil
 }
 
-// applyMigration executes a single migration and records it. If the
-// migration contains multiple statements (e.g. several ALTER TABLE ADD
-// COLUMN), each is executed individually so that "duplicate column" errors
-// from a prior partial run can be skipped — the column already exists and
-// the intent is satisfied.
+// applyMigration executes a single migration and records it. A multi-statement
+// migration runs statement by statement so a "duplicate column" error from a
+// prior partial run can be skipped, the intent already being satisfied.
 func applyMigration(database *DB, name, rawSQL string) error {
 	stmts := splitStatements(rawSQL)
 
@@ -384,8 +357,8 @@ func applyMigration(database *DB, name, rawSQL string) error {
 		}
 	}
 
-	// Record the migration inside the same transaction so the migration
-	// and its tracking record are atomic.
+	// Record the migration in the same transaction, so it and its tracking row
+	// are atomic.
 	if _, execErr := tx.Exec(
 		"INSERT INTO schema_versions (version) VALUES (?)", name,
 	); execErr != nil {
@@ -430,9 +403,8 @@ func splitStatements(raw string) []string {
 			continue
 		}
 
-		// Detect BEGIN that opens a trigger body. The keyword appears at
-		// the end of a CREATE TRIGGER line (e.g. "... BEGIN") or on its
-		// own line inside a trigger definition.
+		// Detect BEGIN opening a trigger body: the keyword ends a CREATE TRIGGER
+		// line or stands on its own line inside the definition.
 		if strings.HasSuffix(upperTrimmed, " BEGIN") || upperTrimmed == "BEGIN" {
 			depth++
 			buf.WriteString(line)
@@ -451,9 +423,8 @@ func splitStatements(raw string) []string {
 		buf.WriteString(line)
 		buf.WriteString("\n")
 
-		// Check whether the accumulated buffer contains a semicolon to split on.
-		// We split the full buffer content, not just the current line, because a
-		// statement may span multiple lines before its terminating semicolon.
+		// Split the full buffer, not just the current line, because a statement may
+		// span lines before its terminating semicolon.
 		content := buf.String()
 		if strings.Contains(content, ";") {
 			parts := strings.Split(content, ";")

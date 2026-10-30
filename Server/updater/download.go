@@ -29,18 +29,17 @@ func (u *Updater) ValidateDownloadURL(url string) error {
 }
 
 // DownloadAndVerify downloads the release artifact from downloadURL, fetches
-// the checksum file, the detached binary signature, and a signed release
-// manifest, and verifies that the downloaded asset matches both the release
-// version and the pinned signing key. On Windows the asset is a single
-// executable; on Linux it is a tar.gz archive containing a "chatserver"
-// binary, which is extracted to destPath. On verification failure the
-// downloaded file is removed.
+// the checksum file, the detached binary signature and a signed release
+// manifest, and verifies the asset against both the release version and the
+// pinned signing key. On Windows the asset is a single executable; on Linux a
+// tar.gz containing a "chatserver" binary, extracted to destPath. On
+// verification failure the downloaded file is removed.
 //
-// It returns the hex SHA256 of the staged binary at destPath, derived from
-// the signed release manifest (on Linux, computed over the extracted bytes of
-// the manifest-verified archive). Callers that later execute the staged file
-// must re-verify it against this hash through an open handle
-// (OpenVerifiedBinary), never by path.
+// It returns the hex SHA256 of the staged binary at destPath, derived from the
+// signed manifest (on Linux, computed over the extracted bytes of the
+// manifest-verified archive). Callers that later execute the staged file must
+// re-verify it against this hash through an open handle (OpenVerifiedBinary),
+// never by path.
 func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL, destPath string) (string, error) {
 	if err := u.ValidateDownloadURL(downloadURL); err != nil {
 		return "", err
@@ -48,9 +47,8 @@ func (u *Updater) DownloadAndVerify(ctx context.Context, latestVersion, download
 	if err := u.ValidateDownloadURL(checksumURL); err != nil {
 		return "", fmt.Errorf("validating checksum URL: %w", err)
 	}
-	// The detached binary signature is consumed only by the Windows verify
-	// path; Linux integrity comes from the signed manifest + checksum, so a
-	// release without the .sig asset must not block the Linux path here.
+	// The detached signature is consumed only by the Windows verify path;
+	// Linux integrity comes from the signed manifest + checksum.
 	needSignature := runtime.GOOS == "windows"
 	if needSignature {
 		if err := u.ValidateDownloadURL(signatureURL); err != nil {
@@ -252,10 +250,10 @@ func extractChatserverFromTarGz(r io.Reader, destPath string) (string, error) {
 
 // serverDownloadAssetName returns the GitHub release asset file name for the
 // server binary on the given GOOS/GOARCH. Only the four published pairs
-// resolve; every other combination returns "" so the caller treats the update
-// as unavailable rather than installing a foreign-arch binary it cannot
-// execute. The pairs are matched whole — never by architecture or
-// OS alone — so adding an asset can never widen an unrelated one.
+// resolve; any other combination returns "" so the caller treats the update as
+// unavailable rather than installing a foreign-arch binary. Pairs are matched
+// whole, never by architecture or OS alone, so adding an asset cannot widen an
+// unrelated one.
 func serverDownloadAssetName(goos, goarch string) string {
 	switch {
 	case goos == "windows" && goarch == "amd64":
@@ -272,10 +270,8 @@ func serverDownloadAssetName(goos, goarch string) string {
 }
 
 // serverSignatureAssetName returns the detached-signature asset paired with
-// serverDownloadAssetName's result, or "" where no detached signature is
-// published. It is Windows-only: the Linux tarball path verifies through the
-// signed manifest and checksum instead, so requiring a signature there would
-// block Linux updates (see hasRequiredServerAssetsFor).
+// serverDownloadAssetName's result, or "" where none is published. It is
+// Windows-only; see hasRequiredServerAssetsFor.
 func serverSignatureAssetName(goos, goarch string) string {
 	if goos != "windows" {
 		return ""
@@ -370,12 +366,12 @@ func (u *Updater) downloadFile(parent context.Context, url, destPath string) err
 // within the stall timeout.
 var errDownloadStalled = errors.New("download stalled: no data received")
 
-// downloadHTTPClient returns the client for the large release asset. It is the
-// metadata client minus the whole-exchange Timeout, which net/http applies to
-// reading the body and would cut any download slower than that limit. It keeps
-// the metadata client's Transport (connect and response-header timeouts) and
-// CheckRedirect (the release-host check on every hop). The body is bounded by
-// the caller's context deadline and the stall watchdog instead.
+// downloadHTTPClient returns the client for the large release asset: the
+// metadata client minus its whole-exchange Timeout (which net/http applies to
+// reading the body and would cut any slow download). It keeps the Transport
+// (connect and response-header timeouts) and CheckRedirect (release-host check
+// on every hop); the body is bounded by the caller's deadline and the stall
+// watchdog.
 func (u *Updater) downloadHTTPClient() *http.Client {
 	c := *u.httpClient
 	c.Timeout = 0

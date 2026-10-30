@@ -14,9 +14,8 @@ import (
 // for), so the smoke has to turn it on to see what the binary embeds.
 const browserClientEnv = "OWNCORD_SERVER_BROWSER_CLIENT_ENABLED=true"
 
-// maxClientBody caps what the smoke reads of any browser-client response. The
-// index is a few KiB and the entry script well under a MiB; the cap only keeps
-// a misbehaving server from filling memory.
+// maxClientBody caps what the smoke reads of any browser-client response, only
+// to keep a misbehaving server from filling memory.
 const maxClientBody = 16 << 20
 
 // assetScriptPattern finds a hashed script under /assets/ in the index page.

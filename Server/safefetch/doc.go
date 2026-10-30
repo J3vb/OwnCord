@@ -2,8 +2,7 @@
 //
 // Every server-side fetch of content the server did not choose goes through a
 // Fetcher: the GIF proxy (Server/api/gif_handler.go) and the plugin `http`
-// host capability (Server/plugin/host_http.go). Both used to carry their own
-// partial version of this policy, and neither carried all of it.
+// host capability (Server/plugin/host_http.go).
 //
 // # What one fetch is bounded by
 //
@@ -33,30 +32,28 @@
 //     the process.
 //
 // The policy is documented as a contract in docs/trust-model.md, the desktop
-// preview destination policy, clauses 2 through 6. Clauses 1, 7 and 8
-// are the desktop broker's and are B7's.
+// preview destination policy, clauses 2 through 6; the rest are the desktop
+// broker's.
 //
 // # What is deliberately not here
 //
-// Aggregate cross-caller byte budgets and byte-weighted cache eviction are
-// B7's, not this package's. The server's outbound surface is one hard-coded
-// host plus an operator allowlist that defaults to empty, so there is close to
-// nothing to aggregate and no test of an aggregate budget here could fail
-// honestly. The interface is shaped so B7 adds them without a rewrite:
+// Aggregate cross-caller byte budgets and byte-weighted cache eviction are not
+// part of this package: the server's outbound surface is one hard-coded host
+// plus an operator allowlist that defaults to empty, so there is nothing to
+// aggregate. The interface leaves room to add them without a rewrite:
 //
 //   - every fetch passes one admission point, Fetcher.Fetch's gate acquire,
-//     which is where a byte budget is charged and refunded;
-//   - every byte of every body passes one accounting point, limitedReader,
-//     which already counts what it lets through;
+//     where a byte budget would be charged and refunded;
+//   - every byte of every body passes one accounting point, limitedReader;
 //   - Policy carries the per-fetch numbers, so a process-wide budget is a new
 //     field plus a second gate rather than a change to any call site.
 //
-// This package fills no cache, so cache partitioning and expiry are not in
-// scope here either; they belong to whatever B7 puts a cache in front of.
+// This package fills no cache, so cache partitioning and expiry are out of
+// scope too.
 //
 // # Using it
 //
-// Build one Fetcher per call site at start-up and share it — the concurrency
+// Build one Fetcher per call site at start-up and share it; the concurrency
 // cap and the connection pool both live in it:
 //
 //	var fetcher = safefetch.MustNew(safefetch.Policy{

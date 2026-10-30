@@ -13,8 +13,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/updater"
 )
 
-// ─── Wizard payload ──────────────────────────────────────────────────────────
-
 // setupWizardRequest is the optional "wizard" object on POST /api/setup.
 // Every field is a pointer: absent means "keep the current/default value".
 type setupWizardRequest struct {
@@ -77,8 +75,6 @@ func wizardPortRefusal(wr *setupWizardRequest, running *config.Config) error {
 	return nil
 }
 
-// ─── Validation ──────────────────────────────────────────────────────────────
-
 var validTLSModes = map[string]struct{}{
 	"self_signed": {}, "acme": {}, "manual": {}, "off": {},
 }
@@ -103,12 +99,10 @@ func validateWizard(wr *setupWizardRequest) error {
 // server reads live: the display name and the message of the day.
 //
 // It uses the fixpoint sanitizer (service.SanitizeText), not a bare
-// bluemonday.StrictPolicy().Sanitize call: bluemonday's bare Sanitize HTML-escapes
-// survivors (' -> &#39;, & -> &amp;, " -> &#34;), which would store these
-// fields differently from how the admin Settings page's handlePatchSettings
-// stores the exact same keys (no sanitizer at all). See setup_handler.go's
-// identical treatment of the username field, and service.SanitizeText's doc
-// comment.
+// bluemonday.StrictPolicy().Sanitize, which HTML-escapes survivors (' ->
+// &#39;) and would store these fields differently from the admin Settings
+// page's handlePatchSettings (no sanitizer at all). See setup_handler.go's
+// treatment of the username field.
 func wizardValidateIdentity(wr *setupWizardRequest) error {
 	if wr.RegistrationMode != nil {
 		mode, ok := service.ParseRegistrationMode(*wr.RegistrationMode)
@@ -208,16 +202,12 @@ func validateHostname(h string) error {
 	return nil
 }
 
-// ─── Applying the wizard ─────────────────────────────────────────────────────
-
 // wizardSettingUpdates maps the wizard payload onto the settings rows it
 // writes. server_name, motd and registration_mode are read live by the server;
-// max_upload_bytes and voice_quality are written so the Settings page shows
-// values consistent with what the wizard put in config.yaml.
-//
-// This is the mapping only — SetupService.ApplyWizardSettings commits the
-// result in one transaction, so a partial write cannot leave the Settings page
-// showing values the wizard never applied.
+// max_upload_bytes and voice_quality are written so the Settings page matches
+// what the wizard put in config.yaml. This is the mapping only;
+// SetupService.ApplyWizardSettings commits it in one transaction, so a partial
+// write cannot leave the Settings page showing values the wizard never applied.
 func wizardSettingUpdates(wr *setupWizardRequest) map[string]string {
 	updates := map[string]string{}
 	if wr.ServerName != nil {
@@ -280,13 +270,13 @@ func buildConfigPatch(wr *setupWizardRequest, running *config.Config) config.Pat
 }
 
 // wizardOverrides maps the wizard payload onto config-overrides.json keys, for
-// a container where config.yaml is a read-only mount. Only a value that
-// differs from running is included, so config.yaml stays authoritative for
-// everything the owner did not change, and a key an OWNCORD_* variable pins is
-// never written (it would lose at the next boot). server.name is not included:
-// the settings table owns it. The generated LiveKit credentials are included
-// only when base, the configuration with no credential generation, has neither half,
-// which is Patch's rule at config/save.go re-expressed; values are never
+// a container where config.yaml is a read-only mount. Only a value that differs
+// from running is included, so config.yaml stays authoritative for everything
+// the owner did not change, and a key an OWNCORD_* variable pins is never
+// written (it would lose at the next boot). server.name is not included: the
+// settings table owns it. The generated LiveKit credentials are included only
+// when base (the configuration with no credential generation) has neither
+// half, which is Patch's rule at config/save.go re-expressed. Values are never
 // logged.
 //
 // The second result names the keys the wizard chose a new value for but an
@@ -395,8 +385,6 @@ func patchedConfigKeys(wr *setupWizardRequest) string {
 	keys = append(keys, "voice credentials (persisted if unset)")
 	return strings.Join(keys, ", ")
 }
-
-// ─── Restart decision ────────────────────────────────────────────────────────
 
 // wizardChangesRunningConfig reports whether the wizard set any startup-only
 // value to something different from what this process booted with. Only those
