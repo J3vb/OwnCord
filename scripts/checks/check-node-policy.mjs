@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const MANIFESTS = ["package.json", "Client/package.json", "tools/mcp-introspect/package.json"];
 const NPMRCS = [".npmrc", "Client/.npmrc", "tools/mcp-introspect/.npmrc"];

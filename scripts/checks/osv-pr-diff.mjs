@@ -2,8 +2,8 @@
 // Pull-request half of ci.yml's Supply-chain Scan: fail only on advisories the
 // PR's own lockfile changes bring in.
 //
-//   node scripts/osv-pr-diff.mjs <base-sha>
-//   node --test scripts/osv-pr-diff.test.mjs
+//   node scripts/checks/osv-pr-diff.mjs <base-sha>
+//   node --test scripts/checks/osv-pr-diff.test.mjs
 //
 // The plain osv-scanner step fails on every known advisory, so a new advisory
 // published against a package already on dev turns every PR that touches a
@@ -109,7 +109,7 @@ function baseLockfiles(baseSha) {
 function main() {
   const baseSha = process.argv[2];
   if (!baseSha) {
-    process.stderr.write("usage: node scripts/osv-pr-diff.mjs <base-sha>\n");
+    process.stderr.write("usage: node scripts/checks/osv-pr-diff.mjs <base-sha>\n");
     process.exit(2);
   }
   const head = scan(LOCKFILES);

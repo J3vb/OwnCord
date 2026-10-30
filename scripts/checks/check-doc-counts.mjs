@@ -2,8 +2,8 @@
 // Fail when an explicitly current summary states a count the ledger contradicts
 // (the automated half of G-04).
 //
-//   node scripts/check-doc-counts.mjs
-//   node --test scripts/check-doc-counts.test.mjs
+//   node scripts/checks/check-doc-counts.mjs
+//   node --test scripts/checks/check-doc-counts.test.mjs
 //
 // Scope, deliberately small: this counts ledger statuses and compares them to
 // the numbers current summaries assert. It is not a document-status framework,
@@ -41,7 +41,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // Explicit allow-list of current guidance and summaries whose counts track
 // the LIVE ledger. Adding a current summary means opting its document in here;
@@ -147,7 +147,7 @@ function main() {
     const p = join(ROOT, rel);
     if (!existsSync(p)) {
       failures.push(
-        `${rel}: watched file does not exist — fix the list in scripts/check-doc-counts.mjs`,
+        `${rel}: watched file does not exist — fix the list in scripts/checks/check-doc-counts.mjs`,
       );
       continue;
     }

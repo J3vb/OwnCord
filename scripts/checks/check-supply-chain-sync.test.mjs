@@ -3,7 +3,7 @@
 // not the other would leave the weekly run scanning with a different tool or
 // a shorter list, so this fails Repository Hygiene when they differ.
 //
-//   node --test scripts/check-supply-chain-sync.test.mjs
+//   node --test scripts/checks/check-supply-chain-sync.test.mjs
 //
 // Text-level like check-workflow-guards.mjs: no YAML parser among the root
 // devDependencies, and these are line comparisons.
@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 
 // The body of one job under `jobs:`, up to the next 2-space-indented key.

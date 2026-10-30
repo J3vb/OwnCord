@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { auditArtifactPathLists, auditReleaseEnvironment } from "./check-release-environment.mjs";
 
 const realReleaseWorkflow = readFileSync(
-  join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), ".github/workflows/release.yml"),
+  join(
+    resolve(dirname(fileURLToPath(import.meta.url)), "..", ".."),
+    ".github/workflows/release.yml",
+  ),
   "utf8",
 );
 

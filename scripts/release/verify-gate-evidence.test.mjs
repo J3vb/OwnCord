@@ -10,7 +10,7 @@ import {
   classifyRuns,
 } from "./verify-gate-evidence.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PROTECTION_SCRIPT = "docs/plans/b0-dev-branch-protection.sh";
 
 // Parsing the real protection script, not a fixture: if its shape changes,

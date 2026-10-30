@@ -13,11 +13,11 @@
 //     downloads, but not beside its siblings, and the steps that consume it —
 //     the checksum and `attest-sbom` steps — look where it is not.
 //
-//   node scripts/check-release-environment.mjs
-//   node --test scripts/check-release-environment.test.mjs
+//   node scripts/release/check-release-environment.mjs
+//   node --test scripts/release/check-release-environment.test.mjs
 //
 // Deliberately text-level, not YAML-parsed — same tradeoff as
-// scripts/check-workflow-guards.mjs: no YAML parser among the root
+// scripts/checks/check-workflow-guards.mjs: no YAML parser among the root
 // devDependencies, and this is a presence/shape check, not full semantics.
 //
 // Gated jobs are DERIVED from the file (any job block containing `push: true`
@@ -30,7 +30,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const RELEASE_WORKFLOW = ".github/workflows/release.yml";
 
 // A job block publishes something if its body does either of these. Extend

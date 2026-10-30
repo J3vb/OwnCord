@@ -206,7 +206,7 @@ const DEPS_FILES = new Set([
   "tools/mcp-introspect/package-lock.json",
   "osv-scanner.toml", // the scan's ignore baseline
   "Client/src-tauri/deny.toml", // cargo-deny's policy
-  "scripts/osv-pr-diff.mjs", // the PR verdict of the osv-scanner step
+  "scripts/checks/osv-pr-diff.mjs", // the PR verdict of the osv-scanner step
 ]);
 
 /**

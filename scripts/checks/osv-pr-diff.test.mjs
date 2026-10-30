@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { LOCKFILES, advisoryKeys, newAdvisories } from "./osv-pr-diff.mjs";
 
-const CI = fileURLToPath(new URL("../.github/workflows/ci.yml", import.meta.url));
-const SELECT = fileURLToPath(new URL("./ci-select.mjs", import.meta.url));
+const CI = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
+const SELECT = fileURLToPath(new URL("../ci-select.mjs", import.meta.url));
 
 const pkg = (ecosystem, name, version, ...groups) => ({
   package: { ecosystem, name, version },
@@ -83,5 +83,5 @@ test("the lockfile list matches ci.yml's osv-scanner step", () => {
 });
 
 test("a change to this script selects the Supply-chain Scan", () => {
-  assert.match(readFileSync(SELECT, "utf8"), /"scripts\/osv-pr-diff\.mjs"/);
+  assert.match(readFileSync(SELECT, "utf8"), /"scripts\/checks\/osv-pr-diff\.mjs"/);
 });

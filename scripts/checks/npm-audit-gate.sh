@@ -2,8 +2,8 @@
 #
 # The shipped-dependency advisory gate, minus the npm registry's uptime.
 #
-#   bash scripts/npm-audit-gate.sh
-#   bash scripts/npm-audit-gate.sh --selftest
+#   bash scripts/checks/npm-audit-gate.sh
+#   bash scripts/checks/npm-audit-gate.sh --selftest
 #
 # `npm audit` exits 1 for two unrelated reasons: it found an advisory at or
 # above --audit-level, and it could not reach the audit endpoint. CI ran the

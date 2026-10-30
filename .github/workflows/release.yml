@@ -87,7 +87,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node scripts/verify-gate-evidence.mjs "${{ github.sha }}"
+        run: node scripts/release/verify-gate-evidence.mjs "${{ github.sha }}"
 
   # The release rehearsal (upgrade-rehearsal job below) skips the failure and
   # recovery drills, so the nightly is their only run — and from 2026-10-02 it
@@ -115,7 +115,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           ALLOW_RED_NIGHTLY: ${{ inputs.allow_red_nightly == true || vars.RELEASE_ALLOW_RED_NIGHTLY == 'true' }}
-        run: node scripts/verify-nightly-drills.mjs
+        run: node scripts/release/verify-nightly-drills.mjs
 
   # Five betas shipped while the plan index still said the beta launch was next:
   # nothing tied a tag to a status record. docs/STATUS.md is that record, and
@@ -135,7 +135,7 @@ jobs:
           node-version: 26
           package-manager-cache: false
       - name: The tagged version must have a row in docs/STATUS.md
-        run: node scripts/verify-release-status.mjs "$RELEASE_TAG"
+        run: node scripts/release/verify-release-status.mjs "$RELEASE_TAG"
 
   # The v1.1.0-alpha.4 release shipped clients still versioned 1.1.0-alpha.3
   # because the client manifests weren't bumped before tagging — deployed

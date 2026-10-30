@@ -65,7 +65,7 @@ a passing check.
   `Client/.nvmrc` is the source of truth.
   - Each `package.json` has an `engines` block, and each package's `.npmrc`
     sets `engine-strict=true`. So `npm ci` fails on a different major version.
-  - `node scripts/check-node-policy.mjs` fails the Repository Hygiene job when
+  - `node scripts/checks/check-node-policy.mjs` fails the Repository Hygiene job when
     any other place states a different version.
 - **Rust 1.98.1** for the Tauri client, with `clippy` and `rustfmt`.
   `Client/src-tauri/rust-toolchain.toml` pins it, and rustup installs it for
@@ -203,7 +203,7 @@ The GStreamer runtime libraries already come with WebKitGTK. The `.deb`
 declares them and the camera plugins, and the AppImage bundles its own. Only
 the `-dev` headers are an extra build-time need. They matter only on the same
 Linux Rust builds that compile `webrtc-sys`. Every CI Linux job that builds the
-client installs them, and `scripts/check-workflow-guards.mjs` fails a workflow
+client installs them, and `scripts/checks/check-workflow-guards.mjs` fails a workflow
 whose Tauri build step leaves them out.
 
 **Tests**
@@ -737,7 +737,7 @@ on 2026-08-05.
     `.npmrc` sets `engine-strict=true`, so a different major fails the install
     instead of warning.
   - Three things stop those Node statements drifting apart. `Client/.nvmrc` is
-    the single source of truth. `node scripts/check-node-policy.mjs` fails the
+    the single source of truth. `node scripts/checks/check-node-policy.mjs` fails the
     Repository Hygiene job when another statement disagrees. And the
     `node-policy` CI job installs a wrong major on purpose to prove all three
     roots refuse it.

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Fail the release when the latest nightly upgrade rehearsal is not green.
 //
-//   node scripts/verify-nightly-drills.mjs        # assert, using $GITHUB_TOKEN
-//   node --test scripts/verify-nightly-drills.test.mjs
+//   node scripts/release/verify-nightly-drills.mjs        # assert, using $GITHUB_TOKEN
+//   node --test scripts/release/verify-nightly-drills.test.mjs
 //
 // release.yml calls upgrade-rehearsal.yml with `release: true`, which skips the
 // failure and recovery drills, so the drills only ever run on the nightly. From

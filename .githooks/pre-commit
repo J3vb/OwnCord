@@ -110,8 +110,8 @@ fi
 # watched summaries (WATCHED in the script) with the findings ledger.
 if printf '%s\n' "$changed" | grep -qE '^(docs/|CHANGELOG\.md$|README\.md$|CLAUDE\.md$|\.superpowers/findings-ledger\.json$)'; then
     if command -v node >/dev/null 2>&1; then
-        node scripts/check-doc-counts.mjs \
-            || fail "a doc states a ledger count the ledger contradicts — update the number named above (or the ledger) and re-stage; check with 'node scripts/check-doc-counts.mjs'"
+        node scripts/checks/check-doc-counts.mjs \
+            || fail "a doc states a ledger count the ledger contradicts — update the number named above (or the ledger) and re-stage; check with 'node scripts/checks/check-doc-counts.mjs'"
     else
         printf 'pre-commit: WARNING: node not installed; skipping the doc-counts check. CI will run it.\n' >&2
     fi

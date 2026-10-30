@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { PLANNED_PATHS, WATCHED, citedPaths, evaluate, repoPath } from "./check-doc-citations.mjs";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 const realDoc = () => readFileSync(join(ROOT, WATCHED[0]), "utf8");
 const onDisk = (p) => existsSync(join(ROOT, p));

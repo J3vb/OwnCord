@@ -100,10 +100,10 @@ function fixture(t) {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, text);
   };
-  write("scripts/check-doc-counts.mjs", "");
+  write("scripts/checks/check-doc-counts.mjs", "");
   copyFileSync(
     new URL("./check-doc-counts.mjs", import.meta.url),
-    join(root, "scripts/check-doc-counts.mjs"),
+    join(root, "scripts/checks/check-doc-counts.mjs"),
   );
   const ledger = { findings: [{ status: "fixed" }, { status: "open" }] };
   const writeLedger = () => write(".superpowers/findings-ledger.json", JSON.stringify(ledger));
@@ -111,7 +111,9 @@ function fixture(t) {
   for (const rel of CURRENT) write(rel, "Current ledger: 1 fixed / 1 open = 2\n");
   for (const rel of DATED) write(rel, "Measured 2026-08-25: 1 fixed / 1 open = 2\n");
   const run = () =>
-    spawnSync(process.execPath, [join(root, "scripts/check-doc-counts.mjs")], { encoding: "utf8" });
+    spawnSync(process.execPath, [join(root, "scripts/checks/check-doc-counts.mjs")], {
+      encoding: "utf8",
+    });
   return { root, write, ledger, writeLedger, run };
 }
 

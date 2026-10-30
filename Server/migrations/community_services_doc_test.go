@@ -24,7 +24,7 @@ import (
 // the document's own shape.
 //
 // The one part that was NOT about migrations — that every repository path the
-// document cites still exists — moved to scripts/check-doc-citations.mjs, which
+// document cites still exists — moved to scripts/checks/check-doc-citations.mjs, which
 // runs in the unconditional `Docs & Ledger Consistency` job. It had to move:
 // the paths cited are mostly under Client/ and docs/, and since `dfa5f66a` a
 // diff confined to those selects no server job (scripts/ci-select.mjs), so a
