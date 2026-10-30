@@ -31,6 +31,10 @@ const (
 
 	searchRateLimitPerMinute = 30
 
+	// mediaRateLimitPerMinute covers the gallery's pages and month counts;
+	// a fast scroll asks for a page every few seconds.
+	mediaRateLimitPerMinute = 120
+
 	livekitProxyRateLimitPerMinute = 30
 
 	clientUpdateRateLimitPerMinute = 30
@@ -44,6 +48,10 @@ const (
 	// gifRateLimitPerMinute; it exists to bound abuse of the operator's Klipy
 	// quota.
 	gifRateLimitPerMinute = 30
+
+	// externalRateLimitPerMinute is per IP: a GIF picker page asks for 20
+	// images and a busy channel a few dozen, each an outbound fetch.
+	externalRateLimitPerMinute = 300
 
 	// gifFavoritesRateLimitPerMinute is looser than the proxy's because there is
 	// no upstream call.

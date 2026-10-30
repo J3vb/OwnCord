@@ -169,11 +169,8 @@ describe("screen share FPS", () => {
   });
 
   describe("screenShareDegradation", () => {
-    it("is balanced only at 120 fps", () => {
-      expect(screenShareDegradation(120)).toBe("balanced");
-      for (const fps of [5, 30, 60]) {
-        expect(screenShareDegradation(fps)).toBe("maintain-resolution");
-      }
+    it("keeps the frame rate", () => {
+      expect(screenShareDegradation()).toBe("maintain-framerate");
     });
   });
 
@@ -271,6 +268,7 @@ describe("videoLayerOptions", () => {
   describe("shareMotionPolicy test arm", () => {
     const QUALITIES = ["low", "medium", "high", "source"] as const;
     const ARMS = [
+      ["detail-resolution", "detail", "maintain-resolution"],
       ["detail-balanced", "detail", "balanced"],
       ["detail-framerate", "detail", "maintain-framerate"],
       ["motion-resolution", "motion", "maintain-resolution"],
@@ -278,17 +276,20 @@ describe("videoLayerOptions", () => {
       ["motion-framerate", "motion", "maintain-framerate"],
     ] as const;
 
-    it("legacy leaves capture options and degradation exactly as before", () => {
+    it("legacy is the smooth-motion default: motion hint, keep frame rate", () => {
       for (const quality of QUALITIES) {
         const opts = getScreenShareCaptureOptions(quality, 30);
         expect(opts.contentHint).toBe(SCREENSHARE_PRESETS[quality].contentHint);
+        expect(screenVideoPublishOptions("vp8", quality, 30).degradationPreference).toBe(
+          "maintain-framerate",
+        );
+      }
+      for (const quality of ["medium", "high", "source"] as const) {
+        expect(getScreenShareCaptureOptions(quality, 60).contentHint).toBe("motion");
       }
       expect(getScreenShareCaptureOptions("low", 30).contentHint).toBeUndefined();
-      expect(screenVideoPublishOptions("vp8", "high", 30).degradationPreference).toBe(
-        "maintain-resolution",
-      );
       expect(screenVideoPublishOptions("vp8", "source", 120).degradationPreference).toBe(
-        "balanced",
+        "maintain-framerate",
       );
     });
 
@@ -311,8 +312,9 @@ describe("videoLayerOptions", () => {
     it("an unknown stored value behaves as legacy", () => {
       setPolicy("sideways");
       expect(getScreenShareCaptureOptions("low", 30).contentHint).toBeUndefined();
+      expect(getScreenShareCaptureOptions("high", 30).contentHint).toBe("motion");
       expect(screenVideoPublishOptions("vp8", "medium", 30).degradationPreference).toBe(
-        "maintain-resolution",
+        "maintain-framerate",
       );
     });
   });

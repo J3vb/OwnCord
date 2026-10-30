@@ -153,6 +153,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	MountInviteRoutes(r, svc)
 
 	mountGIF(r, cfg, svc, limiter)
+	// Link previews and outside images for the browser client, which has no
+	// native broker of its own. Only mounted when the browser client is.
+	mountExternalContent(r, cfg, svc.Sessions, limiter)
 
 	// Web Push subscription storage, mounted unconditionally; with push.enabled
 	// false every route answers 503 PUSH_DISABLED after authentication.
@@ -373,6 +376,7 @@ func routerChannelRoutes(r chi.Router, svc *service.Services, limiter *auth.Rate
 	MountChannelRoutes(r, svc, limiter, cfg.Server.TrustedProxies, hub)
 	MountNSFWRoutes(r, svc, hub)
 	MountThreadRoutes(r, svc)
+	MountChannelMediaRoutes(r, svc, limiter, cfg.Server.TrustedProxies)
 }
 
 // routerReportRoutes mounts report intake, the reporter's status view, the

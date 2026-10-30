@@ -4,7 +4,8 @@
 // inert, so the app reaches no host and stores nothing rather than half-work.
 // The rest: notifications (Web Notification API, also secure-context
 // only), file save (a download), logs (a memory ring), invite deep links
-// (`?invite=`), external content (refused) and the URL opener (a new tab) are
+// (`?invite=`), external content (through the server's broker, secure context
+// only) and the URL opener (a new tab) are
 // browser adapters, one file each; every other member either refuses (a rejected promise, or the typed
 // "unavailable" answer its contract defines) or does nothing, exactly as its
 // contract allows, and the four contracts a Settings control sits on say so
@@ -23,6 +24,7 @@ import type {
   Autostart,
   CredentialStore,
   DevTools,
+  ExternalContentBroker,
   GameDetector,
   MediaDetector,
   GlobalShortcuts,
@@ -44,7 +46,7 @@ import type {
 import type { SocketConnection } from "../contracts/socket";
 import { credentials as browserCredentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
-import { externalContent } from "./externalContent";
+import { externalContent as browserExternalContent } from "./externalContent";
 import { fileSaver } from "./fileSave";
 import { http as browserHttp } from "./http";
 import { identity as browserIdentity } from "./identity";
@@ -116,6 +118,11 @@ const globalShortcuts: GlobalShortcuts = {
   configurePortal: () => Promise.reject(new UnsupportedKeysError()),
   onStatusChange: inertUnsubscribe,
   onShortcut: inertUnsubscribe,
+};
+
+const inertExternalContent: ExternalContentBroker = {
+  preview: async () => ({ ok: false, failure: "unavailable" }),
+  image: async () => ({ ok: false, failure: "unavailable" }),
 };
 
 const inertHttp: HttpClient = {
@@ -196,6 +203,7 @@ const inertSocket: SocketTransport = { create: createConnection };
 /** The members that run only in a secure context. */
 interface SecureMembers {
   readonly credentials: CredentialStore;
+  readonly externalContent: ExternalContentBroker;
   readonly http: HttpClient;
   readonly identity: IdentityStore;
   readonly notifier: Notifier;
@@ -214,6 +222,7 @@ function isSecurePage(): boolean {
 const secureMembers: SecureMembers = isSecurePage()
   ? {
       credentials: browserCredentials,
+      externalContent: browserExternalContent,
       http: browserHttp,
       identity: browserIdentity,
       notifier: browserNotifier,
@@ -224,6 +233,7 @@ const secureMembers: SecureMembers = isSecurePage()
     }
   : {
       credentials: inertCredentials,
+      externalContent: inertExternalContent,
       http: inertHttp,
       identity: inertIdentity,
       notifier: inertNotifier,
@@ -288,7 +298,6 @@ export const browser: Platform = {
   autostart,
   deepLinks,
   devTools,
-  externalContent,
   fileSaver,
   gameDetector,
   mediaDetector,

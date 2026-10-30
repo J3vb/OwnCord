@@ -434,6 +434,7 @@ export const settingsText = defineCatalog("settings", {
   "logs.shareMode": "Test mode",
   "logs.shareModeDesc": "For testing only. Takes effect the next time you share.",
   "logs.shareMode.legacy": "Normal (default)",
+  "logs.shareMode.detail-resolution": "Sharp text, keep resolution",
   "logs.shareMode.detail-balanced": "Sharp text, smooth fallback",
   "logs.shareMode.detail-framerate": "Sharp text, keep frame rate",
   "logs.shareMode.motion-resolution": "Smooth motion, keep resolution",

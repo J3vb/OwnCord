@@ -89,4 +89,8 @@ jobs:
         run: osv-scanner --version && cargo-deny --version
 
       - name: Check the Rust dependency policy (cargo-deny)
-        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check bans licenses sources
+
+      # Fatal here: this scan is where a new advisory on dev is reported.
+      - name: Check Rust advisories (cargo-deny)
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check advisories

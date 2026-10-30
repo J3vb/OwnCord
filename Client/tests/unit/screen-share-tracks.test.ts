@@ -935,8 +935,7 @@ describe("enableScreenshare", () => {
     expect(videoOpts).toMatchObject({
       simulcast: false,
       screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 120 },
-      // M-2: lower the resolution a little before halving the frame rate.
-      degradationPreference: "balanced",
+      degradationPreference: "maintain-framerate",
     });
     expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
   });
@@ -953,11 +952,11 @@ describe("enableScreenshare", () => {
     const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(videoOpts).toMatchObject({
       screenShareEncoding: { maxFramerate: 60 },
-      degradationPreference: "maintain-resolution",
+      degradationPreference: "maintain-framerate",
     });
   });
 
-  it("publishes 30 and 60 fps shares keeping their resolution", async () => {
+  it("publishes 30 and 60 fps shares keeping their frame rate", async () => {
     for (const fps of [30, 60]) {
       loadPref.mockImplementation((key: string) =>
         key === "screenShareQuality" ? "high" : key === "screenShareFps" ? fps : "",
@@ -970,7 +969,7 @@ describe("enableScreenshare", () => {
       await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
 
       expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
-        degradationPreference: "maintain-resolution",
+        degradationPreference: "maintain-framerate",
       });
       const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
       expect(audioOpts).not.toHaveProperty("degradationPreference");
@@ -1880,7 +1879,7 @@ describe("video codec", () => {
     expect(encodingInfo).toHaveBeenCalledTimes(1);
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
       videoCodec: "h264",
-      degradationPreference: "balanced",
+      degradationPreference: "maintain-framerate",
     });
   });
 

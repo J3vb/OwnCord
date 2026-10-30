@@ -170,6 +170,8 @@ type MessageService struct {
 	sticker StickerStore
 	// threads reads a forum post's thread for a retry; nil disables forum posts.
 	threads ThreadStore
+	// media reads a channel's media gallery; nil disables it.
+	media MediaStore
 }
 
 // SetMessageRequests wires the first-contact gate (service.New() calls it once);
@@ -209,6 +211,7 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 	s.sticker, _ = st.(StickerStore)
 	s.threads, _ = st.(ThreadStore)
 	s.mentionIDs, _ = st.(MentionIDStore)
+	s.media, _ = st.(MediaStore)
 	return s
 }
 

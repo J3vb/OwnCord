@@ -21,9 +21,8 @@
  *
  * One more switch is not about viewers: MediaCapabilities can say hardware for
  * H.264 while WebRTC falls back to OpenH264 when the encoder starts (a
- * 3440x1440 frame the GPU refuses). OpenH264 is single-threaded and the
- * share's maintain-resolution degradation then holds the size and drops to a
- * few fps. So a few seconds after an H.264 screen share goes live off Linux,
+ * 3440x1440 frame the GPU refuses). OpenH264 is single-threaded, so the
+ * share either drops to a few fps or shrinks to a blur to keep up. So a few seconds after an H.264 screen share goes live off Linux,
  * a sender sample names the encoder (once more if it has no name yet); an
  * OpenH264 one, even on only a lower simulcast layer, republishes the share as
  * VP8 and that share stays VP8 until it ends.

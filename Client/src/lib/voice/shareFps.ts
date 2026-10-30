@@ -2,8 +2,8 @@
  * The screen share frame rates offered beside the default (each quality's own
  * rate). 120 is hidden for now: WebView2's screen capture delivers about
  * 60 fps whatever is asked, so a 120 fps share only cost bitrate. Its handling
- * stays in place (the picker's monitor gate, the 120 fps degradation and
- * bitrate rules) for when a capture path that reaches 120 exists.
+ * stays in place (the picker's monitor gate and the 120 fps bitrate and
+ * simulcast rules) for when a capture path that reaches 120 exists.
  */
 
 /** Whether 120 fps is offered. */

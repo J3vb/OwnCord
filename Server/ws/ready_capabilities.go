@@ -10,6 +10,7 @@ import "github.com/J3vb/OwnCord/Server/service"
 // about 1 KB per ready (TestWriteReady_AllocatesAFifthOfTheRoster). Fields stay
 // in key order so the encoded bytes match what the map produced.
 type readyCapabilitiesPayload struct {
+	ChannelMedia              bool  `json:"channel_media"` // GET /api/v1/channels/{id}/media and /media/months
 	DMPrivacy                 bool  `json:"dm_privacy"`
 	Forums                    bool  `json:"forums"`             // forum_post_create and a forum's posts
 	GameActivity              bool  `json:"game_activity"`      // activity_update, presence.activity and ready.activities; false while an admin has it off
@@ -31,6 +32,7 @@ type readyCapabilitiesPayload struct {
 
 func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity bool) readyCapabilitiesPayload {
 	return readyCapabilitiesPayload{
+		ChannelMedia:              true,
 		DMPrivacy:                 true,
 		Forums:                    forums,
 		GameActivity:              gameActivity,

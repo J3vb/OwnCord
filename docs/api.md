@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 237 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 241 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -140,6 +140,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/blocks/{userId}`                                            |
 | PUT     | `/api/v1/blocks/{userId}`                                            |
 | GET     | `/api/v1/channels/`                                                  |
+| GET     | `/api/v1/channels/{id}/media`                                        |
+| GET     | `/api/v1/channels/{id}/media/months`                                 |
 | GET     | `/api/v1/channels/{id}/messages`                                     |
 | GET     | `/api/v1/channels/{id}/messages/around/{messageId}`                  |
 | POST    | `/api/v1/channels/{id}/messages/purge`                               |
@@ -171,6 +173,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/emoji/`                                                     |
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
+| GET     | `/api/v1/external/image`                                             |
+| GET     | `/api/v1/external/preview`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
 | POST    | `/api/v1/files/{id}/link`                                            |
 | GET     | `/api/v1/files/{id}/thumb`                                           |
@@ -1498,6 +1502,43 @@ Get all pinned messages for a channel.
 #### Response 200 OK
 
 Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (messages pinned before migration 056 have no pin time and sort last). At most 1000 pins are returned; `has_more` is `true` only when the channel holds more and the list was truncated.
+
+---
+
+### GET /api/v1/channels/{id}/media
+
+One page of the files posted in a channel, for the channel's media gallery. Only attachments of live (not deleted) messages appear; media from users the caller blocked is left out. Rate-limited with the `media:` bucket (120 requests a minute, shared with `/media/months`).
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel (the same gate as the history, checked on every page)
+
+| Query    | Description                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `kind`   | `media` (default: `image/*` and `video/*`) or `files` (everything else, voice messages included)                         |
+| `q`      | Keeps file names containing this text (ASCII case-insensitive, matched literally), at most 100 characters                |
+| `from`   | Keeps files posted by this user id                                                                                       |
+| `order`  | `newest` (default) or `oldest`, by message                                                                               |
+| `month`  | `YYYY-MM` in `tz`: newest-first starts at the end of that month, oldest-first at its start. Ignored when `cursor` is set |
+| `tz`     | IANA time zone for `month`; empty means UTC                                                                              |
+| `cursor` | The previous page's `next_cursor`                                                                                        |
+| `limit`  | Page size, default 60, at most 100                                                                                       |
+
+#### Response 200 OK
+
+`{ "items": [ { "attachment": Attachment, "message_id": 123, "user": { "id", "username", "avatar" }, "timestamp": "2026-10-30 05:00:00" } ], "next_cursor": "123_<attachment id>" }`. `attachment` has the same shape as a message's attachments. `next_cursor` is `""` on the last page. The cursor holds the last item's message id and attachment id, so files posted while a viewer pages never repeat or shift a page; several files of one message keep a stable order. `400 BAD_REQUEST` for a malformed query, `403 FORBIDDEN` without read, `404 NOT_FOUND` for an unknown channel.
+
+---
+
+### GET /api/v1/channels/{id}/media/months
+
+How many items each calendar month holds, for the gallery's month scrubber. Takes `kind`, `q`, `from` and `tz` as above.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel
+
+#### Response 200 OK
+
+`{ "months": [ { "month": "2026-10", "count": 42 } ] }`, newest month first, months counted in `tz` (UTC when empty).
 
 ---
 

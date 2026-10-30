@@ -68,6 +68,16 @@ func (f *Fetcher) readBody(ctx context.Context, resp *http.Response, gzipped boo
 		src = &limitedReader{r: zr, remaining: f.policy.MaxDecompressedBytes + 1, over: ErrDecompressedTooLarge}
 		limit, over = f.policy.MaxDecompressedBytes, ErrDecompressedTooLarge
 	}
+	if f.policy.Truncate {
+		// Never past the inflated ceiling, and never one byte past it either:
+		// limitedReader would report the breach on the read after it.
+		keep := min(f.policy.MaxDecompressedBytes, limit)
+		body, err := io.ReadAll(io.LimitReader(src, keep))
+		if err != nil {
+			return nil, f.readError(ctx, err)
+		}
+		return body, nil
+	}
 	body, err := io.ReadAll(src)
 	if err != nil {
 		return nil, f.readError(ctx, err)
