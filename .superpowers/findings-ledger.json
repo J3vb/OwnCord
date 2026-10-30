@@ -4947,7 +4947,7 @@
       "confidence": "high",
       "fix": {
         "commit": "0b665f3c7da336b95beb7c63f3c3eb23b634e173",
-        "test": "Client/tests/unit/media.test.ts",
+        "test": "Client/tests/unit/media/urlsAndEmbeds.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Export the trailing-punctuation strip from content-parser.ts (factor renderMentions:171-179 into e.g. `stripUrlTrailingPunctuation(raw)`) and apply it once in extractUrls (media.ts:515) before returning, so the embed pipeline and the anchor agree on the same URL. One change in the shared extractor covers YouTube, direct-image and generic-preview branches.",
