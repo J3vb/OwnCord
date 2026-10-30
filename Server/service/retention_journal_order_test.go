@@ -21,8 +21,8 @@ type journalOrderSpy struct {
 	filesAt    []byte // raw retention_runs.files read right after call snapshotAt
 }
 
-func (s *journalOrderSpy) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error) {
-	activeRunID, ids, files, err := s.DB.SweepRetentionJournaled(ctx, runID, channelID, cutoff, limit, countChannel)
+func (s *journalOrderSpy) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel, includeImported bool) (int64, []int64, []string, error) {
+	activeRunID, ids, files, err := s.DB.SweepRetentionJournaled(ctx, runID, channelID, cutoff, limit, countChannel, includeImported)
 	s.calls++
 	if s.calls == s.snapshotAt {
 		var raw string
@@ -133,7 +133,7 @@ func TestRetention_ReplayMarkersSweepsPastOneBudgetAndJournalsEachBatch(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-time.Hour).Format("2006-01-02 15:04:05"), seq); err != nil {
+	if err := markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-time.Hour).Format("2006-01-02 15:04:05"), seq, false); err != nil {
 		t.Fatal(err)
 	}
 

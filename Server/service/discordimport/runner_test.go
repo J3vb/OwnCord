@@ -516,3 +516,29 @@ func TestStart_RefusedWhileShuttingDownLeavesNothingBehind(t *testing.T) {
 		t.Errorf("job status = %q, %v; want failed (and not blocking the next start)", status, err)
 	}
 }
+
+// A downloaded .json attachment lives in the media folder of the export and is
+// copied like any other file.
+func TestRun_ImportsAJSONAttachmentFromTheMediaFolder(t *testing.T) {
+	h := newHarness(t, 10)
+	body := `{"channel":{"id":"7","name":"cfg"},"messages":[
+	 {"id":"1","type":"Default","timestamp":"2020-01-01T10:00:00+00:00","content":"a","author":{"id":"1","name":"a"},"attachments":[
+	   {"url":"chan.json_Files/config-1A2B.json","fileName":"config.json"}]}]}`
+	z, err := openZipBytes(t, buildZip(t,
+		zipEntry{name: "chan.json", body: body},
+		zipEntry{name: "chan.json_Files/config-1A2B.json", body: `{"a":1}`},
+	), ZipLimits{})
+	if err != nil {
+		t.Fatalf("zip with a media .json: %v", err)
+	}
+	_, res := h.run(z)
+	if res.Err != nil || res.Status != db.ImportDone {
+		t.Fatalf("result = %+v", res)
+	}
+	if res.SkippedAttachments != 0 {
+		t.Errorf("skipped attachments = %d, want 0", res.SkippedAttachments)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM attachments`); n != 1 {
+		t.Errorf("attachment rows = %d, want the json file", n)
+	}
+}

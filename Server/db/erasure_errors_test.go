@@ -55,8 +55,8 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 		"SetChannelRetention":         func() error { return database.SetChannelRetention(ctx, chID, 1, uid) },
 		"DeleteChannelRetention":      func() error { _, err := database.DeleteChannelRetention(ctx, chID); return err },
 		"RetentionWindows":            func() error { _, err := database.RetentionWindows(ctx); return err },
-		"CountRetentionCandidates":    func() error { _, err := database.CountRetentionCandidates(ctx, chID, time.Now()); return err },
-		"SweepRetention":              func() error { _, _, err := database.SweepRetention(ctx, chID, time.Now(), 10); return err },
+		"CountRetentionCandidates":    func() error { _, err := database.CountRetentionCandidates(ctx, chID, time.Now(), false); return err },
+		"SweepRetention":              func() error { _, _, err := database.SweepRetention(ctx, chID, time.Now(), 10, false); return err },
 		"StartRetentionRun":           func() error { _, err := database.StartRetentionRun(ctx); return err },
 		"RecordRetentionRunFiles":     func() error { return database.RecordRetentionRunFiles(ctx, 1, 0, 0, nil) },
 		"FinishRetentionRun":          func() error { return database.FinishRetentionRun(ctx, 1, 0, "") },
@@ -88,9 +88,9 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 		"ConfirmAccount":       func() error { return m.ConfirmAccount(ctx, "t") },
 		"DiscardPending":       func() error { return m.DiscardPending(ctx, "t") },
 		"Markers":              func() error { _, err := m.Markers(ctx); return err },
-		"RecordMessagesSweep":  func() error { return m.RecordMessagesSweep(ctx, chID, "2026-01-01 00:00:00", 0) },
+		"RecordMessagesSweep":  func() error { return m.RecordMessagesSweep(ctx, chID, "2026-01-01 00:00:00", 0, false) },
 		"ReplayMessages": func() error {
-			_, err := m.ReplayMessages(ctx, func(context.Context, int64, string) (int, error) { return 0, nil })
+			_, err := m.ReplayMessages(ctx, func(context.Context, int64, string, bool) (int, error) { return 0, nil })
 			return err
 		},
 		"ReplayAccounts": func() error {
@@ -126,15 +126,15 @@ func TestMarkerStore_ReplayPropagatesCallbackErrors(t *testing.T) {
 	t.Cleanup(func() { _ = m.Close() })
 	tok, _, _ := m.RecordPendingAccount(ctx, uid, 0)
 	_ = m.ConfirmAccount(ctx, tok)
-	_ = m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0)
+	_ = m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0, false)
 	if _, err := m.ReplayAccounts(ctx, database, func(context.Context, int64, string) error { return context.DeadlineExceeded }); err == nil {
 		t.Error("ReplayAccounts swallowed the erase error")
 	}
-	if _, err := m.ReplayMessages(ctx, func(context.Context, int64, string) (int, error) { return 0, context.DeadlineExceeded }); err == nil {
+	if _, err := m.ReplayMessages(ctx, func(context.Context, int64, string, bool) (int, error) { return 0, context.DeadlineExceeded }); err == nil {
 		t.Error("ReplayMessages swallowed the sweep error")
 	}
 	// A messages sweep that removes nothing counts no replay.
-	if n, err := m.ReplayMessages(ctx, func(context.Context, int64, string) (int, error) { return 0, nil }); err != nil || n != 0 {
+	if n, err := m.ReplayMessages(ctx, func(context.Context, int64, string, bool) (int, error) { return 0, nil }); err != nil || n != 0 {
 		t.Errorf("idle ReplayMessages = %d, %v", n, err)
 	}
 	markers, _ := m.Markers(ctx)

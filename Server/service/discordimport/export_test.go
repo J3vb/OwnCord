@@ -81,6 +81,37 @@ func TestZipExport_ReadsJSONAndLocalMedia(t *testing.T) {
 	}
 }
 
+// A downloaded .json attachment sits in the media folder; it is not a second
+// export document.
+func TestZipExport_JSONInsideTheMediaFolderIsMedia(t *testing.T) {
+	b := buildZip(t,
+		zipEntry{name: "chan.json", body: `{"channel":{"id":"1","name":"x"},"messages":[]}`},
+		zipEntry{name: "chan.json_Files/config-1A2B.json", body: `{"a":1}`},
+	)
+	z, err := openZipBytes(t, b, ZipLimits{})
+	if err != nil {
+		t.Fatalf("a media .json made the zip unusable: %v", err)
+	}
+	rc, err := z.OpenJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	if !strings.Contains(string(doc), `"channel"`) {
+		t.Errorf("export document = %s", doc)
+	}
+	m, err := z.OpenMedia("chan.json_Files/config-1A2B.json")
+	if err != nil {
+		t.Fatalf("OpenMedia: %v", err)
+	}
+	data, _ := io.ReadAll(m.Reader)
+	_ = m.Reader.Close()
+	if string(data) != `{"a":1}` {
+		t.Errorf("media = %q", data)
+	}
+}
+
 func TestZipExport_MediaRelativeToAJSONInAFolder(t *testing.T) {
 	b := buildZip(t,
 		zipEntry{name: "export/channel.json", body: `{}`},

@@ -38,6 +38,11 @@ type DeletionMarker struct {
 	ErasedAt     string
 	Replays      int
 	LastReplay   *string
+	// ImportedCutoff, on a messages marker, is the newest cutoff a sweep ran
+	// under the channel's own window, which reaches Discord-imported messages.
+	// Nil means every sweep spared them (the server-wide window does, and so does
+	// any marker written before imports existed).
+	ImportedCutoff *string
 }
 
 // Marker scopes and states.
@@ -75,7 +80,8 @@ CREATE TABLE IF NOT EXISTS deletion_markers (
     state         TEXT    NOT NULL DEFAULT 'recorded' CHECK (state IN ('pending', 'recorded')),
     erased_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     replays       INTEGER NOT NULL DEFAULT 0,
-    last_replay   TEXT
+    last_replay   TEXT,
+    imported_cutoff TEXT
 );`, `
 CREATE TABLE IF NOT EXISTS sequence_floors (
     name TEXT    PRIMARY KEY,
@@ -154,6 +160,10 @@ func OpenMarkerStore(path string, key []byte) (*MarkerStore, error) {
 			_ = sqlDB.Close()
 			return nil, fmt.Errorf("marker store: schema: %w", err)
 		}
+	}
+	if err := ensureImportedCutoffColumn(sqlDB); err != nil {
+		_ = sqlDB.Close()
+		return nil, err
 	}
 	if err := bindMarkerKey(sqlDB, path, markerKeyFingerprint(key)); err != nil {
 		_ = sqlDB.Close()
@@ -423,7 +433,7 @@ func (m *MarkerStore) DiscardPending(ctx context.Context, token string) error {
 // Markers lists every marker, oldest first.
 func (m *MarkerStore) Markers(ctx context.Context) ([]DeletionMarker, error) {
 	rows, err := m.sqlDB.QueryContext(ctx,
-		`SELECT subject_token, scope, channel_id, cutoff, state, erased_at, replays, last_replay
+		`SELECT subject_token, scope, channel_id, cutoff, state, erased_at, replays, last_replay, imported_cutoff
 		   FROM deletion_markers ORDER BY erased_at, subject_token`)
 	if err != nil {
 		return nil, fmt.Errorf("marker store: list: %w", err)
@@ -432,7 +442,7 @@ func (m *MarkerStore) Markers(ctx context.Context) ([]DeletionMarker, error) {
 	var out []DeletionMarker
 	for rows.Next() {
 		var mk DeletionMarker
-		if err := rows.Scan(&mk.SubjectToken, &mk.Scope, &mk.ChannelID, &mk.Cutoff, &mk.State, &mk.ErasedAt, &mk.Replays, &mk.LastReplay); err != nil {
+		if err := rows.Scan(&mk.SubjectToken, &mk.Scope, &mk.ChannelID, &mk.Cutoff, &mk.State, &mk.ErasedAt, &mk.Replays, &mk.LastReplay, &mk.ImportedCutoff); err != nil {
 			return nil, fmt.Errorf("marker store: scan: %w", err)
 		}
 		out = append(out, mk)
@@ -537,75 +547,6 @@ func (m *MarkerStore) HasAccountMarkers(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("marker store: account markers: %w", err)
 	}
 	return true, nil
-}
-
-// MessagesToken is the unlinkable name of a channel's retention marker:
-// hex of HMAC-SHA256(key, "messages:" || decimal channel id).
-func (m *MarkerStore) MessagesToken(channelID int64) string {
-	mac := hmac.New(sha256.New, m.key)
-	mac.Write([]byte("messages:"))
-	mac.Write([]byte(strconv.FormatInt(channelID, 10)))
-	return hex.EncodeToString(mac.Sum(nil))
-}
-
-// RecordMessagesSweep records that retention removed everything older than
-// cutoff in channelID: one marker per channel, its cutoff only ever
-// moving forward, so a restore of an older backup re-sweeps to the newest
-// cutoff the policy reached. cutoff is stored in SQLite's UTC layout. The
-// channels sequence goes down with it as a floor (channelsSeq is
-// DB.SequenceValue for the channels table), so a restore cannot hand the
-// channel's id — and with it this marker — to a new channel.
-func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, cutoff string, channelsSeq int64) error {
-	tx, err := m.sqlDB.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("marker store: record messages sweep: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO deletion_markers (subject_token, scope, channel_id, cutoff, state)
-		 VALUES (?, 'messages', ?, ?, 'recorded')
-		 ON CONFLICT(subject_token) DO UPDATE SET cutoff = MAX(cutoff, excluded.cutoff), erased_at = datetime('now')`,
-		m.MessagesToken(channelID), channelID, cutoff); err != nil {
-		return fmt.Errorf("marker store: record messages sweep: %w", err)
-	}
-	if err := raiseSequenceFloor(ctx, tx, SequenceFloorChannels, channelsSeq); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("marker store: record messages sweep commit: %w", err)
-	}
-	return nil
-}
-
-// ReplayMessages re-applies every messages marker: sweep is called with the
-// channel and the marker's cutoff and must remove everything older than it
-// (the retention sweep, pinned exempt), returning how many rows went. A
-// marker for a channel that no longer exists is skipped. Returns the number
-// of messages removed across all markers.
-func (m *MarkerStore) ReplayMessages(ctx context.Context, sweep func(ctx context.Context, channelID int64, cutoff string) (int, error)) (int, error) {
-	markers, err := m.Markers(ctx)
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, mk := range markers {
-		if mk.Scope != MarkerScopeMessages || mk.ChannelID == nil || mk.Cutoff == nil {
-			continue
-		}
-		n, err := sweep(ctx, *mk.ChannelID, *mk.Cutoff)
-		if err != nil {
-			return total, fmt.Errorf("marker store: replay messages for channel %d: %w", *mk.ChannelID, err)
-		}
-		if n > 0 {
-			slog.Warn("retention marker: messages present past the recorded cutoff, removed again", "channel_id", *mk.ChannelID, "messages", n)
-			if _, err := m.sqlDB.ExecContext(ctx,
-				`UPDATE deletion_markers SET replays = replays + 1, last_replay = datetime('now') WHERE subject_token = ?`, mk.SubjectToken); err != nil {
-				return total, fmt.Errorf("marker store: count replay: %w", err)
-			}
-		}
-		total += n
-	}
-	return total, nil
 }
 
 // UserIDLister lists every users.id; *DB satisfies it.

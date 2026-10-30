@@ -205,14 +205,14 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 	if m.MessagesToken(5) == m.SubjectToken(5) || m.MessagesToken(5) == m.MessagesToken(6) {
 		t.Fatal("messages tokens collide with account tokens or each other")
 	}
-	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-01 00:00:00", 0); err != nil {
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-01 00:00:00", 0, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-02 00:00:00", 0); err != nil {
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-09-02 00:00:00", 0, false); err != nil {
 		t.Fatal(err)
 	}
 	// An older cutoff never moves the marker back.
-	if err := m.RecordMessagesSweep(ctx, 5, "2026-08-01 00:00:00", 0); err != nil {
+	if err := m.RecordMessagesSweep(ctx, 5, "2026-08-01 00:00:00", 0, false); err != nil {
 		t.Fatal(err)
 	}
 	markers, _ := m.Markers(ctx)
@@ -220,7 +220,7 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 		t.Fatalf("markers = %+v", markers)
 	}
 	calls := map[int64]string{}
-	n, err := m.ReplayMessages(ctx, func(_ context.Context, ch int64, cutoff string) (int, error) {
+	n, err := m.ReplayMessages(ctx, func(_ context.Context, ch int64, cutoff string, _ bool) (int, error) {
 		calls[ch] = cutoff
 		return 3, nil
 	})
@@ -234,7 +234,7 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 	// Account markers are not handed to the messages sweep.
 	tok, _, _ := m.RecordPendingAccount(ctx, 9, 0)
 	_ = m.ConfirmAccount(ctx, tok)
-	n, err = m.ReplayMessages(ctx, func(_ context.Context, ch int64, _ string) (int, error) {
+	n, err = m.ReplayMessages(ctx, func(_ context.Context, ch int64, _ string, _ bool) (int, error) {
 		if ch != 5 {
 			t.Errorf("unexpected channel %d", ch)
 		}

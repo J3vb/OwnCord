@@ -89,6 +89,8 @@ type Config struct {
 	// reclaims unlinked rows after an hour. Zero takes the defaults.
 	ChunkBytes int64
 	ChunkAge   time.Duration
+	// Now is the clock the chunk age is measured on; time.Now when nil.
+	Now func() time.Time
 }
 
 // Defaults for Config.ChunkBytes and Config.ChunkAge.

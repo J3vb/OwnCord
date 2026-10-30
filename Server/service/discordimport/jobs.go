@@ -85,5 +85,13 @@ func (r *Runner) chunkOverdue(st *runState) bool {
 		return false
 	}
 	return r.cfg.ChunkBytes > 0 && st.chunkBytes >= r.cfg.ChunkBytes ||
-		r.cfg.ChunkAge > 0 && time.Since(st.chunkSince) >= r.cfg.ChunkAge
+		r.cfg.ChunkAge > 0 && r.now().Sub(st.chunkSince) >= r.cfg.ChunkAge
+}
+
+// now reads the configured clock.
+func (r *Runner) now() time.Time {
+	if r.cfg.Now != nil {
+		return r.cfg.Now()
+	}
+	return time.Now()
 }

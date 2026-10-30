@@ -26,8 +26,8 @@ type RetentionStore interface {
 	SetChannelRetention(ctx context.Context, channelID int64, days int, updatedBy int64) error
 	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
-	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
-	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error)
+	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time, includeImported bool) (int64, error)
+	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel, includeImported bool) (int64, []int64, []string, error)
 	DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error)
 	SequenceValue(ctx context.Context, table string) (int64, error)
 	StartRetentionRun(ctx context.Context) (int64, error)
@@ -203,7 +203,7 @@ func (s *RetentionService) Preview(ctx context.Context) ([]RetentionPreview, err
 	out := make([]RetentionPreview, 0, len(windows))
 	for _, w := range windows {
 		cutoff := s.cutoff(w.Days)
-		n, err := s.st.CountRetentionCandidates(ctx, w.ChannelID, cutoff)
+		n, err := s.st.CountRetentionCandidates(ctx, w.ChannelID, cutoff, w.Source == "channel")
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInternal, err)
 		}
@@ -258,12 +258,12 @@ func (s *RetentionService) Tick(ctx context.Context) (TickReport, error) {
 		// next start finish the sweep, while a marker failure leaves the rows
 		// untouched instead of silently losing the anti-resurrection guarantee.
 		if s.markers != nil {
-			if err := s.recordMessagesMarker(ctx, w.ChannelID, cutoff); err != nil {
+			if err := s.recordMessagesMarker(ctx, w.ChannelID, cutoff, w.Source == "channel"); err != nil {
 				sweepErr = err
 				break
 			}
 		}
-		_, exhausted, err := s.sweepChannel(ctx, run, w.ChannelID, cutoff)
+		_, exhausted, err := s.sweepChannel(ctx, run, w.ChannelID, cutoff, w.Source == "channel")
 		if err != nil {
 			sweepErr = err
 			break
@@ -326,11 +326,11 @@ type sweepRun struct {
 // batch's deletion transaction, so a kill after commit always leaves both
 // durable resume handles. The run opens lazily in that transaction when
 // run.runID is zero, so a pass that finds nothing creates no empty row.
-func (s *RetentionService) sweepChannel(ctx context.Context, run *sweepRun, channelID int64, cutoff time.Time) (removed int, exhausted bool, err error) {
+func (s *RetentionService) sweepChannel(ctx context.Context, run *sweepRun, channelID int64, cutoff time.Time, includeImported bool) (removed int, exhausted bool, err error) {
 	counted := false
 	for run.budget > 0 {
 		limit := min(RetentionBatch, run.budget)
-		runID, ids, batchFiles, err := s.st.SweepRetentionJournaled(ctx, run.runID, channelID, cutoff, limit, !counted)
+		runID, ids, batchFiles, err := s.st.SweepRetentionJournaled(ctx, run.runID, channelID, cutoff, limit, !counted, includeImported)
 		if err != nil {
 			return removed, false, err
 		}
@@ -386,12 +386,12 @@ func (s *RetentionService) purgeReplay(ctx context.Context, ids []int64) error {
 // recordMessagesMarker writes the channel's retention intent with the
 // channels sequence as its floor. It runs before deletion and is required:
 // without it a restored backup could resurrect data the sweep removed.
-func (s *RetentionService) recordMessagesMarker(ctx context.Context, channelID int64, cutoff time.Time) error {
+func (s *RetentionService) recordMessagesMarker(ctx context.Context, channelID int64, cutoff time.Time, includeImported bool) error {
 	seq, err := s.st.SequenceValue(ctx, db.SequenceFloorChannels)
 	if err != nil {
 		return fmt.Errorf("retention marker sequence for channel %d: %w", channelID, err)
 	}
-	if err := s.markers.RecordMessagesSweep(ctx, channelID, cutoff.Format(dbtime.SQLiteLayout), seq); err != nil {
+	if err := s.markers.RecordMessagesSweep(ctx, channelID, cutoff.Format(dbtime.SQLiteLayout), seq, includeImported); err != nil {
 		return fmt.Errorf("retention marker for channel %d: %w", channelID, err)
 	}
 	return nil
@@ -493,7 +493,7 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 	if err := s.resumeRuns(ctx); err != nil {
 		return 0, fmt.Errorf("resume retention runs before marker replay: %w", err)
 	}
-	return s.markers.ReplayMessages(ctx, func(ctx context.Context, channelID int64, cutoff string) (int, error) {
+	return s.markers.ReplayMessages(ctx, func(ctx context.Context, channelID int64, cutoff string, includeImported bool) (int, error) {
 		t, err := time.Parse(dbtime.SQLiteLayout, cutoff)
 		if err != nil {
 			return 0, fmt.Errorf("marker cutoff %q: %w", cutoff, err)
@@ -509,7 +509,7 @@ func (s *RetentionService) ReplayMarkers(ctx context.Context) (int, error) {
 			// the time this loop returns — only one pass' worth of ids and
 			// file names is ever held in memory at a time.
 			run := &sweepRun{budget: RetentionTickBudget}
-			removed, exhausted, sweepErr := s.sweepChannel(ctx, run, channelID, t)
+			removed, exhausted, sweepErr := s.sweepChannel(ctx, run, channelID, t, includeImported)
 			total += removed
 			if len(run.pending) > 0 && sweepErr == nil {
 				sweepErr = fmt.Errorf("replay purge pending for %d messages, retried next tick", len(run.pending))

@@ -144,6 +144,7 @@ func NewZipExport(ra io.ReaderAt, size int64, lim ZipLimits) (*ZipExport, error)
 	maxBytes := uint64(lim.MaxUncompressedBytes) //nolint:gosec // G115: made positive above
 	z := &ZipExport{zr: zr, files: make(map[string]*zip.File, len(zr.File)), budget: &byteBudget{remaining: lim.MaxUncompressedBytes}}
 	var total uint64
+	var roots, nested []string
 	for _, f := range zr.File {
 		name, err := cleanZipName(f.Name)
 		if err != nil {
@@ -161,14 +162,27 @@ func NewZipExport(ra io.ReaderAt, size int64, lim ZipLimits) (*ZipExport, error)
 		}
 		z.files[name] = f
 		if isExportJSON(name) {
-			if z.json != nil {
-				return nil, fmt.Errorf("%w: the zip holds more than one .json file", ErrBadExport)
+			if path.Dir(name) == "." {
+				roots = append(roots, name)
+			} else {
+				nested = append(nested, name)
 			}
-			z.json, z.jsonAt = f, path.Dir(name)
 		}
 	}
-	if z.json == nil {
+	// The export document is the .json at the archive root; a .json inside a
+	// folder is a downloaded attachment. Only when nothing sits at the root (a
+	// zipped folder) is the single nested .json taken as the document.
+	candidates := roots
+	if len(candidates) == 0 {
+		candidates = nested
+	}
+	switch len(candidates) {
+	case 0:
 		return nil, fmt.Errorf("%w: the zip holds no .json file", ErrBadExport)
+	case 1:
+		z.json, z.jsonAt = z.files[candidates[0]], path.Dir(candidates[0])
+	default:
+		return nil, fmt.Errorf("%w: the zip holds more than one .json file", ErrBadExport)
 	}
 	return z, nil
 }

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"path"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/google/uuid"
@@ -74,7 +73,7 @@ func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a 
 	}
 	res.Commit()
 	if st.chunkBytes == 0 {
-		st.chunkSince = time.Now()
+		st.chunkSince = r.now()
 	}
 	st.chunkBytes += max(written, 1)
 	return fileID, nil

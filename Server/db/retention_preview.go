@@ -162,11 +162,7 @@ func retentionEffectTx(ctx context.Context, tx *sql.Tx, w RetentionWindow, obser
 	e.Cutoff = cutoff.Format(time.RFC3339)
 	// The proposed policy is not stored yet, so the window's own source decides
 	// whether an imported message is in reach: only a channel window takes it.
-	candidates := retentionBase + ` AND ` + notImportedMessage
-	if w.Source == "channel" {
-		candidates = retentionBase
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+candidates,
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates(w.Source == "channel"),
 		w.ChannelID, cutoff.Format(dbtime.SQLiteLayout)).Scan(&e.WouldDelete); err != nil {
 		return e, err
 	}

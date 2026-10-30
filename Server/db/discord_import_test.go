@@ -582,7 +582,7 @@ func TestRetention_ImportedMessagesAreExemptFromTheServerWindowOnly(t *testing.T
 			t.Errorf("preview would delete %d under the server window, want only the native message", e.WouldDelete)
 		}
 	}
-	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -30)); err != nil || n != 1 {
+	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -30), false); err != nil || n != 1 {
 		t.Errorf("sweep candidates under the server window = %d, %v; want 1", n, err)
 	}
 
@@ -602,7 +602,7 @@ func TestRetention_ImportedMessagesAreExemptFromTheServerWindowOnly(t *testing.T
 			t.Errorf("preview with a channel window would delete %d, want all 3", e.WouldDelete)
 		}
 	}
-	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -365)); err != nil || n != 3 {
+	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -365), true); err != nil || n != 3 {
 		t.Errorf("sweep candidates under the channel window = %d, %v; want 3", n, err)
 	}
 }
@@ -746,5 +746,44 @@ func TestStartImport_AdoptStaleTakesOverAnOrphanedRunningJob(t *testing.T) {
 	_ = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM channels WHERE id = ?`, oldCh).Scan(&n)
 	if n != 0 {
 		t.Error("the orphaned job's channel was left behind")
+	}
+}
+
+// While an import runs, its committed chunks already carry old dates under new
+// ids. A native date search must not be thrown off by them.
+func TestDateBounds_SurviveARunningImport(t *testing.T) {
+	ctx := context.Background()
+	database := openMigratedMemory(t)
+	user := seedUser(t, database, "poster")
+	native := seedChannel(t, database, "general")
+	insert := func(content, ts string) {
+		t.Helper()
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, ?, ?)`,
+			native, user, content, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("before the import", "2026-06-01 10:00:00")
+	author, _ := database.EnsureImportAccount(ctx)
+	ch, job := startTestImport(ctx, t, database, "history")
+	if _, err := database.ImportChunk(ctx, db.ImportChunkParams{
+		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(5, "m"),
+		Progress: db.ImportProgress{Imported: 5},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	insert("during the import", "2026-06-02 10:00:00")
+
+	got, err := database.SearchMessagesFiltered(ctx,
+		db.SearchQuery{ChannelIDs: []int64{native}, AfterTS: "2025-01-01 00:00:00"}, db.SearchPage{Limit: 50, Recent: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Errorf("found %d native messages while the import runs, want 2", len(got))
+	}
+	if id, err := database.FirstIDAtOrAfterForTest(ctx, "2025-01-01 00:00:00"); err != nil || id > 1 {
+		t.Errorf("first id at or after 2025 = %d, %v; want the first native id", id, err)
 	}
 }

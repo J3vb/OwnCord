@@ -40,15 +40,22 @@ func TestRun_ChunkFlushesEarlyOnAttachmentBytesOrAge(t *testing.T) {
 	for name, tc := range map[string]struct {
 		bytes  int64
 		age    time.Duration
+		step   time.Duration // the fake clock moves this far on every reading
 		chunks int
 	}{
 		"neither budget":     {chunks: 1},
 		"byte budget passed": {bytes: 5, chunks: 3},
-		"age passed":         {age: time.Nanosecond, chunks: 3},
+		"age passed":         {age: 30 * time.Second, step: time.Minute, chunks: 3},
+		"age not reached":    {age: time.Hour, step: time.Minute, chunks: 1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, 100)
 			h.runner.cfg.ChunkBytes, h.runner.cfg.ChunkAge = tc.bytes, tc.age
+			clock := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			h.runner.cfg.Now = func() time.Time {
+				clock = clock.Add(tc.step)
+				return clock
+			}
 			var chunks int
 			h.runner.afterChunk = func(context.Context, int) { chunks++ }
 			if _, res := h.run(threeFileExport(t)); res.Err != nil {

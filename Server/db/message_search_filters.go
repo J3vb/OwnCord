@@ -208,11 +208,13 @@ func (d *DB) rankCutoff(ctx context.Context, match, filter string, filterArgs []
 	return cutoff, true, nil
 }
 
-// importedChannelIDs lists the channels a finished Discord import built. Their
-// messages keep the dates they were sent on, so an id says nothing about when a
-// row was written there; every other channel's ids still follow time.
+// importedChannelIDs lists the channels a Discord import built or is building,
+// whatever the state of the job. Their messages keep the dates they were sent
+// on, and every committed chunk of a running import already breaks the order of
+// ids and times, so an id says nothing about when a row was written there;
+// every other channel's ids still follow time.
 func (d *DB) importedChannelIDs(ctx context.Context) ([]int64, error) {
-	rows, err := d.reader.QueryContext(ctx, `SELECT channel_id FROM import_jobs WHERE status = 'done' AND channel_id IS NOT NULL`)
+	rows, err := d.reader.QueryContext(ctx, `SELECT channel_id FROM import_jobs WHERE channel_id IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("importedChannelIDs: %w", err)
 	}

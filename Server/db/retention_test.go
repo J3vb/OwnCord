@@ -46,10 +46,10 @@ func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
 
 	// A caller-provided run that does not exist makes the journal write fail;
 	// the deletion and its attachment removal must roll back with it.
-	if _, _, _, err := database.SweepRetentionJournaled(ctx, 999999, chID, cutoff, 10, true); err == nil {
+	if _, _, _, err := database.SweepRetentionJournaled(ctx, 999999, chID, cutoff, 10, true, false); err == nil {
 		t.Fatal("journaled sweep with a missing run succeeded")
 	}
-	if n, err := database.CountRetentionCandidates(ctx, chID, cutoff); err != nil || n != 1 {
+	if n, err := database.CountRetentionCandidates(ctx, chID, cutoff, false); err != nil || n != 1 {
 		t.Fatalf("candidates after rolled-back journal failure = %d, %v; want 1", n, err)
 	}
 	var attachments int
@@ -57,11 +57,11 @@ func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
 		t.Fatalf("attachments after rolled-back journal failure = %d, %v; want 1", attachments, err)
 	}
 
-	if runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff.Add(-24*time.Hour), 10, true); err != nil || runID != 0 || len(ids) != 0 || len(files) != 0 {
+	if runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff.Add(-24*time.Hour), 10, true, false); err != nil || runID != 0 || len(ids) != 0 || len(files) != 0 {
 		t.Fatalf("empty lazy sweep = run %d, ids %v, files %v, %v; want no run", runID, ids, files, err)
 	}
 
-	runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff, 10, true)
+	runID, ids, files, err := database.SweepRetentionJournaled(ctx, 0, chID, cutoff, 10, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,20 +234,20 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n, err := database.CountRetentionCandidates(ctx, ch, cutoff); err != nil || n != 2 {
+	if n, err := database.CountRetentionCandidates(ctx, ch, cutoff, false); err != nil || n != 2 {
 		t.Fatalf("candidates = %d, %v; want 2 (the two past the window; pinned and at-boundary stay)", n, err)
 	}
 
 	// Bounded: one per call, then the rest.
-	ids, files, err := database.SweepRetention(ctx, ch, cutoff, 1)
+	ids, files, err := database.SweepRetention(ctx, ch, cutoff, 1, false)
 	if err != nil || len(ids) != 1 || len(files) != 1 || files[0] != "stored-0" {
 		t.Fatalf("first sweep = %v, %v, %v", ids, files, err)
 	}
-	ids, files, err = database.SweepRetention(ctx, ch, cutoff, 100)
+	ids, files, err = database.SweepRetention(ctx, ch, cutoff, 100, false)
 	if err != nil || len(ids) != 1 || len(files) != 1 || files[0] != "stored-1" {
 		t.Fatalf("second sweep = %v, %v, %v", ids, files, err)
 	}
-	if ids, _, err := database.SweepRetention(ctx, ch, cutoff, 100); err != nil || len(ids) != 0 {
+	if ids, _, err := database.SweepRetention(ctx, ch, cutoff, 100, false); err != nil || len(ids) != 0 {
 		t.Fatalf("third sweep = %v, %v; want none", ids, err)
 	}
 

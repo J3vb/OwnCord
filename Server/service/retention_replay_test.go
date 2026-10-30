@@ -268,7 +268,7 @@ func TestRetention_ReplayMarkersPurgesPersistedEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-7*24*time.Hour).Format("2006-01-02 15:04:05"), seq); err != nil {
+	if err := markers.RecordMessagesSweep(ctx, chID, retentionNow.Add(-7*24*time.Hour).Format("2006-01-02 15:04:05"), seq, false); err != nil {
 		t.Fatal(err)
 	}
 	n, err := svc.ReplayMarkers(ctx)

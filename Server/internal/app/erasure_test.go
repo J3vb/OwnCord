@@ -213,7 +213,7 @@ func TestOpenMarkers_ReplaysRetentionMarkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := markers.RecordMessagesSweep(ctx, chID, "2026-06-01 00:00:00", 0); err != nil {
+	if err := markers.RecordMessagesSweep(ctx, chID, "2026-06-01 00:00:00", 0, false); err != nil {
 		t.Fatal(err)
 	}
 	_ = markers.Close()

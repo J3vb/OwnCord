@@ -178,21 +178,29 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 // same way), never a pinned message, tombstones included.
 //
 // A message a Discord import wrote keeps the date it was sent, often years old,
-// so the server-wide window must not take it: it is a candidate only when its
-// channel has a window of its own. A native message in the same channel follows
-// the server window like any other.
+// so the server-wide window must not take it. includeImported says whether the
+// window in force is the channel's own, which does reach those messages. The
+// caller states it rather than the query reading channel_retention, because a
+// replayed marker must act on the policy that was in force when it was written,
+// not on whatever policy a restored backup holds. A native message in an
+// imported channel follows the window either way.
+func retentionCandidates(includeImported bool) string {
+	if includeImported {
+		return retentionBase
+	}
+	return retentionBase + ` AND ` + notImportedMessage
+}
+
 const (
-	retentionBase       = `channel_id = ? AND pinned = 0 AND timestamp < ?`
-	notImportedMessage  = `NOT EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = messages.id)`
-	retentionCandidates = retentionBase + ` AND (EXISTS (SELECT 1 FROM channel_retention cr JOIN channels ch ON ch.id = messages.channel_id
-		WHERE cr.channel_id = COALESCE(ch.parent_channel_id, ch.id)) OR ` + notImportedMessage + `)`
+	retentionBase      = `channel_id = ? AND pinned = 0 AND timestamp < ?`
+	notImportedMessage = `NOT EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = messages.id)`
 )
 
 // CountRetentionCandidates is the preview: how many messages a sweep of
 // channelID with this cutoff would remove.
-func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error) {
+func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time, includeImported bool) (int64, error) {
 	var n int64
-	if err := d.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates,
+	if err := d.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates(includeImported),
 		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout)).Scan(&n); err != nil {
 		return 0, fmt.Errorf("CountRetentionCandidates: %w", err)
 	}
@@ -208,8 +216,8 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 // the replay tiers (DeleteEventsForMessages, ws.Hub.PurgeMessagesFromReplay)
 // — and the files; fewer ids than limit means the channel is swept for this
 // cutoff.
-func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
-	_, ids, files, err := d.sweepRetention(ctx, 0, channelID, cutoff, limit, false, false)
+func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int, includeImported bool) ([]int64, []string, error) {
+	_, ids, files, err := d.sweepRetention(ctx, 0, channelID, cutoff, limit, false, false, includeImported)
 	return ids, files, err
 }
 
@@ -218,11 +226,12 @@ func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Ti
 // transaction as the message deletion. If runID is zero, the run is opened
 // lazily only when the batch finds something to delete. countChannel adds one
 // to the run's channel count when this is its first non-empty batch.
-func (d *DB) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error) {
-	return d.sweepRetention(ctx, runID, channelID, cutoff, limit, true, countChannel)
+// includeImported is the retentionCandidates switch.
+func (d *DB) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel, includeImported bool) (int64, []int64, []string, error) {
+	return d.sweepRetention(ctx, runID, channelID, cutoff, limit, true, countChannel, includeImported)
 }
 
-func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, journal, countChannel bool) (int64, []int64, []string, error) {
+func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, journal, countChannel, includeImported bool) (int64, []int64, []string, error) {
 	if limit < 1 {
 		return runID, nil, nil, nil
 	}
@@ -232,7 +241,7 @@ func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates+` ORDER BY id LIMIT ?`,
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates(includeImported)+` ORDER BY id LIMIT ?`, //nolint:gosec // G202: retentionCandidates returns one of two constant fragments
 		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout), limit)
 	if err != nil {
 		return runID, nil, nil, fmt.Errorf("SweepRetention select: %w", err)
