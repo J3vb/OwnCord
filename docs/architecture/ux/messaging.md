@@ -476,7 +476,7 @@ the same signal in future.
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
 `src/components/MentionAutocomplete.ts`, `src/lib/text/mentions.ts`,
-`src/components/message-list/content-parser.ts` (+ `syntax-highlight.ts`),
+`src/components/message-list/contentParser.ts` (+ `syntax-highlight.ts`),
 `src/lib/text/markdown.ts`, `src/lib/nav/channelNavigation.ts`, `src/lib/notifications.ts`;
 server `Server/service/message.go`, `Server/service/mentions.go`,
 `Server/ws/handlers_chat.go`.

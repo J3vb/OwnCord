@@ -42,7 +42,7 @@ import { createMessageController } from "../../src/pages/main-page/MessageContro
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
-import { renderMentionSegment } from "../../src/components/message-list/content-parser";
+import { renderMentionSegment } from "../../src/components/message-list/contentParser";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import {
   deleteMessage,
@@ -647,7 +647,7 @@ describe("Copy Message Link action", () => {
 
     // Copy Message Link left the hover bar: it is in the message menu.
     expect(row.querySelector('[data-testid="msg-copy-link-42"]')).toBeNull();
-    const { openMessageMenu } = await import("../../src/components/message-list/message-menu");
+    const { openMessageMenu } = await import("../../src/components/message-list/messageMenu");
     openMessageMenu({
       msg,
       opts: {

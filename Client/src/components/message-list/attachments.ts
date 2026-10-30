@@ -45,9 +45,9 @@ import {
   rememberBlobSize,
   setImageBox,
   type ImageBox,
-} from "./image-sizes";
-import type { ImageMenuTarget } from "./image-menu";
-import { highlightCode, resolveLanguage } from "./syntax-highlight";
+} from "./imageSizes";
+import type { ImageMenuTarget } from "./imageMenu";
+import { highlightCode, resolveLanguage } from "./syntaxHighlight";
 import {
   clearTextPreviewCache,
   isTextPreviewable,
@@ -1930,12 +1930,12 @@ async function downloadFile(url: string, filename: string): Promise<void> {
 
 // -- Image menu ---------------------------------------------------------------
 
-type ImageMenuModule = typeof import("./image-menu");
+type ImageMenuModule = typeof import("./imageMenu");
 /** Set once the lazy menu module has loaded, so teardown can close its menu. */
 let imageMenuModule: ImageMenuModule | null = null;
 
 function loadImageMenu(): Promise<ImageMenuModule> {
-  return import("./image-menu").then((m) => {
+  return import("./imageMenu").then((m) => {
     imageMenuModule = m;
     return m;
   });
@@ -2252,7 +2252,7 @@ export function openImageLightbox(
       shownImageUrl,
       close,
     };
-    import("./lightbox-gallery").then(
+    import("./lightboxGallery").then(
       (m) => {
         if (!disposable.signal.aborted) m.attachLightboxGallery(gallery, handle);
       },

@@ -31,7 +31,7 @@ import {
   type MentionInfo,
 } from "@lib/text/mentions";
 import { isSafeUrl } from "./attachments";
-import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./custom-emoji";
+import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./customEmoji";
 import {
   formatDiscordTimestamp,
   type TimestampStyle,
@@ -45,7 +45,7 @@ import {
   type InlineNode,
   type InlineStyle,
 } from "@lib/text/markdown";
-import { highlightCode, resolveLanguage, type CodeToken } from "./syntax-highlight";
+import { highlightCode, resolveLanguage, type CodeToken } from "./syntaxHighlight";
 import { copyThenRelabel } from "@lib/ui/clipboard";
 
 // -- Regex constants ----------------------------------------------------------

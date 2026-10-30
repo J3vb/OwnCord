@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-import { adminPanelUrl, openAdminPanel } from "@lib/admin-panel";
+import { adminPanelUrl, openAdminPanel } from "@lib/adminPanel";
 
 describe("adminPanelUrl", () => {
   it("points at the server's /admin path over https", () => {

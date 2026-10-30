@@ -35,10 +35,7 @@ import {
   setMarkReadSender,
   writeReadPointer,
 } from "@lib/read-state";
-import {
-  markMessageUnread,
-  setMarkUnreadSender,
-} from "../../src/components/message-list/mark-unread";
+import { setMarkUnreadSender } from "../../src/components/message-list/mark-unread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
@@ -279,7 +276,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
   describe("Mark Unread", () => {
     const settled = async (): Promise<void> => {
-      await import("@components/message-list/message-menu");
+      await import("@components/message-list/messageMenu");
       await new Promise((r) => setTimeout(r, 0));
     };
 

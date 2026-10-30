@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   attachChannelContextMenu,
   CHANNEL_MUTE_CHANGED,
-} from "@components/channel-sidebar/context-menu";
+} from "@components/channel-sidebar/contextMenu";
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
 import {
   isChannelMuted,

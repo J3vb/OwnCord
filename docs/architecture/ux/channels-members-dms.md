@@ -37,7 +37,7 @@ Each channel type gets a distinct icon and interaction:
 ### 1.1a Per-channel notification mutes
 
 The channel context menu offers "Mute Channel" / "Unmute Channel"
-(the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/context-menu.ts`, backed by `lib/prefs/channelMutes.ts`).
+(the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/contextMenu.ts`, backed by `lib/prefs/channelMutes.ts`).
 Discord semantics, deliberately: a mute silences the channel's _noise_ — no
 desktop notification, no chime — while the unread badge still counts but
 renders dimmed, and a message that mentions you still notifies and shows the

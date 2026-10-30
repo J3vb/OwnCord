@@ -46,15 +46,15 @@ import {
 } from "./message-list/renderers";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
-import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
-import { withMessageMenu } from "./message-list/message-menu-loader";
+import { ROW_FOCUSABLE_SELECTOR } from "./message-list/messageActions";
+import { withMessageMenu } from "./message-list/messageMenuLoader";
 import { preloadInlineEdit, withInlineEdit } from "../features/messaging/inlineEditLoader";
 import type { InlineEditSession } from "../features/messaging/inlineEdit";
 import {
   clearContentParseCache,
   relabelInlineTimestamps,
   resyncMentions,
-} from "./message-list/content-parser";
+} from "./message-list/contentParser";
 import { highlightsCurrentUser } from "@lib/text/mentions";
 import { applyPickedMentions, tokensToPickedText } from "@lib/text/pickedMentions";
 import { canManageMessages } from "@lib/permissions";
@@ -83,10 +83,10 @@ import {
   fitImageBox,
   getImageBox,
   knownImageHeight,
-} from "./message-list/image-sizes";
+} from "./message-list/imageSizes";
 import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
-import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/row-heights";
+import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/rowHeights";
 import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {

@@ -16,7 +16,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/message-actions";
+import { messageActionGates } from "@components/message-list/messageActions";
 import { pinRowTarget } from "@components/message-list/pinRows";
 import { shouldGroup } from "@lib/text/formatting";
 import { isPinRowKind, isServerRowKind } from "@lib/text/messageKind";
@@ -313,7 +313,7 @@ describe("pin row actions", () => {
     container
       .querySelector<HTMLElement>('[data-testid="message-9"]')!
       .dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
-    await import("@components/message-list/message-menu");
+    await import("@components/message-list/messageMenu");
     await new Promise((r) => setTimeout(r, 0));
     expect(document.querySelector(".message-context-menu")).toBeNull();
   });

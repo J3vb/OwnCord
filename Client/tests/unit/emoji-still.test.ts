@@ -19,7 +19,7 @@ vi.mock("../../src/components/message-list/attachments", async (importOriginal) 
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
-import { buildCustomEmojiImage } from "../../src/components/message-list/custom-emoji";
+import { buildCustomEmojiImage } from "../../src/components/message-list/customEmoji";
 import { clearAttachmentCaches } from "../../src/components/message-list/attachments";
 import {
   animateEmojiEnabled,

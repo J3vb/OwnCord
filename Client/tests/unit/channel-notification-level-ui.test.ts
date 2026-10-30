@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { attachChannelContextMenu } from "@components/channel-sidebar/context-menu";
+import { attachChannelContextMenu } from "@components/channel-sidebar/contextMenu";
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
 import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/prefs/channelMutes";
 import {

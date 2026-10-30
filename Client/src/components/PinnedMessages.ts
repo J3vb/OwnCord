@@ -10,7 +10,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { parseTimestamp } from "@lib/text/formatting";
 import { messagingText } from "../i18n/messaging";
 import { createAvatarElement } from "./message-list/avatar";
-import { renderMessageContent } from "./message-list/content-parser";
+import { renderMessageContent } from "./message-list/contentParser";
 import type { ImportedAuthor } from "@lib/types";
 import {
   createImportedAvatar,
