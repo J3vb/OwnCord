@@ -2,8 +2,8 @@
 // Fail when the commit being released does not carry green evidence for every
 // required check (R-09 / RL-16).
 //
-//   node scripts/verify-gate-evidence.mjs <sha>   # assert, using $GITHUB_TOKEN
-//   node --test scripts/verify-gate-evidence.test.mjs
+//   node scripts/release/verify-gate-evidence.mjs <sha>   # assert, using $GITHUB_TOKEN
+//   node --test scripts/release/verify-gate-evidence.test.mjs
 //
 // A tag push starts release.yml and nothing else. ci.yml has no `tags:` trigger,
 // so the tagged commit is only ever covered by the CI that ran when that same
@@ -15,7 +15,7 @@
 // states the rule: a step that exists only in release.yml first executes at tag
 // time, so its own bugs surface on the release. Server/scripts/docker-smoke.sh
 // is the worked example — one script, called from both workflows. Here the
-// second call site is `node --test scripts/verify-gate-evidence.test.mjs` in
+// second call site is `node --test scripts/release/verify-gate-evidence.test.mjs` in
 // ci.yml, which exercises the decision logic on fixtures every PR without
 // needing a tag or a network call.
 //
@@ -47,7 +47,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CI_WORKFLOW = ".github/workflows/ci.yml";
 const PROTECTION_SCRIPT = "docs/plans/b0-dev-branch-protection.sh";
 
@@ -64,7 +64,7 @@ export function requiredContexts(scriptSrc) {
 // be squash-merged into a tree no CI run ever saw, and the PR-head evidence
 // this gate trusts stops describing what actually landed. strict: true is what
 // makes "the required matrix ran on the merged tree" a construction rather
-// than a habit — scripts/verify-integration-tree.sh spot-proves it per squash
+// than a habit — scripts/release/verify-integration-tree.sh spot-proves it per squash
 // SHA — so losing the flag must fail on a pull request, not in a later audit.
 export function strictUpToDate(scriptSrc) {
   const block = scriptSrc.match(/"required_status_checks"\s*:\s*\{([\s\S]*?)\}/);
@@ -186,7 +186,7 @@ async function fetchRunTrust(repo, sha, token) {
 async function main() {
   const sha = process.argv[2];
   if (!sha) {
-    console.error("usage: node scripts/verify-gate-evidence.mjs <sha>");
+    console.error("usage: node scripts/release/verify-gate-evidence.mjs <sha>");
     process.exit(2);
   }
   const repo = process.env.GITHUB_REPOSITORY;

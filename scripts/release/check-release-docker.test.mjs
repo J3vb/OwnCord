@@ -11,7 +11,10 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { splitJobs } from "./check-release-environment.mjs";
 
-const workflow = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+const workflow = readFileSync(
+  new URL("../../.github/workflows/release.yml", import.meta.url),
+  "utf8",
+);
 const jobs = splitJobs(workflow);
 const job = jobs.find((j) => j.name === "release-server-docker").body;
 const steps = job

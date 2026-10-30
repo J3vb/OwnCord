@@ -20,9 +20,9 @@
 # and gate their steps, so a green leg on a dev PR can mean the server was not
 # selected at all. Release evidence does not rest on this: a tagged commit sits
 # on main, where the selector answers `--all`, and
-# scripts/verify-gate-evidence.mjs is what checks it.
+# scripts/release/verify-gate-evidence.mjs is what checks it.
 #
-#   bash scripts/verify-integration-tree.sh <squash-sha> [<squash-sha>...]
+#   bash scripts/release/verify-integration-tree.sh <squash-sha> [<squash-sha>...]
 #
 # For each squash commit: parse the pull-request number from the "(#N)"
 # subject suffix every squash merge carries, fetch refs/pull/N/head from
@@ -32,7 +32,7 @@
 set -euo pipefail
 
 if [ "$#" -lt 1 ]; then
-  echo "usage: bash scripts/verify-integration-tree.sh <squash-sha> [<squash-sha>...]" >&2
+  echo "usage: bash scripts/release/verify-integration-tree.sh <squash-sha> [<squash-sha>...]" >&2
   exit 2
 fi
 

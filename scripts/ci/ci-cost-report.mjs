@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Measure what GitHub Actions spends on this repository over a window of days.
 //
-//   GITHUB_TOKEN=... node scripts/ci-cost-report.mjs [--days 30] [--repo J3vb/OwnCord] [--json out.json] [--cache dir]
-//   node --test scripts/ci-cost-report.test.mjs
+//   GITHUB_TOKEN=... node scripts/ci/ci-cost-report.mjs [--days 30] [--repo J3vb/OwnCord] [--json out.json] [--cache dir]
+//   node --test scripts/ci/ci-cost-report.test.mjs
 //
 // ARCH-047: CI cost was quoted from one hand-timed run (docs/archive/plans/
 // ci-cost-2026-09-20.md). This reads every run in the window and its jobs
@@ -27,6 +27,7 @@ export const OS_MULTIPLIER = { linux: 1, windows: 2, macos: 10 };
 
 export const CI_WORKFLOW = join(
   dirname(fileURLToPath(import.meta.url)),
+  "..",
   "..",
   ".github",
   "workflows",

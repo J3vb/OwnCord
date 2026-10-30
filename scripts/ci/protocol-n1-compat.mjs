@@ -13,7 +13,7 @@
 //             the old dispatcher (Client/tests/compat/n1-new-frames.compat.ts,
 //             copied in); the only assertion is that nothing throws.
 //
-// Usage: node scripts/protocol-n1-compat.mjs [--tag vX.Y.Z] [--keep]
+// Usage: node scripts/ci/protocol-n1-compat.mjs [--tag vX.Y.Z] [--keep]
 // Exit:  0 pass, 1 the change breaks the old client, 2 the check could not run.
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -30,7 +30,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FIXTURES_REL = path.join("protocol", "fixtures", "epoch-1");
 const STRICT_TEST = "tests/contract/protocol-fixtures.test.ts";
 const COMPAT_SRC = path.join(REPO, "Client", "tests", "compat", "n1-new-frames.compat.ts");

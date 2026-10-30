@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Fail when a watched document cites a repository path that is not there.
 //
-//   node scripts/check-doc-citations.mjs
-//   node --test scripts/check-doc-citations.test.mjs
+//   node scripts/checks/check-doc-citations.mjs
+//   node --test scripts/checks/check-doc-citations.test.mjs
 //
 // ── Why this is a repository check and not a Go test ─────────────────────────
 // This check used to live inside TestCommunityServicesDocIsCurrent, in
@@ -35,7 +35,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // Documents whose backticked repository paths must exist. Coverage is OPT-IN,
 // the same rule as check-doc-counts.mjs's WATCHED list: a new reference
@@ -107,12 +107,12 @@ export function evaluate(doc, cited, exists, planned = {}) {
     if (here && isPlanned) {
       problems.push(
         `${doc} exempts \`${p}\` as owed by ${planned[p]}, but it exists now. ` +
-          `Drop the exemption from PLANNED_PATHS in scripts/check-doc-citations.mjs.`,
+          `Drop the exemption from PLANNED_PATHS in scripts/checks/check-doc-citations.mjs.`,
       );
     } else if (!here && !isPlanned) {
       problems.push(
         `${doc} cites \`${p}\`, which does not exist. Fix the citation, or add it to ` +
-          `PLANNED_PATHS in scripts/check-doc-citations.mjs with the step that creates it.`,
+          `PLANNED_PATHS in scripts/checks/check-doc-citations.mjs with the step that creates it.`,
       );
     }
   }
@@ -135,7 +135,7 @@ function main() {
     const p = join(ROOT, rel);
     if (!existsSync(p)) {
       problems.push(
-        `${rel}: watched file does not exist — fix the list in scripts/check-doc-citations.mjs`,
+        `${rel}: watched file does not exist — fix the list in scripts/checks/check-doc-citations.mjs`,
       );
       continue;
     }

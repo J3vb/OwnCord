@@ -16,7 +16,7 @@ import {
   titleIdsIn,
 } from "./check-comment-ids.mjs";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ids = (src, lang) => idsIn(src, lang).map((h) => h.id);
 
 test("ids in TypeScript comments are found, ids in strings and regexes are not", () => {

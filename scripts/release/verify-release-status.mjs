@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Fail the release when the version being tagged has no row in docs/STATUS.md.
 //
-//   node scripts/verify-release-status.mjs v2.2.0-beta.4
-//   node --test scripts/verify-release-status.test.mjs
+//   node scripts/release/verify-release-status.mjs v2.2.0-beta.4
+//   node --test scripts/release/verify-release-status.test.mjs
 //
 // Five betas shipped while docs/plans/README.md still said the beta launch was
 // next, because nothing tied a tag to a status record. STATUS.md is that record
@@ -18,7 +18,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const STATUS_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "docs", "STATUS.md");
+export const STATUS_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "docs",
+  "STATUS.md",
+);
 
 // releaseRows returns the first cell of every row in the "## Releases" table,
 // without a leading `v` or backticks.

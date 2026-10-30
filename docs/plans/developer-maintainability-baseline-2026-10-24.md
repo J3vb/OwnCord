@@ -32,9 +32,9 @@ The filename keeps the `2026-10-24` date of the assignment that named it. Every 
 | Command                                                                                                               | Status           | Result                                                |
 | --------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------- |
 | `node scripts/run.mjs --list`                                                                                         | executed         | Prints every task with commands and directories.      |
-| `node scripts/check-doc-counts.mjs`                                                                                   | executed         | 0 claims across 5 documents agree with the ledger.    |
-| `node scripts/check-doc-citations.mjs`                                                                                | executed         | 140 cited paths all exist.                            |
-| `node scripts/check-migrations.mjs`                                                                                   | executed         | No shipped migration changed.                         |
+| `node scripts/checks/check-doc-counts.mjs`                                                                            | executed         | 0 claims across 5 documents agree with the ledger.    |
+| `node scripts/checks/check-doc-citations.mjs`                                                                         | executed         | 140 cited paths all exist.                            |
+| `node scripts/checks/check-migrations.mjs`                                                                            | executed         | No shipped migration changed.                         |
 | `node .superpowers/render-ledger.mjs --check`                                                                         | executed         | Ledger valid, 518 findings.                           |
 | `node --test scripts/run.test.mjs`                                                                                    | executed         | 16 of 16 pass.                                        |
 | `node --test scripts/ci-select.test.mjs`                                                                              | executed         | 64 of 64 pass.                                        |

@@ -171,7 +171,7 @@ CI fails on drift, and the next generator run silently discards a hand edit. `np
 
 ### Other boundaries
 
-- A migration that has shipped is immutable; write a new migration instead. A new one is numbered one past the highest on `dev`. `scripts/check-migrations.mjs` enforces both; see [docs/summaries/database.md](docs/summaries/database.md#migrations-and-rollback).
+- A migration that has shipped is immutable; write a new migration instead. A new one is numbered one past the highest on `dev`. `scripts/checks/check-migrations.mjs` enforces both; see [docs/summaries/database.md](docs/summaries/database.md#migrations-and-rollback).
 - The `DBImportAllow` and `AuthzResidueAllow` inventories in `Server/invariants/` only shrink. Put new persistence behind a service, and new authorization behind a permission predicate, rather than adding a row.
 - Never run `npm run tauri build` locally; the full desktop installer build is CI-only (the `tauri-build` job, on PRs to `main`). `cargo build --example native_voice_interop` (the native-voice interop proof) is fine.
 - `.superpowers/findings-ledger.json` is the bug-hunt ledger and its only tracked copy. `FINDINGS.md` is generated (`node .superpowers/render-ledger.mjs`, gitignored): edit the ledger, never the rendering. Statuses are `open`, `fixed`, `declined`, `refuted`, `duplicate`, `blocked`; `severity` is `critical`, `high`, `medium` or `low`.
@@ -180,7 +180,7 @@ CI fails on drift, and the next generator run silently discards a hand edit. `np
 
 - [CLAUDE.md](CLAUDE.md), [Server/CLAUDE.md](Server/CLAUDE.md), [Client/CLAUDE.md](Client/CLAUDE.md)
 - [README.md](README.md), [docs/contributing.md](docs/contributing.md), [docs/security.md](docs/security.md)
-- [package.json](package.json), [Client/package.json](Client/package.json), [scripts/run.mjs](scripts/run.mjs), [scripts/ci-select.mjs](scripts/ci-select.mjs), [scripts/check-migrations.mjs](scripts/check-migrations.mjs)
+- [package.json](package.json), [Client/package.json](Client/package.json), [scripts/run.mjs](scripts/run.mjs), [scripts/ci-select.mjs](scripts/ci-select.mjs), [scripts/checks/check-migrations.mjs](scripts/checks/check-migrations.mjs)
 - [.github/workflows/ci.yml](.github/workflows/ci.yml), [Server/Makefile](Server/Makefile), [Server/sqlc.yaml](Server/sqlc.yaml)
 - [Server/invariants/syncutil_locks.go](Server/invariants/syncutil_locks.go), [Server/invariants/db_import_boundary.go](Server/invariants/db_import_boundary.go), [docs/architecture/server-boundaries.md](docs/architecture/server-boundaries.md)
 - [Client/src/components/message-list/attachments.ts](Client/src/components/message-list/attachments.ts), [Client/tests/e2e/config/playwright.config.native.ts](Client/tests/e2e/config/playwright.config.native.ts), [Client/vitest.config.ts](Client/vitest.config.ts), [Client/scripts/linux-webrtc-toolchain.sh](Client/scripts/linux-webrtc-toolchain.sh), [Client/src-tauri/rust-toolchain.toml](Client/src-tauri/rust-toolchain.toml)

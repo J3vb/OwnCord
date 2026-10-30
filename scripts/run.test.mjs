@@ -243,11 +243,15 @@ test("a failing check preserves its exit code and stops later steps", () => {
     mkdirSync(join(fixture, "scripts"));
     mkdirSync(join(fixture, "Server"));
     mkdirSync(join(fixture, "Client"));
+    mkdirSync(join(fixture, "scripts", "checks"));
     copyFileSync(runner, join(fixture, "scripts", "run.mjs"));
-    writeFileSync(join(fixture, "scripts", "check-doc-counts.mjs"), "process.exitCode = 7;");
+    writeFileSync(
+      join(fixture, "scripts", "checks", "check-doc-counts.mjs"),
+      "process.exitCode = 7;",
+    );
     const marker = join(fixture, "unexpected-next-step");
     writeFileSync(
-      join(fixture, "scripts", "check-doc-citations.test.mjs"),
+      join(fixture, "scripts", "checks", "check-doc-citations.test.mjs"),
       `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "ran");`,
     );
     const result = spawnSync(
@@ -260,7 +264,7 @@ test("a failing check preserves its exit code and stops later steps", () => {
       },
     );
     assert.equal(result.status, 7, result.stderr);
-    assert.match(result.stderr, /FAILED: node scripts\/check-doc-counts.mjs exited 7/);
+    assert.match(result.stderr, /FAILED: node scripts\/checks\/check-doc-counts.mjs exited 7/);
     assert.equal(existsSync(marker), false, "later check did not run");
     assert.doesNotMatch(result.stdout, /check:docs: passed/);
   } finally {

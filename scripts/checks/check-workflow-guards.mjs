@@ -2,8 +2,8 @@
 // Fail when a workflow that consumes a metered credential loses one of its
 // guards (L-16).
 //
-//   node scripts/check-workflow-guards.mjs
-//   node --test scripts/check-workflow-guards.test.mjs
+//   node scripts/checks/check-workflow-guards.mjs
+//   node --test scripts/checks/check-workflow-guards.test.mjs
 //
 // Why this exists rather than trusting review: the guards below are three lines
 // in a YAML file that nothing else verifies. actionlint checks expression
@@ -29,7 +29,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // Workflows whose runs consume a metered credential, and therefore must carry
 // every guard in CHECKS. An unlisted workflow is not checked.
@@ -154,7 +154,7 @@ function main() {
     const p = join(ROOT, rel);
     if (!existsSync(p)) {
       failures.push(
-        `${rel}: listed in METERED but does not exist — fix the list in ${"scripts/check-workflow-guards.mjs"}`,
+        `${rel}: listed in METERED but does not exist — fix the list in ${"scripts/checks/check-workflow-guards.mjs"}`,
       );
       continue;
     }

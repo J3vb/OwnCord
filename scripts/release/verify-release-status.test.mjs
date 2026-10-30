@@ -63,7 +63,7 @@ test("the real docs/STATUS.md parses and records the current release", () => {
   const rows = releaseRows(readFileSync(STATUS_PATH, "utf8"));
   assert.ok(rows.length > 0);
   const manifest = JSON.parse(
-    readFileSync(new URL("../Client/package.json", import.meta.url), "utf8"),
+    readFileSync(new URL("../../Client/package.json", import.meta.url), "utf8"),
   );
   assert.ok(
     rows.includes(manifest.version),

@@ -2,7 +2,7 @@
 // Plan and ticket ids in code comments ("(WP 7.4b)", "B7-15c", "OC-0395",
 // "Codex review round 2") point at documents a reader of the code does not
 // have. This counts them per file in production code and holds the counts in
-// scripts/comment-id-baseline.json as a shrink-only ratchet: a file may not
+// scripts/checks/comment-id-baseline.json as a shrink-only ratchet: a file may not
 // gain one, a file that lost some must have its row lowered, and the total
 // stays under TOTAL_CAP. Run with --update to write the lowered counts after
 // rewriting comments; it refuses to raise any row.
@@ -16,8 +16,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const BASELINE_PATH = path.join(ROOT, "scripts/comment-id-baseline.json");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+export const BASELINE_PATH = path.join(ROOT, "scripts/checks/comment-id-baseline.json");
 
 /** Ids that may remain in total. Lower it in every change that removes ids; it never rises. */
 export const TOTAL_CAP = 0;
@@ -346,14 +346,14 @@ export function compare(actual, baseline, cap) {
     const n = actual[f] ?? 0;
     if (n < allowed) {
       problems.push(
-        `${f}: baseline says ${allowed}, the file now has ${n}. Lower the row (node scripts/check-comment-ids.mjs --update).`,
+        `${f}: baseline says ${allowed}, the file now has ${n}. Lower the row (node scripts/checks/check-comment-ids.mjs --update).`,
       );
     }
   }
   const total = Object.values(baseline).reduce((a, b) => a + b, 0);
   if (total > cap) {
     problems.push(
-      `baseline total ${total} is above TOTAL_CAP ${cap} in scripts/check-comment-ids.mjs.`,
+      `baseline total ${total} is above TOTAL_CAP ${cap} in scripts/checks/check-comment-ids.mjs.`,
     );
   } else if (total < cap) {
     problems.push(

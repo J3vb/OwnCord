@@ -6,7 +6,7 @@
 # proposed: a scheduled run attaches its check runs to the DEFAULT branch's
 # tip, so the jobs that would have to be skipped to scope the nightly to the
 # smoke would land on main's tip as `skipped` under names that are required
-# contexts. scripts/verify-gate-evidence.mjs:45-61 keeps the latest attempt
+# contexts. scripts/release/verify-gate-evidence.mjs:45-61 keeps the latest attempt
 # per name and does not count `skipped` as success, so release.yml's
 # gate-evidence job would then refuse to tag that commit. The job name below
 # matches no required context, and ci.yml is left alone.

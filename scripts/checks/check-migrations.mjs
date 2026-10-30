@@ -2,8 +2,8 @@
 // Fail when a migration that has already shipped is edited or removed
 // (OC-0395).
 //
-//   node scripts/check-migrations.mjs
-//   node --test scripts/check-migrations.test.mjs
+//   node scripts/checks/check-migrations.mjs
+//   node --test scripts/checks/check-migrations.test.mjs
 //
 // Why this exists rather than trusting review: Server/db/migrate.go records an
 // applied migration by FILENAME and stores no content hash, so editing a file
@@ -21,13 +21,13 @@
 // and "harmless enough to skip" is a judgement this script would get wrong in
 // the one case that matters.
 //
-// Dependency-free, like scripts/check-workflow-guards.mjs — node: and git.
+// Dependency-free, like scripts/checks/check-workflow-guards.mjs — node: and git.
 
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const MIGRATIONS = "Server/migrations";
 
 function git(args) {
@@ -158,7 +158,7 @@ function main() {
         "Without one this check cannot tell a new migration from an edited one, so it fails\n" +
         "rather than passing blind. Fetch the integration branch and re-run:\n" +
         "  git fetch origin dev\n" +
-        "  node scripts/check-migrations.mjs",
+        "  node scripts/checks/check-migrations.mjs",
     );
     process.exit(1);
   }
@@ -173,7 +173,7 @@ function main() {
       `ERROR: git diff against ${base.ref} (${mergeBase.slice(0, 8)}) failed, so no migration was\n` +
         "checked. Re-run in a full clone:\n" +
         "  git fetch --unshallow origin\n" +
-        "  node scripts/check-migrations.mjs",
+        "  node scripts/checks/check-migrations.mjs",
     );
     process.exit(1);
   }
@@ -236,7 +236,7 @@ function main() {
           .map((v) => `  git mv ${v.path} ${renumber(v.path, v.want)}\n`)
           .join("") +
         "  # then update its row in the Migration History table in docs/schema.md\n" +
-        "  node scripts/check-migrations.mjs",
+        "  node scripts/checks/check-migrations.mjs",
     );
     process.exit(1);
   }
