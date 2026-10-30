@@ -87,8 +87,8 @@ import {
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
 import { createNotesContext, setNotesContextSource } from "../features/profiles/userNotes";
-import { markAllRead, setMarkReadSender } from "@lib/read-state";
-import { setMarkUnreadSender } from "@components/message-list/mark-unread";
+import { markAllRead, setMarkReadSender } from "@lib/readState";
+import { setMarkUnreadSender } from "@components/message-list/markUnread";
 import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { setAudioVolumeHost } from "@lib/voice/audioElements";

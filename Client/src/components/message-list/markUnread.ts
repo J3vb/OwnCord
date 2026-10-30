@@ -1,11 +1,11 @@
 /**
  * Mark Unread, the page's half: the socket sender, and the scan for
  * the message before the one clicked. The shared state (pending request, hold,
- * pointer) lives in lib/read-state.ts, which the startup chunk needs for
+ * pointer) lives in lib/readState.ts, which the startup chunk needs for
  * `read_state` and the refusal; this half is only needed by the main page.
  */
 
-import { beginMarkUnread, setMarkUnreadNotice } from "@lib/read-state";
+import { beginMarkUnread, setMarkUnreadNotice } from "@lib/readState";
 import { showToast } from "@lib/ui/toast";
 import { getChannelMessages } from "@stores/messages.store";
 import { messagingText } from "../../i18n/messaging";

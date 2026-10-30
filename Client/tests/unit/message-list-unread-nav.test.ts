@@ -35,7 +35,7 @@ import {
   setActiveChannel,
   incrementUnread,
 } from "@stores/channels.store";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import { closeSettings, openSettings } from "@stores/ui.store";
 import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
 import { createReconnectClock } from "../../src/features/connection/dispatchContext";

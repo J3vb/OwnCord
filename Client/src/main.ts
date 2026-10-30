@@ -16,7 +16,7 @@ import { openNotificationTarget } from "@lib/notifications";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { wireConnectionStatus } from "@lib/dispatcher";
-import { markActiveChannelReadOnUnload } from "@lib/read-state";
+import { markActiveChannelReadOnUnload } from "@lib/readState";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
