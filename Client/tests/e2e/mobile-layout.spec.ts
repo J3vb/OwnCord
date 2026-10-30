@@ -69,6 +69,23 @@ for (const profile of PROFILES) {
       await noHorizontalScroll(page);
     });
 
+    test("the saved servers fold away so the sign-in form is on screen", async ({ page }) => {
+      const toggle = page.locator("[data-testid='server-panel-toggle']");
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(page.locator(".btn-add-server")).toBeHidden();
+      // Before any pick the first saved server stays in view.
+      await expect(page.locator(".server-item").first()).toBeVisible();
+      await expect(page.locator(".connect-form button[type='submit']")).toBeInViewport();
+
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(page.locator(".btn-add-server")).toBeVisible();
+      await page.locator(".server-item").first().click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(page.locator(".server-item.active")).toBeVisible();
+      await noHorizontalScroll(page);
+    });
+
     async function signIn(page: Page): Promise<void> {
       await submitLogin(page);
       await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
@@ -163,6 +180,28 @@ for (const profile of PROFILES) {
       await page.locator("button[aria-label='Settings']").click();
       await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
       await noHorizontalScroll(page);
+    });
+
+    test("settings shows the section list, then one section with a way back", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").click();
+      await page.locator("button[aria-label='Settings']").click();
+      const overlay = page.locator("[data-testid='settings-overlay']");
+      await expect(overlay).toHaveClass(/open/);
+      const appearance = overlay.locator(".settings-nav-item[role='tab']", {
+        hasText: "Appearance",
+      });
+      await expect(appearance).toBeInViewport();
+      await expect(overlay.locator(".settings-content")).toBeHidden();
+
+      await appearance.click();
+      await expect(overlay.locator(".settings-content h1")).toHaveText("Appearance");
+      await expect(appearance).toBeHidden();
+      await noHorizontalScroll(page);
+
+      await overlay.locator("[data-testid='settings-back']").click();
+      await expect(appearance).toBeInViewport();
+      await expect(overlay).toHaveClass(/open/);
     });
 
     test("long-press on a message opens the message menu, and only one", async ({ page }) => {

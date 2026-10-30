@@ -541,6 +541,9 @@ video[hidden] + .video-surface {
   background: var(--accent);
   color: var(--on-accent);
 }
+.video-fs-btn[hidden] {
+  display: none;
+}
 .video-fs-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;

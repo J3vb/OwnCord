@@ -24,7 +24,7 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@components/MaskedLinkGuard", () => ({ guardMaskedLink }));
 vi.mock("@lib/ui/touchInput", () => ({ installTouchInput }));
 
-import { installGlobalGuards } from "../../src/app/globalGuards";
+import { installGlobalGuards, lockPageZoom } from "../../src/app/globalGuards";
 import { connectText } from "../../src/i18n/connect";
 
 let added: Array<[string, EventListenerOrEventListenerObject]> = [];
@@ -203,5 +203,27 @@ describe("installGlobalGuards", () => {
       );
       vi.doMock("@lib/ui/touchInput", () => ({ installTouchInput }));
     });
+  });
+});
+
+describe("lockPageZoom", () => {
+  it("adds the no-zoom terms to the viewport meta once", () => {
+    const meta = document.createElement("meta");
+    meta.name = "viewport";
+    meta.content = "width=device-width, initial-scale=1";
+    document.head.append(meta);
+    try {
+      lockPageZoom();
+      lockPageZoom();
+      expect(meta.content).toBe(
+        "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
+      );
+    } finally {
+      meta.remove();
+    }
+  });
+
+  it("does nothing without a viewport meta", () => {
+    expect(() => lockPageZoom()).not.toThrow();
   });
 });

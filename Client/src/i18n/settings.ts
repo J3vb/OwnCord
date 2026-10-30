@@ -35,6 +35,7 @@ export const settingsText = defineCatalog("settings", {
   "logout.confirm.body": "Are you sure you want to log out?",
   "logout.confirm.button": "Log Out",
   "shell.esc": "ESC",
+  "shell.back": "Back to settings",
   "search.label": "Search settings",
   "search.placeholder": "Search",
   "search.clear": "Clear search",
