@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 245 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 248 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -258,10 +258,13 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/users/me/sessions`                                          |
 | GET     | `/api/v1/users/me/sessions`                                          |
 | DELETE  | `/api/v1/users/me/sessions/{id}`                                     |
+| GET     | `/api/v1/users/me/storage`                                           |
 | DELETE  | `/api/v1/users/me/totp`                                              |
 | POST    | `/api/v1/users/me/totp/confirm`                                      |
 | POST    | `/api/v1/users/me/totp/enable`                                       |
 | POST    | `/api/v1/users/me/totp/recovery-codes`                               |
+| GET     | `/api/v1/users/me/uploads`                                           |
+| DELETE  | `/api/v1/users/me/uploads/{id}`                                      |
 | GET     | `/api/v1/ws`                                                         |
 | GET     | `/assets/*`                                                          |
 | GET     | `/health`                                                            |
@@ -2742,6 +2745,87 @@ has been waiting too long.
 | Status | Code        | When                                                                                                 |
 | ------ | ----------- | ---------------------------------------------------------------------------------------------------- |
 | 404    | `NOT_FOUND` | No such upload, it belongs to someone else, a message already holds it, or it is your current avatar |
+
+---
+
+### GET /api/v1/users/me/storage
+
+How much of the upload quota the caller has used, for the My uploads page. Rate-limited with the `uploads:` bucket (120 requests a minute, shared with the two routes below).
+
+**Auth:** Required
+
+#### Response 200 OK
+
+`{ "used_bytes": 1234, "quota_bytes": 104857600 }`. `used_bytes` is the same counter uploads are admitted against, so it includes sent files, unsent uploads and the caller's avatar and banner; a user who never uploaded reads `0`. `quota_bytes` is `upload.user_quota_mb` in bytes, and `0` means no limit.
+
+---
+
+### GET /api/v1/users/me/uploads
+
+The files the caller uploaded, in every state, across all channels and DMs. Rate-limited with the `uploads:` bucket.
+
+**Auth:** Required
+
+| Query    | Description                                                                                               |
+| -------- | --------------------------------------------------------------------------------------------------------- |
+| `sort`   | `newest` (default: upload time, then id, descending) or `largest` (size, then id, descending)             |
+| `q`      | Keeps file names containing this text (ASCII case-insensitive, matched literally), at most 100 characters |
+| `cursor` | The previous page's `next_cursor`; a cursor from the other `sort` is refused                              |
+| `limit`  | Page size, default 50, at most 100                                                                        |
+
+#### Response 200 OK
+
+```json
+{
+  "items": [
+    {
+      "attachment": {
+        "id": "…",
+        "filename": "photo.png",
+        "size": 52113,
+        "mime": "image/png",
+        "url": "/api/v1/files/…"
+      },
+      "uploaded_at": "2026-10-30 05:00:00",
+      "channel_id": 12,
+      "message_id": 4410,
+      "state": "message",
+      "removable": true
+    }
+  ],
+  "next_cursor": "…"
+}
+```
+
+`attachment` has the same shape as a message's attachments. `next_cursor` is omitted on the last page; it is opaque and encodes the last item's sort key and id, so files uploaded while a viewer pages never repeat or shift a page. `channel_id` and `message_id` are set while a message holds the file and `null` otherwise; the response never carries a channel name, so a channel the caller lost access to leaks nothing. `state` is one of:
+
+| State        | Meaning                                                                    | `removable` |
+| ------------ | -------------------------------------------------------------------------- | ----------- |
+| `message`    | Held by a live message                                                     | `true`      |
+| `deleted`    | Held by a deleted message; still counted until the orphan sweep removes it | `true`      |
+| `pending`    | Uploaded, never sent, and not in use                                       | `true`      |
+| `avatar`     | A current avatar                                                           | `false`     |
+| `banner`     | A current profile banner                                                   | `false`     |
+| `group_icon` | A current group DM icon                                                    | `false`     |
+
+`400 BAD_REQUEST` for an unknown `sort`, a malformed `cursor`, a `q` over 100 characters or a `limit` that is not a positive integer.
+
+---
+
+### DELETE /api/v1/users/me/uploads/{id}
+
+Remove one of the caller's own files, wherever it sits: unsent, in a message, or in a message since deleted. The row and the stored bytes are deleted and the size stops counting against the quota at once. Rate-limited with the `uploads:` bucket.
+
+**Auth:** Required
+
+If a message held the file, its readers are told over the WebSocket. A message left with no text, no files and no poll, sticker or forward is deleted like any own delete (`chat_deleted`, with mention reversal and audit); if that delete is refused, for example in an archived channel, it is announced as changed instead. Any other message is sent as a [`chat_edited`](protocol.md#chat_edited-server---client-broadcast) carrying its remaining `attachments`, with `edited_at` unchanged. Forwards hold their own copies of a file, so removing the original leaves them intact.
+
+#### Response 204 No Content
+
+| Status | Code        | When                                                                                                                     |
+| ------ | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 404    | `NOT_FOUND` | No such file, it belongs to someone else, or it is already gone (including a second device removing it at the same time) |
+| 409    | `CONFLICT`  | The file is a current avatar, profile banner or group DM icon; change that first                                         |
 
 ---
 

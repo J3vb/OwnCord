@@ -197,6 +197,10 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	// creation so a message purge or an nsfw_ack can broadcast through it.
 	routerChannelRoutes(r, svc, limiter, cfg, hub)
 
+	// The signed-in user's own uploads: storage figure, list and removal. Mounted
+	// after hub creation so removing the file of a message can tell its readers.
+	MountUserUploadRoutes(r, svc, profileStore, limiter, cfg.Server.TrustedProxies, hub)
+
 	// Custom emoji routes, mounted after hub creation so an upload or delete can
 	// fan out an emoji_update. They need the attachment routes' file storage;
 	// without it they are not mounted (a 404 the client reads as "this server

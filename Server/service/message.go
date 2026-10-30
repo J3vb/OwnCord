@@ -172,6 +172,13 @@ type MessageService struct {
 	threads ThreadStore
 	// media reads a channel's media gallery; nil disables it.
 	media MediaStore
+	// emptyDeleter and storedMentions back AfterAttachmentRemoved; nil disables the
+	// auto-delete and reports no stored mentions.
+	emptyDeleter   EmptyMessageDeleter
+	storedMentions StoredMentionStore
+	// afterRemovalRead is a test seam called after AfterAttachmentRemoved reads the
+	// message and before it deletes. Nil in production.
+	afterRemovalRead func()
 }
 
 // SetMessageRequests wires the first-contact gate (service.New() calls it once);
@@ -212,6 +219,8 @@ func NewMessageService(st Store, perms *PermissionService, limiter *auth.RateLim
 	s.threads, _ = st.(ThreadStore)
 	s.mentionIDs, _ = st.(MentionIDStore)
 	s.media, _ = st.(MediaStore)
+	s.emptyDeleter, _ = st.(EmptyMessageDeleter)
+	s.storedMentions, _ = st.(StoredMentionStore)
 	return s
 }
 

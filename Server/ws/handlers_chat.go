@@ -220,25 +220,36 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
-	editedPayload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
+	return Result{Events: chatEditedEvents(result)}
+}
+
+// chatEditedEvents is the fan-out of a committed edit: the sequenced chat_edited to
+// the channel or, for a DM, to its participants.
+func chatEditedEvents(result *service.EditMessageResult) []Event {
+	payload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
 		result.Mentions, result.MentionRoles, result.MentionsEveryone, result.MentionsHere)
-	if result.IsDM {
-		return Result{Events: []Event{dmEventOrFallback(
-			dmEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: editedPayload},
-			channelEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, payload: editedPayload},
-			result.ParticipantIDs)}}
+	return editedFrameEvents(payload, result.ChannelID, result.IsDM, result.ParticipantIDs, result.PostOpening)
+}
+
+// editedFrameEvents addresses one chat_edited payload: to a DM's participants
+// (the channel topic only when the list is empty), or to the channel with, for a
+// forum post's opening message, a coalesced thread note so the forum's viewers
+// hear the new preview. Edits and file removals share it, so both reach exactly
+// the same readers.
+func editedFrameEvents(payload []byte, channelID int64, isDM bool, participantIDs []int64, postOpening bool) []Event {
+	if isDM {
+		return []Event{dmEventOrFallback(
+			dmEvt{evType: MsgTypeChatEdited, channelID: channelID, participantIDs: participantIDs, payload: payload},
+			channelEvt{evType: MsgTypeChatEdited, channelID: channelID, payload: payload},
+			participantIDs)}
 	}
-	events := []Event{channelEvt{
-		evType:    MsgTypeChatEdited,
-		channelID: result.ChannelID,
-		payload:   editedPayload,
-	}}
-	if result.PostOpening {
+	events := []Event{channelEvt{evType: MsgTypeChatEdited, channelID: channelID, payload: payload}}
+	if postOpening {
 		// A forum post's opening message is the list's preview: the forum's
 		// viewers hear the new text as a thread_changed (coalesced).
-		events = append(events, threadNoteEvt{threadID: result.ChannelID})
+		events = append(events, threadNoteEvt{threadID: channelID})
 	}
-	return Result{Events: events}
+	return events
 }
 
 // handleChatDeleteV2 processes a chat_delete command via the MessageService.
@@ -251,24 +262,26 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 		return serviceErrorToResult(err)
 	}
 
-	deletedPayload := buildChatDeleted(result.MessageID, result.ChannelID)
+	return Result{Events: chatDeletedEvents(result)}
+}
+
+// chatDeletedEvents is the fan-out of a committed delete: the sequenced
+// chat_deleted to the channel or, for a DM, to its participants.
+func chatDeletedEvents(result *service.DeleteMessageResult) []Event {
+	payload := buildChatDeleted(result.MessageID, result.ChannelID)
 	if result.IsDM {
-		return Result{Events: []Event{dmEventOrFallback(
-			dmEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: deletedPayload},
-			channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: deletedPayload},
-			result.ParticipantIDs)}}
+		return []Event{dmEventOrFallback(
+			dmEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: payload},
+			channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: payload},
+			result.ParticipantIDs)}
 	}
-	events := []Event{channelEvt{
-		evType:    MsgTypeChatDeleted,
-		channelID: result.ChannelID,
-		payload:   deletedPayload,
-	}}
+	events := []Event{channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: payload}}
 	if result.IsThread {
 		// The delete moved the thread's count and last message: tell the
 		// parent's viewers (coalesced).
 		events = append(events, threadNoteEvt{threadID: result.ChannelID})
 	}
-	return Result{Events: events}
+	return events
 }
 
 // dmEventOrFallback returns the participant-targeted DM event, falling back to the
