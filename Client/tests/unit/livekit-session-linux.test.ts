@@ -814,7 +814,20 @@ describe("LiveKitSession on the Linux native backend", () => {
     host.connectFails = true;
     const onError = vi.fn();
     session.setOnError(onError);
-    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    vi.useFakeTimers();
+    try {
+      // The connect retries back off with timers; step through them.
+      let settled = false;
+      const join = session.handleVoiceToken("tok", "/livekit", 1, undefined, true).finally(() => {
+        settled = true;
+      });
+      for (let i = 0; i < 30 && !settled; i++) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      await join;
+    } finally {
+      vi.useRealTimers();
+    }
     expect(names().filter((n) => n === "connect")).toHaveLength(3);
     expect(names()).not.toContain("disconnect");
     expect(onError).toHaveBeenCalledWith("Failed to join voice — connection error");

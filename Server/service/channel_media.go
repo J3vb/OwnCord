@@ -59,7 +59,7 @@ type MediaMonth struct {
 
 // ListChannelMedia returns one page of the attachments in a channel the caller
 // may read, behind the same gate as the message history.
-func (s *MessageService) ListChannelMedia(ctx context.Context, userID, channelID int64, in ChannelMediaRequest) (page ChannelMediaPage, err error) {
+func (s *messageReads) ListChannelMedia(ctx context.Context, userID, channelID int64, in ChannelMediaRequest) (page ChannelMediaPage, err error) {
 	if s.media == nil {
 		return ChannelMediaPage{}, fmt.Errorf("%w: the media gallery is not available", ErrInternal)
 	}
@@ -112,7 +112,7 @@ func (s *MessageService) ListChannelMedia(ctx context.Context, userID, channelID
 
 // ChannelMediaMonths counts a channel's media per calendar month in the
 // caller's zone, newest month first, with the same filters as the list.
-func (s *MessageService) ChannelMediaMonths(ctx context.Context, userID, channelID int64, in ChannelMediaRequest) (months []MediaMonth, err error) {
+func (s *messageReads) ChannelMediaMonths(ctx context.Context, userID, channelID int64, in ChannelMediaRequest) (months []MediaMonth, err error) {
 	if s.media == nil {
 		return nil, fmt.Errorf("%w: the media gallery is not available", ErrInternal)
 	}

@@ -10,7 +10,7 @@ import (
 )
 
 // GetAccessibleChannelIDs returns all channel IDs the user can read.
-func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
+func (s *messageReads) GetAccessibleChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list channels: %w", ErrInternal, err)
@@ -60,7 +60,7 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 // SearchMessages' global branch, so a hit in an unacknowledged labelled channel is
 // absent rather than returned. The acknowledgement lookup runs only per labelled
 // channel in the visible set.
-func (s *MessageService) ReadableChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
+func (s *messageReads) ReadableChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	ids, err := s.GetAccessibleChannelIDs(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) e
 // (ws/handlers_command.go) uses it to pick the sender-aware DM audience: a slash
 // command's broadcast is a DM interaction and must not bypass the first-contact
 // gate via channel fan-out.
-func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool, error) {
+func (s *messageReads) ChannelIsDM(ctx context.Context, channelID int64) (bool, error) {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil {
 		return false, err

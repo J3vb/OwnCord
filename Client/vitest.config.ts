@@ -32,6 +32,47 @@ if (!(process.env.NODE_OPTIONS ?? "").includes(WEBSTORAGE_OFF)) {
   process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ""} ${WEBSTORAGE_OFF}`.trim();
 }
 
+// Files that still need a whole Node process each (the `desktop-node`
+// project). Everything else runs in the `vmForks` pool: one jsdom VM context
+// per file inside reused worker processes, which skips a process spawn and a
+// jsdom import per file and took the suite from 455 s to under 2 min on a
+// 4-core box. A file belongs here only when the VM context changes what it
+// measures:
+// - it builds its own JSDOM, runs a bundler or other Node tooling, and those
+//   CommonJS packages cannot load inside the VM context;
+// - it imports Playwright (directly or through tests/e2e/support), which
+//   refuses to load a second time in one process;
+// - it redefines `window.location`, which jsdom's VM window keeps
+//   non-configurable;
+// - it checks an error or buffer against the page's constructors
+//   (`instanceof SyntaxError`, `expect.any(Error)`, `instanceof ArrayBuffer`)
+//   while the value comes from Node's realm (fetch, vi.mock, Node streams).
+// Shrink-only: move a file back by fixing it, never add one to dodge a failure
+// that also happens in the forks pool.
+const NODE_PROCESS_FILES = [
+  "tests/contract/server-admin-*.test.ts",
+  "tests/unit/api.test.ts",
+  "tests/unit/app-deepLinks.test.ts",
+  "tests/unit/app-globalGuards.test.ts",
+  "tests/unit/app-router.test.ts",
+  "tests/unit/artifact-cert-pin.test.ts",
+  "tests/unit/artifact-updater-restart.test.ts",
+  "tests/unit/artifact-webview2-policy.test.ts",
+  "tests/unit/layer-baseline.test.ts",
+  "tests/unit/lifecycle-ownership.test.ts",
+  "tests/unit/lifecycle-probe.test.ts",
+  "tests/unit/main.test.ts",
+  "tests/unit/native-artifacts.test.ts",
+  "tests/unit/native-launch.test.ts",
+  "tests/unit/noise-suppression-bytes-cache.test.ts",
+  "tests/unit/platform/browser-registry.test.ts",
+  "tests/unit/platform/socket.browser.test.ts",
+  "tests/unit/playwright-devserver-v8-flag.test.ts",
+  "tests/unit/process-nonloopback.test.ts",
+  "tests/unit/soak-console-errors.test.ts",
+  "tests/unit/web-build.test.ts",
+];
+
 export default defineConfig({
   plugins: [changelogModule()],
   define: { __OWNCORD_WEB__: false },
@@ -46,22 +87,30 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    // "forks" is vitest 4's default; pinning it makes the dependency explicit
-    // so a future default flip is a deliberate edit here rather than a silent
-    // behaviour change. Two things need child processes rather than worker
-    // threads. `process.env.TZ` only reaches Date's local-time engine on a
-    // process main thread, so the TZ-pinned regression blocks in
-    // tests/unit/{dispatcher,renderers}.test.ts measure nothing under threads
-    // — tests/helpers/tz-pin.ts throws rather than skipping if that happens.
-    // And the NODE_OPTIONS flag above is a process start-up flag: a worker
-    // thread inherits the variable but not its effect (today jsdom supplies
-    // the globals anyway, so that half is belt-and-braces, not load-bearing).
-    pool: "forks",
+    // Child processes, never worker threads: `process.env.TZ` only reaches
+    // Date's local-time engine on a process main thread, so the TZ-pinned
+    // regression blocks in tests/unit/{dispatcher,renderers}.test.ts measure
+    // nothing under threads (tests/helpers/tz-pin.ts throws rather than
+    // skipping if that happens), and the NODE_OPTIONS flag above is a process
+    // start-up flag. `vmForks` keeps both: forked workers, each test file in a
+    // fresh VM context with its own module graph. `desktop-node` below keeps
+    // the few files that need a whole process each on `forks`.
+    pool: "vmForks",
+    // V8 coverage reports every script still alive in a worker, so a VM
+    // worker that keeps the contexts of earlier files makes each later
+    // report bigger. Recycling at 300 MB took the coverage run from 441 s to
+    // 263 s with the same numbers; the plain run does not notice it.
+    vmMemoryLimit: "300MB",
     // Asserts the NODE_OPTIONS flag below actually arrived; see its comment
     // and tests/setup.ts's header.
     setupFiles: ["./tests/setup.ts"],
-    // Two projects over one config (WP 6.13e): `desktop` is the suite as it
-    // always was, with `__OWNCORD_WEB__` false. `web` builds the portal's
+    // The per-test budget. A test that needs longer waits on the fake clock
+    // instead of the real one, or, when its cost is real work (a lint pass
+    // over src/, hundreds of DOM rebuilds), says so with its own `timeout`.
+    testTimeout: 2_000,
+    // Three projects over one config (WP 6.13e): `desktop` is the suite as it
+    // always was, with `__OWNCORD_WEB__` false, and `desktop-node` is the same
+    // suite for NODE_PROCESS_FILES. `web` builds the portal's
     // branches in (`__OWNCORD_WEB__` true, the platform registry swapped for
     // the browser one exactly as `vite.config.web.ts` does) and runs only
     // tests/web/. A plain `vitest run` runs both. `include` and `exclude` live
@@ -78,7 +127,21 @@ export default defineConfig({
           // tests/browser/ runs real browser APIs (AudioContext, WASM) under
           // vitest.config.browser.ts (`npm run test:browser`); it cannot pass
           // in jsdom and is not part of this suite.
-          exclude: [...configDefaults.exclude, "tests/browser/**", "tests/web/**"],
+          exclude: [
+            ...configDefaults.exclude,
+            "tests/browser/**",
+            "tests/web/**",
+            ...NODE_PROCESS_FILES,
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "desktop-node",
+          pool: "forks",
+          include: NODE_PROCESS_FILES,
+          exclude: [...configDefaults.exclude],
         },
       },
       {

@@ -140,14 +140,14 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"service.(*ChannelService).ListVisibleChannels": {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},
 	// The channel family's override guards — moved from the
 	// admin handlers with their code; the rows moved with them.
-	"service.requireGrantableChannelOverride":           {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
-	"service.(*ChannelService).requireOutranks":         {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
-	"service.(*MessageService).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
-	"service.(*PermissionService).loadPerms":            {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
-	"service.(*PermissionService).Subject":              {classAdminShortCircuit, "skips the TimedOut lookup for an administrator (B5-9)", calls{"HasAdmin": 1}},
-	"ws.(*Hub).computeAllowedChannels":                  {classAdminShortCircuit, "broadcast audience skips the override query for an administrator", calls{"HasAdmin": 1}},
-	"ws.(*Hub).readyVisibleChannels":                    {classAdminShortCircuit, "ready snapshot skips the override query for an administrator", calls{"HasAdmin": 1}},
-	"ws.(*Hub).voiceJoinPublishPerms":                   {classAdminShortCircuit, "publish/video/screenshare bits skip the override query for an administrator", calls{"HasAdmin": 1}},
+	"service.requireGrantableChannelOverride":         {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
+	"service.(*ChannelService).requireOutranks":       {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
+	"service.(*messageReads).GetAccessibleChannelIDs": {classAdminShortCircuit, "an administrator searches every channel; skips the override query", calls{"HasAdmin": 1}},
+	"service.(*PermissionService).loadPerms":          {classAdminShortCircuit, "cache fill skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"service.(*PermissionService).Subject":            {classAdminShortCircuit, "skips the TimedOut lookup for an administrator (B5-9)", calls{"HasAdmin": 1}},
+	"ws.(*Hub).computeAllowedChannels":                {classAdminShortCircuit, "broadcast audience skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"ws.(*Hub).readyVisibleChannels":                  {classAdminShortCircuit, "ready snapshot skips the override query for an administrator", calls{"HasAdmin": 1}},
+	"ws.(*Hub).voiceJoinPublishPerms":                 {classAdminShortCircuit, "publish/video/screenshare bits skip the override query for an administrator", calls{"HasAdmin": 1}},
 
 	// ── HasAdmin as an authorization input: role hierarchy and perimeter ───
 	"service.(*UploadService).Authorize": {classAdminPerimeter, "administrator bypass for attachment access", calls{"HasAdmin": 1}},
@@ -157,7 +157,7 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// The one multi-call row: one EffectivePerms for the layer's mask, then
 	// HasAdmin twice — once to keep an administrator role in, once in the
 	// read test.
-	"service.(*MessageService).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
+	"service.(*mentionState).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
 
 	// ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor's
 	// own base-bit-rejection rows are GONE:

@@ -1,7 +1,7 @@
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { waitForUpdaterRestart } from "../e2e/support/artifact-app";
 
 // What `tasklist /fo csv /nh /fi "imagename eq owncord-client.exe"` printed on
@@ -31,13 +31,30 @@ describe.skipIf(process.platform === "win32")(
       await chmod(join(dir, "tasklist"), 0o755);
     };
     const calls = async () => (await readFile(join(dir, "calls"), "utf8")).trim().split("\n");
+    // The fake tasklist runs for real; only the helper's one-second poll sleep
+    // and its deadline clock are fake. Skip a sleep the moment it is set, and
+    // otherwise yield to the event loop so the child process can finish.
+    const drive = async <T>(wait: Promise<T>): Promise<T> => {
+      let settled = false;
+      const done = wait.finally(() => {
+        settled = true;
+      });
+      done.catch(() => {});
+      while (!settled) {
+        if (vi.getTimerCount() > 0) await vi.advanceTimersByTimeAsync(1_000);
+        else await new Promise((resume) => setImmediate(resume));
+      }
+      return done;
+    };
 
     beforeEach(async () => {
       dir = await mkdtemp(join(tmpdir(), "owncord-tasklist-"));
       process.env.PATH = `${dir}:${path}`;
       Object.defineProperty(process, "platform", { value: "win32" });
+      vi.useFakeTimers({ toFake: ["setTimeout", "Date"] });
     });
     afterEach(async () => {
+      vi.useRealTimers();
       Object.defineProperty(process, "platform", { value: platform });
       process.env.PATH = path;
       await rm(dir, { recursive: true, force: true });
@@ -45,7 +62,7 @@ describe.skipIf(process.platform === "win32")(
 
     it("returns only once the installer has started the app", async () => {
       await fakeTasklist(NONE, RUNNING);
-      await waitForUpdaterRestart();
+      await drive(waitForUpdaterRestart());
       expect(await calls()).toEqual([
         "/fo csv /nh /fi imagename eq owncord-client.exe",
         "/fo csv /nh /fi imagename eq owncord-client.exe",
@@ -54,7 +71,7 @@ describe.skipIf(process.platform === "win32")(
 
     it("fails when the installer never starts the app", async () => {
       await fakeTasklist(NONE);
-      await expect(waitForUpdaterRestart(1_500)).rejects.toThrow(/never restarted/);
+      await expect(drive(waitForUpdaterRestart(1_500))).rejects.toThrow(/never restarted/);
     });
   },
 );

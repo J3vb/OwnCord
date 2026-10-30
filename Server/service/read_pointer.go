@@ -36,7 +36,7 @@ func (s *MessageService) SetReadStateNotifier(n ReadStateNotifier) {
 }
 
 // MoveReadPointer moves userID's read pointer in channelID and tells them the
-// result. It lives on MessageService because it owns mentionEmitMu.
+// result. It lives on mentionState because that part owns mentionEmitMu.
 // Admission is channel_focus's (admitReadState) except that a thread is admitted
 // too (admitReadPointer): a missing channel is ErrNotFound, lost access or an
 // archived channel ErrForbidden. messageID must be positive for db.ReadUpTo and
@@ -48,7 +48,7 @@ func (s *MessageService) SetReadStateNotifier(n ReadStateNotifier) {
 // frame so a mention_count frame from the worker or a removal cannot overtake this
 // read_state frame and the last frame matches the committed row. Never taken under
 // a hub lock; the caller runs on the read goroutine. On failure no frame is sent.
-func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error) {
+func (s *mentionState) MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error) {
 	if channelID <= 0 {
 		return db.ReadPointer{}, fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
@@ -106,7 +106,7 @@ func (s *MessageService) MoveReadPointer(ctx context.Context, userID, channelID 
 // readAtLatestIsCurrent reports whether the stored row already says "read at the
 // newest live message, no mentions" and, if so, the ReadPointer the write would
 // return.
-func (s *MessageService) readAtLatestIsCurrent(ctx context.Context, userID, channelID int64) (db.ReadPointer, bool) {
+func (s *mentionState) readAtLatestIsCurrent(ctx context.Context, userID, channelID int64) (db.ReadPointer, bool) {
 	latestID, err := s.st.GetLatestMessageID(ctx, channelID)
 	if err != nil {
 		return db.ReadPointer{}, false

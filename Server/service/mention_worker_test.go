@@ -398,7 +398,7 @@ func TestMentionWorker_BoundsGoroutinesUnderBurst(t *testing.T) {
 func TestMentionWorker_PlainSendsDoNotQueue(t *testing.T) {
 	svc, _, _ := newMentionFixture(t)
 	// A started worker with no loop, so queued jobs stay countable.
-	w := newMentionWorker(svc.st)
+	w := newMentionWorker(svc.mentionState.st)
 	w.started.Store(true)
 	svc.mentionWorker.Store(w)
 
