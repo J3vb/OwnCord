@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -287,7 +288,10 @@ func readLogHistory(ctx context.Context, dir string, q logHistoryQuery) (logHist
 func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *logHistoryQuery, resp *logHistoryResponse, scanned *int64) (bool, error) {
 	f, err := os.Open(filepath.Join(dir, key.name())) //nolint:gosec // G304: key comes from listLogFiles or a cursor checked by parseLogFileName
 	if err != nil {
-		if os.IsNotExist(err) {
+		// On Windows a file the cleanup has just deleted stays listed until
+		// its last handle closes, and opening it fails with access denied.
+		// Either way it is gone.
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 			return false, nil
 		}
 		return false, err
