@@ -6,12 +6,13 @@
 // committed.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
-import { membersStore } from "@stores/members.store";
+import { membersStore, updatePresence } from "@stores/members.store";
 import { createPresenceSender } from "@lib/presence/presence";
-import { createPresenceLimiter } from "@lib/net/rateLimiter";
+import { createPresenceLimiter, type RateLimiter } from "@lib/net/rateLimiter";
 import {
   loadCustomStatus,
   loadUserStatus,
+  loadUserStatusOrigin,
   saveCustomStatus,
   saveUserStatus,
 } from "@lib/presence/userStatus";
@@ -36,7 +37,7 @@ function createMockWs(): WsClient {
 
 /** A minimal WsClient whose `on` registry can be fired by the test, so a
  *  server `error` reply can be delivered to the sender. */
-function createErrorableWs(): {
+function createErrorableWs(returnIds = true): {
   ws: WsClient;
   sent: Array<{ type: string; payload: { status: string; custom_status?: string } }>;
   fireError: (code: string, id?: string) => void;
@@ -49,7 +50,7 @@ function createErrorableWs(): {
     disconnect: vi.fn(),
     send: vi.fn((msg: { type: string; payload: { status: string; custom_status?: string } }) => {
       sent.push(msg);
-      return `id-${++nextId}`;
+      return returnIds ? `id-${++nextId}` : undefined;
     }),
     on: vi.fn((type: string, listener: (payload: unknown, id?: string) => void) => {
       if (!listeners.has(type)) listeners.set(type, new Set());
@@ -433,6 +434,289 @@ describe("createPresenceSender — custom_status survival across supersession", 
       expect(sentMsg.payload.custom_status).toBe("Working on OwnCord");
     } finally {
       sender.destroy?.();
+    }
+  });
+});
+
+describe("createPresenceSender — rollback, retry and teardown details", () => {
+  const member = (): { status?: string; customStatus?: string | null } | undefined =>
+    membersStore.getState().members.get(1);
+
+  beforeEach(() => {
+    localStorage.clear();
+    authStore.setState(() => ({
+      token: "tok",
+      user: { id: 1, username: "alice", avatar: null, role: "member" },
+      serverName: "TestServer",
+      motd: null,
+      isAuthenticated: true,
+    }));
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          1,
+          {
+            id: 1,
+            username: "alice",
+            displayName: null,
+            avatar: null,
+            role: "member",
+            status: "online",
+            customStatus: "old text",
+          } as never,
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    authStore.setState(() => ({
+      token: null,
+      user: null,
+      serverName: null,
+      motd: null,
+      isAuthenticated: false,
+    }));
+    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  });
+
+  it("rolls back a refused status flip that carried no text", () => {
+    const { ws } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      expect(member()?.status).toBe("dnd");
+      sender.rollbackRefused("id-1");
+      expect(member()?.status).toBe("online");
+      expect(loadUserStatus()).toBe("online");
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("has nothing to roll back for a frame that repeats the saved text and status", () => {
+    const { ws } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      sender.send("online", "old text");
+      // Another device changes the status before this frame is refused.
+      updatePresence(1, "dnd");
+      sender.rollbackRefused("id-1");
+      expect(member()?.status).toBe("dnd");
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("has nothing to roll back for a plain flip to the status already shown", () => {
+    const { ws } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      sender.send("online");
+      updatePresence(1, "dnd");
+      sender.rollbackRefused("id-1");
+      expect(member()?.status).toBe("dnd");
+      expect(member()?.customStatus).toBe("old text");
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("leaves out the text and expiry fields it was not given", () => {
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      sender.send("dnd");
+      expect(Object.keys(sent[0]!.payload)).toEqual(["status"]);
+    } finally {
+      sender.destroy();
+    }
+    const second = createErrorableWs();
+    const other = createPresenceSender(second.ws, createPresenceLimiter());
+    try {
+      other.send("dnd", "busy");
+      expect(Object.keys(second.sent[0]!.payload)).toEqual(["status", "custom_status"]);
+    } finally {
+      other.destroy();
+    }
+  });
+
+  it("rolls back to the last accepted status when several edits queue behind the limiter", () => {
+    vi.useFakeTimers();
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      sender.send("online", "first");
+      saveUserStatus("dnd");
+      sender.send("dnd", "second");
+      saveUserStatus("idle");
+      sender.send("idle", "third");
+      expect(sent).toHaveLength(1);
+
+      vi.advanceTimersByTime(11_000);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.payload.custom_status).toBe("third");
+
+      // The server accepted the first frame, never the second: back to the first.
+      sender.rollbackRefused("id-2");
+      expect(member()?.status).toBe("online");
+      expect(member()?.customStatus).toBe("first");
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("clears the saved text when the refused frame replaced none", () => {
+    membersStore.setState((p) => ({
+      ...p,
+      members: new Map([[1, { ...p.members.get(1)!, customStatus: undefined }]]),
+    }));
+    const { ws } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveCustomStatus("new text");
+      sender.send("online", "new text");
+      sender.rollbackRefused("id-1");
+      expect(loadCustomStatus()).toBe("");
+      expect(member()?.customStatus).toBeNull();
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("restores how the status was chosen even when the status value is unchanged", () => {
+    const { ws } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online", "auto");
+      sender.send("online", "hello");
+      // The user then picks the same status by hand.
+      saveUserStatus("online", "manual");
+      sender.rollbackRefused("id-1");
+      expect(loadUserStatus()).toBe("online");
+      expect(loadUserStatusOrigin()).toBe("auto");
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("cancels a queued retry when a later change goes straight out", () => {
+    vi.useFakeTimers();
+    const { ws, sent } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      vi.advanceTimersByTime(1_000);
+      saveUserStatus("invisible");
+      sender.send("invisible"); // queued for t=11s
+      expect(sent).toHaveLength(1);
+
+      vi.advanceTimersByTime(9_500); // t=10.5s: the window has reopened
+      saveUserStatus("idle");
+      sender.send("idle");
+      expect(sent).toHaveLength(2);
+
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(2);
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("sends nothing after destroy, neither a queued retry nor one for a late rate-limit reply", () => {
+    vi.useFakeTimers();
+    const { ws, sent, fireError } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    saveUserStatus("dnd");
+    sender.send("dnd");
+    saveUserStatus("idle");
+    sender.send("idle"); // queued
+    sender.destroy();
+    vi.advanceTimersByTime(60_000);
+    expect(sent).toHaveLength(1);
+
+    fireError("RATE_LIMITED", "id-1");
+    vi.advanceTimersByTime(60_000);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("ignores other error codes for its own frame", () => {
+    vi.useFakeTimers();
+    const { ws, sent, fireError } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      fireError("TIMED_OUT", "id-1");
+      fireError("BAD_REQUEST", "id-1");
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(1);
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("keeps a newer queued change when a rate-limit reply for the earlier frame arrives", () => {
+    vi.useFakeTimers();
+    const { ws, sent, fireError } = createErrorableWs();
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("online");
+      sender.send("online", "first");
+      saveUserStatus("dnd");
+      sender.send("dnd", "second"); // queued behind the limiter
+      fireError("RATE_LIMITED", "id-1");
+      vi.advanceTimersByTime(11_000);
+      expect(sent).toHaveLength(2);
+      expect(sent[1]!.payload.status).toBe("dnd");
+      expect(sent[1]!.payload.custom_status).toBe("second");
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("does not match a reply without an id to a frame the transport gave no id", () => {
+    vi.useFakeTimers();
+    const { ws, sent, fireError } = createErrorableWs(false);
+    const sender = createPresenceSender(ws, createPresenceLimiter());
+    try {
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      fireError("RATE_LIMITED", undefined);
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(1);
+
+      sender.rollbackRefused(undefined);
+      expect(member()?.status).toBe("dnd");
+    } finally {
+      sender.destroy();
+    }
+  });
+
+  it("waits the full window plus a margin before retrying a rate-limited frame", () => {
+    vi.useFakeTimers();
+    const { ws, sent, fireError } = createErrorableWs();
+    const limiter = {
+      tryConsume: () => true,
+      getRemainingMs: () => 5_000,
+    } as unknown as RateLimiter;
+    const sender = createPresenceSender(ws, limiter);
+    try {
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      fireError("RATE_LIMITED", "id-1");
+      vi.advanceTimersByTime(5_500);
+      expect(sent).toHaveLength(1);
+      vi.advanceTimersByTime(600);
+      expect(sent).toHaveLength(2);
+    } finally {
+      sender.destroy();
     }
   });
 });

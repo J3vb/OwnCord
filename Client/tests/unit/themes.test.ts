@@ -5,7 +5,9 @@ import {
   applyThemeByName,
   applyThemeChoice,
   getActiveThemeName,
+  onSystemThemePainted,
   readableRoleColor,
+  resolveSystemTheme,
   restoreTheme,
 } from "@lib/prefs/themes";
 
@@ -337,5 +339,204 @@ describe("themes with unusable storage", () => {
     expect(() => applyTheme("midnight")).not.toThrow();
     expect(document.body.classList.contains("theme-midnight")).toBe(true);
     expect(() => applyThemeChoice("system")).not.toThrow();
+  });
+});
+
+describe("applyThemeByName leaves unrelated state alone", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.className = "";
+    for (let i = document.body.style.length - 1; i >= 0; i--) {
+      document.body.style.removeProperty(document.body.style.item(i));
+    }
+  });
+
+  it("keeps classes that are not theme classes", () => {
+    document.body.className = "sidebar-open theme-dark compact";
+    applyThemeByName("midnight");
+    expect(document.body.classList.contains("sidebar-open")).toBe(true);
+    expect(document.body.classList.contains("compact")).toBe(true);
+    expect(document.body.classList.contains("theme-dark")).toBe(false);
+    expect(document.body.classList.contains("theme-midnight")).toBe(true);
+  });
+
+  it("clears inline custom properties, even a lone one, but not ordinary styles", () => {
+    document.body.style.setProperty("--accent", "#123456");
+    applyThemeByName("dark");
+    expect(document.body.style.getPropertyValue("--accent")).toBe("");
+
+    document.body.style.setProperty("color", "red");
+    document.body.style.setProperty("--first", "1");
+    document.body.style.setProperty("--second", "2");
+    document.body.style.setProperty("--third", "3");
+    applyThemeByName("dark");
+    expect(document.body.style.getPropertyValue("color")).toBe("red");
+    expect(document.body.style.getPropertyValue("--first")).toBe("");
+    expect(document.body.style.getPropertyValue("--second")).toBe("");
+    expect(document.body.style.getPropertyValue("--third")).toBe("");
+  });
+
+  it("adds no class for a name that is not a built-in theme", () => {
+    applyThemeByName("not-a-theme");
+    expect(document.body.className).toBe("");
+  });
+
+  it("forgets a stored name it does not know and falls back to the default", () => {
+    localStorage.setItem("owncord:theme:active", "stale-theme");
+    expect(getActiveThemeName()).toBe("neon-glow");
+    expect(localStorage.getItem("owncord:theme:active")).toBeNull();
+  });
+});
+
+describe("system theme and the OS setting", () => {
+  let darkMatches = true;
+  let registered: Array<{ type: string; fn: () => void }> = [];
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.body.className = "";
+    darkMatches = true;
+    registered = [];
+    // Only the dark-scheme query answers with the OS setting; any other query is "no".
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      get matches() {
+        return media === "(prefers-color-scheme: dark)" ? darkMatches : false;
+      },
+      media,
+      addEventListener: (type: string, fn: () => void, opts?: { signal?: AbortSignal }) => {
+        const entry = { type, fn };
+        registered.push(entry);
+        opts?.signal?.addEventListener("abort", () => {
+          registered = registered.filter((r) => r !== entry);
+        });
+      },
+      removeEventListener: vi.fn(),
+    }));
+  });
+
+  afterEach(() => {
+    applyTheme("neon-glow");
+    document.body.style.removeProperty("--accent");
+    vi.unstubAllGlobals();
+  });
+
+  const flip = (dark: boolean): void => {
+    darkMatches = dark;
+    for (const r of registered.filter((e) => e.type === "change")) r.fn();
+  };
+
+  it("asks the OS for the dark colour scheme when resolving", () => {
+    expect(resolveSystemTheme()).toBe("dark");
+    darkMatches = false;
+    expect(resolveSystemTheme()).toBe("light");
+    applyThemeChoice("system");
+    expect(document.body.classList.contains("theme-light")).toBe(true);
+  });
+
+  it("resolves to dark when the browser cannot answer", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    expect(resolveSystemTheme()).toBe("dark");
+  });
+
+  it("listens for change events only", () => {
+    applyThemeChoice("system");
+    expect(registered.map((r) => r.type)).toEqual(["change"]);
+  });
+
+  it("paints the saved accent as soon as system is chosen", () => {
+    localStorage.setItem("owncord:settings:accentColor", JSON.stringify("#123456"));
+    applyThemeChoice("system");
+    expect(document.body.style.getPropertyValue("--accent")).toBe("#123456");
+  });
+
+  it("tells painted-theme listeners after a flip, with the accent already restored", () => {
+    localStorage.setItem("owncord:settings:accentColor", JSON.stringify("#123456"));
+    applyThemeChoice("system");
+    const accentSeen: string[] = [];
+    const ctl = new AbortController();
+    onSystemThemePainted(() => {
+      accentSeen.push(document.body.style.getPropertyValue("--accent"));
+    }, ctl.signal);
+    flip(false);
+    flip(true);
+    ctl.abort();
+    expect(accentSeen).toEqual(["#123456", "#123456"]);
+  });
+
+  it("stops telling a listener once its signal aborts", () => {
+    applyThemeChoice("system");
+    const cb = vi.fn();
+    const ctl = new AbortController();
+    onSystemThemePainted(cb, ctl.signal);
+    flip(false);
+    expect(cb).toHaveBeenCalledTimes(1);
+    ctl.abort();
+    flip(true);
+    flip(false);
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+
+  it("never registers a listener whose signal is already aborted", () => {
+    applyThemeChoice("system");
+    const cb = vi.fn();
+    const ctl = new AbortController();
+    ctl.abort();
+    onSystemThemePainted(cb, ctl.signal);
+    flip(false);
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+
+describe("readableRoleColor probing", () => {
+  const html = document.documentElement.style;
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+    for (let i = html.length - 1; i >= 0; i--) html.removeProperty(html.item(i));
+    for (const [token, value] of [
+      ["--bg-primary", "#313338"],
+      ["--bg-secondary", "#2b2d31"],
+      ["--bg-tertiary", "#1e1f22"],
+      ["--bg-input", "#383a40"],
+    ]) {
+      html.setProperty(token!, value!);
+    }
+    // A theme switch empties the cache of earlier tests.
+    applyThemeByName("dark");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    for (let i = html.length - 1; i >= 0; i--) html.removeProperty(html.item(i));
+  });
+
+  /** Spy on computed-style reads of spans, recording whether each was in the page. */
+  function watchSpanReads(): boolean[] {
+    const reads: boolean[] = [];
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      (el: Element, pseudo?: string | null) => {
+        if (el instanceof HTMLSpanElement) reads.push(el.isConnected);
+        return real(el, pseudo);
+      },
+    );
+    return reads;
+  }
+
+  it("reads the colour from an element that is in the page, and cleans it up", () => {
+    const reads = watchSpanReads();
+    expect(readableRoleColor("#57f287")).toBe("#57f287");
+    expect(reads).toEqual([true]);
+    expect(document.body.querySelector("span")).toBeNull();
+  });
+
+  it("works a colour out once and reuses the answer until the theme changes", () => {
+    const reads = watchSpanReads();
+    readableRoleColor("#57f287");
+    readableRoleColor("#57f287");
+    expect(reads).toHaveLength(1);
+    applyThemeByName("dark");
+    readableRoleColor("#57f287");
+    expect(reads).toHaveLength(2);
   });
 });
