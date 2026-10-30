@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/voiceAudioTabMocks";
 import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
 import { vadThreshold } from "@lib/voice/audioPipeline";
+import { AUTO_MAX_THRESHOLD } from "@lib/voice/noiseFloor";
 import {
   FakeAudioContext,
   FakeAudioWorkletNode,
@@ -764,11 +765,11 @@ describe("VoiceAudioTab UI structure", () => {
       localStorage.setItem("owncord:settings:autoInputSensitivity", "false");
       const { el, ac } = build();
       const value = el.querySelector<HTMLElement>("[data-testid='sensitivity-value']")!;
-      expect(value.textContent).toBe("50%");
+      expect(value.textContent).toBe("-40 dB");
       el.querySelector(".mic-meter-threshold")!.dispatchEvent(
         new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
       );
-      expect(value.textContent).toBe("45%");
+      expect(value.textContent).toBe("-37 dB");
       ac.abort();
     });
 
@@ -794,7 +795,7 @@ describe("VoiceAudioTab UI structure", () => {
         const { el, ac } = build();
         expect(autoToggle(el).getAttribute("aria-checked")).toBe("false");
         expect(handleOf(el).hidden).toBe(false);
-        expect(valueOf(el).textContent).toBe("30%");
+        expect(valueOf(el).textContent).toBe("-28 dB");
         ac.abort();
       });
 
@@ -827,10 +828,10 @@ describe("VoiceAudioTab UI structure", () => {
           expect(FakeAudioWorkletNode.instances.some((w) => w.name === "vad-processor")).toBe(true),
         );
         const worklet = FakeAudioWorkletNode.instances.find((w) => w.name === "vad-processor")!;
-        // Before the first estimate, auto gates at the default threshold.
+        // Before the first estimate, auto gates at its loudest threshold.
         expect(worklet.port.postMessage).toHaveBeenCalledWith({
           type: "config",
-          threshold: vadThreshold(50),
+          threshold: AUTO_MAX_THRESHOLD,
         });
         vi.useFakeTimers({ toFake: ["performance"] });
         try {
@@ -969,13 +970,16 @@ describe("VoiceAudioTab UI structure", () => {
         const { el, worklet, ac } = await meter();
         const handle = el.querySelector<HTMLElement>(".mic-meter-threshold")!;
         expect(handle.style.left).toBe("50%");
-        // A level equal to the threshold reaches the handle, no further.
-        worklet.emit({ type: "rms", value: 0.05 });
+        // A level equal to the threshold reaches the handle, no further; the
+        // axis is decibels, so half the bar is 30 dB under the right edge.
+        worklet.emit({ type: "rms", value: vadThreshold(50) });
         expect(meterOf(el).style.width).toBe("50%");
-        worklet.emit({ type: "rms", value: 0.025 });
+        worklet.emit({ type: "rms", value: vadThreshold(75) });
         expect(meterOf(el).style.width).toBe("25%");
         worklet.emit({ type: "rms", value: 0.4 });
         expect(meterOf(el).style.width).toBe("100%");
+        worklet.emit({ type: "rms", value: 0 });
+        expect(meterOf(el).style.width).toBe("0%");
         ac.abort();
       });
 
@@ -987,7 +991,7 @@ describe("VoiceAudioTab UI structure", () => {
 
         handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
 
-        expect(el.querySelector("[data-testid='sensitivity-value']")!.textContent).toBe("45%");
+        expect(el.querySelector("[data-testid='sensitivity-value']")!.textContent).toBe("-37 dB");
         expect(worklet.port.postMessage).toHaveBeenLastCalledWith({
           type: "config",
           threshold: vadThreshold(45),

@@ -94,16 +94,16 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
     return proc;
   }
 
-  it("does not close the gate until ~320ms below the threshold (120 render quanta), not ~32ms (12 quanta)", () => {
+  it("does not close the gate until ~500ms below the threshold (188 render quanta), not ~32ms (12 quanta)", () => {
     const proc = freshUngatedProcessor();
 
-    const calls = callsUntilMessageOfType(proc, SILENT, "gate", 200);
+    const calls = callsUntilMessageOfType(proc, SILENT, "gate", 300);
     const elapsedMs = calls * FRAME_MS;
 
     // 12 quanta (the wrong constant) is ~32ms — well under 150ms. The hold is
-    // ~320ms (120 quanta) plus the 4-quantum smoothing window draining.
-    expect(elapsedMs).toBeGreaterThan(280);
-    expect(elapsedMs).toBeLessThan(380);
+    // ~500ms (188 quanta) plus the 4-quantum smoothing window draining.
+    expect(elapsedMs).toBeGreaterThan(460);
+    expect(elapsedMs).toBeLessThan(560);
   });
 
   it("does not reopen the gate until ~32ms of speech (≈12 render quanta), not ~5ms (2 quanta)", () => {
@@ -167,6 +167,39 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
     const calls = callsUntilMessageOfType(proc, QUIET, "gate", 200);
     expect(calls * FRAME_MS).toBeGreaterThan(20);
     expect(calls * FRAME_MS).toBeLessThan(55);
+  });
+
+  it("closes only 6 dB under the threshold: a level between the two keeps the gate open", () => {
+    const proc = freshUngatedProcessor();
+    // Default threshold 0.05; 0.03 is 4.4 dB under it, inside the hysteresis.
+    for (let i = 0; i < 400; i++) proc.process([[frame(0.03)]]);
+    expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: true });
+    // 0.02 is 8 dB under: the hold starts and the gate closes.
+    const calls = callsUntilMessageOfType(proc, 0.02, "gate", 300);
+    expect(calls * FRAME_MS).toBeGreaterThan(460);
+    expect(calls * FRAME_MS).toBeLessThan(560);
+  });
+
+  it("reopens at the threshold itself, not at the lower close level", () => {
+    const proc = freshUngatedProcessor();
+    callsUntilMessageOfType(proc, SILENT, "gate", 300);
+    postMessageMock(proc).mockClear();
+    for (let i = 0; i < 100; i++) proc.process([[frame(0.03)]]);
+    expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: false });
+    callsUntilMessageOfType(proc, LOUD, "gate", 100);
+  });
+
+  it("one quiet quantum inside an onset does not start the attack over", () => {
+    const proc = freshUngatedProcessor();
+    callsUntilMessageOfType(proc, SILENT, "gate", 300);
+    postMessageMock(proc).mockClear();
+    // 8 loud quanta, a dip, then loud again: 12 loud in all open it, where a
+    // consecutive count would need 12 after the dip.
+    for (let i = 0; i < 8; i++) proc.process([[frame(LOUD)]]);
+    proc.process([[frame(SILENT)]]);
+    const calls = callsUntilMessageOfType(proc, LOUD, "gate", 100);
+    // The dip costs one count and the smoothing window a little more.
+    expect(calls).toBeLessThan(10);
   });
 
   it("acknowledges stop from its final process() call", () => {

@@ -95,6 +95,7 @@ export const shards = {
     "src/lib/voice/audioElements.ts",
     "src/lib/ui/inputMode.ts",
     "src/lib/voice/noiseFloor.ts",
+    "src/lib/voice/gateScale.ts",
     "src/lib/prefs/mediaVisibility.ts",
   ],
   "audio-media-2": [

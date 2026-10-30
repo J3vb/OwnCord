@@ -22,7 +22,8 @@ import {
   getLocalMicSettings,
 } from "@lib/voice/livekitSession";
 import {
-  VAD_MAX_THRESHOLD,
+  vadLevelPosition,
+  vadThresholdDb,
   micCaptureOptions,
   micProcessingOptions,
   isMissingDeviceError,
@@ -95,6 +96,12 @@ function nativeTestAudio(): NativeVoiceAudioOptions {
     autoGainControl,
     enhancedNoiseSuppression: loadPref<boolean>("enhancedNoiseSuppression", false),
   };
+}
+
+/** The gate level in words: its decibels, or Off at 100 (no gate). */
+function sensitivityLabel(sensitivity: number): string {
+  if (sensitivity >= 100) return t("voiceAudio.sensitivityOff");
+  return t("voiceAudio.sensitivityValue", { value: Math.round(vadThresholdDb(sensitivity)) });
 }
 
 /** Meter RMS above which the mic status pill counts the mic as picking you up. */
@@ -388,8 +395,8 @@ function buildVoiceAudioTabInner(
   // sensitivity, held between syllables so it does not flicker.
   let lastHeardAt = Number.NEGATIVE_INFINITY;
   function paintMeter(level: number, gateOpen: boolean): void {
-    // Same axis as the handle, whose position is threshold / max.
-    const position = Math.min(level / VAD_MAX_THRESHOLD, 1);
+    // Same axis as the handle: decibels, GATE_DB_MIN at the left edge.
+    const position = vadLevelPosition(level);
     meterLevel.style.width = `${Math.round(position * 1000) / 10}%`;
     meterLevel.style.background = gateOpen ? "var(--green)" : "var(--yellow)";
     const now = performance.now();
@@ -494,11 +501,9 @@ function buildVoiceAudioTabInner(
     // This matches Discord: drag LEFT = easier to pass, RIGHT = harder.
     meterThreshold.style.left = `${100 - sensitivity}%`;
     meterThreshold.setAttribute("aria-valuenow", String(100 - sensitivity));
-    meterThreshold.setAttribute(
-      "aria-valuetext",
-      t("voiceAudio.sensitivityValue", { value: sensitivity }),
-    );
-    setText(sensitivityValue, `${sensitivity}%`);
+    const label = sensitivityLabel(sensitivity);
+    meterThreshold.setAttribute("aria-valuetext", label);
+    setText(sensitivityValue, label);
   }
   updateThresholdIndicator(currentSensitivity);
 

@@ -561,7 +561,8 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.autoPlayCameras": "Automatically play cameras",
   "voiceAudio.autoPlayCamerasDesc":
     "Others' cameras play as soon as they turn them on. Off, each camera waits for you to click Watch stream.",
-  "voiceAudio.sensitivityValue": "Sensitivity {value}%",
+  "voiceAudio.sensitivityValue": "{value} dB",
+  "voiceAudio.sensitivityOff": "Off",
   "voiceAudio.outputDevice": "Output Device",
   "voiceAudio.outputVolume": "Output Volume",
   "voiceAudio.cameraQuality": "Camera Quality",
