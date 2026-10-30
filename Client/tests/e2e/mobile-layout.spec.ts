@@ -73,6 +73,8 @@ for (const profile of PROFILES) {
       const toggle = page.locator("[data-testid='server-panel-toggle']");
       await expect(toggle).toHaveAttribute("aria-expanded", "false");
       await expect(page.locator(".btn-add-server")).toBeHidden();
+      // Before any pick the first saved server stays in view.
+      await expect(page.locator(".server-item").first()).toBeVisible();
       await expect(page.locator(".connect-form button[type='submit']")).toBeInViewport();
 
       await toggle.click();

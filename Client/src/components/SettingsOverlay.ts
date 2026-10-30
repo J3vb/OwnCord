@@ -221,6 +221,7 @@ export function createSettingsOverlay(
   let renderOwner: Disposable | null = null;
   /** On a phone the panel shows either the section list or one open section. */
   let sectionOpen = false;
+  let backBtn: HTMLButtonElement | null = null;
   const phone = typeof window.matchMedia === "function" ? window.matchMedia(PHONE_QUERY) : null;
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
@@ -362,18 +363,22 @@ export function createSettingsOverlay(
   }
 
   /** Move onto a visible tab from the search box (Up/Down/Enter). */
-  function enterTabs(pick: "first" | "last"): void {
+  /** Returns the tab it picked, or null when the query matched none or a
+   *  pending recovery secret held the switch. */
+  function enterTabs(pick: "first" | "last"): TabName | null {
     if (query === "") {
       // Nothing to pick from: just move onto the open tab.
       const btn = tabButtons.get(activeTab);
       if (btn?.hidden === false) btn.focus();
-      return;
+      return null;
     }
     const shown = visibleTabs();
     const name = pick === "first" ? shown[0] : shown[shown.length - 1];
-    if (name === undefined) return;
+    if (name === undefined) return null;
     setActiveTab(name);
+    if (activeTab !== name) return null;
     if (secretRequests === 0) tabButtons.get(name)?.focus();
+    return name;
   }
 
   /** Release resources held by the tab currently on screen. */
@@ -410,7 +415,10 @@ export function createSettingsOverlay(
     setActiveTab(tab);
     if (activeTab !== tab) return;
     setSectionOpen(true);
-    if (phone?.matches === true) contentArea?.scrollTo?.({ top: 0 });
+    if (phone?.matches !== true) return;
+    contentArea?.scrollTo?.({ top: 0 });
+    // The list (and the tab that had focus) is hidden now: focus moves to Back.
+    backBtn?.focus();
   }
 
   /** Phone Back: from a section to the list, focus on the section it left. */
@@ -563,8 +571,8 @@ export function createSettingsOverlay(
         } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter") {
           e.preventDefault();
           if (e.key === "Enter" && query === "") return;
-          enterTabs(e.key === "ArrowUp" ? "last" : "first");
-          if (e.key === "Enter") setSectionOpen(true);
+          const picked = enterTabs(e.key === "ArrowUp" ? "last" : "first");
+          if (e.key === "Enter" && picked !== null) openSection(picked);
         }
       },
       { signal: disposable.signal },
@@ -784,7 +792,7 @@ export function createSettingsOverlay(
     );
     appendChildren(closeWrap, closeBtn, escLabel);
 
-    const backBtn = createElement("button", {
+    backBtn = createElement("button", {
       class: "settings-back-btn",
       type: "button",
       "aria-label": settingsText("shell.back"),
@@ -908,6 +916,7 @@ export function createSettingsOverlay(
     panel = null;
     contentArea = null;
     pageTitle = null;
+    backBtn = null;
     searchInput = null;
     searchClear = null;
     searchEmpty = null;
