@@ -1,4 +1,3 @@
-/* oxlint-disable unicorn/consistent-function-scoping -- these closures captured file-level helpers that now live in the harness */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../../../../tests/helpers/nativeRoomMocks";
 import type { Participant, VideoQuality } from "livekit-client";
@@ -79,6 +78,10 @@ beforeEach(() => {
   nativeCounters.rust = null;
   setLocalDeafened(false);
 });
+
+function emitEncryptionStatus(identity: string, encrypted: boolean): void {
+  emit({ session: 1, event: { type: "encryptionStatus", identity, encrypted } });
+}
 
 describe("NativeRoom connect/disconnect", () => {
   it("subscribes before connecting, then reports connected with our identity", async () => {
@@ -730,8 +733,7 @@ describe("NativeRoom room surface", () => {
       const encryptionError = vi.fn();
       room.on("encryptionError", encryptionError);
       await room.connect("u", "t");
-      const status = (identity: string, encrypted: boolean): void =>
-        emit({ session: 1, event: { type: "encryptionStatus", identity, encrypted } });
+      const status = emitEncryptionStatus;
       emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
       emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
 
@@ -775,26 +777,24 @@ describe("NativeRoom room surface", () => {
       );
       await room.connect("u", "t");
       emit({ session: 1, event: { type: "participantConnected", identity: "user-2" } });
-      const status = (encrypted: boolean): void =>
-        emit({ session: 1, event: { type: "encryptionStatus", identity: "user-2", encrypted } });
 
       // A failure past the grace window reads "Unsecured"...
-      status(false);
+      emitEncryptionStatus("user-2", false);
       vi.advanceTimersByTime(3000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
       // ...and the peer's frames decrypting again clears it.
-      status(true);
+      emitEncryptionStatus("user-2", true);
       vi.advanceTimersByTime(3000);
       expect(voiceStore.getState().encryptionDegraded).toBe(false);
 
       // The local E2EE not running is not the peer's to clear.
-      status(false);
+      emitEncryptionStatus("user-2", false);
       vi.advanceTimersByTime(3000);
       emit({
         session: 1,
         event: { type: "encryptionStatus", identity: "user-1", encrypted: false },
       });
-      status(true);
+      emitEncryptionStatus("user-2", true);
       vi.advanceTimersByTime(5000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
       await room.disconnect();
