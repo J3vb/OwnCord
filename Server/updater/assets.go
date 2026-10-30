@@ -38,6 +38,9 @@ type textAssetCacheEntry struct {
 // client that does not gets 204 before this map is consulted, because it cannot
 // install a .deb and serving it would turn an honest banner into a failing
 // install.
+//
+// The Android entry is the signed APK itself. The app downloads it, checks the
+// .sig and hands the file to Android's package installer.
 var clientAssetSuffixByTarget = map[string]string{
 	"windows-x86_64-nsis":    "_x64-setup.nsis.zip",
 	"windows-aarch64-nsis":   "_arm64-setup.nsis.zip",
@@ -45,6 +48,7 @@ var clientAssetSuffixByTarget = map[string]string{
 	"linux-aarch64-appimage": "_aarch64.AppImage.tar.gz",
 	"linux-x86_64-deb":       "_amd64.deb",
 	"linux-aarch64-deb":      "_arm64.deb",
+	"android-aarch64-apk":    "_arm64.apk",
 }
 
 // FindClientAssets scans the cached release assets for the client updater

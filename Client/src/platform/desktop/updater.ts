@@ -59,6 +59,8 @@ const FAILURE_REASONS = new Map<string, UpdateFailureReason>([
   ["update cancelled", "cancelled"],
   // i18n-exempt: backend error code (text.rs), mapped to catalog text by the notifier
   ["update not authorized", "not-authorized"],
+  // i18n-exempt: backend error code (text.rs), mapped to catalog text by the notifier
+  ["update install permission needed", "android-permission"],
 ]);
 
 /** Check if a newer client version is available on the connected server. */
@@ -99,17 +101,36 @@ function downloadAndInstallUpdate(serverUrl: string): Promise<void> {
         });
       });
       let unlistenInstalling: (() => void) | null = null;
+      let unlistenHandedOff: (() => void) | null = null;
+      let handedOff = false;
       try {
         // A .deb install asks for the system password after the download; the
         // backend says so just before it does.
         unlistenInstalling = await listen("update-installing", () => {
           publishInstallState({ status: "installing" });
         });
+        // Android opens its own installer and restarts the app after the
+        // user taps Install there.
+        unlistenHandedOff = await listen("update-installer-opened", () => {
+          handedOff = true;
+        });
         await invoke("download_and_install_update", { serverUrl });
         installed = true;
       } finally {
+        unlistenHandedOff?.();
         unlistenInstalling?.();
         unlisten();
+      }
+      if (handedOff) {
+        // The user can close Android's prompt, so the update must stay
+        // startable again.
+        installation = null;
+        publishInstallState({
+          status: "failed",
+          restartRequired: false,
+          reason: "android-confirm",
+        });
+        return;
       }
       log.info("Update installed, relaunching...");
       publishInstallState({ status: "restarting" });

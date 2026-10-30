@@ -86,6 +86,8 @@ function failedText(state: Extract<UpdateInstallState, { status: "failed" }>): s
   if (state.restartRequired) return connectText("update.installedRestart");
   if (state.reason === "cancelled") return connectText("update.cancelled");
   if (state.reason === "not-authorized") return connectText("update.notAuthorized");
+  if (state.reason === "android-confirm") return connectText("update.androidConfirm");
+  if (state.reason === "android-permission") return connectText("update.androidPermission");
   return connectText("update.failed");
 }
 
@@ -255,7 +257,8 @@ export function createUpdateNotifier(options: UpdateNotifierOptions): MountableC
           : state.status === "restarting"
             ? connectText("update.installedRestarting")
             : failedText(state);
-    const failed = state.status === "failed" && !state.restartRequired;
+    const failed =
+      state.status === "failed" && !state.restartRequired && state.reason !== "android-confirm";
     const body = buildFrame(banner, failed ? "triangle-alert" : "download", text);
     if (state.status === "downloading" && state.progress !== null) {
       const bar = buildProgressBar(state.progress);

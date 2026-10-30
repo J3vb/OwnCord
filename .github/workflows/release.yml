@@ -773,6 +773,134 @@ jobs:
           name: linux-arm64-release-assets
           path: linux-arm64-staging/
 
+  # The Android app (arm64 APK). Same build as ci.yml's android-build job,
+  # signed with the Android release keystore from the repository secrets: an
+  # update must carry the same signing key as the installed app or Android
+  # refuses it. The APK is then signed once more with the Tauri updater key,
+  # like every desktop updater artifact, and the app checks that .sig before it
+  # opens Android's installer (Client/src-tauri/src/update_commands/android.rs).
+  # Named OwnCord_<v>_arm64.apk, the suffix Server/updater/assets.go serves.
+  release-client-android:
+    name: Build Tauri (Android arm64)
+    needs: verify-versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: Client/
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          # Same cache-poisoning rule as the desktop builds above.
+          package-manager-cache: false
+
+      # From src-tauri/ so rustup reads its rust-toolchain.toml and adds the
+      # Android target to the pinned toolchain, not the runner's default.
+      - name: Android toolchains
+        working-directory: Client/src-tauri/
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-linux-android
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # A release must be signed: an unsigned APK cannot update anyone, so
+      # missing secrets fail here instead of publishing one.
+      - name: Signing config from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          missing=""
+          [ -n "$KEYSTORE_BASE64" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -n "$KEYSTORE_PASSWORD" ] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -n "$KEY_ALIAS" ] || missing="$missing ANDROID_KEY_ALIAS"
+          if [ -n "$missing" ]; then
+            echo "::error::these repository secrets are empty or missing:$missing"
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/owncord-release.jks"
+          STORE_PW=$(printf '%s' "$KEYSTORE_PASSWORD" | tr -d '\r\n')
+          ALIAS=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+          export STORE_PW
+          if ! keytool -list -keystore "$RUNNER_TEMP/owncord-release.jks" -storepass:env STORE_PW -alias "$ALIAS" > /dev/null; then
+            echo "::error::keytool cannot open the key ANDROID_KEY_ALIAS in the keystore with ANDROID_KEYSTORE_PASSWORD"
+            exit 1
+          fi
+          {
+            echo "storeFile=$RUNNER_TEMP/owncord-release.jks"
+            echo "keyAlias=$ALIAS"
+          } > src-tauri/gen/android/keystore.properties
+
+      - name: Build the APK (arm64)
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: npx tauri android build --apk --target aarch64 --ci
+
+      - name: Remove the signing config
+        if: always()
+        run: rm -f "$RUNNER_TEMP/owncord-release.jks" src-tauri/gen/android/keystore.properties
+
+      # versionCode is what Android compares, not the version name: one that
+      # does not rise makes Android refuse the update. Tauri derives it as
+      # major*1000000 + minor*1000 + patch, which rises with every release.
+      - name: Check signature, page alignment and versionCode
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(src-tauri/gen/android/app/build/outputs/apk/*/release/*.apk)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one release APK, found ${#apks[@]}"
+            exit 1
+          fi
+          VERSION="${RELEASE_TAG#v}"
+          mkdir -p ../android-staging
+          APK="../android-staging/OwnCord_${VERSION}_arm64.apk"
+          cp "${apks[0]}" "$APK"
+          tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          "$tools/zipalign" -c -P 16 4 "$APK"
+          "$tools/apksigner" verify "$APK"
+          IFS=. read -r MAJOR MINOR PATCH <<< "${VERSION%%-*}"
+          WANT=$(( MAJOR * 1000000 + MINOR * 1000 + PATCH ))
+          GOT=$("$tools/aapt2" dump badging "$APK" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -n 1)
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::APK versionCode is '$GOT', expected $WANT for $VERSION"
+            exit 1
+          fi
+          echo "APK $(basename "$APK"): versionCode $GOT, $(stat -c %s "$APK") bytes" >> "$GITHUB_STEP_SUMMARY"
+
+      # --app-version binds the signature to this release: the app sets
+      # `requireSignedVersion` and refuses an artifact signed without it.
+      - name: Sign the APK as an updater artifact
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APK="../android-staging/OwnCord_${RELEASE_TAG#v}_arm64.apk"
+          npx tauri signer sign -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" --app-version "${RELEASE_TAG#v}" "$APK"
+          test -s "$APK.sig"
+
+      - name: Upload Android release assets
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-release-assets
+          path: android-staging/
+          if-no-files-found: error
+
   # Smoke each architecture on its OWN hardware before anything is pushed
   # (B6-2). Emulating arm64 under QEMU would prove only that binfmt can
   # interpret the image — not that it runs on an ARM host — and it would make
@@ -1173,6 +1301,7 @@ jobs:
         release-client-windows,
         release-client-linux,
         release-client-linux-arm64,
+        release-client-android,
         client-artifact-smoke,
         release-server,
         release-server-docker,
@@ -1228,6 +1357,12 @@ jobs:
           name: linux-arm64-release-assets
           path: linux
 
+      - name: Download Android client assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: android-release-assets
+          path: android
+
       # Four server assets, one per supported architecture. They land in the
       # same windows/ and linux/ staging directories the client assets use, so
       # the checksum and release steps below pick them all up unchanged.
@@ -1263,9 +1398,12 @@ jobs:
       - name: Generate SHA256 checksums
         shell: bash
         run: |
-          (cd windows && sha256sum -- *) > checksums.sha256
-          (cd linux && sha256sum -- *) >> checksums.sha256
-          sha256sum owncord-src-*.tar.gz >> checksums.sha256
+          {
+            (cd windows && sha256sum -- *)
+            (cd linux && sha256sum -- *)
+            (cd android && sha256sum -- *)
+            sha256sum owncord-src-*.tar.gz
+          } > checksums.sha256
 
       # Server-side schema: updater.releaseManifest.
       - name: Generate server update manifest
@@ -1409,6 +1547,7 @@ jobs:
           subject-path: |
             windows/*
             linux/*
+            android/*
             checksums.sha256
             owncord-src-*.tar.gz
 
@@ -1446,7 +1585,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for f in windows/* linux/* checksums.sha256 owncord-src-*.tar.gz; do
+          for f in windows/* linux/* android/* checksums.sha256 owncord-src-*.tar.gz; do
             gh attestation verify "$f" --repo "$GITHUB_REPOSITORY"
           done
 
@@ -1501,7 +1640,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mapfile -t assets < <(find windows linux -type f)
+          mapfile -t assets < <(find windows linux android -type f)
           assets+=(checksums.sha256 owncord-src-*.tar.gz)
           gh release create "${RELEASE_TAG}" \
             --notes-file release-notes.md \
@@ -1518,6 +1657,7 @@ jobs:
           path: |
             windows
             linux
+            android
             checksums.sha256
             owncord-src-*.tar.gz
             release-notes.md
