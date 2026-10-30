@@ -9,12 +9,10 @@ import (
 )
 
 // DefaultBlockedExtensions is upload.blocked_extensions when config.yaml does
-// not set it: Windows scripts, installers, shortcuts and disk images that run
-// or mount on a double-click, plus web pages and SVG, shell scripts,
-// macro-enabled Office documents and Linux and macOS launchers, which run
-// something when opened from a download. Most are plain text with no magic
-// signature for ValidateFileType to catch; the rest (exe, dll, msi) are also
-// caught there.
+// not set it: scripts, installers, shortcuts and disk images that run or mount
+// on a double-click, plus web pages and SVG, macro-enabled Office documents and
+// Linux/macOS launchers. Most are plain text with no magic signature for
+// ValidateFileType to catch; the rest (exe, dll, msi) are also caught there.
 var DefaultBlockedExtensions = []string{
 	"bat", "cmd", "ps1", "psm1", "ps1xml", "vbs", "vbe", "js", "jse", "wsf", "wsh", "wsc",
 	"sct", "hta", "scr", "msi", "msp", "msc", "msix", "msixbundle", "appx", "appxbundle",

@@ -21,8 +21,7 @@ import (
 )
 
 // archiveName is the download's fixed name. The snapshot inside is a real
-// database copy; the fixed name means a browser never overwrites two archives
-// with each other's confusing name.
+// database copy; the fixed name keeps a browser from confusing two archives.
 const archiveName = "owncord-archive.zip"
 
 // archiveWorkPrefix names each build's work dir under the backup dir, so the
@@ -30,16 +29,15 @@ const archiveName = "owncord-archive.zip"
 const archiveWorkPrefix = "owncord-archive-"
 
 // handleArchive serves GET /admin/api/archive: one zip carrying everything a
-// restore needs that a database backup does not — the whole data directory
-// (uploads, the key files, erasure markers, TLS material) and config.yaml
-// (O3). The live SQLite file is replaced by a `VACUUM INTO` snapshot, so the
-// archive is a consistent copy even while the server runs.
+// restore needs that a database backup does not: the whole data directory
+// (uploads, key files, erasure markers, TLS material) and config.yaml. The
+// live SQLite file is replaced by a `VACUUM INTO` snapshot, so the archive is
+// consistent even while the server runs.
 //
-// It is for the owner or a RESTORE_BACKUPS holder: the archive holds
-// password hashes and the key files.
-// The admin panel does not call this directly; it asks for a single-use link
-// (POST /archive/link) and opens that, so the whole archive is never buffered
-// in the page (see archive_link.go). This route stays for direct API callers.
+// It is for the owner or a RESTORE_BACKUPS holder: the archive holds password
+// hashes and the key files. The panel asks for a single-use link (POST
+// /archive/link, see archive_link.go) instead, so the archive is never
+// buffered in the page; this route stays for direct API callers.
 func handleArchive(database *db.DB, opts SetupOptions, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		serveArchive(w, r, database, opts, paths, actorFromContext(r))
@@ -136,8 +134,8 @@ var archiveBeforeSnapshotHook func()
 // list), replacing the live database file with the snapshot and leaving out
 // the backup directory. Before the snapshot it refuses with errArchiveNoSpace
 // when the build would take the backup volume below server.min_free_disk_mb;
-// that estimate's plan is then retaken, so the zip is written from a walk
-// that follows the snapshot.
+// the plan is then retaken so the zip is written from a walk that follows the
+// snapshot.
 func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths backupPaths, work string) (string, error) {
 	cfg := opts.RunningCfg
 	snapshot := filepath.Join(work, "snapshot.db")
@@ -161,8 +159,8 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 		return "", fmt.Errorf("restricting snapshot: %w", err)
 	}
 	// Write from a plan taken after the snapshot: an upload lands its file
-	// before its row, so every file a snapshotted row names is on disk by
-	// now, while the first plan may predate it.
+	// before its row, so every file a snapshotted row names is on disk by now,
+	// while the first plan may predate it.
 	if t, err = plan(); err != nil {
 		return "", err
 	}
@@ -368,9 +366,8 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 		return err
 	}
 	name := filepath.ToSlash(filepath.Join(prefix, rel))
-	// The live database's WAL sidecars are superseded by the snapshot (the
-	// WAL belongs to the database file, not this walk); *.tmp files are in-progress
-	// writes.
+	// The live database's WAL sidecars are superseded by the snapshot; *.tmp
+	// files are in-progress writes.
 	if !d.IsDir() && (strings.HasPrefix(path, t.db+"-") || strings.HasSuffix(path, ".tmp")) {
 		return nil
 	}

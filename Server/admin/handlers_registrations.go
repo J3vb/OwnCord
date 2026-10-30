@@ -10,7 +10,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Registration queue (approval mode) ────────────────────────────────
 //
 // An approval-mode application is an account row that cannot sign in until
 // an admin approves it; denial deletes it. Both decisions are audited by the

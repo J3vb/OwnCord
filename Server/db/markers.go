@@ -14,14 +14,12 @@ import (
 	"strconv"
 )
 
-// MarkerStore is the durable deletion-marker file:
-// data/erasure/markers.sqlite, a second SQLite database that
-// lives outside the file a backup restore overwrites. Every account erasure
-// records a marker here; on every open the server replays the markers
-// against the main database and erases again whatever a restored backup
-// brought back. A marker names its subject only through
-// SubjectToken — HMAC-SHA256 under the erasure key kept beside totp.key —
-// so the file identifies nobody without the key.
+// MarkerStore is the durable deletion-marker file (data/erasure/markers.sqlite),
+// a second SQLite database outside the file a backup restore overwrites. Every
+// account erasure records a marker; on every open the server replays them and
+// erases again whatever a restored backup brought back. A marker names its
+// subject only through SubjectToken (HMAC-SHA256 under the erasure key kept
+// beside totp.key), so the file identifies nobody without the key.
 type MarkerStore struct {
 	sqlDB *sql.DB
 	key   []byte
@@ -44,12 +42,11 @@ type DeletionMarker struct {
 const (
 	MarkerScopeAccount  = "account"
 	MarkerScopeMessages = "messages"
-	// MarkerPending is written before the erasure transaction and resolved
-	// after it: confirmed when the transaction committed, discarded when it
-	// was refused. A pending marker left by a crash is applied on the next
-	// open like a recorded one (ReplayAccounts): whether the transaction
-	// committed cannot be read off the main database, since a restore
-	// reverts it, and the request the marker records was authorised.
+	// MarkerPending is written before the erasure transaction and resolved after
+	// it: confirmed on commit, discarded when refused. A pending marker left by a
+	// crash is applied on the next open like a recorded one (ReplayAccounts),
+	// because whether the transaction committed cannot be read off a restored
+	// main database and the request was authorised.
 	MarkerPending  = "pending"
 	MarkerRecorded = "recorded"
 )
@@ -61,11 +58,10 @@ const (
 	SequenceFloorChannels = "channels"
 )
 
-// markerSchema is the marker file: deletion_markers, the marker
-// rows plus the state column the pending/recorded
-// protocol needs; sequence_floors, the AUTOINCREMENT counters below
-// which no id may be handed out again (RaiseSequenceFloor); and
-// marker_meta, which binds the file to one erasure key (bindMarkerKey).
+// markerSchema is the marker file: deletion_markers (with the state column the
+// pending/recorded protocol needs), sequence_floors (AUTOINCREMENT counters
+// below which no id may be handed out again) and marker_meta, which binds the
+// file to one erasure key (bindMarkerKey).
 var markerSchema = []string{`
 CREATE TABLE IF NOT EXISTS deletion_markers (
     subject_token TEXT    PRIMARY KEY,
@@ -90,49 +86,41 @@ CREATE TABLE IF NOT EXISTS marker_meta (
     value TEXT NOT NULL
 );`}
 
-// markerKeyFingerprintName is the marker_meta row that binds a marker file
-// to the erasure key its tokens were computed under. Nothing in
-// the file is otherwise key-derived, so a regenerated or swapped key makes
-// every token miss: the replay matches nothing, reports {Erased:0} with a
-// nil error, and the account a restored backup brought back keeps serving.
-// The fingerprint is what makes that state loud instead of silent.
+// markerKeyFingerprintName is the marker_meta row binding a marker file to the
+// erasure key its tokens were computed under. Nothing else in the file is
+// key-derived, so a regenerated or swapped key would make every token miss and
+// the replay silently erase nothing; the fingerprint makes that loud.
 const markerKeyFingerprintName = "erasure-key-fingerprint"
 
 // markerKeyFingerprint names the key without revealing it: hex of
-// HMAC-SHA256(key, "owncord-marker-fingerprint"). It shares no preimage with
-// SubjectToken or MessagesToken, so the row tells an attacker with the file
-// nothing about the subjects it holds.
+// HMAC-SHA256(key, "owncord-marker-fingerprint"), which shares no preimage
+// with SubjectToken or MessagesToken.
 func markerKeyFingerprint(key []byte) string {
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte("owncord-marker-fingerprint"))
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// fingerprintPrefix is how much of a fingerprint the operator messages
-// print — enough to tell two keys apart, and bounded so a corrupt or
-// hand-edited row cannot panic the branch whose whole job is to report it.
+// fingerprintPrefix is the part of a fingerprint operator messages print;
+// bounded so a corrupt row cannot panic the branch that reports it.
 func fingerprintPrefix(fp string) string { return fp[:min(12, len(fp))] }
 
-// ErrMarkerKeyMismatch is the refusal when the marker file records a
-// different erasure key than the one the server is running: its tokens name
-// nobody this key can match, so a replay would erase nothing and a restored
-// backup's accounts would serve. Start-up fails on it instead of replaying
-// into the void. The way out is the operator's — put the original key back,
-// or bless this one against the file by hand (docs/security.md, "Erasure
-// marker key"). The message names both.
+// ErrMarkerKeyMismatch is the refusal when the marker file records a different
+// erasure key than the running one: a replay would erase nothing and a restored
+// backup's accounts would serve, so start-up fails instead. The operator puts
+// the original key back or blesses this one by hand (docs/security.md,
+// "Erasure marker key"); the message names both.
 var ErrMarkerKeyMismatch = errors.New("marker store: the marker file was created under a different erasure key")
 
 // ErrMarkerKeyUnverified is the refusal when a marker file holds markers but
-// records no key fingerprint: a file written before the key binding was added.
-// Adopting whatever key is present would be the defect itself — if the key
-// was regenerated in between, the wrong one silently becomes the file's key
-// of record and every marker is voided. Only the operator can say the key is
-// the one those markers were written under, so only they can bless it.
+// records no key fingerprint. Adopting the present key would be the defect
+// itself, since a regenerated key would silently become the key of record and
+// void every marker; only the operator can bless it.
 var ErrMarkerKeyUnverified = errors.New("marker store: the marker file holds markers but records no erasure key")
 
-// OpenMarkerStore opens (creating if absent) the marker file at path with
-// the given 32-byte erasure key and applies its schema. The parent directory
-// is created. ":memory:" is accepted for tests.
+// OpenMarkerStore opens (creating if absent) the marker file at path with the
+// 32-byte erasure key and applies its schema, creating the parent directory.
+// ":memory:" is accepted for tests.
 func OpenMarkerStore(path string, key []byte) (*MarkerStore, error) {
 	if len(key) != sha256.Size {
 		return nil, fmt.Errorf("marker store: key must be %d bytes, got %d", sha256.Size, len(key))
@@ -162,20 +150,16 @@ func OpenMarkerStore(path string, key []byte) (*MarkerStore, error) {
 	return &MarkerStore{sqlDB: sqlDB, key: append([]byte(nil), key...), path: path}, nil
 }
 
-// markerFileEscapeHatch is the warning every refusal below carries: the
-// obvious way out — delete the file and let a fresh one appear — throws away
-// more than the markers.
+// markerFileEscapeHatch is the warning every refusal below carries: deleting
+// the file to get past it throws away more than the markers.
 const markerFileEscapeHatch = "do not delete or move markers.sqlite to get past this: it also carries sequence_floors (without them an erased account's id is handed out again and its innocent new holder is erased by the old marker) and the account markers that keep the first-run setup gate closed against a restore of a pre-owner backup"
 
-// bindMarkerKey holds the marker file to one erasure key. An empty
-// file adopts the key it is first opened under — that is how a new
-// installation gets its fingerprint. A file that already holds markers must
-// prove the key: a recorded fingerprint must match, and a file from before
-// the fingerprint existed is refused rather than adopted, because adopting
-// there is exactly the defect (a key regenerated in between would silently
-// become the key of record and void every marker). Both refusals are the
-// operator's to resolve, and the log names the statement that does it —
-// mirroring the floor-probe acknowledgement (docs/security.md).
+// bindMarkerKey holds the marker file to one erasure key. An empty file adopts
+// the key it is first opened under. A file that already holds markers must
+// prove the key: a recorded fingerprint must match, and one from before the
+// fingerprint existed is refused rather than adopted (see
+// ErrMarkerKeyUnverified). Both refusals are the operator's to resolve; the
+// log names the statement that does it (docs/security.md).
 func bindMarkerKey(sqlDB *sql.DB, path, fp string) error {
 	var stored string
 	err := sqlDB.QueryRow(`SELECT value FROM marker_meta WHERE name = ?`, markerKeyFingerprintName).Scan(&stored)
@@ -227,8 +211,8 @@ func (m *MarkerStore) Close() error {
 func (m *MarkerStore) Path() string { return m.path }
 
 // SubjectToken is the unlinkable name of an account: hex of
-// HMAC-SHA256(key, "account:" || decimal user id). The same token is what
-// the erasure leaves in audit_log.subject_token.
+// HMAC-SHA256(key, "account:" || decimal user id), also what the erasure
+// leaves in audit_log.subject_token.
 func (m *MarkerStore) SubjectToken(userID int64) string {
 	mac := hmac.New(sha256.New, m.key)
 	mac.Write([]byte("account:"))
@@ -237,11 +221,10 @@ func (m *MarkerStore) SubjectToken(userID int64) string {
 }
 
 // RecordPendingAccount writes a pending account marker for userID before the
-// erasure transaction runs — together with the users sequence floor
-// (usersSeq is DB.SequenceValue for the users table, the id space as it
-// stands with the subject in it) — and returns its token, and whether this
-// call created the marker (false when one for the subject already exists —
-// a replay of a recorded marker, or a retry after a crash).
+// erasure transaction, with the users sequence floor (usersSeq is
+// DB.SequenceValue for users, taken with the subject still present). It
+// returns the token and whether this call created the marker (false for a
+// replay of a recorded marker or a retry after a crash).
 func (m *MarkerStore) RecordPendingAccount(ctx context.Context, userID int64, usersSeq int64) (string, bool, error) {
 	token := m.SubjectToken(userID)
 	tx, err := m.sqlDB.BeginTx(ctx, nil)
@@ -267,14 +250,11 @@ func (m *MarkerStore) RecordPendingAccount(ctx context.Context, userID int64, us
 	return token, n == 1, nil
 }
 
-// RaiseSequenceFloor records that table's AUTOINCREMENT counter stood at
-// seq when a marker was written: a restore rolls sqlite_sequence back with
-// the rest of the file, and the next row would take an id a marker still
-// names — the first account to inherit an erased user's id would be erased
-// by that user's marker on the next open. Every open re-applies the floors
-// to the main database (DB.RaiseSequences) before the markers are
-// replayed, so an id is never handed out twice across restored timelines.
-// A floor only ever moves up.
+// RaiseSequenceFloor records that table's AUTOINCREMENT counter stood at seq
+// when a marker was written. A restore rolls sqlite_sequence back, and the
+// next row would take an id a marker still names, so the new holder would be
+// erased by the old user's marker. Every open re-applies the floors
+// (DB.RaiseSequences) before replaying markers. A floor only moves up.
 func (m *MarkerStore) RaiseSequenceFloor(ctx context.Context, table string, seq int64) error {
 	return raiseSequenceFloor(ctx, m.sqlDB, table, seq)
 }
@@ -312,23 +292,18 @@ func (m *MarkerStore) SequenceFloors(ctx context.Context) (map[string]int64, err
 	return floors, rows.Err()
 }
 
-// SequenceFloorProbeCeiling bounds LocateSequenceFloor's search. A marker
-// names its subject by a one-way token, so recovering the id means hashing
-// candidates until every marker is accounted for; the probe stops there,
-// which on any real id space is long before this. A store whose markers
-// name an id beyond it cannot be resolved by probing, and the caller is
-// told rather than left with a floor that only looks safe.
+// SequenceFloorProbeCeiling bounds LocateSequenceFloor's search. Markers name
+// subjects by one-way token, so recovering an id means hashing candidates; a
+// marker beyond the ceiling cannot be resolved and the caller is told rather
+// than left with a floor that only looks safe.
 const SequenceFloorProbeCeiling = 1 << 24
 
 // LocateSequenceFloor recovers the floor a marker file written before
 // sequence_floors existed never recorded: the highest id its markers name,
-// found by hashing candidates and looking them up. The live counter cannot
-// supply it — a restore can have rolled it back below an id a marker still
-// names, which is the case the floors exist to defend against — and neither
-// can a floor row that is present but older than some marker, so the
-// markers themselves are the only source. complete reports whether every
-// marker of the table's scope was located; a false means the probe reached
-// ceiling first and the floor it returns is a lower bound, not a safe one.
+// found by hashing candidates. The live counter cannot supply it (a restore
+// can roll it below a marker's id), nor can a floor row older than some
+// marker. complete is false when the probe hit ceiling first, so the returned
+// floor is only a lower bound.
 //
 // table is SequenceFloorUsers (account markers, keyed by SubjectToken) or
 // SequenceFloorChannels (messages markers, keyed by MessagesToken).
@@ -369,15 +344,13 @@ func (m *MarkerStore) LocateSequenceFloor(ctx context.Context, table string, cei
 	return highest, false, nil
 }
 
-// FloorProbed reports whether this table's floor is settled: a complete
-// probe established it, or an operator acknowledged one they established by
-// hand. Once either has happened every marker then present is covered, and
-// every marker written since recorded its own floor, so the probe never has
-// to run again — and, equally, a floor row alone is not evidence of that: a
-// store can hold a floor written by a later erasure while an older marker
-// still names a higher id. The acknowledgement is the row itself, which is
-// what an operator inserts to unblock a store whose markers reach past the
-// probe (docs/security.md, "Erasure marker sequence floors").
+// FloorProbed reports whether this table's floor is settled: a complete probe
+// established it, or an operator acknowledged one established by hand (the
+// row itself, inserted to unblock a store whose markers reach past the probe;
+// docs/security.md, "Erasure marker sequence floors"). After that every marker
+// present is covered and later ones recorded their own floor. A floor row
+// alone is not evidence: a later erasure may have written it while an older
+// marker names a higher id.
 func (m *MarkerStore) FloorProbed(ctx context.Context, table string) (bool, error) {
 	var one int
 	err := m.sqlDB.QueryRowContext(ctx, `SELECT 1 FROM floor_probes WHERE name = ?`, table).Scan(&one)
@@ -390,8 +363,7 @@ func (m *MarkerStore) FloorProbed(ctx context.Context, table string) (bool, erro
 	return true, nil
 }
 
-// MarkFloorProbed records that a complete probe established this table's
-// floor.
+// MarkFloorProbed records that a complete probe established this table's floor.
 func (m *MarkerStore) MarkFloorProbed(ctx context.Context, table string) error {
 	if _, err := m.sqlDB.ExecContext(ctx,
 		`INSERT OR IGNORE INTO floor_probes (name) VALUES (?)`, table); err != nil {
@@ -409,9 +381,8 @@ func (m *MarkerStore) ConfirmAccount(ctx context.Context, token string) error {
 	return nil
 }
 
-// DiscardPending removes a pending marker whose erasure was refused — the
-// transaction returned an error, so nothing changed. Only the erasure that
-// wrote the marker may discard it; a replay never does (ReplayAccounts).
+// DiscardPending removes a pending marker whose erasure was refused. Only the
+// erasure that wrote the marker may discard it; a replay never does.
 func (m *MarkerStore) DiscardPending(ctx context.Context, token string) error {
 	if _, err := m.sqlDB.ExecContext(ctx,
 		`DELETE FROM deletion_markers WHERE subject_token = ? AND state = 'pending'`, token); err != nil {
@@ -450,21 +421,16 @@ type ReplayReport struct {
 	Confirmed int
 }
 
-// ReplayAccounts applies the account markers to the main database (data-
-// lifecycle O4 A5): every account whose id hashes to a marker is erased
-// again through erase — after a restore, that is the resurrected subject.
-// A pending marker is one an erasure wrote before its transaction and a
-// crash left unresolved. Whether that transaction committed cannot be read
-// off the main database — a restore reverts a commit, and a restore is
-// exactly when the markers matter — so a pending marker whose account is
-// present is applied like a recorded one and becomes recorded: the request
-// it records was authorised before it was written (the erasure's preflight
-// refuses first), and "done, then undone by a restore" and "never done"
-// end the same way. A pending marker whose account is gone is confirmed.
-// erase must be the full erasure (db.ReplayEraseAccount plus the file
-// half), given the marker's token so the audit rows unlink to it, and must
-// not apply the last-admin guard — a live-operation rule the erasure passed
-// when it ran.
+// ReplayAccounts applies the account markers to the main database: every
+// account whose id hashes to a marker is erased again through erase (after a
+// restore, the resurrected subject). A pending marker whose account is present
+// is applied like a recorded one and becomes recorded: whether its transaction
+// committed cannot be read off a database a restore reverts, the request was
+// authorised before the marker was written, and "done then undone by a
+// restore" and "never done" end the same way. A pending marker whose account
+// is gone is confirmed. erase must be the full erasure (ReplayEraseAccount
+// plus the file half), given the marker's token so audit rows unlink to it,
+// and must not apply the last-admin guard.
 func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, erase func(ctx context.Context, userID int64, token string) error) (ReplayReport, error) {
 	var rep ReplayReport
 	markers, err := m.Markers(ctx)
@@ -522,10 +488,9 @@ func (m *MarkerStore) ReplayAccounts(ctx context.Context, users UserIDLister, er
 }
 
 // HasAccountMarkers reports whether the file holds any account marker. One
-// is proof that this installation was set up and an account erased, and it
-// lives outside the database a restore overwrites — which is what makes it
-// the only evidence that survives a restore of a backup taken before the
-// first owner existed (ErasureService.ReplayMarkers).
+// proves the installation was set up and an account erased, and it survives a
+// restore of a backup taken before the first owner existed
+// (ErasureService.ReplayMarkers).
 func (m *MarkerStore) HasAccountMarkers(ctx context.Context) (bool, error) {
 	var one int
 	err := m.sqlDB.QueryRowContext(ctx,
@@ -549,12 +514,11 @@ func (m *MarkerStore) MessagesToken(channelID int64) string {
 }
 
 // RecordMessagesSweep records that retention removed everything older than
-// cutoff in channelID: one marker per channel, its cutoff only ever
-// moving forward, so a restore of an older backup re-sweeps to the newest
-// cutoff the policy reached. cutoff is stored in SQLite's UTC layout. The
-// channels sequence goes down with it as a floor (channelsSeq is
-// DB.SequenceValue for the channels table), so a restore cannot hand the
-// channel's id — and with it this marker — to a new channel.
+// cutoff in channelID: one marker per channel, its cutoff only moving forward,
+// so restoring an older backup re-sweeps to the newest cutoff. cutoff is in
+// SQLite's UTC layout. The channels sequence is recorded as a floor
+// (channelsSeq is DB.SequenceValue for channels) so a restore cannot hand the
+// channel's id, and this marker, to a new channel.
 func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, cutoff string, channelsSeq int64) error {
 	tx, err := m.sqlDB.BeginTx(ctx, nil)
 	if err != nil {
@@ -577,11 +541,10 @@ func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, 
 	return nil
 }
 
-// ReplayMessages re-applies every messages marker: sweep is called with the
-// channel and the marker's cutoff and must remove everything older than it
-// (the retention sweep, pinned exempt), returning how many rows went. A
-// marker for a channel that no longer exists is skipped. Returns the number
-// of messages removed across all markers.
+// ReplayMessages re-applies every messages marker: sweep removes everything in
+// the channel older than the cutoff (the retention sweep, pinned exempt) and
+// returns how many rows went. A marker for a vanished channel is skipped. It
+// returns the total removed.
 func (m *MarkerStore) ReplayMessages(ctx context.Context, sweep func(ctx context.Context, channelID int64, cutoff string) (int, error)) (int, error) {
 	markers, err := m.Markers(ctx)
 	if err != nil {

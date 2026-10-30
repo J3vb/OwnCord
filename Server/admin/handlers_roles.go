@@ -8,7 +8,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Role Handlers ───────────────────────────────────────────────────────────
 //
 // The whole group sits behind requirePerm(MANAGE_ROLES); RoleService re-checks
 // the bit and owns the hierarchy rules (manage only below your own position,

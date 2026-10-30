@@ -4,15 +4,12 @@ package auth
 const erasureKeyBytes = 32
 
 // LoadOrGenerateErasureKey returns the 32-byte key under which deletion
-// markers name their subject: a marker carries
-// HMAC-SHA256(key, user id), so without the key a marker names no one and
-// with it the server can recognise a resurrected account. It checks, in
-// order, the OWNCORD_ERASURE_KEY environment variable (hex, 32 bytes), then
-// dataDir/erasure.key, and generates a key into that file only on a
-// confirmed absence — the same fail-closed rule as the TOTP key:
-// replacing the key on a read error would orphan every marker recorded so
-// far, and a restore could then resurrect what they guard. Back it up beside
-// totp.key; a database backup does not contain it.
+// markers name their subject: a marker carries HMAC-SHA256(key, user id), so
+// without the key it names no one and with it the server can recognise a
+// resurrected account. It checks OWNCORD_ERASURE_KEY (hex, 32 bytes), then
+// dataDir/erasure.key, and generates a key only on a confirmed absence (as
+// for the TOTP key): replacing it on a read error would orphan every recorded
+// marker. Back it up beside totp.key; a database backup does not contain it.
 func LoadOrGenerateErasureKey(dataDir string) ([]byte, error) {
 	return loadOrGenerateKeyFile(keyFileSpec{
 		env:       "OWNCORD_ERASURE_KEY",

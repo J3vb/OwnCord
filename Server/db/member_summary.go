@@ -45,10 +45,9 @@ type MemberSummary struct {
 	Avatar   *string `json:"avatar"`
 	Status   string  `json:"status"`
 	// MemberRoleSet carries role (the top role's lowercased name) and role_ids
-	// (every role held, top first), flat in the JSON at this position.
-	// An embedded pointer keeps MemberSummary under the range-copy size
-	// limit; ListMembers always sets it, and a summary built by hand needs it
-	// before .Role or .RoleIDs is read.
+	// (every role held, top first), flat in the JSON here. An embedded pointer
+	// keeps MemberSummary under the range-copy size limit; ListMembers always sets
+	// it, and a hand-built summary needs it before .Role or .RoleIDs is read.
 	*MemberRoleSet
 	// IdentityPublicKey is the user's long-term E2EE identity public key
 	// (base64), pinned by peers on first sight (F3 TOFU). Omitted when the
@@ -61,9 +60,8 @@ type MemberSummary struct {
 	About *string `json:"about"`
 	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
 	CreatedAt string `json:"created_at"`
-	// MemberBanner is nil for a member with no banner, which omits both keys,
-	// so a roster of such members is no larger than before. It is an
-	// embedded pointer to keep MemberSummary under the range-copy size limit.
+	// MemberBanner is nil for a member with no banner, which omits both keys. An
+	// embedded pointer keeps MemberSummary under the range-copy size limit.
 	*MemberBanner
 	// CustomStatus is the free-text status line shown under the name. Null
 	// when unset. It must stay the LAST field: encodeRoster in package ws
@@ -76,13 +74,10 @@ type MemberSummary struct {
 // so "who is invisible" is decided in exactly one place.
 func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
 	m.Status = StatusForViewer(m.Status, m.ID, viewerID)
-	// A connected-but-invisible member collapses to "offline" above, but their
-	// custom_status is a separate column BroadcastStatus never touches. Left
-	// alone, a viewer sees {status:"offline", custom_status:"<text>"} for that
-	// member while every genuinely disconnected member is
-	// {status:"offline", custom_status:null} — the surviving text is a tell
-	// that the member is actually online. Blank it at the same choke point
-	// that collapses the status so no other caller has to remember to.
+	// A connected-but-invisible member collapses to "offline" above, but
+	// custom_status is a separate column BroadcastStatus never touches; left alone
+	// a viewer would see {status:"offline", custom_status:"<text>"}, a tell that
+	// the member is online. Blank it at the same choke point.
 	if m.ID != viewerID && m.Status == StatusOffline {
 		m.CustomStatus = nil
 	}
