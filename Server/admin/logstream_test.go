@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -13,10 +14,11 @@ import (
 )
 
 // sseProbe is an httptest ResponseWriter for the log-stream handler that lets a
-// test act from inside the handler's own writes: after the n-th SSE data frame
-// it calls onData(n). That drives both the mid-backfill revocation cases (revoke
-// the caller's credential on frame 1, cancel the request on frame 2) and the
-// v059 gap case (write a fresh log line on frame 1, exactly the interleaving
+// test act from inside the handler's own writes: after the n-th write carrying
+// SSE data frames (one backfill chunk, or one live entry) it calls onData(n).
+// That drives both the mid-backfill revocation cases (revoke the caller's
+// credential on write 1, cancel the request on write 2) and the v059 gap case
+// (write a fresh log line on write 1, exactly the interleaving
 // Snapshot()-then-Subscribe() lost, then cancel once the frames have arrived).
 type sseProbe struct {
 	header     http.Header
@@ -66,11 +68,21 @@ func newLogStreamTestDB(t *testing.T) *db.DB {
 	return database
 }
 
+// fillRing returns a ring holding n entries, all stamped ts.
+func fillRing(n int, ts string) *RingBuffer {
+	rb := NewRingBuffer(n)
+	for i := range n {
+		rb.Write(LogEntry{Timestamp: ts, Level: "INFO", Message: "line " + strconv.Itoa(i), Source: "test"})
+	}
+	return rb
+}
+
+// The backfill re-checks the principal once per chunk, not per entry, so a
+// credential revoked while the first chunk is going out still ends the stream
+// before the second.
 func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 	database := newLogStreamTestDB(t)
-	logBuf := NewRingBuffer(8)
-	logBuf.Write(LogEntry{Timestamp: "2026-03-29T10:00:00Z", Level: "info", Message: "first", Source: "test"})
-	logBuf.Write(LogEntry{Timestamp: "2026-03-29T10:00:01Z", Level: "info", Message: "second", Source: "test"})
+	logBuf := fillRing(3*backfillChunk, "2026-03-29T10:00:00Z")
 
 	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
 	if err != nil {
@@ -113,15 +125,16 @@ func TestHandleLogStream_BackfillStopsAfterSessionRevocation(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body = %s", writer.statusCode, writer.buffer.String())
 	}
 	if writer.writeCount != 1 {
-		t.Fatalf("expected backfill to stop after first entry once session was revoked, wrote %d entries; body = %s", writer.writeCount, writer.buffer.String())
+		t.Fatalf("expected backfill to stop after the first chunk once the session was revoked, wrote %d chunks", writer.writeCount)
+	}
+	if got := bytes.Count(writer.buffer.Bytes(), []byte("data: ")); got != backfillChunk {
+		t.Fatalf("expected exactly one chunk of %d entries before the revocation cut the stream, got %d", backfillChunk, got)
 	}
 }
 
 func TestHandleLogStream_BackfillStopsAfterAPITokenRevocation(t *testing.T) {
 	database := newLogStreamTestDB(t)
-	logBuf := NewRingBuffer(8)
-	logBuf.Write(LogEntry{Timestamp: "2026-07-31T10:00:00Z", Level: "info", Message: "first", Source: "test"})
-	logBuf.Write(LogEntry{Timestamp: "2026-07-31T10:00:01Z", Level: "info", Message: "second", Source: "test"})
+	logBuf := fillRing(3*backfillChunk, "2026-07-31T10:00:00Z")
 
 	userID, err := database.CreateUser(context.Background(), "owner", "hash", 1)
 	if err != nil {
@@ -165,7 +178,10 @@ func TestHandleLogStream_BackfillStopsAfterAPITokenRevocation(t *testing.T) {
 		t.Fatalf("status = %d, want 200; body = %s", writer.statusCode, writer.buffer.String())
 	}
 	if writer.writeCount != 1 {
-		t.Fatalf("expected backfill to stop after first entry once the API token was revoked, wrote %d entries; body = %s", writer.writeCount, writer.buffer.String())
+		t.Fatalf("expected backfill to stop after the first chunk once the API token was revoked, wrote %d chunks", writer.writeCount)
+	}
+	if got := bytes.Count(writer.buffer.Bytes(), []byte("data: ")); got != backfillChunk {
+		t.Fatalf("expected exactly one chunk of %d entries before the revocation cut the stream, got %d", backfillChunk, got)
 	}
 }
 

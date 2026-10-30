@@ -67,8 +67,15 @@ and only when it changes something a contributor or fork holder must do
 **Phones and touch screens**
 
 - The Android app hides desktop-only settings and buttons (pop-out, Keybinds, tray, taskbar and screen share options), and Enter adds a new line in the message box there; the send button sends.
+**Admin panel**
+
+- Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
 
 ### Fixed
+
+**Admin panel**
+
+- Server logs opened slowly once many lines were collected. A full log now opens in a fraction of a second, and the page keeps the last 10,000 lines instead of 2,000.
 
 **Login & connection**
 
