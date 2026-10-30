@@ -101,6 +101,33 @@ describe("createMediaGalleryController", () => {
     ctrl.cleanup();
   });
 
+  it("closes on a press outside it but not inside it or on its header button", async () => {
+    document.body.appendChild(root);
+    const mediaBtn = document.createElement("button");
+    mediaBtn.className = "pin-btn media-btn";
+    const outside = document.createElement("div");
+    root.append(mediaBtn, outside);
+    panel.mount.mockImplementationOnce((container: Element) => {
+      const el = document.createElement("div");
+      el.className = "media-gallery";
+      el.appendChild(document.createElement("button"));
+      container.appendChild(el);
+    });
+    const press = (el: Element): void => {
+      el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    };
+    const ctrl = make();
+    await ctrl.toggle();
+
+    press(root.querySelector(".media-gallery button")!);
+    press(mediaBtn);
+    expect(panel.destroy).not.toHaveBeenCalled();
+
+    press(outside);
+    expect(panel.destroy).toHaveBeenCalledOnce();
+    root.remove();
+  });
+
   it("jumps in the channel it opened for and closes", async () => {
     const ctrl = make();
     await ctrl.toggle();

@@ -63,6 +63,10 @@ and only when it changes something a contributor or fork holder must do
 
 - Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
 
+**Desktop UI**
+
+- The Media panel and the Pinned messages panel stayed open when you clicked outside them — a click anywhere else now closes them.
+
 ## v2.6.0
 
 **OwnCord 2.6** (the seventh public beta) adds a Discord-style server rail, a Media panel for every text channel, Discord channel import, passwords on voice channels and your own CSS themes. Screen shares now stay smooth when the connection drops, and the web client catches up with the desktop app.

@@ -120,6 +120,7 @@ export function createMediaGalleryController(opts: {
     },
     errorLog: "Failed to open the media gallery", // i18n-exempt: developer log line, never shown
     errorToast: shellText("media.openFailed"),
+    outsidePress: { panel: ".media-gallery", toggle: ".media-btn" },
   });
 
   async function toggle(): Promise<void> {
