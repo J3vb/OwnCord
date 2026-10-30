@@ -5,10 +5,6 @@
 -- account, which keeps its registration_status of 'system' (an older binary
 -- already lists only 'active' members, so the account stays out of sight).
 --
--- An older binary does not know the retention exemption of imported messages:
--- its server-wide retention window deletes imported history by the original
--- dates, so turn retention off before rolling back if that history matters.
---
 -- A channel still being built (import_pending = 1) is deleted, since an older
 -- binary would show it half finished.
 DELETE FROM channels WHERE import_pending = 1;

@@ -167,28 +167,14 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 // retentionCandidates is the WHERE clause of everything retention may remove
 // in a channel: older than the cutoff (messages.timestamp is UTC
 // 'YYYY-MM-DD HH:MM:SS', compared bytewise, so format the cutoff the same
-// way), never pinned, tombstones included. Imported messages keep their
-// original, often years-old dates, so the server-wide window spares them;
-// includeImported is true only under the channel's own window. The caller
-// states it because a replayed marker must follow the policy in force when it
-// was written, not the one a restored backup holds.
-func retentionCandidates(includeImported bool) string {
-	if includeImported {
-		return retentionBase
-	}
-	return retentionBase + ` AND ` + notImportedMessage
-}
-
-const (
-	retentionBase      = `channel_id = ? AND pinned = 0 AND timestamp < ?`
-	notImportedMessage = `NOT EXISTS (SELECT 1 FROM message_import_authors ia WHERE ia.message_id = messages.id)`
-)
+// way), never pinned, tombstones included.
+const retentionCandidates = `channel_id = ? AND pinned = 0 AND timestamp < ?`
 
 // CountRetentionCandidates previews how many messages a sweep of channelID
 // with this cutoff would remove.
-func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time, includeImported bool) (int64, error) {
+func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error) {
 	var n int64
-	if err := d.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates(includeImported),
+	if err := d.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates,
 		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout)).Scan(&n); err != nil {
 		return 0, fmt.Errorf("CountRetentionCandidates: %w", err)
 	}
@@ -202,8 +188,8 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 // entries. It returns the removed ids, whose frames the caller takes out of
 // the replay tiers (DeleteEventsForMessages, ws.Hub.PurgeMessagesFromReplay),
 // and the files; fewer ids than limit means the channel is swept.
-func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int, includeImported bool) ([]int64, []string, error) {
-	_, ids, files, err := d.sweepRetention(ctx, 0, channelID, cutoff, limit, false, false, includeImported)
+func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
+	_, ids, files, err := d.sweepRetention(ctx, 0, channelID, cutoff, limit, false, false)
 	return ids, files, err
 }
 
@@ -212,11 +198,11 @@ func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Ti
 // transaction as the deletion. A zero runID opens the run lazily, only when
 // the batch finds something. countChannel adds one to the run's channel count
 // on its first non-empty batch.
-func (d *DB) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel, includeImported bool) (int64, []int64, []string, error) {
-	return d.sweepRetention(ctx, runID, channelID, cutoff, limit, true, countChannel, includeImported)
+func (d *DB) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error) {
+	return d.sweepRetention(ctx, runID, channelID, cutoff, limit, true, countChannel)
 }
 
-func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, journal, countChannel, includeImported bool) (int64, []int64, []string, error) {
+func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, journal, countChannel bool) (int64, []int64, []string, error) {
 	if limit < 1 {
 		return runID, nil, nil, nil
 	}
@@ -226,7 +212,7 @@ func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates(includeImported)+` ORDER BY id LIMIT ?`, //nolint:gosec // G202: retentionCandidates returns one of two constant fragments
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates+` ORDER BY id LIMIT ?`,
 		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout), limit)
 	if err != nil {
 		return runID, nil, nil, fmt.Errorf("SweepRetention select: %w", err)

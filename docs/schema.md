@@ -253,8 +253,7 @@ CREATE TABLE IF NOT EXISTS deletion_markers (
     state         TEXT    NOT NULL DEFAULT 'recorded' CHECK (state IN ('pending', 'recorded')),
     erased_at     TEXT    NOT NULL DEFAULT (datetime('now')),
     replays       INTEGER NOT NULL DEFAULT 0,
-    last_replay   TEXT,
-    imported_cutoff TEXT
+    last_replay   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sequence_floors (
@@ -281,13 +280,7 @@ one when its account is present — a restore can revert the commit it was
 waiting on, so the main database cannot say whether it happened, and the
 request behind the marker was authorised — and confirmed when the account
 is gone. `scope = messages` with `channel_id` and `cutoff` is B4-11's
-retention marker. `imported_cutoff` is the newest cutoff a sweep ran under the
-channel's own window, which reaches Discord-imported messages; NULL means every
-sweep spared them, as the server-wide window does. The replay sweeps `cutoff`
-with imported messages spared, then `imported_cutoff` with them included, so it
-does not depend on the retention policy a restored backup holds. A file created
-before the column existed gets it added on open, and its markers replay as
-"imported messages spared". `replays` counts the restores the marker undid.
+retention marker. `replays` counts the restores the marker undid.
 `marker_meta` holds one row, `erasure-key-fingerprint`: HMAC-SHA256 of the
 literal `owncord-marker-fingerprint` under the erasure key, so the file
 records which key its tokens were computed under without holding the key.
@@ -964,11 +957,9 @@ imported message with `mention_count` 0, and marks the job `done`. Then one
 channel-created event goes out. There are no per-message events and no
 notifications.
 
-Retention: an imported message (a row in `message_import_authors`) is exempt
-from the server-wide window, since it keeps the date it was sent on. A native
-message posted later in the same channel follows the server window like any
-other, and a window set on the channel itself applies to every message in it,
-by the original dates. Date bounds in search and in the ban purge find native
+Retention: imported messages follow the server-wide window and a channel's own
+window like any other message, by the dates they were sent on; a channel still
+being built is not swept. Date bounds in search and in the ban purge find native
 messages as before: the id probe leaves out every channel an import built or is
 building (a running import's committed chunks already break the id order), a search that includes such a channel judges its rows by timestamp alone,
 and every other channel in the same search keeps its id range. Publishing renames the channel

@@ -520,90 +520,53 @@ func TestDateBounds_SurviveAPublishedImportOfOlderMessages(t *testing.T) {
 	}
 }
 
-// Imported history is old on purpose. The server-wide window must not sweep it
-// away, but a window set on the imported channel itself still applies.
-func TestRetention_ImportedMessagesAreExemptFromTheServerWindowOnly(t *testing.T) {
+// Imported messages follow server retention like any other message once the
+// import is published; a channel still being built is not swept at all.
+func TestRetention_ServerWindowCoversPublishedImportsNotPendingOnes(t *testing.T) {
 	ctx := context.Background()
 	database := openMigratedMemory(t)
-	admin := seedUser(t, database, "admin")
-	native := seedChannel(t, database, "general")
 	author, _ := database.EnsureImportAccount(ctx)
-	ch, job := startTestImport(ctx, t, database, "history")
-	ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
-		JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(2, "m"),
-		Progress: db.ImportProgress{Imported: 2},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.PublishImport(ctx, job, ch, ids["mb"], db.ImportProgress{Imported: 2}); err != nil {
-		t.Fatal(err)
-	}
-	if err := database.SetSetting(ctx, db.RetentionDaysKey, "30"); err != nil {
-		t.Fatal(err)
-	}
-	// A native message posted later in the imported channel is old by the time
-	// the sweep looks at it, and follows the server window like any other.
-	nativeID, err := database.CreateMessage(ctx, ch, admin, "posted here later", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.ExecContext(ctx, `UPDATE messages SET timestamp = '2020-06-01 00:00:00' WHERE id = ?`, nativeID); err != nil {
-		t.Fatal(err)
-	}
 
-	windowFor := func() map[int64]db.RetentionWindow {
+	chunk := func(ch, job int64) map[string]int64 {
 		t.Helper()
-		ws, err := database.RetentionWindows(ctx)
+		ids, err := database.ImportChunk(ctx, db.ImportChunkParams{
+			JobID: job, ChannelID: ch, AuthorID: author, Messages: importMessages(2, "m"),
+			Progress: db.ImportProgress{Imported: 2},
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		out := map[int64]db.RetentionWindow{}
-		for _, w := range ws {
-			out[w.ChannelID] = w
-		}
-		return out
+		return ids
 	}
-	if w := windowFor(); len(w) != 2 || w[native].Days != 30 || w[ch].Source != "server" {
-		t.Errorf("windows under the server policy = %+v, want both channels on the server window", w)
+	published, pubJob := startTestImport(ctx, t, database, "history")
+	ids := chunk(published, pubJob)
+	if err := database.PublishImport(ctx, pubJob, published, ids["mb"], db.ImportProgress{Imported: 2}); err != nil {
+		t.Fatal(err)
 	}
+	pending, pendJob := startTestImport(ctx, t, database, "building")
+	chunk(pending, pendJob)
 
-	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
-	p, err := database.RetentionPolicySnapshot(ctx)
+	if err := database.SetSetting(ctx, db.RetentionDaysKey, "30"); err != nil {
+		t.Fatal(err)
+	}
+	windows, err := database.RetentionWindows(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	preview, err := database.PreviewRetentionChange(ctx, db.RetentionChange{Scope: "server", Days: new(30)}, p.Revision, now)
-	if err != nil {
-		t.Fatal(err)
+	got := map[int64]int{}
+	for _, w := range windows {
+		got[w.ChannelID] = w.Days
 	}
-	for _, e := range preview.Channels {
-		if e.ChannelID == ch && e.WouldDelete != 1 {
-			t.Errorf("preview would delete %d under the server window, want only the native message", e.WouldDelete)
-		}
+	if got[published] != 30 {
+		t.Errorf("published import window = %d, want the server's 30 days", got[published])
 	}
-	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -30), false); err != nil || n != 1 {
-		t.Errorf("sweep candidates under the server window = %d, %v; want 1", n, err)
+	if _, ok := got[pending]; ok {
+		t.Error("a pending import channel is in the retention windows")
 	}
-
-	if err := database.SetChannelRetention(ctx, ch, 365, admin); err != nil {
-		t.Fatal(err)
-	}
-	if w := windowFor(); w[ch].Days != 365 || w[ch].Source != "channel" {
-		t.Errorf("channel window on the imported channel = %+v, want 365 days from the channel", w[ch])
-	}
-	p, _ = database.RetentionPolicySnapshot(ctx)
-	preview, err = database.PreviewRetentionChange(ctx, db.RetentionChange{Scope: "server", Days: new(30)}, p.Revision, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range preview.Channels {
-		if e.ChannelID == ch && e.WouldDelete != 3 {
-			t.Errorf("preview with a channel window would delete %d, want all 3", e.WouldDelete)
-		}
-	}
-	if n, err := database.CountRetentionCandidates(ctx, ch, now.AddDate(0, 0, -365), true); err != nil || n != 3 {
-		t.Errorf("sweep candidates under the channel window = %d, %v; want 3", n, err)
+	cutoff := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC).AddDate(0, 0, -30)
+	removed, _, err := database.SweepRetention(ctx, published, cutoff, 100)
+	if err != nil || len(removed) != 2 {
+		t.Errorf("sweep of the published import = %v, %v; want its 2 old messages", removed, err)
 	}
 }
 

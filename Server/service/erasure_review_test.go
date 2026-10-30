@@ -644,7 +644,7 @@ func TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore(t *testin
 	freshDB := openFileDB(t, freshPath)
 	t.Cleanup(func() { _ = freshDB.Close() })
 	empty := newTestMarkers(t)
-	if err := empty.RecordMessagesSweep(ctx, 1, "2026-01-01 00:00:00", 0, false); err != nil {
+	if err := empty.RecordMessagesSweep(ctx, 1, "2026-01-01 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
 	bare := NewErasureService(freshDB)

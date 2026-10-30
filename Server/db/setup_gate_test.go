@@ -119,7 +119,7 @@ func TestMarkerStore_LocateSequenceFloor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0, false); err != nil {
+	if err := m.RecordMessagesSweep(ctx, 7, "2026-01-01 00:00:00", 0); err != nil {
 		t.Fatal(err)
 	}
 	got, complete, err = m.LocateSequenceFloor(ctx, db.SequenceFloorUsers, probeCeiling)

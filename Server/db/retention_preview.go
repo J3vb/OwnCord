@@ -160,8 +160,7 @@ func retentionEffectTx(ctx context.Context, tx *sql.Tx, w RetentionWindow, obser
 	}
 	cutoff := observed.UTC().Add(-time.Duration(w.Days) * 24 * time.Hour)
 	e.Cutoff = cutoff.Format(time.RFC3339)
-	// The proposed policy is not stored yet, so the window's source decides.
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates(w.Source == "channel"),
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates,
 		w.ChannelID, cutoff.Format(dbtime.SQLiteLayout)).Scan(&e.WouldDelete); err != nil {
 		return e, err
 	}
