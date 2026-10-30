@@ -875,7 +875,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
-  function showUploadError(message: string): void {
+  function showUploadError(message: string, action?: { label: string; onClick: () => void }): void {
     if (attachmentPreviewBar === null) return;
     // One persistent refusal line: the user needs to read it after the fact,
     // so it is not removed on a timer (A11Y-05). It is cleared by its own
@@ -885,6 +885,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const shownText = uploadErrorEl?.querySelector(".attachment-upload-error-text");
     if (shownText) {
       shownText.textContent = message;
+      uploadErrorEl?.querySelector(".attachment-upload-error-action")?.remove();
+      if (action) {
+        uploadErrorEl?.insertBefore(
+          createErrorAction(action),
+          uploadErrorEl.querySelector(".attachment-upload-error-dismiss"),
+        );
+      }
       return;
     }
     uploadErrorEl = createElement("div", {
@@ -894,6 +901,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     uploadErrorEl.appendChild(
       createElement("span", { class: "attachment-upload-error-text" }, message),
     );
+    if (action) uploadErrorEl.appendChild(createErrorAction(action));
     const dismissBtn = createElement("button", {
       class: "attachment-upload-error-dismiss",
       type: "button",
@@ -915,6 +923,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // container and is never seen.
     attachmentPreviewBar.classList.add("visible");
     attachmentPreviewBar.appendChild(uploadErrorEl);
+  }
+
+  function createErrorAction(action: { label: string; onClick: () => void }): HTMLButtonElement {
+    const btn = createElement(
+      "button",
+      {
+        class: "attachment-upload-error-action",
+        type: "button",
+        "data-testid": "too-long-as-file",
+      },
+      action.label,
+    );
+    btn.addEventListener("click", action.onClick, { signal });
+    return btn;
   }
 
   /** Clear the composer's refusal line and collapse the preview bar when it
@@ -1039,7 +1061,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // emoji the server accepts. Checked before the debounce stamp below so a
     // refused send does not suppress the next one.
     if ([...typed].length > MAX_MESSAGE_LEN) {
-      showUploadError(messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }));
+      const draft = textarea.value.trim();
+      showUploadError(
+        messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }),
+        canAttachLongText(draft)
+          ? {
+              label: messagingText("error.tooLongAsFile", { name: LONG_PASTE_FILENAME }),
+              onClick: () => sendDraftAsFile(draft),
+            }
+          : undefined,
+      );
       return;
     }
 
@@ -1103,26 +1134,44 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     clearUploadError();
   }
 
+  /** True when `text` could go up as the long-text file: uploads are wired and
+   *  allowed, the name and size pass the server's policy, and there is room
+   *  in the queue. */
+  function canAttachLongText(text: string): boolean {
+    if (options.onUploadFile === undefined) return false;
+    if (disabledReason !== null || uploadsDisabledByServer()) return false;
+    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
+    return (
+      refusedExtension(LONG_PASTE_FILENAME) === null &&
+      new Blob([text]).size <= maxBytes &&
+      pendingAttachments.length < MAX_ATTACHMENTS
+    );
+  }
+
+  /** Moves a draft that is too long to send into a pending message.txt. */
+  function sendDraftAsFile(draft: string): void {
+    if (textarea === null) return;
+    const file = new File([draft], LONG_PASTE_FILENAME, { type: "text/plain" });
+    textarea.value = "";
+    pickedMentions = [];
+    autoResize();
+    clearUploadError();
+    textarea.focus();
+    void handlePasteFile(file);
+  }
+
   /** A paste that would take the message past the limit goes up as
    *  message.txt, as Discord does, instead of a draft that can never send.
    *  When the file could not be attached the paste stays plain text. */
   function pasteLongTextAsFile(e: ClipboardEvent): void {
-    if (textarea === null || options.onUploadFile === undefined) return;
-    if (disabledReason !== null || uploadsDisabledByServer()) return;
+    if (textarea === null) return;
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (text === "") return;
     const { value, selectionStart, selectionEnd } = textarea;
     const after = value.slice(0, selectionStart) + text + value.slice(selectionEnd);
     if ([...after.trim()].length <= MAX_MESSAGE_LEN) return;
+    if (!canAttachLongText(text)) return;
     const file = new File([text], LONG_PASTE_FILENAME, { type: "text/plain" });
-    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
-    if (
-      refusedExtension(file.name) !== null ||
-      file.size > maxBytes ||
-      pendingAttachments.length >= MAX_ATTACHMENTS
-    ) {
-      return;
-    }
     e.preventDefault();
     void handlePasteFile(file);
   }
