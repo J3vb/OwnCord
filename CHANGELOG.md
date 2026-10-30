@@ -101,6 +101,12 @@ and only when it changes something a contributor or fork holder must do
 
 - Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
 
+### Changed
+
+**Voice**
+
+- The video codec for camera and screen share now defaults to Auto: H.264 when your graphics card can encode it, otherwise VP8. In the Windows app on an NVIDIA or AMD graphics card, Auto now uses the graphics card's H.264 encoder (before, it always ended up on VP8). If you picked a codec yourself in Settings > Voice & Audio, that choice is kept.
+
 ## v2.6.0
 
 **OwnCord 2.6** (the seventh public beta) adds a Discord-style server rail, a Media panel for every text channel, Discord channel import, passwords on voice channels and your own CSS themes. Screen shares now stay smooth when the connection drops, and the web client catches up with the desktop app.
