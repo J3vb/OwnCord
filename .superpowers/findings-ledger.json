@@ -11428,7 +11428,7 @@
       "suggestedFix": "Show the renderer's canvas itself in the tile and keep the track only for identity and lifecycle.",
       "fix": {
         "commit": "pending",
-        "test": "Client/src/lib/videoSurface.test.ts, Client/src/features/voice/native/videoRenderer.test.ts (is the picture of its track, which captures no frames), Client/tests/unit/video-grid.test.ts (shows a canvas-drawn stream's canvas with its video, in the window and back), Client/src/features/voice/miniPlayer.test.ts",
+        "test": "Client/src/lib/videoSurface.test.ts, Client/src/features/voice/native/videoRenderer.test.ts (is the picture of its track, which captures no frames), Client/tests/unit/videoGrid/popout.test.ts (shows a canvas-drawn stream's canvas with its video, in the window and back), Client/src/features/voice/miniPlayer.test.ts",
         "revertProof": "fail (without the fix the renderer captures with the default rate and no canvas is shown beside the tile's video)"
       },
       "note": "Needs a re-test on the reporting laptop: the GPU path does not exist in CI.",
@@ -11452,7 +11452,7 @@
       "suggestedFix": "Give the <video> its stream again when it returns with no data.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/video-grid.test.ts (gives a video that came back empty its stream again; leaves a video that still plays on its return alone)",
+        "test": "Client/tests/unit/videoGrid/popout.test.ts (gives a video that came back empty its stream again; leaves a video that still plays on its return alone)",
         "revertProof": "fail (without the fix the returned video is never given its stream again)"
       },
       "note": "On Linux the canvas surface (OC-0494) already brings the picture back; this covers any <video> the pop-out moves.",
