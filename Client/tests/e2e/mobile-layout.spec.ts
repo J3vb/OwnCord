@@ -10,6 +10,7 @@
  */
 import { devices, type Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
+import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
@@ -419,6 +420,39 @@ for (const profile of PROFILES) {
 
       await bar.locator("[data-testid='pcb-leave']").tap();
       await expect(bar).toBeHidden();
+    });
+
+    test("the join sheet and the call bar meet the shared accessibility checks", async ({
+      page,
+    }) => {
+      await openDrawerAndTapVoice(page);
+      const sheet = page.locator("[data-testid='voice-join-sheet']");
+      await expect(sheet).toBeVisible();
+      expect(await findUnnamedControls(sheet)).toEqual([]);
+      expect(
+        (await textContrast(sheet.locator("[data-testid='join-sheet-count']"))).ratio,
+      ).toBeGreaterThanOrEqual(Q1.text);
+      // A keystroke first, so the browser treats the focus as keyboard focus.
+      await page.keyboard.press("Shift");
+      const join = sheet.getByRole("button", { name: "Join Voice" });
+      await join.focus();
+      expect((await focusIndicator(page)).problems).toEqual([]);
+
+      await join.tap();
+      await markConnected(page);
+      const bar = page.locator("[data-testid='phone-call-bar']");
+      await expect(bar).toBeVisible();
+      expect(await findUnnamedControls(bar)).toEqual([]);
+      for (const id of ["pcb-name", "pcb-detail"]) {
+        expect(
+          (await textContrast(bar.locator(`[data-testid='${id}']`))).ratio,
+        ).toBeGreaterThanOrEqual(Q1.text);
+      }
+      await page.keyboard.press("Shift");
+      for (const id of ["pcb-open", "pcb-mute", "pcb-leave"]) {
+        await bar.locator(`[data-testid='${id}']`).focus();
+        expect((await focusIndicator(page)).problems, id).toEqual([]);
+      }
     });
 
     test("Cancel on the join sheet joins nothing", async ({ page }) => {
