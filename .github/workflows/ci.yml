@@ -1066,11 +1066,11 @@ jobs:
       # Every lockfile in the repository, named rather than globbed: a new
       # component's lockfile must be added here, to scripts/ci-select.mjs's
       # DEPS_FILES and to scripts/checks/osv-pr-diff.mjs's LOCKFILES, so it cannot be
-      # silently unscanned. On a PR this step only warns and the next one
-      # decides; on a push it is the verdict.
+      # silently unscanned. On a PR or a push to dev this step only warns and
+      # the next one decides; on main or a manual run it is the verdict.
       - name: Scan the dependency manifests (osv-scanner)
         id: osv
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev') }}
         run: |
           osv-scanner scan source --config osv-scanner.toml \
             -L Server/go.mod \
@@ -1079,13 +1079,15 @@ jobs:
             -L tools/mcp-introspect/package-lock.json \
             -L package-lock.json
 
-      # A PR fails only on advisories its own lockfile changes bring in: one
-      # already on the base commit is dev's to fix (daily dev scan, dev's push
-      # run), not every PR's that happens to touch a lockfile.
-      - name: Fail a PR only on advisories it introduces
-        if: ${{ github.event_name == 'pull_request' && steps.osv.outcome == 'failure' }}
+      # A PR, or a merge pushed to dev, fails only on advisories its own
+      # lockfile changes bring in. One published later against a package
+      # already on dev is the daily dev scan's to report (weekly-supply-chain.yml,
+      # dispatched every morning), so it does not turn every dev push red until
+      # someone bumps or baselines it. main keeps the full verdict for releases.
+      - name: Fail only on advisories this change introduces
+        if: ${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev')) && steps.osv.outcome == 'failure' }}
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: |
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
           node scripts/checks/osv-pr-diff.mjs "$BASE_SHA"
@@ -1110,9 +1112,16 @@ jobs:
       - name: Report tool versions
         run: osv-scanner --version && cargo-deny --version
 
-      # Advisories, licences and sources under Client/src-tauri/deny.toml.
+      # Licences, bans and sources under Client/src-tauri/deny.toml.
       - name: Check the Rust dependency policy (cargo-deny)
-        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check bans licenses sources
+
+      # RustSec advisories. Only a warning on a dev push, for the same reason as
+      # the osv step above: a Cargo.lock change that brings one in is already
+      # failed there, since osv-scanner reads the same RustSec database.
+      - name: Check Rust advisories (cargo-deny)
+        continue-on-error: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check advisories
 
   client-tests:
     name: Client Unit Tests
