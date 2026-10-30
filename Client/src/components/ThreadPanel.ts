@@ -65,6 +65,12 @@ import { createMessageInput, type MessageInputComponent } from "./MessageInput";
 import { createArchiveIcon } from "./message-list/threadChip";
 import { renderMessageContent } from "./message-list/content-parser";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import {
+  createImportedAvatar,
+  createImportedName,
+  createImportedTag,
+} from "./message-list/importedAuthor";
+import { importedName } from "../features/messaging/importedAuthor";
 import type { MessageController } from "../pages/main-page/MessageController";
 import { messagingText } from "../i18n/messaging";
 import { shellText } from "../i18n/shell";
@@ -372,21 +378,27 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     }
     const author = resolveAuthor(msg.user);
     const color = userRoleColorVar(msg.user.id);
+    const imported = msg.importedAuthor;
     starterEl.appendChild(
-      createAvatarElement(author, {
-        className: "msg-avatar thread-starter-avatar",
-        background: pickAvatarColor(author.username),
-      }),
+      imported !== undefined
+        ? createImportedAvatar(imported, "msg-avatar thread-starter-avatar")
+        : createAvatarElement(author, {
+            className: "msg-avatar thread-starter-avatar",
+            background: pickAvatarColor(author.username),
+          }),
     );
     const main = createElement("div", { class: "thread-starter-main" });
     const head = createElement("div", { class: "thread-starter-head" });
     head.appendChild(
-      createElement(
-        "span",
-        { class: "msg-author", style: `color: ${readableRoleColor(color)}` },
-        resolveDisplayName(author),
-      ),
+      imported !== undefined
+        ? createImportedName(imported, "msg-author msg-author--imported")
+        : createElement(
+            "span",
+            { class: "msg-author", style: `color: ${readableRoleColor(color)}` },
+            resolveDisplayName(author),
+          ),
     );
+    if (imported !== undefined) head.appendChild(createImportedTag());
     head.appendChild(
       createElement("span", { class: "msg-time" }, formatMessageTimestamp(msg.timestamp)),
     );
@@ -567,9 +579,15 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       onReplyClick: (messageId) => {
         const msg = getChannelMessages(threadId).find((m) => m.id === messageId);
         if (msg === undefined) return;
-        messageInput?.setReplyTo(msg.id, msg.user.display_name || msg.user.username, {
-          self: msg.user.id === userId(),
-        });
+        messageInput?.setReplyTo(
+          msg.id,
+          msg.importedAuthor !== undefined
+            ? importedName(msg.importedAuthor)
+            : msg.user.display_name || msg.user.username,
+          {
+            self: msg.user.id === userId(),
+          },
+        );
       },
       onEditClick: (messageId) => void messageList?.startEdit(messageId),
       onEditSave: (messageId, content) => {

@@ -238,6 +238,7 @@ export const shards = {
     "src/features/messaging/shortcodes.ts",
     "src/features/messaging/spoilerAttachment.ts",
     "src/features/messaging/textPreview.ts",
+    "src/features/messaging/importedAuthor.ts",
     "src/features/messaging/forwardTargets.ts",
     "src/features/messaging/forwardSend.ts",
     "src/features/messaging/forwardRequests.ts",

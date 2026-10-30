@@ -128,7 +128,11 @@ func (d *DB) SearchMessagesFiltered(ctx context.Context, q SearchQuery, page Sea
 	if err != nil {
 		return nil, err
 	}
-	return d.attachSearchStickers(ctx, results)
+	results, err = d.attachSearchStickers(ctx, results)
+	if err != nil {
+		return nil, err
+	}
+	return d.attachSearchImportedAuthors(ctx, results)
 }
 
 // searchFilters renders the channel, author, date, has:, mentions: and pinned:
