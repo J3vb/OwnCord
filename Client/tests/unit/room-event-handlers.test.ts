@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/roomEventHandlers.ts (was 57.1% statements / 62.5%
+ * Tests for src/lib/voice/roomEventHandlers.ts (was 57.1% statements / 62.5%
  * functions, no test file).
  *
  * These handlers are the whole reaction surface of a live voice call: audio and
@@ -27,10 +27,10 @@ vi.mock("@stores/voice.store", async (importOriginal) => {
   return { ...actual, setSpeakers: vi.fn(actual.setSpeakers) };
 });
 
-import { createRoomEventHandlers } from "@lib/roomEventHandlers";
+import { createRoomEventHandlers } from "@lib/voice/roomEventHandlers";
 import { onRoom } from "../../src/features/voice/releaseRoom";
-import { beginJoinAttempt, finishJoinAttempt, voiceJoinSnapshot } from "@lib/voiceJoinTrace";
-import type { RoomEventDeps } from "@lib/roomEventHandlers";
+import { beginJoinAttempt, finishJoinAttempt, voiceJoinSnapshot } from "@lib/voice/voiceJoinTrace";
+import type { RoomEventDeps } from "@lib/voice/roomEventHandlers";
 import {
   voiceStore,
   setEncryptionDegraded,
@@ -38,7 +38,7 @@ import {
   joinVoiceChannel,
 } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
-import type { AudioElements } from "@lib/audioElements";
+import type { AudioElements } from "@lib/voice/audioElements";
 import { expectConsole } from "../helpers/console";
 import { captureLogs } from "../helpers/log-capture";
 
@@ -1098,7 +1098,7 @@ describe("handleEncryptionError", () => {
   // REMOTE sender. Those frames are dropped, never played in clear, and the
   // failures stop once the offer lands. Only a streak that outlasts the grace
   // window is a real failure.
-  describe("receive-side decrypt failures (OC-0452)", () => {
+  describe("receive-side decrypt failures", () => {
     const bob = { identity: "bob", isLocal: false } as Participant;
     const decryptFailed = () =>
       new Error(

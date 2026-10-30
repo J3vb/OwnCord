@@ -4,12 +4,12 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
-import { dialogOpen } from "@lib/dialogOpen";
+import { isImeCommit } from "@lib/text/ime";
+import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { createLazyScreen } from "@components/lazyScreen";
 import {
   createMentionAutocomplete,
@@ -33,8 +33,8 @@ import {
   type SlashAutocompleteComponent,
 } from "@components/SlashAutocomplete";
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
-import { applyPickedMentions, type PickedMention } from "@lib/pickedMentions";
-import { idMentionsEnabled } from "@lib/serverCapabilities";
+import { applyPickedMentions, type PickedMention } from "@lib/text/pickedMentions";
+import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
@@ -52,7 +52,12 @@ const stickerPickerScreen = createLazyScreen(
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
-import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/serverCapabilities";
+import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
+import { onPrefChange } from "@lib/prefs/preferences";
+import {
+  COMPOSER_BUTTON_PREF_KEYS,
+  composerButtonShown,
+} from "../features/messaging/composerButtons";
 import { currentUserRoleHasPermission } from "@lib/permissions";
 import { Permission, type VoiceUploadMeta } from "@lib/types";
 import {
@@ -65,7 +70,7 @@ import type { VoiceComposer } from "../features/voice-messages/voiceComposer";
 import { voiceMessagesText } from "../i18n/voiceMessages";
 import { messagingText } from "../i18n/messaging";
 import { stickersText } from "../i18n/stickers";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 export interface MessageInputOptions {
   readonly channelId: number;
@@ -92,7 +97,7 @@ export interface MessageInputOptions {
     file: File,
     signal?: AbortSignal,
     onProgress?: (fraction: number) => void,
-    /** Set for a voice message (WP 8.9): its length and waveform ride the upload. */
+    /** Set for a voice message: its length and waveform ride the upload. */
     voice?: VoiceUploadMeta,
   ) => Promise<{ id: string; url: string; filename: string }>;
   /** Withdraw an upload that will never be sent, so its quota is free at
@@ -100,12 +105,12 @@ export interface MessageInputOptions {
   readonly onDiscardUpload?: (id: string) => Promise<void>;
   readonly onTyping: () => void;
   /**
-   * Opens the poll dialog (WP 6.9b). Omit to leave the Poll button out; it is
+   * Opens the poll dialog. Omit to leave the Poll button out; it is
    * also left out on a server that does not advertise polls.
    */
   readonly onCreatePoll?: () => void;
   /**
-   * Sends a custom sticker at once (WP 8.8): `replyTo` and `replyPing` are the
+   * Sends a custom sticker at once: `replyTo` and `replyPing` are the
    * pending reply, if any. Omit to leave the sticker button and tab out; they
    * are also left out on a server that does not advertise stickers.
    */
@@ -146,7 +151,8 @@ export interface QueuedAttachment {
 
 /** The message a draft replies to. `username` is the name the bar shows (the
  *  display name when there is one); `ping` is the bar's @ON/@OFF toggle,
- *  absent meaning ON; `self` hides the toggle on a reply to your own message. */
+ *  absent meaning ON; `self` hides the toggle on a reply to your own message or to
+ *  an imported one (nobody to ping). */
 export interface ReplyTarget {
   readonly messageId: number;
   readonly username: string;
@@ -155,12 +161,12 @@ export interface ReplyTarget {
 }
 
 /** A channel's unsent composer state, captured before a channel switch and
- *  restored when the user returns (UX-1). Uploads settled before the switch
+ *  restored when the user returns. Uploads settled before the switch
  *  keep their server id; an upload still in flight rides along in `uploads`. */
 export interface ComposerDraft {
   readonly content: string;
   readonly replyTo: ReplyTarget | null;
-  /** Users and roles picked from the mention popup (WP 6.3e). */
+  /** Users and roles picked from the mention popup. */
   readonly picks?: readonly PickedMention[];
   readonly attachments: readonly {
     readonly id: string;
@@ -320,11 +326,25 @@ function markGifUnavailable(gifBtn: HTMLButtonElement, reason: string): void {
 }
 
 /** File-icon + filename label for a non-image attachment chip. */
-function appendFileLabel(item: HTMLDivElement, filename: string): void {
+function fileLabel(filename: string): [HTMLDivElement, HTMLSpanElement] {
   const icon = createElement("div", { class: "attachment-preview-file" });
   icon.appendChild(createIcon("file-text", 16));
   const nameEl = createElement("span", { class: "attachment-preview-name" }, filename);
-  appendChildren(item, icon, nameEl);
+  return [icon, nameEl];
+}
+
+function appendFileLabel(item: HTMLDivElement, filename: string): void {
+  appendChildren(item, ...fileLabel(filename));
+}
+
+/** Image types the webview cannot draw. Chat shows them through the server's
+ *  JPEG preview once sent; before that the composer has only the file. */
+const UNDRAWABLE_IMAGE_MIMES = new Set(["image/heic", "image/heif", "image/tiff"]);
+
+/** Whether the composer can preview `file` from its own bytes. */
+function isPreviewableImage(file: File): boolean {
+  const base = file.type.split(";")[0]!.trim().toLowerCase();
+  return base.startsWith("image/") && !UNDRAWABLE_IMAGE_MIMES.has(base);
 }
 
 /** Rename a chip's visible labels after its file was renamed. */
@@ -368,7 +388,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** True once the server has told us GIFs are off, or if no GIF api was wired. */
   let gifUnavailable = options.gifApi === undefined;
   const controlButtons: HTMLButtonElement[] = [];
-  /** The voice-message recorder bar (WP 8.9), owned by this composer. */
+  /** The voice-message recorder bar, owned by this composer. */
   let voice: VoiceComposer | null = null;
   let attachmentPreviewBar: HTMLDivElement | null = null;
   /** The composer's single refusal line. It stays until the user edits or
@@ -384,7 +404,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   /** Set by mount(); backs togglePicker(). */
   let togglePickerOf: ((kind: "emoji" | "gif" | "sticker") => void) | null = null;
   let mentionPopup: MentionAutocompleteComponent | null = null;
-  /** Users and roles picked from the popup for this draft (WP 6.3e), by the
+  /** Users and roles picked from the popup for this draft, by the
    *  text now in the textarea. Send turns the spans still intact into id
    *  tokens, on a server that resolves them; an edited span is plain text. */
   let pickedMentions: PickedMention[] = [];
@@ -421,6 +441,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     expired?: boolean;
     /** Put back after a send did not carry it; cleared by a fresh upload. */
     unsent?: boolean;
+    /** A draft moved into this file, returned to the composer if the upload fails. */
+    draftText?: string;
   }[] = [];
   /** Uploads getDraft() handed to the draft; destroy() leaves them running. */
   const handedOff = new Set<DraftUpload>();
@@ -856,7 +878,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
   }
 
-  function showUploadError(message: string): void {
+  function showUploadError(message: string, action?: { label: string; onClick: () => void }): void {
     if (attachmentPreviewBar === null) return;
     // One persistent refusal line: the user needs to read it after the fact,
     // so it is not removed on a timer (A11Y-05). It is cleared by its own
@@ -866,6 +888,13 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const shownText = uploadErrorEl?.querySelector(".attachment-upload-error-text");
     if (shownText) {
       shownText.textContent = message;
+      uploadErrorEl?.querySelector(".attachment-upload-error-action")?.remove();
+      if (action) {
+        uploadErrorEl?.insertBefore(
+          createErrorAction(action),
+          uploadErrorEl.querySelector(".attachment-upload-error-dismiss"),
+        );
+      }
       return;
     }
     uploadErrorEl = createElement("div", {
@@ -875,6 +904,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     uploadErrorEl.appendChild(
       createElement("span", { class: "attachment-upload-error-text" }, message),
     );
+    if (action) uploadErrorEl.appendChild(createErrorAction(action));
     const dismissBtn = createElement("button", {
       class: "attachment-upload-error-dismiss",
       type: "button",
@@ -896,6 +926,20 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // container and is never seen.
     attachmentPreviewBar.classList.add("visible");
     attachmentPreviewBar.appendChild(uploadErrorEl);
+  }
+
+  function createErrorAction(action: { label: string; onClick: () => void }): HTMLButtonElement {
+    const btn = createElement(
+      "button",
+      {
+        class: "attachment-upload-error-action",
+        type: "button",
+        "data-testid": "too-long-as-file",
+      },
+      action.label,
+    );
+    btn.addEventListener("click", action.onClick, { signal });
+    return btn;
   }
 
   /** Clear the composer's refusal line and collapse the preview bar when it
@@ -924,7 +968,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   function applyDisabledState(): void {
     if (textarea === null) return;
     const disabled = disabledReason !== null;
-    // UX-1 / DESIGN_SYSTEM "Disabled": a gated composer uses aria-disabled +
+    // DESIGN_SYSTEM "Disabled": a gated composer uses aria-disabled +
     // readOnly rather than the `disabled` attribute, because disabling a
     // focused element drops focus to <body> and loses the caret mid-sentence.
     // Send is refused in handleSend() with the reason; the buttons stay
@@ -936,7 +980,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     for (const btn of controlButtons) {
       // The mic needs what "+" needs (an upload) and a server that keeps the clip's metadata.
       if (btn.classList.contains("mic-btn")) {
-        btn.hidden = uploadsOff || !voiceMessagesEnabled();
+        btn.hidden = uploadsOff || !voiceMessagesEnabled() || !composerButtonShown("voice");
         if (disabled) btn.setAttribute("disabled", "true");
         else btn.removeAttribute("disabled");
         continue;
@@ -1020,7 +1064,15 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     // emoji the server accepts. Checked before the debounce stamp below so a
     // refused send does not suppress the next one.
     if ([...typed].length > MAX_MESSAGE_LEN) {
-      showUploadError(messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }));
+      showUploadError(
+        messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }),
+        canAttachLongText(textarea.value.trim())
+          ? {
+              label: messagingText("error.tooLongAsFile", { name: LONG_PASTE_FILENAME }),
+              onClick: sendDraftAsFile,
+            }
+          : undefined,
+      );
       return;
     }
 
@@ -1084,26 +1136,48 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     clearUploadError();
   }
 
+  /** True when `text` could go up as the long-text file: uploads are wired and
+   *  allowed, the name and size pass the server's policy, and there is room
+   *  in the queue. */
+  function canAttachLongText(text: string): boolean {
+    if (options.onUploadFile === undefined) return false;
+    if (disabledReason !== null || uploadsDisabledByServer()) return false;
+    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
+    return (
+      refusedExtension(LONG_PASTE_FILENAME) === null &&
+      new Blob([text]).size <= maxBytes &&
+      pendingAttachments.length < MAX_ATTACHMENTS
+    );
+  }
+
+  /** Moves a draft that is too long to send into a pending message.txt. The
+   *  text is read now, not when Send was refused: formatting shortcuts change
+   *  it without an input event that would clear the refusal. */
+  function sendDraftAsFile(): void {
+    if (textarea === null) return;
+    const draft = textarea.value.trim();
+    if (!canAttachLongText(draft)) return;
+    const file = new File([draft], LONG_PASTE_FILENAME, { type: "text/plain" });
+    textarea.value = "";
+    pickedMentions = [];
+    autoResize();
+    clearUploadError();
+    textarea.focus();
+    void handlePasteFile(file, draft);
+  }
+
   /** A paste that would take the message past the limit goes up as
    *  message.txt, as Discord does, instead of a draft that can never send.
    *  When the file could not be attached the paste stays plain text. */
   function pasteLongTextAsFile(e: ClipboardEvent): void {
-    if (textarea === null || options.onUploadFile === undefined) return;
-    if (disabledReason !== null || uploadsDisabledByServer()) return;
+    if (textarea === null) return;
     const text = e.clipboardData?.getData("text/plain") ?? "";
     if (text === "") return;
     const { value, selectionStart, selectionEnd } = textarea;
     const after = value.slice(0, selectionStart) + text + value.slice(selectionEnd);
     if ([...after.trim()].length <= MAX_MESSAGE_LEN) return;
+    if (!canAttachLongText(text)) return;
     const file = new File([text], LONG_PASTE_FILENAME, { type: "text/plain" });
-    const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
-    if (
-      refusedExtension(file.name) !== null ||
-      file.size > maxBytes ||
-      pendingAttachments.length >= MAX_ATTACHMENTS
-    ) {
-      return;
-    }
     e.preventDefault();
     void handlePasteFile(file);
   }
@@ -1215,7 +1289,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     const idx = pendingAttachments.findIndex((a) => a.previewEl === el);
     const att = idx !== -1 ? pendingAttachments[idx] : undefined;
     if (att !== undefined) {
-      // SRV-05: removing an in-flight attachment cancels its upload and frees
+      // Removing an in-flight attachment cancels its upload and frees
       // Send immediately, instead of leaving a doomed request running and the
       // composer blocked on it until the request settles.
       att.upload?.owner.destroy();
@@ -1241,6 +1315,32 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       reader.addEventListener("error", () => reject(new Error("Failed to read file")));
       reader.readAsDataURL(file);
     });
+  }
+
+  /** The chip's picture: the image itself when the webview can draw it from
+   *  the picked bytes, else the file icon and name. A restored chip without
+   *  its file has only the name. */
+  function appendPreview(item: HTMLDivElement, file: File | undefined, filename: string): void {
+    if (file === undefined || !isPreviewableImage(file)) {
+      appendFileLabel(item, filename);
+      return;
+    }
+    // Read file as data URL for preview (works reliably in WebView2)
+    const img = createElement("img", { class: "attachment-preview-img", alt: filename });
+    item.appendChild(img);
+    // A type the webview cannot decode (a camera RAW, PSD, ...) would leave
+    // a broken-image icon; the file chip is the honest preview for it.
+    const showFileChip = (): void => {
+      if (signal.aborted || !img.isConnected) return;
+      img.replaceWith(...fileLabel(img.alt));
+    };
+    img.addEventListener("error", showFileChip, { once: true, signal });
+    readFileAsDataUrl(file)
+      .then((dataUrl) => {
+        if (signal.aborted) return;
+        img.src = dataUrl;
+      })
+      .catch(showFileChip);
   }
 
   /** The chip's × button; removing the chip cancels its upload, if any. */
@@ -1325,7 +1425,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     item.appendChild(btn);
   }
 
-  async function handlePasteFile(file: File): Promise<void> {
+  async function handlePasteFile(file: File, draftText?: string): Promise<void> {
     if (options.onUploadFile === undefined || attachmentPreviewBar === null) return;
     if (disabledReason !== null) return;
     if (uploadsDisabledByServer()) {
@@ -1365,7 +1465,6 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     }
 
     const tempId = `pending-${++previewCounter}`;
-    const isImage = file.type.startsWith("image/");
 
     // A valid attachment is the user acting on any earlier refusal.
     clearUploadError();
@@ -1373,27 +1472,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     const item = createElement("div", { class: "attachment-preview-item uploading" });
 
-    if (isImage) {
-      // Read file as data URL for preview (works reliably in WebView2)
-      const img = createElement("img", {
-        class: "attachment-preview-img",
-        alt: file.name,
-      });
-      item.appendChild(img);
-      readFileAsDataUrl(file)
-        .then((dataUrl) => {
-          if (signal.aborted) return;
-          img.src = dataUrl;
-        })
-        .catch(() => {
-          if (signal.aborted) return;
-          // Fallback: show filename
-          const nameEl = createElement("span", { class: "attachment-preview-name" }, file.name);
-          img.replaceWith(nameEl);
-        });
-    } else {
-      appendFileLabel(item, file.name);
-    }
+    appendPreview(item, file, file.name);
 
     appendRemoveButton(item, file.name);
     appendSpoilerButton(item, file);
@@ -1403,6 +1482,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       filename: file.name,
       previewEl: item,
       file,
+      ...(draftText === undefined ? {} : { draftText }),
     };
     pendingAttachments.push(pending);
     await runUpload(pending, file);
@@ -1464,6 +1544,14 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
   }
 
   /** Show `handle` on `pending`'s chip until it settles. */
+  /** A draft whose file failed to upload goes back in front of anything typed since. */
+  function restoreDraftText(text: string | undefined): void {
+    if (text === undefined || textarea === null) return;
+    const typed = textarea.value.trim();
+    textarea.value = typed === "" ? text : `${text}\n${typed}`;
+    autoResize();
+  }
+
   async function followUpload(
     pending: (typeof pendingAttachments)[number],
     handle: DraftUpload,
@@ -1518,6 +1606,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         progressBar.remove();
       } else {
         removePreviewItem(item);
+        restoreDraftText(pending.draftText);
       }
       const errMsg = errorText(err, messagingText("error.uploadFailed"));
       showUploadError(messagingText("error.uploadFailedDetail", { detail: errMsg }));
@@ -1641,7 +1730,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (gifUnavailable) {
       markGifUnavailable(gifBtn, messagingText("gif.disabled"));
     }
-    // The Sticker button (WP 8.8): only where the host can send one and the server has stickers.
+    // The Sticker button: only where the host can send one and the server has stickers.
     const sendSticker = options.onSendSticker;
     const stickerBtn =
       sendSticker !== undefined && stickersEnabled()
@@ -1654,7 +1743,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           })
         : null;
     stickerBtn?.appendChild(createIcon("sticker", 20));
-    // The Poll button (WP 6.9b): only where the host can open the dialog and the server has polls.
+    // The Poll button: only where the host can open the dialog and the server has polls.
     const createPoll = options.onCreatePoll;
     const pollBtn =
       createPoll !== undefined && pollsEnabled()
@@ -1677,7 +1766,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       "data-testid": "send-btn",
     });
     sendBtn.appendChild(createIcon("send", 20));
-    // The mic (WP 8.9): where the composer can upload at all, unless a text-only composer.
+    // The mic: where the composer can upload at all, unless a text-only composer.
     const micBtn =
       options.onUploadFile !== undefined && options.noAttach !== true
         ? createElement("button", {
@@ -1839,7 +1928,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
 
     sendBtn.addEventListener("click", handleSend, { signal });
 
-    // The GIF, sticker and emoji buttons share one tabbed popup (WP 8.8). Each
+    // The GIF, sticker and emoji buttons share one tabbed popup. Each
     // button opens it on its own tab; the active tab's button closes it.
     let popup: ExpressionPopup | null = null;
     // One outside-click owner for the open popup, destroyed when it closes.
@@ -1860,7 +1949,11 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       popupDismiss = null;
       closing.element.remove();
       closing.destroy();
-      if (returnFocus) tabButton(tab)?.focus();
+      if (!returnFocus) return;
+      const btn = tabButton(tab);
+      // A button the user hid in settings cannot take focus; the textarea can.
+      if (btn !== null && !btn.hidden) btn.focus();
+      else textarea?.focus();
     }
 
     function handlePopupClickOutside(e: MouseEvent): void {
@@ -2038,6 +2131,16 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     if (pollBtn !== null) inputBox.appendChild(pollBtn);
     if (micBtn !== null) inputBox.appendChild(micBtn);
     appendChildren(inputBox, charCounter, sendBtn);
+    // Settings → Text & Images can hide each of these; the switch applies live.
+    const applyButtonPrefs = (): void => {
+      emojiBtn.hidden = !composerButtonShown("emoji");
+      gifBtn.hidden = !composerButtonShown("gif");
+      if (stickerBtn !== null) stickerBtn.hidden = !composerButtonShown("sticker");
+      if (pollBtn !== null) pollBtn.hidden = !composerButtonShown("poll");
+      applyDisabledState();
+    };
+    applyButtonPrefs();
+    onPrefChange(COMPOSER_BUTTON_PREF_KEYS, applyButtonPrefs, signal);
     slowModeNoteEl = createElement("div", {
       class: "composer-slow-note",
       "data-testid": "slow-mode-note",
@@ -2127,7 +2230,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       cancelAnimationFrame(resizeFrame);
       resizeFrame = null;
     }
-    // SRV-05: an unmount must not leave an upload running against a composer
+    // An unmount must not leave an upload running against a composer
     // that no longer exists, unless getDraft() handed it to the draft.
     for (const att of pendingAttachments) {
       if (att.upload === undefined) continue;
@@ -2247,7 +2350,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       if (attachmentPreviewBar === null) break;
       if (att.unsent === true) continue;
       const item = createElement("div", { class: "attachment-preview-item" });
-      appendFileLabel(item, att.filename);
+      appendPreview(item, att.file, att.filename);
       appendRemoveButton(item, att.filename);
       appendSpoilerButton(item, att.file);
       attachmentPreviewBar.classList.add("visible");
@@ -2263,7 +2366,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
         continue;
       }
       const item = createElement("div", { class: "attachment-preview-item" });
-      appendFileLabel(item, handle.filename);
+      appendPreview(item, handle.file, handle.filename);
       appendRemoveButton(item, handle.filename);
       appendSpoilerButton(item, handle.file);
       attachmentPreviewBar.classList.add("visible");
@@ -2294,7 +2397,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
       class: "attachment-preview-item unsent",
       title: messagingText("attach.notSent"),
     });
-    appendFileLabel(item, att.filename);
+    appendPreview(item, att.file, att.filename);
     appendRemoveButton(item, att.filename);
     appendSpoilerButton(item, att.file);
     attachmentPreviewBar.classList.add("visible");

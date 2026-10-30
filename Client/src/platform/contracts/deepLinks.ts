@@ -1,8 +1,8 @@
 /**
  * owncord:// deep links. The contract method below has the exact signature of
- * `lib/deep-link.ts`'s former `initDeepLinks`, which B7-5 moved to
+ * `lib/nav/deepLink.ts`'s former `initDeepLinks`, which the platform seam moved to
  * `platform/desktop/deepLinks.ts`. Parsing (`parseInviteLink`, `parseMessageLink`)
- * is pure and stays in `lib/deep-link.ts` — it needs no native seam at all.
+ * is pure and stays in `lib/nav/deepLink.ts` — it needs no native seam at all.
  */
 export interface DeepLinks {
   /** Wire owncord:// deep links. No-op outside the native host. `onInvite`

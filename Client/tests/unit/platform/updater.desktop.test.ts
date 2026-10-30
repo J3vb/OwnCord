@@ -1,6 +1,6 @@
 // Desktop binding for the AppUpdater suite: `platform/desktop`'s updater.
 // B7-5 runs the same suite file here and in `updater.legacy.test.ts`, whose
-// `lib/updater.ts` exports still exist; green in both is the evidence the
+// `lib/net/updater.ts` exports still exist; green in both is the evidence the
 // move changed nothing.
 //
 // The updater keeps module-level install state across calls, so each test

@@ -1,5 +1,5 @@
 /**
- * The person rows of a video tile's menu (WP 1B-5): Profile, Message and the
+ * The person rows of a video tile's menu: Profile, Message and the
  * voice roster's moderation section, wired to the same openers the sidebar
  * and member list use.
  */

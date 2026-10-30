@@ -25,7 +25,7 @@ import {
   applyReadyCapabilities,
   forumsEnabled,
   resetServerCapabilities,
-} from "@lib/serverCapabilities";
+} from "@lib/net/serverCapabilities";
 import type { WsClient } from "@lib/ws";
 
 const glyph = (el: Element | null): string => el?.querySelector("svg")?.innerHTML ?? "";

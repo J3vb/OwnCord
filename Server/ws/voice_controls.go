@@ -10,19 +10,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// voiceSelfToggle parameterises the two self-toggle handlers, voice_mute and
-// voice_deafen. They were verbatim duplicates of each other, differing only in
-// the fields below; a fix landing on one and not the other — the asymmetric
-// moderator gate is exactly such a fix — is the failure mode this collapse
-// removes.
+// voiceSelfToggle parameterises voice_mute and voice_deafen, which were verbatim
+// duplicates: a fix landing on one and not the other (the asymmetric moderator
+// gate) is the failure this collapse removes.
 type voiceSelfToggle struct {
 	rateKey    string // auth.Key namespace, "voice_mute" / "voice_deafen"
 	rateLimit  int
 	rateWindow time.Duration
 	rateMsg    string
-	// serverDeafen picks which moderator flag refuseIfServerSilenced consults:
-	// false = ServerMuted (blocks a self-unmute), true = ServerDeafened (blocks a
-	// self-undeafen). A server deafen is the moderator's to lift, same as a mute.
+	// serverDeafen picks which moderator flag refuseIfServerSilenced consults: false =
+	// ServerMuted (blocks a self-unmute), true = ServerDeafened (blocks a self-undeafen).
 	serverDeafen bool
 	update       func(ctx context.Context, userID int64, on bool) error
 	updateLog    string // slog.Error message when update fails
@@ -98,11 +95,9 @@ func handleVoiceDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	})
 }
 
-// voiceStreamToggle parameterises the two video-stream handlers, voice_camera
-// and voice_screenshare. Like the self-toggles above they were verbatim
-// duplicates. Keeping them one function is not only tidier: camera and
-// screenshare draw from a single per-channel voice_max_video budget (OC-0023),
-// and that bug existed precisely because the two paths had drifted apart.
+// voiceStreamToggle parameterises voice_camera and voice_screenshare. One function
+// matters because both draw from a single per-channel voice_max_video budget, which
+// broke when the two paths drifted apart.
 type voiceStreamToggle struct {
 	rateKey    string // auth.Key namespace, "voice_camera" / "voice_screenshare"
 	rateLimit  int
@@ -110,14 +105,12 @@ type voiceStreamToggle struct {
 	rateMsg    string
 	perm       int64  // permission required to ENABLE the stream
 	permLabel  string // its name, for the refusal
-	// tryReserve is the atomic under-cap check-and-set for this stream's
-	// column; update is its plain unconditional write. Both are handed to
-	// enableVideoSlot, which owns the shared-budget rule.
-	//
-	// The handlers fill these with closures over the deps, not with method
-	// values off d.Voice: a method value evaluates its receiver where it is
-	// written, so a bare VoiceDeps fixture would fault at handler entry
-	// instead of at the write the handler may never reach.
+	// tryReserve is the atomic under-cap check-and-set for this stream's column; update
+	// is its plain unconditional write. Both go to enableVideoSlot, which owns the
+	// shared-budget rule. The handlers fill them with closures over the deps, not
+	// method values off d.Voice: a method value evaluates its receiver where written, so
+	// a bare VoiceDeps fixture would fault at handler entry instead of at the write the
+	// handler may never reach.
 	tryReserve func(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
 	update     func(ctx context.Context, userID int64, enabled bool) error
 	logPrefix  string // handler name, for slog messages
@@ -129,13 +122,12 @@ type voiceStreamToggle struct {
 // voiceStreamToggleV2 is the shared body of handleVoiceCameraV2 and
 // handleVoiceScreenshareV2.
 //
-// Only the enable direction is gated on the permission, mirroring
-// handleVoiceMuteV2/handleVoiceDeafenV2's asymmetric gate — once a moderator
-// revokes it mid-call the user must still be able to turn the stream off, or
-// the column (voice_states.camera / voice_states.screenshare) stays stuck at 1:
-// for camera that permanently burns a voice_max_video slot, and for screenshare
-// every subsequent voice_state keeps advertising a stream nobody can watch.
-// Nothing else ever clears either one short of leaving voice.
+// Only the enable direction is gated on the permission, like the mute/deafen gate:
+// once a moderator revokes it mid-call the user must still be able to turn the
+// stream off, or voice_states.camera / screenshare stays stuck at 1. For camera
+// that permanently burns a voice_max_video slot; for screenshare every later
+// voice_state advertises a stream nobody can watch. Nothing else clears either
+// short of leaving voice.
 func voiceStreamToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, enabled bool, t voiceStreamToggle) Result {
 	userID := info.UserID
 	voiceChID := info.VoiceChannelID
@@ -153,10 +145,9 @@ func voiceStreamToggleV2(ctx context.Context, d VoiceDeps, info ClientInfo, enab
 		if r := requirePerm(ctx, d.Reader, d.Permissions, d.PermSvc, userID, voiceChID, t.perm, t.permLabel); r != nil {
 			return *r
 		}
-		// Enforce the channel's shared voice_max_video budget atomically (OC-0023:
-		// enableVideoSlot's query counts camera = 1 OR screenshare = 1 rows, so
-		// neither kind can occupy a slot the cap meant to deny it nor hide from
-		// the other's count).
+		// Enforce the shared voice_max_video budget atomically: enableVideoSlot counts
+		// camera = 1 OR screenshare = 1 rows, so neither kind can occupy a slot the cap
+		// meant to deny it nor hide from the other's count.
 		if r := enableVideoSlot(ctx, d, userID, voiceChID, t.tryReserve, t.update, t.logPrefix, t.kind); r != nil {
 			return *r
 		}
@@ -215,14 +206,10 @@ func handleVoiceScreenshareV2(ctx context.Context, cmd Command, info ClientInfo,
 	})
 }
 
-// enableVideoSlot enforces the channel's shared voice_max_video budget
-// before applying a camera or screenshare enable (OC-0023: camera and
-// screenshare draw from the same per-channel slot count, so neither publish
-// kind can bypass the cap by hiding from the other's count). tryReserve is
-// the atomic check-and-update for the specific field being enabled —
-// EnableCameraIfUnderLimit or EnableScreenshareIfUnderLimit, both of which
-// count `camera = 1 OR screenshare = 1` rows against the cap. unconditionalSet
-// applies the same field's plain update when the channel carries no cap.
+// enableVideoSlot enforces the channel's shared voice_max_video budget before a
+// camera or screenshare enable. tryReserve is the atomic check-and-update for the
+// field being enabled; both counts include `camera = 1 OR screenshare = 1` rows.
+// unconditionalSet applies the plain update when the channel carries no cap.
 func enableVideoSlot(
 	ctx context.Context,
 	d VoiceDeps,
@@ -233,12 +220,10 @@ func enableVideoSlot(
 ) *Result {
 	ch, chErr := d.Reader.GetChannel(ctx, voiceChID)
 	if chErr != nil || ch == nil {
-		// Fail closed: an unreadable OR missing channel row is not "no cap
-		// configured" — falling through to the unconditional enable
-		// bypasses the per-channel video limit. GetChannel returns (nil,
-		// nil) for a channel that no longer exists (e.g. deleted while the
-		// user was still in its voice room), so that outcome must refuse
-		// exactly like the error case above, not skip the cap check.
+		// Fail closed: an unreadable OR missing channel row is not "no cap configured";
+		// falling through to the unconditional enable would bypass the limit. GetChannel
+		// returns (nil, nil) for a channel deleted while the user was in its voice room, and
+		// that must refuse like the error case.
 		slog.Error("ws enableVideoSlot GetChannel", "handler", logPrefix, "err", chErr, "channel_id", voiceChID)
 		return &Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to check video limit"}}
 	}

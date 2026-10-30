@@ -198,8 +198,8 @@ pub async fn ws_connect<R: Runtime>(
             error!("[ws_proxy] connect failed to {}: {}", url, e);
             // A TLS handshake failure (as opposed to an unreachable host) is
             // reported with the distinct certificate code so the webview can
-            // show the certificate copy instead of the generic unreachable one
-            // (DP-54 follow-up). The TOFU decision flow itself is unchanged.
+            // show the certificate copy instead of the generic unreachable one.
+            // The TOFU decision flow itself is unchanged.
             if is_tls_failure(&e) {
                 return tofu::cert_connect_error(&format!("ws connect failed: {e}"));
             }
@@ -210,8 +210,7 @@ pub async fn ws_connect<R: Runtime>(
 
     // ── TOFU check ───────────────────────────────────────────────────────
     let host = tofu::extract_host(&url);
-    let observed = captured_fp
-        .lock()
+    let observed = crate::sync::lock_checked(&captured_fp)
         .map_err(|e| format!("failed to read captured fingerprint: {e}"))?
         .clone()
         .filter(|o| !o.fingerprint.is_empty())
@@ -405,7 +404,7 @@ fn deactivate_if_current(
 
 /// Whether a tungstenite connect error is a TLS/certificate rejection rather
 /// than an unreachable host. Drives the distinct `TLS_CERT_UNVERIFIED` code the
-/// webview maps to its certificate copy (DP-54 follow-up). `Error::Tls` is the
+/// webview maps to its certificate copy. `Error::Tls` is the
 /// direct case; when tokio-rustls rejects the handshake it wraps the rustls
 /// error in an `Error::Io` of kind `InvalidData` (a clean EOF is
 /// `UnexpectedEof`, and a dead socket keeps its own kind), so that kind is the
@@ -710,7 +709,7 @@ mod tests {
         assert!(session.ensure("chat.example.com", false).is_err());
     }
 
-    // DP-54 follow-up: a failed TLS handshake or a refused certificate must be
+    // A failed TLS handshake or a refused certificate must be
     // distinguishable from an unreachable host by the webview. The connect
     // error and the refused-cert command error both carry the distinct code.
     #[test]
@@ -948,7 +947,7 @@ mod tests {
         );
     }
 
-    // ── Liveness (CLI-01) ────────────────────────────────────────────────────
+    // ── Liveness ────────────────────────────────────────────────────
     //
     // A firewall or NAT that drops the connection without a FIN/RST leaves a
     // half-open socket that reads nothing forever. The proxy must close it so
@@ -979,14 +978,14 @@ mod tests {
             stream,
             LIVENESS_TIMEOUT,
             |_| {},
-            |e| errors.lock().unwrap().push(e),
+            |e| crate::sync::lock(&errors).push(e),
         )
         .await;
 
         assert_eq!(end, ReadEnd::Silent);
         assert_eq!(started.elapsed(), LIVENESS_TIMEOUT);
         assert_eq!(
-            errors.lock().unwrap().len(),
+            crate::sync::lock(&errors).len(),
             1,
             "the close must be logged to JS"
         );

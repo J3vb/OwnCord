@@ -10,7 +10,7 @@ import {
 // ---------------------------------------------------------------------------
 
 // loadCredential returns null by default (non-Tauri environment)
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 
@@ -23,7 +23,7 @@ vi.mock("@lib/icons", () => ({
   }),
 }));
 
-import { loadCredential } from "@lib/credentials";
+import { loadCredential } from "@lib/net/credentials";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -843,7 +843,7 @@ describe("ServerPanel", () => {
     // (which only aborts once, when the connect page is destroyed) would
     // keep every discarded row from a prior render reachable — and its
     // click handler still live — until then.
-    it("does not fire onServerClick for a row discarded by a later render (OC-0336)", () => {
+    it("does not fire onServerClick for a row discarded by a later render", () => {
       const onServerClick = vi.fn();
       const panel = createServerPanel(makeOpts({ onServerClick }), SIMPLE_PROFILES);
       container.appendChild(panel.element);
@@ -1181,7 +1181,7 @@ describe("ServerPanel", () => {
       expect(onAddProfile).toHaveBeenCalledWith("Port-less", "myserver.example.com");
     });
 
-    it("accepts a bracketed IPv6 host with port (OC-0187)", () => {
+    it("accepts a bracketed IPv6 host with port", () => {
       const onAddProfile = vi.fn();
       const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
       container.appendChild(panel.element);
@@ -1200,7 +1200,7 @@ describe("ServerPanel", () => {
       expect(container.querySelector(".modal-overlay")).toBeNull();
     });
 
-    it("accepts a bare (unbracketed) IPv6 host without port (OC-0187)", () => {
+    it("accepts a bare (unbracketed) IPv6 host without port", () => {
       const onAddProfile = vi.fn();
       const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
       container.appendChild(panel.element);
@@ -1284,7 +1284,7 @@ describe("ServerPanel", () => {
     // closeModal() only removed the overlay from the DOM. A closed modal's
     // save button therefore kept its listener live — and the modal
     // reachable through it — for the rest of the connect page's life.
-    it("does not fire onAddProfile from a closed modal's stale save button (OC-0335)", () => {
+    it("does not fire onAddProfile from a closed modal's stale save button", () => {
       const onAddProfile = vi.fn();
       const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
       container.appendChild(panel.element);

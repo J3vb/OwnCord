@@ -65,27 +65,6 @@ reason = "zbus_names unmaintained (merged into zbus 6), reached only via zbus 4/
 id = "RUSTSEC-2026-0372"
 reason = "zvariant_derive unmaintained (merged into zbus 6), reached only via zbus 4/5 on Linux D-Bus paths (see deny.toml)"
 
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0367"
-reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0368"
-reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0369"
-reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
-
-# zip header-mismatch advisory (no RUSTSEC id yet, so not in deny.toml). It needs
-# an archive written to disk by ZipStreamReader; both dependents read through
-# ZipArchive only (tauri-plugin-updater updater.rs, webrtc-sys-build lib.rs),
-# and the same signature/bypass argument as the three above applies. Fixed in
-# zip 9.0.5; drop with them once both dependents resolve zip >= 9.
-[[IgnoredVulns]]
-id = "GHSA-m665-v7pm-7grj"
-reason = "zip: dependents read via ZipArchive only, not ZipStreamReader; signed Windows update archive / bypassed build-time path (see deny.toml)"
-
 # block-buffer 0.10.4 comes in through digest 0.10 (sha2 for tauri-codegen, wry
 # and the secret-service crates; sha1 for tungstenite and zbus 4; md-5; hkdf).
 # Moving to the fixed 0.12.1 needs the digest 0.11 stack in every one of those,

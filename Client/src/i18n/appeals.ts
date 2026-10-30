@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Filing, withdrawing and tracking an own appeal (B9-16). Its own catalog so
+ * Filing, withdrawing and tracking an own appeal. Its own catalog so
  * it loads with the Safety tab, not at startup; kinds, appeal states and the
  * ban guidance the BANNED refusal also shows stay in safety.ts.
  */

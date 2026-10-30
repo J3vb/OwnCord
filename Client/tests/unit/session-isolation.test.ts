@@ -9,7 +9,16 @@
  * is between servers, and between sequential accounts on one host through the
  * store and cache resets.
  */
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockedObject,
+} from "vitest";
 
 // ---------------------------------------------------------------------------
 // Tauri API mocks — reuse the ws-mocks.ts event-registry helper so ws.ts's
@@ -27,8 +36,8 @@ vi.mock("@tauri-apps/api/event", async () => ({
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
-vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
@@ -37,24 +46,26 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn().mockResolvedValue(undefined),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@lib/prefs/windowState", () => ({
+  initWindowState: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
-vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
 const PROFILES = [
   {
     id: "p-a",
@@ -75,7 +86,7 @@ const PROFILES = [
     color: "#5865F2",
   },
 ];
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
@@ -92,9 +103,9 @@ vi.mock("@lib/profiles", () => ({
 
 // The media session is its own suite (session-isolation-media.test.ts); here
 // only the switch's call into it is observed.
-vi.mock("@lib/livekitSession", () => ({ leaveVoice: vi.fn() }));
-vi.mock("@lib/notificationSound", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/notificationSound")>()),
+vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
+vi.mock("@lib/media/notificationSound", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/media/notificationSound")>()),
   cleanupNotificationAudio: vi.fn(),
 }));
 
@@ -111,7 +122,7 @@ const mockApiLogout = vi.fn().mockResolvedValue(undefined);
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
 const mockCheckForUpdate = vi.fn();
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
@@ -227,24 +238,28 @@ import { blocksStore } from "@stores/blocks.store";
 import { membersStore, setMembers } from "@stores/members.store";
 import { dmStore, setDmChannels } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
-import { cleanupNotificationAudio } from "@lib/notificationSound";
-import { leaveVoice } from "@lib/livekitSession";
-import { deleteCredential, loadCredential } from "@lib/credentials";
+import { cleanupNotificationAudio } from "@lib/media/notificationSound";
+import { leaveVoice } from "@lib/voice/livekitSession";
+import { deleteCredential, loadCredential } from "@lib/net/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
-import { createProfileManager } from "@lib/profiles";
+import { createProfileManager } from "@lib/presence/profiles";
 import { createConnectPage } from "@pages/ConnectPage";
 
 const A = "a.example:8443";
 const B = "b.example:8443";
 
+// main.ts builds its profile manager once at startup, before the per-test
+// mock clear wipes mock.results.
+let startupProfileManager: MockedObject<ReturnType<typeof createProfileManager>>;
 beforeAll(async () => {
   document.body.innerHTML = '<div id="app"></div>';
   await import("../../src/main");
   await Promise.resolve();
   await Promise.resolve();
+  startupProfileManager = vi.mocked(vi.mocked(createProfileManager).mock.results[0]!.value, true);
 });
 
 beforeEach(() => {
@@ -350,7 +365,7 @@ async function quickSwitchTo(host: string): Promise<void> {
   await vi.advanceTimersByTimeAsync(10);
 }
 
-describe("one live connection across a profile switch (B7-13)", () => {
+describe("one live connection across a profile switch", () => {
   it("never holds two transports and closes A's before B's opens", async () => {
     await loginWithPassword(A, 1);
     expect(authStore.getState().isAuthenticated).toBe(true);
@@ -373,7 +388,7 @@ describe("one live connection across a profile switch (B7-13)", () => {
   });
 });
 
-describe("profile switch teardown (B7-13)", () => {
+describe("profile switch teardown", () => {
   it("resets the domain stores, permissions, voice and notification audio", async () => {
     await loginWithPassword(A, 1);
     // What A's `ready` would have delivered: its role list and active channel.
@@ -407,7 +422,7 @@ describe("profile switch teardown (B7-13)", () => {
   });
 });
 
-describe("a server switch leaves nothing of the old server behind (5.2a)", () => {
+describe("a server switch leaves nothing of the old server behind", () => {
   it("ends the API session before any domain reset runs", async () => {
     await loginWithPassword(A, 1);
     const calls: string[] = [];
@@ -453,7 +468,7 @@ describe("a server switch leaves nothing of the old server behind (5.2a)", () =>
   });
 });
 
-describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
+describe("quick switch keeps each server's saved sign-in", () => {
   it("keeps the departed credential and does not revoke its session", async () => {
     await loginWithPassword(A, 1);
 
@@ -537,7 +552,7 @@ describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
       { ...PROFILES[0]!, id: "p-main", host: shared },
       { ...PROFILES[0]!, id: "p-alt", host: shared },
     );
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       removeProfile: ReturnType<typeof vi.fn>;
     };
     manager.removeProfile.mockImplementation((id: string) => {
@@ -658,7 +673,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
   });
 
   it("resumes with the profile's auto-login as it is when the server comes back", async () => {
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       setAutoLogin: ReturnType<typeof vi.fn>;
     };
     const original = PROFILES[0]!;
@@ -697,7 +712,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
 
   it("ends the wait at once when the waited-on profile is deleted", async () => {
     const original = PROFILES[0]!;
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       removeProfile: ReturnType<typeof vi.fn>;
     };
     manager.removeProfile.mockImplementation((id: string) => {
@@ -772,7 +787,7 @@ describe("keeps retrying a server that was down at launch (P2-T7)", () => {
   });
 
   it("still never resumes after an explicit logout (skip-auto-login)", async () => {
-    const manager = vi.mocked(createProfileManager).mock.results[0]!.value as {
+    const manager = startupProfileManager as {
       getAutoConnectProfile: ReturnType<typeof vi.fn>;
     };
     manager.getAutoConnectProfile.mockReturnValue({ ...PROFILES[0]!, autoConnect: true });

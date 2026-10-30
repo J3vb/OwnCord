@@ -1532,6 +1532,11 @@ func journeyVoiceModeration(t *testing.T, r *epochRig) {
 func journeyVoiceModerationMoveKick(t *testing.T, r *epochRig) {
 	aliceID, bobID, aliceTok, bobTok := r.seedBaseline(t)
 	r.seedModerator(t, aliceID)
+	// Only MOVE_MEMBERS opens a move; the seeded Admin role lacks it.
+	if _, err := r.db.ExecContext(context.Background(),
+		`UPDATE roles SET permissions = permissions | ? WHERE id = 2`, permissions.MoveMembers); err != nil {
+		t.Fatalf("grant MOVE_MEMBERS to admin: %v", err)
+	}
 	r.seedSecondVoiceChannel(t)
 
 	a, b := r.dial(t, "a"), r.dial(t, "b")

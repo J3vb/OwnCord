@@ -13,7 +13,7 @@ const { previewMock, imageMock, searchGifsMock, trendingMock } = vi.hoisted(() =
 vi.mock("../../platform/desktop/externalContent", () => ({
   externalContent: { preview: previewMock, image: imageMock },
 }));
-vi.mock("@lib/gifProvider", () => ({
+vi.mock("@lib/media/gifProvider", () => ({
   searchGifs: searchGifsMock,
   getTrendingGifs: trendingMock,
   isAllowedGifUrl: () => true,
@@ -22,7 +22,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import {
   clearExternalImageCache,
   fetchImageAsObjectUrl,

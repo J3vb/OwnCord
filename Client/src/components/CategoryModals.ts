@@ -1,5 +1,5 @@
 /**
- * CategoryModals — the two dialogs of category management (WP 6.5b): a name
+ * CategoryModals — the two dialogs of category management: a name
  * prompt that serves Create and Rename, and the Delete confirmation. They
  * follow DeleteChannelModal's shape: the caller owns the request and the toast,
  * the dialog only re-arms its button and shows the inline error when the
@@ -10,12 +10,12 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 import { categoryErrorText } from "../features/channels/categoryActions";
 

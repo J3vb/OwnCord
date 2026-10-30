@@ -1,4 +1,4 @@
-// The browser platform's proxies (6.13c). There is no tunnel: the page talks
+// The browser platform's proxies. There is no tunnel: the page talks
 // to the server that served it. REST goes to the page's own origin, and
 // LiveKit through the server's proxy path on the page's host.
 import type { NativeProxies } from "../contracts/nativeProxies";

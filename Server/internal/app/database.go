@@ -15,13 +15,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// openDatabase validates the configured backend and opens the database.
-// The database stage; App.startDatabase registers its close before
-// migrating, so a migration failure still releases the handle.
+// openDatabase validates the configured backend and opens the database;
+// App.startDatabase registers its close before migrating, so a migration
+// failure still releases the handle.
 func openDatabase(cfg *config.Config) (*db.DB, error) {
-	// SQLite is the only supported backend; the unfinished Postgres
-	// scaffolding (stubbed query layer, never wired into the runtime) was
-	// removed rather than completed.
+	// SQLite is the only supported backend.
 	if t := cfg.Database.Type; t != "" && t != "sqlite" {
 		return nil, fmt.Errorf("database.type=%q is not supported; set \"sqlite\" or omit it", t)
 	}
@@ -35,13 +33,11 @@ func openDatabase(cfg *config.Config) (*db.DB, error) {
 }
 
 // initDatabase points the admin panel at the live database, runs the
-// migrations and clears state left over from a previous run. Extracted from
-// run.
+// migrations and clears state left over from a previous run.
 func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *RestartCoordinator) error {
-	// Admin restart requests (update apply, backup restore, setup wizard)
-	// land in the coordinator, which drains this process and lets main()
-	// perform the handoff. Wired before the listener starts serving, so no
-	// admin request can ever hit the unwired default hook.
+	// Admin restart requests (update apply, backup restore, setup wizard) land
+	// in the coordinator; wired before the listener starts serving, so no
+	// request can hit the unwired default hook.
 	admin.SetRestartHandoff(rc.Request)
 
 	backup, err := backupBeforePendingMigrations(log, database, cfg.Database.Path, admin.ResolveBackupDir(cfg.Backup.Dir))
@@ -58,8 +54,8 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 			"pre-migration backup saved: "+backup)
 	}
 
-	// Clear stale state from a previous run or crash. Startup work — nothing
-	// to inherit a context from yet.
+	// Clear stale state from a previous run or crash; startup work with no
+	// context to inherit.
 	if err := database.ResetAllUserStatuses(context.Background()); err != nil {
 		log.Warn("failed to reset stale user statuses", "error", err)
 	} else {
@@ -70,30 +66,32 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 	} else {
 		log.Info("cleared stale voice states")
 	}
+	// A Discord import still marked running belongs to the process that just
+	// ended. Fail it and delete its half-built channel so it never shows.
+	if n, err := database.FailInterruptedImports(context.Background()); err != nil {
+		log.Warn("failed to clean up interrupted imports", "error", err)
+	} else if n > 0 {
+		log.Info("failed interrupted imports", "count", n)
+	}
 
 	return nil
 }
 
 // backupBeforePendingMigrations writes a verified copy of the live database
-// before initDatabase lets a pending migration move the schema. Compose
-// tracks :latest, so a routine `docker compose pull` upgrades the schema with
-// no safety copy; this is that copy, taken at boot and named for the first
-// migration it precedes.
+// before a pending migration moves the schema. Compose tracks :latest, so a
+// routine `docker compose pull` would upgrade the schema with no safety copy;
+// this is that copy, named for the first migration it precedes.
 //
-// It FAILS CLOSED: a boot with migrations pending whose backup cannot be
-// written is refused, because the whole promise is that the schema never
-// moves unbacked-up. A read-only file, a full disk or a bad path is the
-// operator's to fix; booting anyway would silently trade the safety net away.
-//
-// It writes into backupDir (backup.dir) so the copy lands beside the operator's
-// manual backups, before db.Migrate so the copy predates the schema move, and
-// before any goroutine serves — there is no context to inherit.
-//
-// It returns the backup's file name, or "" when nothing was pending.
+// It fails closed: a boot with migrations pending whose backup cannot be
+// written is refused, because the promise is that the schema never moves
+// unbacked-up (a read-only file, full disk or bad path is the operator's to
+// fix). It writes into backupDir (backup.dir) beside the manual backups,
+// before db.Migrate and before any goroutine serves. It returns the backup's
+// file name, or "" when nothing was pending.
 func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath, backupDir string) (string, error) {
-	// In-memory databases (tests, tooling) have no file to copy, and a fresh
-	// database has no pending migrations — PendingMigrations returns nil for
-	// both, which is the only thing keeping BackupToSafe off those paths.
+	// In-memory and fresh databases have no file to copy or no pending
+	// migrations; PendingMigrations returns nil for both, which keeps
+	// BackupToSafe off those paths.
 	pending, err := db.PendingMigrations(database)
 	if err != nil {
 		return "", fmt.Errorf("checking for pending migrations: %w", err)
@@ -106,11 +104,10 @@ func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath, ba
 		return "", fmt.Errorf("pre-migration backup: creating %s: %w", backupDir, err)
 	}
 
-	// Name the copy for the first migration it precedes, so an operator can
-	// see at a glance which schema move this protects. A same-name copy may
-	// predate a rollback and hold none of the data written since, so a new
-	// copy goes under the first free _N suffix whenever the database changed
-	// after the newest one; an earlier copy is never touched. A boot loop on a
+	// Name the copy for the first migration it precedes. A same-name copy may
+	// predate a rollback and hold none of the data written since, so a new copy
+	// goes under the first free _N suffix whenever the database changed after
+	// the newest one; an earlier copy is never touched. A boot loop on a
 	// migration that keeps failing changes nothing, so it reuses the newest
 	// copy instead of filling the disk.
 	name := admin.PreMigrateBackupPrefix + strings.TrimSuffix(filepath.Base(pending[0]), ".sql")
@@ -146,8 +143,7 @@ func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath, ba
 
 	// The new copy is verified: trim older safety copies, never this one. A
 	// prune failure must not refuse the boot. The prune covers both prefixes
-	// and protects only the new pre_migrate_ copy, which already holds the
-	// live database.
+	// and protects only the new pre_migrate_ copy.
 	if removed, pruneErr := admin.PruneSafetyCopies(backupDir, admin.SafetyCopiesKept, path); pruneErr != nil {
 		log.Warn("could not prune old safety copies", "dir", backupDir, "error", pruneErr)
 	} else if len(removed) > 0 {
@@ -156,9 +152,9 @@ func backupBeforePendingMigrations(log *slog.Logger, database *db.DB, dbPath, ba
 	return filepath.Base(path), nil
 }
 
-// changedSince reports whether the SQLite database at dbPath may hold writes
-// newer than t: its main file, or a non-empty WAL, was modified after t. An
-// unreadable main file counts as changed.
+// changedSince reports whether the database at dbPath may hold writes newer
+// than t: its main file or a non-empty WAL was modified after t. An unreadable
+// main file counts as changed.
 func changedSince(dbPath string, t time.Time) bool {
 	fi, err := os.Stat(dbPath)
 	if err != nil || fi.ModTime().After(t) {
@@ -170,10 +166,10 @@ func changedSince(dbPath string, t time.Time) bool {
 
 // recordRestoreResult reports the staged backup restore the boot-time apply
 // (db.ApplyStagedRestore, run by db.Open) handled: it reads the result file,
-// writes one audit row into the now-open database, removes the file and
-// returns the outcome for the attention panel. With no restore pending it
-// returns the zero outcome. The file is removed only after the audit row, so
-// a crash between the two repeats the row rather than losing the report.
+// writes one audit row, removes the file and returns the outcome for the
+// attention panel (zero when no restore is pending). The file is removed only
+// after the audit row, so a crash between the two repeats the row rather than
+// losing the report.
 func recordRestoreResult(log *slog.Logger, dbPath string, database *db.DB) service.RestoreOutcome {
 	res, found, err := db.ReadRestoreResult(dbPath)
 	if err != nil {

@@ -31,7 +31,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 
 // The HTTP TOFU proxy resolves a server host to a fixed loopback origin so
 // server-bound fetches are cert-pinned; external URLs go to the broker instead.
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));
@@ -43,11 +43,11 @@ vi.mock("@lib/logger", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 
 const { showToastMock } = vi.hoisted(() => ({ showToastMock: vi.fn() }));
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: showToastMock,
   initToast: vi.fn(),
   teardownToast: vi.fn(),
@@ -640,6 +640,18 @@ describe("renderAttachment — server thumbnails", () => {
       expect(fetchedPaths()).toEqual(["/api/v1/files/abc/thumb", "/api/v1/files/abc"]),
     );
     expect(document.querySelector(".image-lightbox img")).not.toBeNull();
+  });
+
+  it("an image whose bytes do not decode becomes a download card", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    host.appendChild(renderAttachment(att));
+    await vi.waitFor(() => expect(host.querySelector("img")).not.toBeNull());
+    host.querySelector("img")!.dispatchEvent(new Event("error"));
+    expect(host.querySelector("img")).toBeNull();
+    expect(host.querySelector(".msg-file-download")).not.toBeNull();
+    expect(host.querySelector(".msg-file-note")?.textContent).not.toBe("");
+    host.remove();
   });
 
   // WP 8.12: a HEIC or TIFF is no image to a webview; the server's JPEG

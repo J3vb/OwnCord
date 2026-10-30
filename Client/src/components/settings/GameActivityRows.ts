@@ -1,24 +1,24 @@
 /**
- * Settings > Advanced > Activity (WP 8.3c): the "Share the game you are
+ * Settings > Advanced > Activity: the "Share the game you are
  * playing" switch and what this device sees right now.
  *
  * Device-local like the other switches here (a `localStorage` pref, on by
  * default, no toast): the server never learns the setting, only the one game
  * name while it is on. Turning it off stops the scan and tells the server at
- * once; the loop that does both listens for the pref change (`@lib/gameActivity`).
+ * once; the loop that does both listens for the pref change (`@lib/presence/gameActivity`).
  * The "Detected now" line scans only while the switch is on, so what it shows
- * is what others can see. WP 8.3d adds "Your games" below it (`./GameActivityGames`).
+ * is what others can see. "Your games" is added below it (`./GameActivityGames`).
  */
 
 import { createElement, appendChildren, setOwnedTimeout, setText } from "@lib/dom";
-import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
-import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/gameActivityPrefs";
+import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/presence/gameActivityBridge";
+import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/prefs/gameActivityPrefs";
 import {
   hasReceivedReady,
   onGameActivityPolicy,
   serverSupportsGameActivity,
-} from "@lib/serverCapabilities";
-import { savePref } from "@lib/preferences";
+} from "@lib/net/serverCapabilities";
+import { savePref } from "@lib/prefs/preferences";
 import { desktop } from "../../platform/desktop";
 import { gameActivityText as t } from "../../i18n/gameActivity";
 import { buildGamesSection } from "./GameActivityGames";
@@ -27,7 +27,7 @@ import { createToggle } from "./helpers";
 /** How often the line re-checks; the same beat as the loop that sends it. */
 const REFRESH_MS = 15_000;
 
-/** Whether the server has said game activity is off (WP 8.3e-2). */
+/** Whether the server has said game activity is off. */
 function serverOffNow(): boolean {
   return hasReceivedReady() && !serverSupportsGameActivity();
 }
@@ -46,7 +46,7 @@ export function buildGameActivityRows(signal: AbortSignal): HTMLElement[] {
     "data-testid": "game-activity-detected",
     role: "status",
   });
-  // WP 8.3e-2: an admin turned game activity off for this server.
+  // An admin turned game activity off for this server.
   const serverOff = createElement(
     "div",
     { class: "setting-desc", "data-testid": "game-activity-server-off", role: "status" },

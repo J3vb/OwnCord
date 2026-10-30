@@ -11,9 +11,9 @@ const threadArchiverJoinBudget = 5 * time.Second
 
 // startThreadArchiver runs one synchronous sweep so threads that came due while
 // the server was down are archived before the http stage opens the listener,
-// then runs the archiver loop on the background context. The hub (the
-// notifier) is installed by ws.NewHub. Its close step cancels the loop and
-// joins it within threadArchiverJoinBudget.
+// then runs the archiver loop on the background context (ws.NewHub installs the
+// hub as notifier). Its close step cancels and joins it within
+// threadArchiverJoinBudget.
 func (a *App) startThreadArchiver() error {
 	svc := a.runtime.Services
 	if svc == nil || svc.ThreadArchiver == nil {

@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** A forum channel's post list and the New Post dialog (WP 6.9d). Their own
+/** A forum channel's post list and the New Post dialog. Their own
  *  catalog so the copy loads with those lazy modules, not with the main page. */
 export const forumsText = defineCatalog("forums", {
   "view.label": "Forum posts",

@@ -1,4 +1,4 @@
-//! Windows per-app share audio (WP 6.7a): capture one application's sound with
+//! Windows per-app share audio: capture one application's sound with
 //! WASAPI process loopback and stream it to the webview.
 //!
 //! WebView2 gives a shared *window* no sound (only a whole screen has system
@@ -112,7 +112,7 @@ impl ResolveError {
     }
 }
 
-/// The process whose sound a shared window carries (design decision 1).
+/// The process whose sound a shared window carries.
 ///
 /// 1. A `window:<n>:<m>` label names HWND `n`: if `hwnd_pid(n)` finds a live
 ///    window, that is the answer, even when it turns out to be our own.
@@ -303,11 +303,7 @@ impl Shared {
 
     /// Called by the capture thread for each finished frame.
     fn push_frame(&self, frame: Vec<u8>) {
-        let dropped = self
-            .backlog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(frame);
+        let dropped = crate::sync::lock(&self.backlog).push(frame);
         if dropped > 0 {
             log::debug!("[app_audio] socket backed up, dropped {dropped} old frame(s)");
         }
@@ -315,14 +311,11 @@ impl Shared {
     }
 
     fn pop_frame(&self) -> Option<Vec<u8>> {
-        self.backlog.lock().unwrap_or_else(|p| p.into_inner()).pop()
+        crate::sync::lock(&self.backlog).pop()
     }
 
     fn clear(&self) {
-        self.backlog
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clear();
+        crate::sync::lock(&self.backlog).clear();
     }
 }
 
@@ -524,7 +517,7 @@ impl AppAudioState {
     }
 
     fn slot(&self) -> std::sync::MutexGuard<'_, Slot<Capture>> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner())
+        crate::sync::lock(&self.0)
     }
 }
 
@@ -784,7 +777,7 @@ mod windows_impl {
         }
     }
 
-    /// The process to capture for a shared window's label (decision 1).
+    /// The process to capture for a shared window's label.
     pub fn resolve_pid(label: &str) -> Result<u32, String> {
         let parents = parent_map()?;
         let me = std::process::id();
@@ -911,7 +904,7 @@ mod windows_impl {
     }
 
     /// Activate the process loopback client for `pid`'s process tree and
-    /// start it (decision 2). Must run on an MTA thread.
+    /// start it. Must run on an MTA thread.
     fn open_client(pid: u32) -> Result<Client, String> {
         let done = Arc::new(OwnedEvent::new()?);
         let handler: IActivateCompletion = CompletionHandler {

@@ -3,8 +3,7 @@
  * through the native host so the app never has to trust an unpinned TLS
  * certificate itself.
  *
- * **Amended in B7-4**, which is the milestone that created this seam and may
- * shape it. Two things the first draft could not express:
+ * **Amended when the seam was introduced**, which was free to shape it. Two things the first draft could not express:
  *
  *   - The app needs a *fresh* transport per client — a new login, and every
  *     test, must not inherit the previous one's listeners and certificate

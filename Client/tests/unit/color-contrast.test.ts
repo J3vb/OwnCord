@@ -5,7 +5,7 @@ import {
   parseColor,
   toHex,
   type Rgb,
-} from "../../src/lib/color-contrast";
+} from "../../src/lib/text/colorContrast";
 
 const DARK_SURFACES: Rgb[] = ["#313338", "#2b2d31", "#1e1f22", "#383a40"].map((c) =>
   parseColor(c)!,

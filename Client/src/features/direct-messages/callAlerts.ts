@@ -1,5 +1,5 @@
 /**
- * DP-24: the OS-level half of an incoming DM call — the notification, the
+ * The OS-level half of an incoming DM call — the notification, the
  * urgent taskbar flash and the missed-call notice. The banner, the ring state
  * and the ringtone stay on the main page, which loads this in DmCallPanel's
  * lazy chunk at mount so none of it lands in the page's chunk.
@@ -7,12 +7,12 @@
  * Clicking either notification opens the DM through the same target path a
  * message notification uses, so a call from another server is dropped there.
  */
-import { loadPref } from "../../lib/preferences";
-import { loadUserStatus } from "../../lib/userStatus";
-import { getChannelMutesHost } from "../../lib/channel-mutes";
-import { showToast } from "../../lib/toast";
+import { loadPref } from "../../lib/prefs/preferences";
+import { loadUserStatus } from "../../lib/presence/userStatus";
+import { getChannelMutesHost } from "../../lib/prefs/channelMutes";
+import { showToast } from "../../lib/ui/toast";
 import { createLogger } from "../../lib/logger";
-import type { RingState } from "../../lib/call-ring";
+import type { RingState } from "../../lib/voice/callRing";
 import { desktop } from "../../platform/desktop";
 import { dmCallText } from "../../i18n/dmCall";
 import { dmStore, dmDisplayName } from "../../stores/dm.store";
@@ -20,7 +20,7 @@ import { dmStore, dmDisplayName } from "../../stores/dm.store";
 const log = createLogger("call-alerts");
 
 /**
- * The OS popup for `ring`. DND promises no desktop notifications (OC-0037),
+ * The OS popup for `ring`. DND promises no desktop notifications,
  * and while the window is focused the banner is already on screen, so neither
  * case gets one; the banner or the in-app notice still does.
  */
@@ -41,13 +41,12 @@ function popup(title: string, ring: RingState, ringing: boolean): void {
  * A new ring: one OS notification and one attention request. The acceptance
  * "exactly one OS notification and one attention request per ring" applies
  * when the window is not focused; a focused window gets only the banner and
- * the ringtone (D3(b)).
+ * the ringtone.
  */
 export function alertIncomingCall(ring: RingState): void {
   popup(dmCallText("notifyIncoming", { name: ring.fromUsername }), ring, true);
   // Flashes until the window is focused. A ringing call is urgent, so unlike a
-  // message's flash it stays under DND: in the tray it is the only signal left
-  // (OC-0204).
+  // message's flash it stays under DND: in the tray it is the only signal left.
   if (document.hasFocus() || !loadPref<boolean>("flashTaskbar", true)) return;
   desktop.notifier
     .requestAttention()
@@ -77,7 +76,7 @@ export function alertSupersededCall(ring: RingState): void {
 }
 
 /** The ring ended, however it ended: withdraw its notification, which would
- *  otherwise sit in the notification centre offering a call that is over (D-13). */
+ *  otherwise sit in the notification centre offering a call that is over. */
 export function clearIncomingCall(ring: RingState): void {
   desktop.notifier
     .clearCall(ring.channelId)

@@ -19,7 +19,7 @@ func NewInviteService(st Store) *InviteService {
 	return &InviteService{st: st}
 }
 
-// maxInviteExpiryHoursVal caps invite expiry to 30 days (H-4 hardening).
+// maxInviteExpiryHoursVal caps invite expiry to 30 days.
 const maxInviteExpiryHoursVal = 720
 
 // MaxInviteExpiryHours returns the maximum invite expiry in hours.
@@ -36,9 +36,8 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	if expiresInHours > maxInviteExpiryHoursVal {
 		expiresInHours = maxInviteExpiryHoursVal
 	}
-	// A negative count or expiry silently meant "unlimited"/"never expires";
-	// reject it instead, so the caller cannot create a state they did not ask
-	// for (F23).
+	// A negative count or expiry silently meant "unlimited"/"never expires"; reject it
+	// so the caller cannot create a state they did not ask for.
 	if maxUses < 0 || expiresInHours < 0 {
 		return nil, fmt.Errorf("%w: max_uses and expires_in_hours must not be negative", ErrBadRequest)
 	}
@@ -61,7 +60,7 @@ func (s *InviteService) CreateInvite(ctx context.Context, createdBy int64, maxUs
 	if err != nil || invite == nil {
 		return nil, fmt.Errorf("%w: failed to retrieve invite: %w", ErrInternal, err)
 	}
-	// S-02: the row names the invite by id, never by code; the code is the
+	// The row names the invite by id, never by code; the code is the
 	// credential.
 	db.WriteAudit(tailCtx, s.st, createdBy, "invite_create", "invite", invite.ID,
 		fmt.Sprintf("max_uses=%d expires_in_hours=%d", maxUses, expiresInHours))
@@ -77,9 +76,9 @@ func (s *InviteService) ListInvites(ctx context.Context) ([]*db.Invite, error) {
 	return invites, nil
 }
 
-// ListInviteRedemptions returns who redeemed an invite, newest first, so an
-// owner can trace a leaked invite to its redeemer (O1). The invite is resolved
-// by code first; an unknown code is ErrNotFound rather than an empty history.
+// ListInviteRedemptions returns who redeemed an invite, newest first, so an owner
+// can trace a leaked invite to its redeemer. The invite is resolved by code first;
+// an unknown code is ErrNotFound rather than an empty history.
 func (s *InviteService) ListInviteRedemptions(ctx context.Context, code string) ([]*db.InviteRedemption, error) {
 	invite, err := s.st.GetInvite(ctx, code)
 	if err != nil || invite == nil {

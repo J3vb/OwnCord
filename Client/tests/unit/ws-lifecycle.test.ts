@@ -59,7 +59,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
   // produced an unparseable authority ("wss://2001:db8::1/..." — host
   // "2001", port "db8::1") that tokio-tungstenite's URL parser rejects,
   // leaving the user logged in with a socket that can never open.
-  it("brackets a bare IPv6 host when building the ws_connect URL (OC-0163)", async () => {
+  it("brackets a bare IPv6 host when building the ws_connect URL", async () => {
     client.connect({ host: "2001:db8::1", token: "test-token" });
     await vi.advanceTimersByTimeAsync(10);
     expect(mockInvoke).toHaveBeenCalledWith("ws_connect", {
@@ -67,7 +67,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
     });
   });
 
-  it("does not double-bracket a host already bracketed by the caller (OC-0163)", async () => {
+  it("does not double-bracket a host already bracketed by the caller", async () => {
     client.connect({ host: "[2001:db8::1]:8443", token: "test-token" });
     await vi.advanceTimersByTimeAsync(10);
     expect(mockInvoke).toHaveBeenCalledWith("ws_connect", {
@@ -75,7 +75,7 @@ describe("WebSocket Client (Tauri proxy)", () => {
     });
   });
 
-  it("leaves a plain DNS host:port untouched (OC-0163 regression guard)", async () => {
+  it("leaves a plain DNS host:port untouched (regression guard)", async () => {
     client.connect({ host: "example.com:8443", token: "test-token" });
     await vi.advanceTimersByTimeAsync(10);
     expect(mockInvoke).toHaveBeenCalledWith("ws_connect", {
@@ -831,7 +831,7 @@ describe("disconnect() cancelling an in-flight connect()", () => {
   });
 });
 
-describe("overlapping connect() attempts (OC-0219)", () => {
+describe("overlapping connect() attempts", () => {
   let client: ReturnType<typeof createWsClient>;
   let originalMockListenImpl: (typeof mockListen)["getMockImplementation"] extends () => infer R
     ? R
@@ -1256,7 +1256,7 @@ describe("listener registry mechanics (on/off/dispatch)", () => {
   });
 });
 
-describe("bracketBareIPv6Host (OC-0163)", () => {
+describe("bracketBareIPv6Host", () => {
   // The URL-building half of OC-0163 (the cert-compare half is
   // normalizeHostForCertCompare, covered in ws-cert.test.ts). Only a BARE
   // IPv6 literal — more than one colon and nothing outside the IPv6 character

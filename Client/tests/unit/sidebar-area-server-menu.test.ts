@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   rePinPeerIdentity: vi.fn(),
   leaveVoice: vi.fn(),
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
 }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createProfileManager: vi.fn().mockReturnValue({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockReturnValue([]),
@@ -37,7 +37,7 @@ const { inviteOpen, openAdminPanel, createModal } = vi.hoisted(() => ({
 vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
   createInviteManagerController: vi.fn().mockReturnValue({ open: inviteOpen, cleanup: vi.fn() }),
 }));
-vi.mock("@lib/admin-panel", () => ({ openAdminPanel }));
+vi.mock("@lib/adminPanel", () => ({ openAdminPanel }));
 vi.mock("@components/CreateChannelModal", () => ({
   createCreateChannelModal: createModal,
 }));
@@ -49,7 +49,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
 import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/read-state";
-import { isHideMutedChannels, setHideMutedChannels } from "@lib/hide-muted-channels";
+import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 
 const UNREAD: ReadyChannel[] = [

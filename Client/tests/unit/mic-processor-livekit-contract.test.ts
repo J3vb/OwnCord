@@ -6,8 +6,8 @@
 // that the sender only ever received the processor's gated output.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalAudioTrack, Track } from "livekit-client";
-import { createMicProcessor, type MicProcessor } from "../../src/lib/micProcessor";
-import { AudioPipeline } from "../../src/lib/audioPipeline";
+import { createMicProcessor, type MicProcessor } from "../../src/lib/voice/micProcessor";
+import { AudioPipeline } from "../../src/lib/voice/audioPipeline";
 import {
   FakeAudioContext,
   FakeMediaStream,
@@ -114,7 +114,7 @@ describe("mic processor on livekit-client's LocalAudioTrack", () => {
     expect(contextOf(track)).toBe(ctx);
   });
 
-  it("restarts without an audioContext, as the SDK's restart call site sends none (OC-0277)", async () => {
+  it("restarts without an audioContext, as the SDK's restart call site sends none", async () => {
     const processor = createMicProcessor();
     await processor.init({
       kind: Track.Kind.Audio,

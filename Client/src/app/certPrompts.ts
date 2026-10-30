@@ -7,7 +7,7 @@
 // at import time: main.ts calls installCertPrompts() at the point in the boot
 // order where this code used to be inline.
 
-import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
+import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
 import { createLogger } from "@lib/logger";
 import { isCertDeclined, normalizeHostForCertCompare } from "@lib/ws";
 import type { CertTofuEvent, WsClient } from "@lib/ws";

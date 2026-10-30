@@ -18,15 +18,14 @@ import (
 )
 
 // StickerBroadcaster is the slice of the hub the sticker routes need: after
-// every mutation the full set is pushed to every connected client so pickers
-// converge without a reconnect.
+// every mutation the full set is pushed to every client so pickers converge
+// without a reconnect.
 type StickerBroadcaster interface {
 	BroadcastStickerUpdate(list []*service.Sticker)
 }
 
-// stickerResponse is the JSON shape of one sticker in the sticker routes.
-// Deliberately not service.Sticker: the storage id and sniffed mime type are
-// server-side details, and `url` is what a client actually needs.
+// stickerResponse is one sticker in the sticker routes. Deliberately not
+// service.Sticker: the storage id and sniffed mime type are server-side details.
 type stickerResponse struct {
 	ID    int64   `json:"id"`
 	Name  string  `json:"name"`
@@ -49,24 +48,21 @@ func toStickerResponses(list []*service.Sticker) []stickerResponse {
 	return out
 }
 
-// allowedStickerMIME is the set of image types a sticker may be, matched
-// against the type sniffed from the file's own bytes. Animated GIF and WebP
-// are allowed. JPEG is absent (a sticker needs transparency to look like one)
-// and so is SVG, which is markup with script capability and cannot be served
-// inline.
+// allowedStickerMIME is the set of image types a sticker may be, matched against
+// the type sniffed from the bytes. Animated GIF and WebP are allowed; JPEG is
+// absent (a sticker needs transparency) and so is SVG, which is script-capable
+// markup that cannot be served inline.
 var allowedStickerMIME = map[string]bool{
 	"image/png":  true,
 	"image/gif":  true,
 	"image/webp": true,
 }
 
-// MountStickerRoutes registers the custom-sticker endpoints.
-//
-// Every route requires authentication: reading the set is ungated beyond that
-// (stickers are server-wide and every member renders them), while POST, PATCH
-// and DELETE are gated on MANAGE_SERVER inside StickerService. The image route
-// is authenticated rather than public so a sticker cannot be used as an
-// unauthenticated tracking pixel.
+// MountStickerRoutes registers the custom-sticker endpoints; every route needs
+// authentication. Reading is otherwise ungated (stickers are server-wide) while
+// POST, PATCH and DELETE are gated on MANAGE_SERVER inside StickerService. The
+// image route is authenticated so a sticker cannot be an unauthenticated
+// tracking pixel.
 func MountStickerRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster StickerBroadcaster) {
 	r.Route("/api/v1/stickers", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
@@ -80,8 +76,6 @@ func MountStickerRoutes(r chi.Router, svc *service.Services, store FileStore, li
 	})
 }
 
-// stickerIDParam reads the {id} path segment. A value that is not a positive
-// integer is answered 400 here and false is returned.
 func stickerIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, ok := pathID(r, "id")
 	if !ok {
@@ -103,12 +97,10 @@ func handleListStickers(svc *service.Services) http.HandlerFunc {
 }
 
 // handleCreateSticker processes POST /api/v1/stickers (multipart: `file`,
-// `name`, optional `emoji`).
-//
-// Order matters, as for emoji. The permission gate runs BEFORE the multipart
-// parse, so a member without MANAGE_SERVER cannot make the server spool a body
-// to disk; the name and emoji are validated next, so a malformed one costs
-// nothing; only then are the bytes read, sniffed, measured and stored.
+// `name`, optional `emoji`). Order matters, as for emoji: the permission gate
+// runs BEFORE the multipart parse so a member without MANAGE_SERVER cannot make
+// the server spool a body to disk; name and emoji are validated next; only then
+// are the bytes read, sniffed, measured and stored.
 func handleCreateSticker(svc *service.Services, store FileStore, limiter *auth.RateLimiter, broadcaster StickerBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -146,9 +138,9 @@ func handleCreateSticker(svc *service.Services, store FileStore, limiter *auth.R
 		}
 
 		// Like emoji, stickers are a bounded exclusion from the per-user quota
-		// (a server-wide asset that changes owner on erasure, MANAGE_SERVER
-		// gated, capped at service.MaxStickerCount files of maxStickerFileBytes)
-		// but not from the headroom floor: a full disk is full for everyone.
+		// (server-wide asset that changes owner on erasure, MANAGE_SERVER-gated,
+		// capped at service.MaxStickerCount files of maxStickerFileBytes) but
+		// not from the headroom floor: a full disk is full for everyone.
 		res, err := svc.Uploads.ReserveHeadroom(r.Context(), int64(len(raw)))
 		if err != nil {
 			writeStorageSaveError(w, err, "sticker upload")
@@ -165,7 +157,7 @@ func handleCreateSticker(svc *service.Services, store FileStore, limiter *auth.R
 		created, err := svc.Stickers.Create(r.Context(), user.ID, name, r.FormValue("emoji"), storedAs, mimeType)
 		if err != nil {
 			// The row never landed (a name clash included), so the file is an
-			// orphan -- unlink it.
+			// orphan; unlink it.
 			if delErr := store.Delete(storedAs); delErr != nil {
 				slog.Error("failed to clean up orphaned sticker file", "stored_as", storedAs, "error", delErr)
 			}
@@ -179,11 +171,9 @@ func handleCreateSticker(svc *service.Services, store FileStore, limiter *auth.R
 	}
 }
 
-// readStickerUpload pulls the uploaded file out of the already-parsed
-// multipart form and enforces every property of the bytes themselves: the size
-// cap, the sniffed MIME type and the sniffed pixel dimensions. It writes the
-// refusal itself, so a false third result means the response is already
-// complete.
+// readStickerUpload pulls the file out of the parsed multipart form and enforces
+// the size cap, sniffed MIME type and sniffed dimensions. It writes the refusal
+// itself, so a false third result means the response is complete.
 func readStickerUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
@@ -223,8 +213,7 @@ func readStickerUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, 
 }
 
 // stickerPatch is the body of PATCH /api/v1/stickers/{id}. Both fields are
-// optional: an absent name is kept, an absent emoji is kept, and an empty emoji
-// clears it.
+// optional: an absent name or emoji is kept, and an empty emoji clears it.
 type stickerPatch struct {
 	Name  *string `json:"name"`
 	Emoji *string `json:"emoji"`
@@ -294,18 +283,18 @@ func handleDeleteSticker(svc *service.Services, store FileStore, broadcaster Sti
 	}
 }
 
-// removeStickerFile unlinks the stored bytes of a deleted sticker. The row is
-// already gone, so a failed unlink leaves an orphaned blob, not a broken
-// sticker: it is logged rather than failing a successful delete.
+// removeStickerFile unlinks a deleted sticker's bytes. The row is already gone,
+// so a failed unlink leaves an orphaned blob, not a broken sticker; it is logged
+// rather than failing a successful delete.
 func removeStickerFile(store FileStore, removed *service.Sticker) {
 	if err := store.Delete(removed.StoredAs); err != nil {
 		slog.Warn("failed to remove sticker file", "stored_as", removed.StoredAs, "error", err)
 	}
 }
 
-// broadcastStickerSet re-reads the set and pushes it to every client. A
-// failure is logged and swallowed: the mutation already succeeded. The re-read
-// is detached from the request context, which may be canceled by now.
+// broadcastStickerSet re-reads the set and pushes it to every client. A failure
+// is logged and swallowed: the mutation succeeded. The re-read is detached from
+// the request context, which may be canceled by now.
 func broadcastStickerSet(ctx context.Context, svc *service.Services, broadcaster StickerBroadcaster) {
 	if broadcaster == nil {
 		return
@@ -318,9 +307,9 @@ func broadcastStickerSet(ctx context.Context, svc *service.Services, broadcaster
 	broadcaster.BroadcastStickerUpdate(list)
 }
 
-// handleServeStickerImage serves the stored bytes of one sticker. A sticker is
-// server-wide by construction, so authentication is the whole check, and the
-// bytes never change for an id, so the response caches hard.
+// handleServeStickerImage serves one sticker's bytes. A sticker is server-wide,
+// so authentication is the whole check, and the bytes never change for an id, so
+// the response caches hard.
 func handleServeStickerImage(svc *service.Services, store FileStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, ok := pathID(r, "id")

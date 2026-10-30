@@ -1,10 +1,10 @@
-// The camera picker behind the arrow beside Camera in the call bar (WP 1C-5).
+// The camera picker behind the arrow beside Camera in the call bar.
 // Loaded on demand, so it stays out of the eager MainPage chunk.
-import { showContextMenu } from "@lib/context-menu";
+import { showContextMenu } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { createElement } from "@lib/dom";
-import { switchVideoDevice } from "@lib/livekitSession";
+import { switchVideoDevice } from "@lib/voice/livekitSession";
 import { createLogger } from "@lib/logger";
 import { nativeCameraDevices } from "./native/devices";
 import { voiceText as t } from "../../i18n/voice";

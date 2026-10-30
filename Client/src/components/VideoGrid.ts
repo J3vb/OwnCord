@@ -3,14 +3,14 @@
  * Replaces the chat area when cameras are active.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { openMenuOnKeyboard } from "@lib/context-menu";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -20,17 +20,17 @@ import {
   setScreenshareAudioVolume,
   setUserLocalMute,
   setUserVolume,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
-import { loadPref, savePref } from "@lib/preferences";
-import { syncVideoSurface, videoSurfaceOf } from "@lib/videoSurface";
-import { bindVideoZoom } from "@lib/zoomPan";
-import type { ZoomPan } from "@lib/zoomPan";
-import type { MountableComponent } from "@lib/safe-render";
+import { loadPref, savePref } from "@lib/prefs/preferences";
+import { syncVideoSurface, videoSurfaceOf } from "@lib/voice/videoSurface";
+import { bindVideoZoom } from "@lib/ui/zoomPan";
+import type { ZoomPan } from "@lib/ui/zoomPan";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceText } from "../i18n/voice";
 import { viewersLabel } from "./video-grid/viewers";
-import type { StreamInfo } from "./video-grid/stream-info";
-import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
+import type { StreamInfo } from "./video-grid/streamInfo";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volumeMenu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import {
@@ -116,8 +116,8 @@ export interface VideoGridCallbacks {
   /** A tile left later than the removeStream call that ended it. */
   readonly onStreamRemoved?: () => void;
   /** Whether this user's voice state still says their screen share (or
-   *  camera) is on. A codec switch unpublishes and publishes the same track
-   *  (WP M-5b), so a watched stream whose owner still has it on gets a moment
+   *  camera) is on. A codec switch unpublishes and publishes the same track,
+   *  so a watched stream whose owner still has it on gets a moment
    *  to come back, keeping its watch, before its tile ends. */
   readonly isStreamLive?: (userId: number, screenshare: boolean) => boolean;
   /** Back to the full stream view of `tileId`, from its mini-player. */
@@ -413,7 +413,7 @@ function buildVolumeControls(config: TileConfig): {
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
-  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Stream audio
+  // reads, instead of hardcoding "unmuted at 100%". Stream audio
   // plays on an element (volume caps at 1.0); voice has a gain node.
   const savedVolume = config.isScreenshare
     ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
@@ -460,7 +460,7 @@ function buildVolumeControls(config: TileConfig): {
 
   function commit(): void {
     if (config.isScreenshare) {
-      // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
+      // Set actual volume, not just mute toggle. Slider 100 maps
       // to element volume 1.0 (the attach-time default).
       muteScreenshareAudio(config.audioUserId, muted);
       if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
@@ -1342,7 +1342,7 @@ export function createVideoGrid(): VideoGridComponent {
       log.debug("Stream stats unavailable", { tileId, err });
     }
     // Loaded on first use: only a watched stream needs the readout.
-    infoModule ??= await import("./video-grid/stream-info");
+    infoModule ??= await import("./video-grid/streamInfo");
     const { chipText, renderStats, streamInfo } = infoModule;
     if (statsTile !== tileId || cells.get(tileId) !== entry) return;
     const info = sample !== null ? streamInfo(sample, entry.prevSample) : sizeOf(entry.video);
@@ -1364,7 +1364,7 @@ export function createVideoGrid(): VideoGridComponent {
   const lastInfo = new Map<number, StreamInfo>();
   /** The readout module, once a poll has loaded it (the chip shows only
    *  after one has). */
-  let infoModule: typeof import("./video-grid/stream-info") | null = null;
+  let infoModule: typeof import("./video-grid/streamInfo") | null = null;
 
   function toggleStats(tileId: number, chip: HTMLButtonElement): void {
     const entry = cells.get(tileId);
@@ -1398,7 +1398,7 @@ export function createVideoGrid(): VideoGridComponent {
     pop.focus();
   }
 
-  // --- Video layers (P3-07) -------------------------------------------------------
+  // --- Video layers -------------------------------------------------------
 
   /** Nothing while no one can see the tile (grid closed, app hidden or
    *  minimised, stopped); the top layer for the stream you are watching
@@ -1433,7 +1433,7 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   /** Report each remote tile's view when it changes. adaptiveStream is off
-   *  (it froze tiles, OC-0455), so this is what keeps hidden and small tiles
+   *  (it froze tiles), so this is what keeps hidden and small tiles
    *  from pulling the top layer. */
   function syncViews(): void {
     for (const [id, entry] of cells) {
@@ -1697,7 +1697,7 @@ export function createVideoGrid(): VideoGridComponent {
       detail.textContent = parts.join(" · ");
     };
     renderDetail(null);
-    // Why the share sends what it does (M-1): the capture rate, what limits
+    // Why the share sends what it does: the capture rate, what limits
     // the encoder, and which encoder. Filled once the first poll is back.
     const senderLine = createElement("div", { class: "video-self-stats" });
     senderLine.hidden = true;
@@ -1705,7 +1705,7 @@ export function createVideoGrid(): VideoGridComponent {
       let sample: ShareSenderSample | null = null;
       try {
         sample = (await callbacks.getLocalShareStats?.()) ?? null;
-        infoModule ??= await import("./video-grid/stream-info");
+        infoModule ??= await import("./video-grid/streamInfo");
       } catch (err) {
         log.debug("Local share stats unavailable", { tileId, err });
       }
@@ -1969,7 +1969,7 @@ export function createVideoGrid(): VideoGridComponent {
     // so it stays out of the eager bundle. Your own screen share has none.
     if (config !== undefined && (!config.isSelf || !config.isScreenshare)) {
       const openMenu = (x: number, y: number): void =>
-        void import("./video-grid/tile-menu").then((menus) => {
+        void import("./video-grid/tileMenu").then((menus) => {
           if (entry.listeners.signal.aborted || root?.contains(cell) !== true) return;
           if (config.isSelf) menus.showSelfTileMenu(selfMenuOptions(x, y, userId, entry));
           else menus.showTileMenu(tileMenuOptions(x, y, userId, entry, config));

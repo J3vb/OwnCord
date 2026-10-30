@@ -13,9 +13,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Settings Handlers ──────────────────────────────────────────────────────
 //
-// Thin adapters over service.SettingsService (B3-8 settings/audit family):
+// Thin adapters over service.SettingsService:
 // the whitelist, boolean normalization, require_2fa preconditions, atomic
 // apply and audit rows all live in the service.
 
@@ -125,7 +124,7 @@ type uploadPolicyBroadcaster interface {
 }
 
 // gameActivityPolicyApplier is the hub capability that makes the hub follow
-// the saved game activity switch (WP 8.3e-2): it clears every shown game when
+// the saved game activity switch: it clears every shown game when
 // the switch is off and sends game_activity_policy to connected clients.
 // *ws.Hub implements it (hub_wiring_test.go pins that).
 type gameActivityPolicyApplier interface {
@@ -143,7 +142,7 @@ func handlePatchSettings(settings *service.SettingsService, retention *service.R
 			return
 		}
 
-		// The backup policy is owner-only (BPR-072): these keys decide which
+		// The backup policy is owner-only: these keys decide which
 		// scheduled copies survive and whether new ones are taken, so a
 		// MANAGE_SERVER (or ADMINISTRATOR) non-owner must not reach them even
 		// though the rest of the settings page is theirs. Refuse the whole

@@ -1,6 +1,6 @@
 // Step 1.12 — Structured client-side logger
 
-import { onPrefChange, readMigratedStringPref } from "./preferences";
+import { onPrefChange, readMigratedStringPref } from "./prefs/preferences";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 

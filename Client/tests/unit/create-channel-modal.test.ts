@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CHANNEL_TYPES, createCreateChannelModal } from "@components/CreateChannelModal";
 import type { CreateChannelModalOptions } from "@components/CreateChannelModal";
 import { NO_CATEGORY, setChannels, type CategoryRef } from "@stores/channels.store";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 
 describe("CHANNEL_TYPES", () => {
   it("offers every channel type, regardless of category", () => {
@@ -10,7 +10,7 @@ describe("CHANNEL_TYPES", () => {
   });
 });
 
-describe("Forum in the type list (WP 6.9d)", () => {
+describe("Forum in the type list", () => {
   afterEach(() => {
     resetServerCapabilities();
     document.body.replaceChildren();

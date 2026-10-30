@@ -119,7 +119,7 @@ type Bridge = {
   ACTIONS: Record<string, unknown>;
 };
 
-describe("Server/admin/static — category permissions (WP 6.5d)", () => {
+describe("Server/admin/static — category permissions", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {

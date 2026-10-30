@@ -10,7 +10,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Second-factor state (migration 032, B4-3): the durable backend behind the
+// Second-factor state (migration 032): the durable backend behind the
 // auth service's partial-auth, pending-enrolment and used-code stores
 // (auth.SecondFactorPersister) and the emergency recovery-code rows. Nothing
 // here sees a secret in the clear — callers hand over SHA-256 digests, AES-GCM

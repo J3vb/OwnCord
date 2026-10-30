@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { attachChannelContextMenu } from "@components/channel-sidebar/context-menu";
+import { attachChannelContextMenu } from "@components/channel-sidebar/contextMenu";
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
-import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/channel-mutes";
+import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/prefs/channelMutes";
 import {
   getChannelNotificationLevel,
   setChannelNotificationLevel,
   setGlobalNotificationLevel,
   setServerNotificationLevel,
-} from "@lib/notificationLevel";
+} from "@lib/prefs/notificationLevel";
 import { channelsStore } from "@stores/channels.store";
 import { cascadedDeclaration } from "../helpers/app-css";
 import type { Channel } from "@stores/channels.store";

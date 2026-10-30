@@ -30,26 +30,26 @@ import (
 	"github.com/J3vb/OwnCord/Server/config"
 )
 
-// TLSResult holds the output of LoadOrGenerate.
-// For most TLS modes only TLSConfig is set. In ACME mode, HTTPHandler is
-// also set and must be served on :80 for HTTP-01 challenges and redirect.
+// TLSResult holds the output of LoadOrGenerate. Usually only TLSConfig is set;
+// in ACME mode HTTPHandler is also set and must be served on :80 for HTTP-01
+// challenges and the redirect.
 type TLSResult struct {
 	TLSConfig   *tls.Config
 	HTTPHandler http.Handler // non-nil only for ACME mode
 	// Fingerprint is the SHA-256 of the served leaf certificate in the
 	// lower-case colon-hex form the desktop client shows and pins
-	// (Client/src-tauri/src/tofu.rs). It is empty for TLS off and for ACME
-	// before the first handshake, where the leaf is not known at start-up.
+	// (Client/src-tauri/src/tofu.rs). Empty for TLS off and for ACME before the
+	// first handshake, where the leaf is not known at start-up.
 	Fingerprint string
 	// Served tracks the leaf certificate being served now: set at load for
 	// self_signed and manual, and on every handshake for ACME, so a renewal
-	// shows up without a restart. Nil for TLS off, where a reverse proxy
-	// serves the certificate; a nil tracker reports the zero ServedCert.
+	// shows without a restart. Nil for TLS off (a reverse proxy serves the
+	// certificate); a nil tracker reports the zero ServedCert.
 	Served *CertTracker
 }
 
 // ServedCert is a served leaf certificate's fingerprint (LeafFingerprint's
-// form) and validity period. The zero value means none is known.
+// form) and validity period; the zero value means none is known.
 type ServedCert struct {
 	Fingerprint string
 	NotBefore   time.Time
@@ -62,8 +62,8 @@ type CertTracker struct {
 	cur ServedCert
 }
 
-// Current returns the most recently served certificate, or the zero value
-// before the first one (or on a nil tracker).
+// Current returns the most recently served certificate, or the zero value before
+// the first one or on a nil tracker.
 func (t *CertTracker) Current() ServedCert {
 	if t == nil {
 		return ServedCert{}
@@ -101,8 +101,8 @@ func staticTracker(cfg *tls.Config) *CertTracker {
 }
 
 // LeafFingerprint formats cert's leaf DER as lower-case colon-hex
-// ("aa:bb:cc:..."), byte-for-byte the pin format the desktop client uses.
-// Returns "" when cert carries no leaf.
+// ("aa:bb:cc:..."), byte-for-byte the desktop client's pin format; "" when cert
+// carries no leaf.
 func LeafFingerprint(cert tls.Certificate) string {
 	if len(cert.Certificate) == 0 {
 		return ""
@@ -115,13 +115,10 @@ func LeafFingerprint(cert tls.Certificate) string {
 	return strings.Join(parts, ":")
 }
 
-// GenerateSelfSigned generates an ECDSA P-256 self-signed TLS certificate
-// valid for 10 years and writes the PEM-encoded cert and key to the given
-// file paths.
-//
-// ECDSA P-256 is preferred over RSA 4096 for performance — it provides
-// equivalent security at a fraction of the key generation cost, which matters
-// for server startup and test speed.
+// GenerateSelfSigned generates an ECDSA P-256 self-signed TLS certificate valid
+// for 2 years and writes the PEM-encoded cert and key to the given paths. P-256
+// gives equivalent security to RSA 4096 at a fraction of the key generation
+// cost, which matters for server startup and test speed.
 func GenerateSelfSigned(certFile, keyFile string) error {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -229,9 +226,9 @@ func loadCertPair(certFile, keyFile string) (*tls.Config, error) {
 	}, nil
 }
 
-// certConfigFingerprint is the leaf fingerprint of a config that has a
-// statically loaded certificate, or "" when it has none (ACME's cert is
-// fetched on the first handshake, so it cannot be printed at start-up).
+// certConfigFingerprint is the leaf fingerprint of a config with a statically
+// loaded certificate, or "" when it has none (ACME's is fetched on the first
+// handshake, so it cannot be printed at start-up).
 func certConfigFingerprint(cfg *tls.Config) string {
 	if cfg == nil || len(cfg.Certificates) == 0 {
 		return ""
@@ -257,21 +254,19 @@ func fileExists(path string) bool {
 }
 
 // loadACME sets up an autocert.Manager for automatic Let's Encrypt certificates.
-// The returned TLSResult includes an HTTPHandler that must be served on :80 for
-// HTTP-01 challenge validation and HTTP→HTTPS redirect.
+// The TLSResult's HTTPHandler must be served on :80 for HTTP-01 validation and
+// the HTTP→HTTPS redirect.
 func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 	if cfg.Domain == "" {
 		return nil, fmt.Errorf("TLS mode 'acme' requires tls.domain to be set (e.g. \"chat.example.com\")")
 	}
 
-	// Validate domain is not an IP address.
+	// Reject an IP address as domain.
 	if ip := net.ParseIP(cfg.Domain); ip != nil {
-		// The limit is this client, not the CA. Let's Encrypt has issued
-		// certificates for IP addresses since 2026-01-15, under a
-		// short-lived profile that golang.org/x/crypto/acme/autocert cannot
-		// request: its Manager accepts hostnames only and has no profile
-		// selection. Naming the CA sent owners to check the wrong thing.
-		// A public-IP certificate flow is B6-3, which is deferred.
+		// The limit is this client, not the CA: Let's Encrypt issues IP
+		// certificates under a short-lived profile that
+		// golang.org/x/crypto/acme/autocert cannot request (hostnames only, no
+		// profile selection). Naming the CA sent owners to check the wrong thing.
 		return nil, fmt.Errorf("TLS mode 'acme': domain must be a hostname, not an IP address (%s); "+
 			"this build's ACME client cannot request a certificate for an IP address. Use a hostname, "+
 			"or set tls.mode to \"manual\" with your own certificate, or stay on \"self_signed\" and "+
@@ -297,18 +292,17 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 		HostPolicy: autocert.HostWhitelist(cfg.Domain),
 	}
 
-	// HTTP handler serves ACME HTTP-01 challenges on port 80 and redirects
-	// all other traffic to HTTPS. The HTTPS listener does not necessarily
-	// bind 443 (the default is 8443), so the redirect must name the
-	// configured port explicitly.
+	// The HTTP handler serves ACME HTTP-01 challenges on port 80 and redirects
+	// everything else to HTTPS. The HTTPS listener need not bind 443 (default
+	// 8443), so the redirect names the configured port.
 	host := cfg.Domain
 	if cfg.HTTPSPort != 0 && cfg.HTTPSPort != 443 {
 		host = net.JoinHostPort(cfg.Domain, strconv.Itoa(cfg.HTTPSPort))
 	}
 	redirect := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Compose through url.URL rather than string concatenation: the request
-		// URI becomes Path/RawQuery on a URL whose Scheme and Host are fixed
-		// here, so a crafted path can never move the redirect to another host.
+		// Compose through url.URL, not concatenation: the request URI becomes
+		// Path/RawQuery on a URL whose Scheme and Host are fixed here, so a
+		// crafted path can never move the redirect to another host.
 		target := (&url.URL{
 			Scheme:   "https",
 			Host:     host,
@@ -331,10 +325,10 @@ func loadACME(cfg config.TLSConfig) (*TLSResult, error) {
 	}, nil
 }
 
-// trackServed records each certificate next hands to a member's handshake.
-// A TLS-ALPN-01 validation handshake gets a throwaway challenge certificate
-// instead, so it is skipped. So is autocert's RSA leaf: it goes only to
-// clients that cannot use ECDSA, while members are served the ECDSA leaf.
+// trackServed records each certificate next hands to a member's handshake. A
+// TLS-ALPN-01 validation handshake gets a throwaway challenge certificate, so
+// it is skipped; so is autocert's RSA leaf, which goes only to clients that
+// cannot use ECDSA.
 func trackServed(
 	next func(*tls.ClientHelloInfo) (*tls.Certificate, error),
 	served *CertTracker,
@@ -350,36 +344,32 @@ func trackServed(
 	}
 }
 
-// certFailureLogInterval bounds how often an issuance failure is logged. Long
+// certFailureLogInterval bounds how often an issuance failure is logged: long
 // enough that a client retrying in a loop cannot flood the log, short enough
-// that an operator watching the log while they fix their port forwarding sees
-// the state change.
+// that an operator fixing their port forwarding sees the state change.
 const certFailureLogInterval = 10 * time.Minute
 
-// logCertificateFailures reports certificate-issuance failures, at most once
-// per certFailureLogInterval.
+// logCertificateFailures reports certificate-issuance failures, at most once per
+// certFailureLogInterval.
 //
-// Without it these failures are invisible. internal/app sets the HTTP server's
-// ErrorLog to io.Discard — deliberately, to suppress per-handshake TLS noise,
-// and that comment is right — which also discarded the one error an operator
-// needs: a server whose port 80 cannot be reached from the internet logs
-// "server starting", reports healthy, and then fails every TLS handshake in
-// silence. B6-6 exists to stop a reachability limit reading as application
-// success, and this is the clearest instance of it in the tree.
+// Without it these failures are invisible: internal/app sets the HTTP server's
+// ErrorLog to io.Discard to suppress per-handshake TLS noise, which also
+// discarded the one error an operator needs. A server whose port 80 is
+// unreachable from the internet would log "server starting", report healthy,
+// and fail every TLS handshake in silence, the reachability-read-as-success
+// case the connectivity check exists to stop.
 //
-// It observes and returns the underlying error unchanged, so autocert's own
-// retry and caching are untouched.
+// It observes and returns the underlying error unchanged, so autocert's retry
+// and caching are untouched.
 //
-// Two things it deliberately does not do, because this runs on an
-// unauthenticated path — every ClientHello reaches it, before any handshake
-// completes:
+// It deliberately does two things on this unauthenticated path (every
+// ClientHello reaches it before any handshake completes):
 //
 //   - It keeps no per-name state. Deduplicating by hello.ServerName would let
 //     an unauthenticated peer grow a map without bound by varying SNI, so the
-//     throttle is a single timestamp instead.
-//   - It never logs hello.ServerName. That field is whatever the peer sent;
-//     the operator already knows which domain they configured, so the log
-//     carries that instead and no attacker-supplied bytes reach it.
+//     throttle is a single timestamp.
+//   - It never logs hello.ServerName, which is whatever the peer sent; the log
+//     carries the configured domain, so no attacker-supplied bytes reach it.
 func logCertificateFailures(
 	next func(*tls.ClientHelloInfo) (*tls.Certificate, error),
 	domain string,

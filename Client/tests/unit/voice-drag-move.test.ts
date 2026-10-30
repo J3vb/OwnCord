@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: vi.fn(() => false),
@@ -25,7 +25,8 @@ import type { ReadyChannel } from "../../src/lib/types";
 const SELF_ID = 99;
 const TARGET_ID = 80;
 
-function channels(canModerate: boolean, canMove?: boolean): ReadyChannel[] {
+/** canMove defaults to canModerate: a drag needs can_move_voice. */
+function channels(canModerate: boolean, canMove: boolean = canModerate): ReadyChannel[] {
   return [
     { id: 3, name: "lobby", type: "voice", category: "Voice", position: 0 },
     { id: 4, name: "gaming", type: "voice", category: "Voice", position: 1 },
@@ -35,7 +36,7 @@ function channels(canModerate: boolean, canMove?: boolean): ReadyChannel[] {
       ({
         ...ch,
         can_moderate_voice: canModerate,
-        ...(canMove === undefined ? {} : { can_move_voice: canMove }),
+        can_move_voice: canMove,
       }) as ReadyChannel,
   );
 }
@@ -73,7 +74,7 @@ function mouse(target: EventTarget, type: string, x: number, y: number, buttons 
   );
 }
 
-describe("drag a voice user onto another channel (WP 1D-8)", () => {
+describe("drag a voice user onto another channel", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   let onMove: ReturnType<typeof vi.fn<(userId: number, toChannelId: number) => void>>;
@@ -146,7 +147,15 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
     document.querySelectorAll(".voice-user-drag-ghost").forEach((el) => el.remove());
   });
 
-  it("does not make rows draggable without can_moderate_voice", () => {
+  it("does not make rows draggable with only can_moderate_voice", () => {
+    mount(true, [], false);
+    expect(row(TARGET_ID).classList.contains("voice-user-draggable")).toBe(false);
+    dragTargetTo(50, 420);
+    expect(onMove).not.toHaveBeenCalled();
+    expect(document.querySelector(".voice-user-drag-ghost")).toBeNull();
+  });
+
+  it("does not make rows draggable without either verdict", () => {
     mount(false);
     expect(row(TARGET_ID).classList.contains("voice-user-draggable")).toBe(false);
     dragTargetTo(50, 420);
@@ -154,7 +163,7 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
     expect(document.querySelector(".voice-user-drag-ghost")).toBeNull();
   });
 
-  it("makes rows draggable and sends the move with only can_move_voice (WP 8.4b)", () => {
+  it("makes rows draggable and sends the move with only can_move_voice", () => {
     mount(false, [], true);
     expect(row(TARGET_ID).classList.contains("voice-user-draggable")).toBe(true);
     dragTargetTo(50, 420);

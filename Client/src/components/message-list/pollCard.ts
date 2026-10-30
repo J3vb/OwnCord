@@ -1,5 +1,5 @@
 /**
- * The poll card (WP 6.9b): a poll message's question, answers and footer,
+ * The poll card: a poll message's question, answers and footer,
  * drawn in place of its text. Open and not yet voted it is a form (radios for a
  * single-choice poll, checkboxes for a multiple-choice one) with Vote and Show
  * results; after a vote, or once the poll is over, every answer shows its
@@ -26,7 +26,7 @@
 import { createElement, setText, clearChildren, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createConfirmModal } from "../../features/dialogs/confirmModal";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { PollAnswer, PollView } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -41,8 +41,8 @@ import {
   timeLeft,
   winningAnswers,
 } from "../../features/messaging/pollModel";
-import { buildCustomEmojiNode } from "./custom-emoji";
-import { connectionLockReason } from "./message-actions";
+import { buildCustomEmojiNode } from "./customEmoji";
+import { connectionLockReason } from "./messageActions";
 import { channelCanReact, reactionLockReason } from "./reactions";
 import { WsErrorCode } from "@lib/protocolTypes";
 

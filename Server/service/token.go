@@ -13,21 +13,16 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ErrNoOwnerAccount is Bind's refusal when no username was given and the
-// server has no owner yet — the bootstrap case, distinct from "that username
-// does not exist", because the operator's next step is different: create the
-// owner account, not check the spelling.
+// ErrNoOwnerAccount is Bind's refusal when no username was given and no owner
+// exists yet (bootstrap); distinct from "that username does not exist" because the
+// operator's next step differs: create the owner, not check the spelling.
 var ErrNoOwnerAccount = errors.New("no owner account exists yet")
 
 // TokenService owns API tokens: minting, listing and revoking the long-lived
-// bearer credentials that live outside the session table.
-//
-// Two callers used to implement this twice — the admin panel's HTTP routes and
-// `server token …` (the bootstrap CLI, which must work with no credential at
-// all). Duplicated, the two drifted: only the CLI could revoke by label, and
-// the two attributed their audit rows differently. Both differences are real
-// and are preserved here as explicit parts of the contract rather than as
-// accidents of which copy a change happened to land in.
+// bearer credentials outside the session table. The admin panel's HTTP routes and
+// `server token ...` (the bootstrap CLI, which works with no credential) share it.
+// Their real differences (only the CLI revokes by label; audit rows are
+// attributed differently) are explicit parts of the contract.
 type TokenService struct {
 	st Store
 }
@@ -37,21 +32,16 @@ func NewTokenService(st Store) *TokenService {
 	return &TokenService{st: st}
 }
 
-// maxTokenLifetime is the ceiling on a mint's validity: ten years, far past
-// any legitimate use. It is a policy bound, not an overflow guard — a caller
-// that converts an untrusted number into a Duration has to bound the number
-// first, because `time.Duration(n) * time.Hour` overflows int64 nanoseconds
-// into a PAST instant before this ever sees it, minting a token born expired.
-// The admin route does exactly that on its int; the CLI is bounded already by
-// time.ParseDuration's own ~292-year range.
+// maxTokenLifetime is the mint's validity ceiling: ten years, a policy bound, not
+// an overflow guard. A caller converting an untrusted number to a Duration must
+// bound the number first: `time.Duration(n) * time.Hour` overflows int64 into a
+// PAST instant, minting a token born expired. The admin route does that on its
+// int; the CLI is bounded by time.ParseDuration's range.
 const maxTokenLifetime = 10 * 365 * 24 * time.Hour
 
-// Bind resolves the user a new token will act as. An empty username means the
-// owner account, which is the bootstrap default both callers share.
-//
-// A missing user is ErrNotFound; a missing owner is ErrNoOwnerAccount. They are
-// separate because the operator's remedy differs, and the CLI has always said
-// so — keeping one sentinel would have flattened its two messages into one.
+// Bind resolves the user a new token will act as; an empty username means the
+// owner (the bootstrap default). A missing user is ErrNotFound and a missing owner
+// ErrNoOwnerAccount, separate because the operator's remedy differs.
 func (s *TokenService) Bind(ctx context.Context, username string) (*db.User, error) {
 	var (
 		user *db.User
@@ -74,17 +64,14 @@ func (s *TokenService) Bind(ctx context.Context, username string) (*db.User, err
 	return user, nil
 }
 
-// ActorSelf attributes a mint's audit row to the token's own bound user
-// instead of to an operator. `server token create` is the bootstrap path — it
-// runs with no credential at all, so there is no operator identity to record,
-// and the account the token will act as is the most informative thing
-// available. It is a named value rather than a bare 0 because 0 is a real
-// actor id in the audit table's vocabulary ("the system"), and a mint is not
-// a system action.
+// ActorSelf attributes a mint's audit row to the token's bound user.
+// `server token create` runs with no credential, so there is no operator to
+// record and the bound account is the most informative actor. A named value, not
+// 0, which is the audit vocabulary's "the system"; a mint is not a system action.
 const ActorSelf int64 = -1
 
-// MintedToken is what Create hands back. Raw is shown exactly once and is not
-// recoverable afterwards — nothing stores it, only its hash.
+// MintedToken is what Create returns. Raw is shown once and unrecoverable: only
+// its hash is stored.
 type MintedToken struct {
 	ID    int64
 	Raw   string
@@ -98,11 +85,9 @@ func validateTokenInput(label string, lifetime time.Duration) (string, error) {
 	if label == "" {
 		return "", fmt.Errorf("label is required%.0w", ErrBadRequest)
 	}
-	// A negative lifetime is refused rather than folded into "never": the
-	// caller asked for a bounded credential (a computed window that went
-	// negative, a typo'd "-1h") and would otherwise get a permanent one with
-	// a success message (OC-0340). The admin route already refused this at
-	// its edge; the rule now lives here for both callers.
+	// A negative lifetime is refused rather than folded into "never": the caller
+	// asked for a bounded credential (a computed window gone negative, a typo'd
+	// "-1h") and would get a permanent one with a success message.
 	if lifetime < 0 {
 		return "", fmt.Errorf("token lifetime must not be negative (0 means never expires)%.0w", ErrBadRequest)
 	}
@@ -114,18 +99,12 @@ func validateTokenInput(label string, lifetime time.Duration) (string, error) {
 	return label, nil
 }
 
-// Create mints a token bound to the user Bind resolved, and writes the audit
-// row attributed to actorID.
-//
-// actorID is who the audit row names; pass ActorSelf to attribute it to the
-// bound user, which is what a caller with no authenticated operator does.
-//
-// lifetime <= 0 means the token never expires, which is both callers' default;
-// anything longer than maxTokenLifetime is refused rather than silently
-// clamped, because a caller asking for a century has a bug worth surfacing.
-// A blank label is refused here rather than at each caller: the label is how a
-// token is identified in `list` and in revoke-by-label, so an unlabelled token
-// is one nobody can find again.
+// Create mints a token bound to the user Bind resolved and audits it to actorID;
+// pass ActorSelf to attribute it to the bound user (no authenticated operator).
+// lifetime <= 0 never expires; beyond maxTokenLifetime is refused, not clamped,
+// since a century is a bug worth surfacing. A blank label is refused here: the
+// label identifies a token in `list` and revoke-by-label, so an unlabelled one
+// cannot be found again.
 func (s *TokenService) Create(ctx context.Context, actorID int64, username, label string, lifetime time.Duration) (*MintedToken, error) {
 	label, err := validateTokenInput(label, lifetime)
 	if err != nil {
@@ -139,7 +118,7 @@ func (s *TokenService) Create(ctx context.Context, actorID int64, username, labe
 	return s.mint(ctx, actorID, user, label, lifetime)
 }
 
-// mint creates the token for an already-resolved user. label and lifetime are
+// mint creates the token for an already-resolved user; label and lifetime are
 // validated by the caller.
 func (s *TokenService) mint(ctx context.Context, actorID int64, user *db.User, label string, lifetime time.Duration) (*MintedToken, error) {
 	if actorID == ActorSelf {
@@ -166,8 +145,7 @@ func (s *TokenService) mint(ctx context.Context, actorID int64, user *db.User, l
 	return &MintedToken{ID: id, Raw: raw, Label: label, User: user}, nil
 }
 
-// List returns every API token's metadata. It never returns a raw token —
-// none is stored to return.
+// List returns every API token's metadata, never a raw token (none is stored).
 func (s *TokenService) List(ctx context.Context) ([]db.APITokenListItem, error) {
 	tokens, err := s.st.ListAPITokens(ctx)
 	if err != nil {
@@ -176,11 +154,10 @@ func (s *TokenService) List(ctx context.Context) ([]db.APITokenListItem, error) 
 	return tokens, nil
 }
 
-// CreateOwn is Create for a MANAGE_TOKENS holder who is not the owner (WP
-// 8.4d): the token is always bound to the actor. An empty username means the
-// actor, not the owner account as it does for Create; the actor's own name
-// (any case) is accepted; any other username is ErrForbidden and mints
-// nothing, so the refusal does not say whether that account exists.
+// CreateOwn is Create for a MANAGE_TOKENS holder who is not the owner: the token
+// is bound to the actor, an empty username meaning the actor (not the owner as
+// for Create). The actor's own name (any case) is accepted; any other username is
+// ErrForbidden and mints nothing, without saying whether that account exists.
 func (s *TokenService) CreateOwn(ctx context.Context, actor *db.User, username, label string, lifetime time.Duration) (*MintedToken, error) {
 	if actor == nil {
 		return nil, fmt.Errorf("%w: no actor", ErrForbidden)
@@ -195,7 +172,7 @@ func (s *TokenService) CreateOwn(ctx context.Context, actor *db.User, username, 
 	return s.mint(ctx, actor.ID, actor, label, lifetime)
 }
 
-// ListOwn is List restricted to the tokens bound to userID (WP 8.4d).
+// ListOwn is List restricted to the tokens bound to userID.
 func (s *TokenService) ListOwn(ctx context.Context, userID int64) ([]db.APITokenListItem, error) {
 	all, err := s.List(ctx)
 	if err != nil {
@@ -210,9 +187,8 @@ func (s *TokenService) ListOwn(ctx context.Context, userID int64) ([]db.APIToken
 	return own, nil
 }
 
-// RevokeOwn is Revoke restricted to the tokens bound to actorID (WP 8.4d). A
-// token that belongs to someone else is ErrNotFound, the same answer as an id
-// that does not exist, so a holder cannot probe other accounts' token ids.
+// RevokeOwn is Revoke restricted to the actor's tokens. Someone else's token is
+// ErrNotFound, same as a missing id, so a holder cannot probe token ids.
 func (s *TokenService) RevokeOwn(ctx context.Context, actorID, id int64) error {
 	own, err := s.ListOwn(ctx, actorID)
 	if err != nil {
@@ -224,8 +200,7 @@ func (s *TokenService) RevokeOwn(ctx context.Context, actorID, id int64) error {
 	return s.Revoke(ctx, actorID, id)
 }
 
-// ListFor lists the tokens the actor may see: every token for the owner, only
-// the actor's own otherwise (WP 8.4d).
+// ListFor lists the tokens the actor may see: all for the owner, else their own.
 func (s *TokenService) ListFor(ctx context.Context, actorID int64, isOwner bool) ([]db.APITokenListItem, error) {
 	if isOwner {
 		return s.List(ctx)
@@ -233,8 +208,8 @@ func (s *TokenService) ListFor(ctx context.Context, actorID int64, isOwner bool)
 	return s.ListOwn(ctx, actorID)
 }
 
-// CreateFor mints a token on behalf of the actor: bound to whoever the owner
-// names (Create), but only to the actor for anyone else (CreateOwn).
+// CreateFor mints on behalf of the actor: bound to whoever the owner names
+// (Create), otherwise only to the actor (CreateOwn).
 func (s *TokenService) CreateFor(ctx context.Context, actor *db.User, isOwner bool, username, label string, lifetime time.Duration) (*MintedToken, error) {
 	if isOwner {
 		if actor == nil {
@@ -245,8 +220,8 @@ func (s *TokenService) CreateFor(ctx context.Context, actor *db.User, isOwner bo
 	return s.CreateOwn(ctx, actor, username, label, lifetime)
 }
 
-// RevokeFor revokes a token on behalf of the actor: any token for the owner,
-// only the actor's own otherwise (a token that is not theirs is ErrNotFound).
+// RevokeFor revokes any token for the owner, else only the actor's own
+// (otherwise ErrNotFound).
 func (s *TokenService) RevokeFor(ctx context.Context, actorID, id int64, isOwner bool) error {
 	if isOwner {
 		return s.Revoke(ctx, actorID, id)
@@ -254,9 +229,8 @@ func (s *TokenService) RevokeFor(ctx context.Context, actorID, id int64, isOwner
 	return s.RevokeOwn(ctx, actorID, id)
 }
 
-// Revoke revokes one token by id, reporting ErrNotFound when no ACTIVE token
-// carries that id — an already-revoked token is not found again, so a repeated
-// revoke is not reported as a second success.
+// Revoke revokes one token by id; ErrNotFound when no ACTIVE token has that id, so
+// a repeated revoke is not a second success.
 func (s *TokenService) Revoke(ctx context.Context, actorID, id int64) error {
 	affected, err := s.st.RevokeAPIToken(ctx, id)
 	if err != nil {
@@ -270,14 +244,11 @@ func (s *TokenService) Revoke(ctx context.Context, actorID, id int64) error {
 	return nil
 }
 
-// RevokeByLabel revokes every active token carrying a label, reporting how
-// many went. It is the CLI's form — an operator recovering a compromised
-// credential knows the label they typed, not the id the database assigned —
-// and revoking all matches is deliberate: labels are not unique, and leaving
-// a duplicate active would be the one that matters.
-//
-// The audit row carries target id 0 because the action names a label, not a
-// row; the label is in the detail.
+// RevokeByLabel revokes every active token carrying a label and reports how many.
+// It is the CLI's form: an operator recovering a compromised credential knows the
+// label, not the id. Revoking all matches is deliberate since labels are not
+// unique and a surviving duplicate would be the one that matters. The audit row's
+// target id is 0 because the action names a label, not a row.
 func (s *TokenService) RevokeByLabel(ctx context.Context, actorID int64, label string) (int64, error) {
 	affected, err := s.st.RevokeAPITokenByLabel(ctx, label)
 	if err != nil {

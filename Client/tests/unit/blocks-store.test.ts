@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { listSessionResets } from "../../src/lib/sessionRegistry";
+import { listSessionResets } from "../../src/lib/net/sessionRegistry";
 import {
   blocksStore,
   setBlockedByMe,
@@ -87,7 +87,7 @@ describe("blocksStore", () => {
   // race. The GET is issued before the user's own action but its reply can
   // land after — a stale full-set reply must not clobber a fresher per-user
   // delta.
-  describe("setBlockedByMe staleness guard (OC-0218)", () => {
+  describe("setBlockedByMe staleness guard", () => {
     it("applies when no revision is given (direct/legacy caller)", () => {
       setBlockedByMe([5]);
       expect(dmComposerBlockReason(blocksStore.getState(), 5)).toBe(BLOCKED_BY_ME_REASON);

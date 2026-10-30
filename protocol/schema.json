@@ -524,6 +524,18 @@
       { "wire": "RATE_LIMITED", "go": "ErrCodeRateLimited", "ts": "RATE_LIMITED" },
       { "wire": "ALREADY_JOINED", "go": "ErrCodeAlreadyJoined", "ts": "ALREADY_JOINED" },
       { "wire": "CHANNEL_FULL", "go": "ErrCodeChannelFull", "ts": "CHANNEL_FULL" },
+      {
+        "wire": "PASSWORD_REQUIRED",
+        "go": "ErrCodePasswordRequired",
+        "ts": "PASSWORD_REQUIRED",
+        "note": "Refines FORBIDDEN: a voice_join into a password-protected channel the caller has not unlocked, sent without a password. Nothing was joined."
+      },
+      {
+        "wire": "WRONG_PASSWORD",
+        "go": "ErrCodeWrongPassword",
+        "ts": "WRONG_PASSWORD",
+        "note": "Refines FORBIDDEN: a voice_join into a password-protected channel with a password that does not match (or that changed while the join ran). Nothing was joined."
+      },
       { "wire": "VOICE_ERROR", "go": "ErrCodeVoiceError", "ts": "VOICE_ERROR" },
       { "wire": "VIDEO_LIMIT", "go": "ErrCodeVideoLimit", "ts": "VIDEO_LIMIT" },
       { "wire": "BANNED", "go": "ErrCodeBanned", "ts": "BANNED" },

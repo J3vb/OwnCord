@@ -8,7 +8,7 @@ import {
   toggleCategory,
   uiStore,
 } from "@stores/ui.store";
-import { listSessionResets, runSessionResets } from "@lib/sessionRegistry";
+import { listSessionResets, runSessionResets } from "@lib/net/sessionRegistry";
 
 const KEY = "owncord:collapsed:srv:443";
 

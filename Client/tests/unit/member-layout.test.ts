@@ -6,7 +6,7 @@ import {
   clampMemberWidth,
   loadMemberLayout,
 } from "../../src/features/members/memberLayout";
-import { STORAGE_PREFIX, savePref } from "../../src/lib/preferences";
+import { STORAGE_PREFIX, savePref } from "../../src/lib/prefs/preferences";
 
 describe("memberLayout", () => {
   beforeEach(() => {

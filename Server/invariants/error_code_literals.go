@@ -23,7 +23,7 @@ var errorCodeSources = []string{"httperr/codes.go", "ws/message_types.go"}
 // errorCodeScope is where error replies are built.
 var errorCodeScope = []string{"api", "admin", "plugin", "httperr", "ws"}
 
-// errorCodeLiterals enforces MX-16: an error code is spelt as its generated
+// errorCodeLiterals enforces the error-code rule: an error code is spelt as its generated
 // constant (httperr.CodeBadRequest, ws.ErrCodeForbidden), never as a string
 // literal. A literal still compiles where an httperr.Code goes, so only this
 // rule stops a misspelt or unlisted code from reaching a client whose branch

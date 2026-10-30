@@ -1,6 +1,6 @@
 /** The voice move notes reset with the derived caches, after the domain stores. */
 import { describe, expect, it } from "vitest";
-import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
+import { listSessionResets, registerSessionReset } from "../../src/lib/net/sessionRegistry";
 import "../../src/features/voice/moveHint";
 
 describe("move hint session reset", () => {

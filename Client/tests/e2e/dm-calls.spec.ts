@@ -11,7 +11,7 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator } from "./support/accessibility";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
@@ -553,7 +553,7 @@ test.describe("DM calls — call panel", () => {
     );
   });
 
-  test("[F-11] your own avatar in the call shows your own safety number", async ({ page }) => {
+  test("your own avatar in the call shows your own safety number", async ({ page }) => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();

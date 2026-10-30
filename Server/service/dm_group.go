@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// Group DM membership (WP 3B-10b): add, remove and owner transfer, plus the
+// Group DM membership: add, remove and owner transfer, plus the
 // system rows those and the leave and rename paths write.
 
 // GroupDMStore is the data access group DM membership needs beyond the DM reads
@@ -73,10 +73,9 @@ type GroupChangeResult struct {
 	Added []int64
 }
 
-// dedupeGroupRecipients drops repeats and the caller and rejects a
-// non-positive id. A payload naming the same person twice is a client bug, not
-// a reason to refuse, but it must not inflate the participant count or
-// double-insert.
+// dedupeGroupRecipients drops repeats and the caller and rejects a non-positive
+// id. A payload naming someone twice is a client bug, not a refusal, but it must
+// not inflate the participant count or double-insert.
 func dedupeGroupRecipients(ids []int64, callerID int64) ([]int64, error) {
 	seen := map[int64]bool{callerID: true}
 	unique := make([]int64, 0, len(ids))
@@ -93,26 +92,23 @@ func dedupeGroupRecipients(ids []int64, callerID int64) ([]int64, error) {
 	return unique, nil
 }
 
-// groupReachabilityReader is the one read the group reachability check adds to
-// Store. *db.DB satisfies it; it is deliberately not part of Store (the Store
-// method ratchet), and a Store that lacks it fails closed.
+// groupReachabilityReader is the one extra read the reachability check needs.
+// *db.DB satisfies it; it is kept out of Store (the Store method ratchet), and a
+// Store lacking it fails closed.
 type groupReachabilityReader interface {
 	GroupDMTargetsRefuse(ctx context.Context, actorID int64, targets []int64) (bool, error)
 }
 
-// validateGroupRecipients is the check create and add share. Every target must
-// be dmReachableUser (a missing, banned or non-active account is "not
-// found"), and no pair involving a target may be blocked in either direction,
-// against the other targets or against the people already in the room (others).
-// Each target must also be reachable by actorID: it has not turned off direct
-// messages from members without trusting the actor, and the actor holds no
-// message request to it that it has not accepted. Only the actor's trust
-// counts, not that of the people already in the room, and staff are checked
-// like anyone else. Every cause answers with the one refusal, which never
-// names the target.
-// It returns the targets' users in order. A pair of people already in the room
-// is not re-checked: they were checked when they came together, and refusing a
-// newcomer because two others fell out later would make the add unusable.
+// validateGroupRecipients is the check create and add share. Every target must be
+// dmReachableUser (missing, banned or non-active is "not found"); no pair
+// involving a target may be blocked either way, against the other targets or the
+// people already in the room (others); and each target must be reachable by
+// actorID (not DMs-off without trusting the actor, no unaccepted message request
+// from the actor). Only the actor's trust counts, and staff are checked like
+// anyone else. Every cause gives the one refusal, which never names the target.
+// Pairs already in the room are not re-checked: refusing a newcomer because two
+// others fell out later would make the add unusable. Returns the targets' users in
+// order.
 func (s *DMService) validateGroupRecipients(ctx context.Context, actorID int64, targets, others []int64) ([]*db.User, error) {
 	users := make([]*db.User, 0, len(targets))
 	for _, rid := range targets {
@@ -244,9 +240,8 @@ func mapGroupDBError(what string, err error) error {
 	}
 }
 
-// requireGroupActor is the gate every group mutation starts with: the caller is
-// a member (anyone else learns nothing: not found), is not timed out, and the
-// channel is a group (a 1:1 answers 400).
+// requireGroupActor is the gate every group mutation starts with: a member (anyone
+// else gets not found), not timed out, in a group channel (a 1:1 answers 400).
 func (s *DMService) requireGroupActor(ctx context.Context, userID, channelID int64) error {
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
@@ -270,12 +265,11 @@ func (s *DMService) requireGroupActor(ctx context.Context, userID, channelID int
 }
 
 // AddGroupMembers adds users to a group DM on behalf of any member. It takes
-// 1..MaxGroupDMAddPerCall ids; users already in the group are skipped and, if
-// that leaves nobody, the call is a 400. The group may not pass
-// db.MaxGroupDMParticipants (ErrGroupDMFull), counted inside the transaction.
-// A target that has turned off direct messages from members and does not trust
-// the caller, or that the caller holds an unaccepted message request to, is
-// refused (403) and nobody in the call is added.
+// 1..MaxGroupDMAddPerCall ids; users already in the group are skipped, and if that
+// leaves nobody the call is a 400. The group may not pass
+// db.MaxGroupDMParticipants (ErrGroupDMFull), counted inside the transaction. A
+// target that blocks DMs from non-trusted members or holds an unaccepted request
+// from the caller refuses the whole call (403).
 func (s *DMService) AddGroupMembers(ctx context.Context, actorID, channelID int64, userIDs []int64) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.AddGroupMembers",
 		telemetry.Int64("user_id", actorID),
@@ -333,10 +327,9 @@ func (s *DMService) AddGroupMembers(ctx context.Context, actorID, channelID int6
 	return &GroupChangeResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs, Added: added}, nil
 }
 
-// RemoveGroupMember removes targetID from a group DM on behalf of its owner.
-// Removing yourself is a 400 (leave instead); a caller who is not the owner is
-// a 403; a caller or target who is not a member is a 404. The returned rows go
-// to the members who remain (Audience), not to the removed user.
+// RemoveGroupMember removes targetID on behalf of the owner. Removing yourself is
+// a 400, a non-owner caller a 403, a non-member caller or target a 404. The rows
+// go to the remaining members (Audience), not the removed user.
 func (s *DMService) RemoveGroupMember(ctx context.Context, ownerID, channelID, targetID int64) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.RemoveGroupMember",
 		telemetry.Int64("user_id", ownerID),
@@ -365,9 +358,8 @@ func (s *DMService) RemoveGroupMember(ctx context.Context, ownerID, channelID, t
 	return &GroupChangeResult{Rows: s.groupRows(ctx, change.Rows), Audience: change.MemberIDs}, nil
 }
 
-// TransferGroupOwner makes targetID the owner of a group DM on behalf of the
-// current owner. It writes no row; the members get a refreshed dm_channel_open
-// carrying the new owner_id, and the returned Audience is who gets it.
+// TransferGroupOwner makes targetID the owner on behalf of the current owner. It
+// writes no row; Audience gets a refreshed dm_channel_open with the new owner_id.
 func (s *DMService) TransferGroupOwner(ctx context.Context, ownerID, channelID, targetID int64) (*GroupChangeResult, error) {
 	ctx, done := traceCall(ctx, "service/dm", "DMService.TransferGroupOwner",
 		telemetry.Int64("user_id", ownerID),

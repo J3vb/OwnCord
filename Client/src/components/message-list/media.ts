@@ -7,8 +7,8 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
-import { observeMedia } from "@lib/media-visibility";
-import { loadPref, onPrefChange } from "@lib/preferences";
+import { observeMedia } from "@lib/prefs/mediaVisibility";
+import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import {
   bindImageMenu,
   clearExternalImageCache,
@@ -40,8 +40,8 @@ import {
   SPOILER_REGEX,
   stripUrlTrailingPunctuation,
   URL_REGEX,
-} from "./content-parser";
-import { registerSessionReset } from "@lib/sessionRegistry";
+} from "./contentParser";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import {
   blobImageSize,
   clearImageSizes,
@@ -50,7 +50,7 @@ import {
   imageSizeGeneration,
   setImageBox,
   type ImageBox,
-} from "./image-sizes";
+} from "./imageSizes";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
 import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
 
@@ -201,7 +201,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
 
   // Header: channel name + video title
   const header = createElement("div", { class: "msg-embed-yt-header" });
-  // i18n-exempt: provider name, attribution not translated (B9-9 rule)
+  // i18n-exempt: provider name, attribution not translated
   const channelLabel = createElement("div", { class: "msg-embed-host" }, "YouTube");
   const titleLink = createElement("a", {
     class: "msg-embed-yt-title",
@@ -253,7 +253,7 @@ export function renderYouTubeEmbed(videoId: string, originalUrl: string): HTMLDi
     if (src !== null) thumb.src = src;
   });
 
-  // Playback is a separate deliberate act (B9-8): the frame talks to YouTube
+  // Playback is a separate deliberate act: the frame talks to YouTube
   // itself, outside the broker's byte-fetch boundary, and the note says so.
   const note = createElement(
     "div",
@@ -451,7 +451,7 @@ export function renderInlineImage(url: string): HTMLDivElement {
     );
   }
 
-  // The image is a keyboard-operable control, not pointer-only (B9-9): focus
+  // The image is a keyboard-operable control, not pointer-only: focus
   // it and Enter/Space open the same lightbox a click does.
   img.tabIndex = 0;
   img.setAttribute("role", "button");
@@ -539,7 +539,7 @@ export function isLoneImageEmbed(content: string): boolean {
 }
 
 /** One URL's embed (YouTube player, inline image, link card), or null when
- *  it gets none. Concealed until the viewer consented to it (B9-8). */
+ *  it gets none. Concealed until the viewer consented to it. */
 function renderUrlEmbed(url: string): HTMLElement | null {
   const ytId = extractYouTubeId(url);
   const isSafe = isSafeUrl(url);

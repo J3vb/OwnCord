@@ -413,7 +413,7 @@ describe("messages store", () => {
       expect(msgs[0]!.status).toBe("sent");
     });
 
-    it("dedupes an optimistic row against its own real message when the server sanitized the content (OC-0256)", () => {
+    it("dedupes an optimistic row against its own real message when the server sanitized the content", () => {
       // The server runs every send through sanitizeToFixpoint before storing
       // and broadcasting it, so the echo's content need not be byte-identical
       // to what the client typed — a double-escaped entity unescapes down to
@@ -520,7 +520,7 @@ describe("messages store", () => {
       expect(hasMoreMessages(1)).toBe(false);
     });
 
-    it("clears a stale window when a purge empties the channel between mount and refetch (OC-0259)", () => {
+    it("clears a stale window when a purge empties the channel between mount and refetch", () => {
       // Channel loaded with two rows, then the user navigates away (rows are
       // kept, only the loaded flag drops) and every message in the channel is
       // purged server-side while it isn't focused, so no broadcast tells this
@@ -1700,7 +1700,7 @@ describe("messages store", () => {
       expect(msgs[0]!.status).toBe("sent");
     });
 
-    it("reconciles an OFFLINE-failed row whose echo comes back sanitized — stripped tags don't defeat the match (OC-0256)", () => {
+    it("reconciles an OFFLINE-failed row whose echo comes back sanitized — stripped tags don't defeat the match", () => {
       // sanitizeToFixpoint (Server/service/message.go) strips HTML tags
       // before the content is stored and broadcast, so the echo need not be
       // byte-identical to the raw text the user typed.
@@ -2150,7 +2150,7 @@ describe("messages store", () => {
       expect(hasMoreMessages(1)).toBe(false);
     });
 
-    it("still clears a stale window when the refetch comes back empty (OC-0259)", () => {
+    it("still clears a stale window when the refetch comes back empty", () => {
       setMessages(1, page(1, 50), true);
 
       revisit();
@@ -2159,7 +2159,7 @@ describe("messages store", () => {
       expect(getChannelMessages(1)).toEqual([]);
     });
 
-    it("keeps a live message that landed mid-fetch and does not bridge a gap with it (OC-0244)", () => {
+    it("keeps a live message that landed mid-fetch and does not bridge a gap with it", () => {
       setMessages(1, page(1, 50), true);
 
       revisit();

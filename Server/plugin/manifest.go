@@ -1,8 +1,6 @@
 // Package plugin implements the OwnCord plugin runtime.
 //
-// Phase C Step 9 — Wazero Plugin Runtime.
-//
-// The package is split into:
+// It is split into:
 //
 //   - manifest.go    : declarative plugin metadata + permission checks
 //   - registry.go    : in-memory registry + lifecycle (install/enable/load)
@@ -12,13 +10,8 @@
 //   - errors.go
 //
 // The default `go build ./...` ships a stub runtime that satisfies every call
-// site without pulling Wazero into go.mod. To compile the real runtime:
-//
-//	go get github.com/tetratelabs/wazero
-//	go build -tags wazero ./...
-//
-// This mirrors the otel / wazero build-tag approach used elsewhere in the
-// repo so the default build stays self-contained.
+// site without pulling Wazero into go.mod; the real runtime is built with
+// `go build -tags wazero ./...`, mirroring the otel build-tag approach.
 package plugin
 
 import (
@@ -30,25 +23,23 @@ import (
 	"strings"
 )
 
-// pluginNameRegexp restricts plugin names to a tight ASCII charset so the
-// name can flow safely into URL paths (/api/v1/plugins/<name>/...), filesystem
-// paths, and log lines without escaping concerns. Mirrors the npm package
-// name rules: lowercase, digits, dash and underscore, 1-64 chars, must start
-// with a letter or digit.
+// pluginNameRegexp restricts plugin names to a tight ASCII charset (lowercase,
+// digits, dash, underscore, 1-64 chars, starting with a letter or digit, like
+// npm package names) so a name can flow into URL paths
+// (/api/v1/plugins/<name>/...), filesystem paths and log lines without
+// escaping.
 var pluginNameRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-// pluginCommandRegexp restricts declared slash-command names to the same
-// lowercase charset the dispatcher normalizes to (RegisterCommand lowercases
-// and strips a leading "/"), so a declaration always compares equal to the
-// name a client can actually invoke.
+// pluginCommandRegexp restricts declared slash-command names to the lowercase
+// charset the dispatcher normalizes to (RegisterCommand lowercases and strips a
+// leading "/"), so a declaration compares equal to the name a client can invoke.
 var pluginCommandRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
 // maxManifestCommands caps how many commands one plugin may claim.
 const maxManifestCommands = 64
 
 // Manifest is the parsed plugin metadata declared in plugin.json. The on-disk
-// schema is intentionally flat so the default JSON parser handles it without
-// any extra decode dependency.
+// schema is flat so the default JSON parser handles it.
 type Manifest struct {
 	Name        string        `json:"name"`
 	Version     string        `json:"version"`
@@ -61,19 +52,17 @@ type Manifest struct {
 	UI          UISpec        `json:"ui"`
 }
 
-// CommandSpec is one slash command the plugin declares. The declaration is
-// the per-command ACL: activation only binds names listed here, so a guest
-// module cannot claim commands its manifest never advertised.
-//
-// Only Name is enforced today. docs/plans/slash-commands.md extends this
-// object with description/options/permission fields later; unknown JSON keys
-// are ignored, so manifests written against that richer schema still parse.
+// CommandSpec is one slash command the plugin declares. The declaration is the
+// per-command ACL: activation only binds names listed here, so a guest module
+// cannot claim commands its manifest never advertised. Only Name is enforced
+// today; unknown JSON keys are ignored, so manifests written against the richer
+// schema in docs/plans/slash-commands.md still parse.
 type CommandSpec struct {
 	Name string `json:"name"`
 }
 
-// Resources caps the plugin's runtime budget. Zero means "use the runtime
-// default from PluginsConfig".
+// Resources caps the plugin's runtime budget; zero means the PluginsConfig
+// default.
 type Resources struct {
 	MaxMemoryMB int `json:"max_memory_mb"`
 	CPUBudgetMs int `json:"cpu_budget_ms"`
@@ -172,11 +161,10 @@ func (m *Manifest) Validate() error {
 	return nil
 }
 
-// validateRelativePath rejects absolute paths, paths containing "..", paths
-// with NUL bytes, backslashes (Windows separators), and paths that the path
-// package's Clean would alter (which catches "./foo", "foo//bar", trailing
-// slashes, etc.). Asset and entrypoint paths must be plain forward-slash
-// relative segments under the plugin directory.
+// validateRelativePath rejects absolute paths, paths containing "..", NUL bytes
+// or backslashes (Windows separators), and paths path.Clean would alter
+// ("./foo", "foo//bar", trailing slashes). Asset and entrypoint paths must be
+// plain forward-slash relative segments under the plugin directory.
 func validateRelativePath(p string) error {
 	if p == "" {
 		return fmt.Errorf("path is empty")
@@ -203,9 +191,9 @@ func validateRelativePath(p string) error {
 	return nil
 }
 
-// validateCommands enforces the per-command ACL schema: declaring commands
-// requires the `commands` capability, names must be canonical (the form the
-// dispatcher normalizes to), and the list is bounded and duplicate-free.
+// validateCommands enforces the per-command ACL schema: declared commands need
+// the `commands` capability, names must be canonical (the dispatcher's
+// normalized form), and the list is bounded and duplicate-free.
 func (m *Manifest) validateCommands() error {
 	if len(m.Commands) == 0 {
 		return nil

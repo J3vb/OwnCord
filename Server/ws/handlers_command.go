@@ -26,7 +26,7 @@ import (
 const maxCommandArgs = 64
 
 // pluginCommandRateLimit and pluginCommandWindow cap chat_command frames per
-// user (OC-0091). Every other V2 handler is throttled; this one drove a WASM
+// user. Every other V2 handler is throttled; this one drove a WASM
 // guest invocation once per frame with no cap at all. Tighter than chat send
 // (10/s) because DispatchCommand does real work per call.
 const (
@@ -83,7 +83,7 @@ func handleChatCommandV2(ctx context.Context, cmd Command, _ ClientInfo, deps an
 			return *gate
 		}
 		msg := buildCommandBroadcast(cc.ChannelID, cc.userID, cc.Command, result.Broadcast)
-		// B5-6 (Codex P1-2): a DM's plugin broadcast must reach the same
+		// A DM's plugin broadcast must reach the same
 		// sender-aware audience chat/typing/reactions do, not the plain
 		// per-channel-topic fan-out — channel_focus subscribes any DM
 		// participant to the topic regardless of message-request trust.

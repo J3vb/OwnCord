@@ -1,14 +1,7 @@
-import base from "./stryker.config.mjs";
-// A measured target: 54 killed, 31 compile errors, zero survivors (2026-09-08).
-export default {
-  ...base,
-  mutate: ["src/lib/permissions.ts"],
-  thresholds: { high: 100, low: 95, break: 90 },
-  ignorePatterns: [
-    "tests/e2e/.bin/**",
-    "test-results/**",
-    "playwright-report/**",
-    "dist/**",
-    "reports/**",
-  ],
-};
+// @ts-check
+// Forwards to tests/mutation/stryker.ci.config.mjs. The scheduled nightly runs
+// main's copy of nightly-test-depth.yml against dev, and that copy still names
+// this path. Delete this file once main carries the workflow that names the
+// new path (the next release).
+export * from "./tests/mutation/stryker.ci.config.mjs";
+export { default } from "./tests/mutation/stryker.ci.config.mjs";

@@ -1,12 +1,12 @@
 /**
- * The Moderation Center's invalidation signals (B9-11, B9-17). mod_queue says
+ * The Moderation Center's invalidation signals. mod_queue says
  * only that a report or an appeal changed; these keep counters and no queue,
  * evidence, report or appeal data, so the open view re-reads the server and
  * nothing private outlives it.
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { MemberTimeoutEntry } from "@lib/types";
 
 /** Bumped by every report-queue frame. */
@@ -24,8 +24,8 @@ export function noteAppealChange(): void {
 }
 
 /**
- * Who is timed out right now (user id -> expiry), as the server last said
- * (WP 3C-7c). `null` means this server publishes no view (an older one), so a
+ * Who is timed out right now (user id -> expiry), as the server last said.
+ * `null` means this server publishes no view (an older one), so a
  * menu cannot tell and offers both Timeout and Remove Timeout. A moderator
  * holds every entry; anyone else only their own. Presence of an entry is the
  * answer: the server re-sends on expiry, so the clock is never compared.

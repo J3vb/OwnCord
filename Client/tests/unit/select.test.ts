@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createStore, type Store } from "@lib/store";
-import { select, eventSource } from "@lib/select";
+import { select, eventSource } from "@lib/ui/select";
 import { membersStore } from "@stores/members.store";
 import { expectConsole } from "../helpers/console";
 import { assertNoStoreReads, allStores } from "../helpers/storeReadGuard";

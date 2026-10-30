@@ -519,7 +519,7 @@ const SCALE_BURST_SEND_MS = Number(__ENV.K6_SCALE_BURST_SEND_MS || "2000");
 // The last connection is scheduled this long before steady opens, so the
 // steady window starts with the whole population connected.
 const SCALE_RAMP_SETTLE_S = 10;
-// One status flip per user per 10 minutes (C/lib/presence.ts sends
+// One status flip per user per 10 minutes (C/lib/presence/presence.ts sends
 // presence_update only on a change), and typing at most once per 3 s
 // (C/components/MessageInput.ts), as the desktop client does.
 const SCALE_PRESENCE_MS = 600000;

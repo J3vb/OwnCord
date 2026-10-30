@@ -36,7 +36,7 @@ only together with the test that reads them.
 | [platform-contracts.md](platform-contracts.md) | The desktop/browser seam: where native dependencies are isolated, and the three that have no browser equivalent                                      |
 | [server-boundaries.md](server-boundaries.md)   | B3-0 inventory: every file above the domain layer that imports `db`, with a disposition. Generated table, enforced by `db-import-boundary`           |
 | [community-services.md](community-services.md) | B5-0: the community, content and moderation services, each with abuse cases, data ownership and lifecycle                                            |
-| [b9-ui-contract.md](b9-ui-contract.md)         | B9-2: the shared UI rules every feature follows: colour tokens, focus, keyboard, announcements, motion, teardown, and the reusable Playwright checks |
+| [ui-contract.md](ui-contract.md)               | B9-2: the shared UI rules every feature follows: colour tokens, focus, keyboard, announcements, motion, teardown, and the reusable Playwright checks |
 
 ### Decisions
 

@@ -13,16 +13,12 @@ type blockedPrefix struct {
 	why    string
 }
 
-// blockedPrefixes is the whole non-global set: everything
-// Server/plugin/host_http.go's ipAllowed refused before B5-1, plus the
-// documentation, benchmarking and remaining reserved blocks it missed
-// (docs/trust-model.md, "Desktop preview destination policy (C-09)", clause 3).
-//
-// It is a denylist of the IANA special-purpose address registries rather than
-// an allowlist of global unicast, because a new global allocation must not
-// need a code change here to become reachable. Adding a range is a one-line
-// edit; TestClassifyAddr_RejectsEveryNonGlobalClass names every one of them so
-// a deletion fails loudly.
+// blockedPrefixes is the whole non-global set (docs/trust-model.md, the
+// desktop preview destination policy, clause 3). It is a denylist of the IANA
+// special-purpose address registries rather than an allowlist of global
+// unicast, because a new global allocation must not need a code change here to
+// become reachable. TestClassifyAddr_RejectsEveryNonGlobalClass names every
+// range so a deletion fails loudly.
 var blockedPrefixes = []blockedPrefix{
 	// IPv4 — RFC 6890 and the registries it points at.
 	{netip.MustParsePrefix("0.0.0.0/8"), "this-network (RFC1122)"},
@@ -64,31 +60,28 @@ var blockedPrefixes = []blockedPrefix{
 	{netip.MustParsePrefix("ff00::/8"), "multicast (RFC4291)"},
 }
 
-// nat64WellKnown is RFC 6052's well-known prefix. An address inside it is a
-// wrapper: a NAT64 translator strips the prefix and delivers the packet to the
-// IPv4 address in the low 32 bits, so that embedded address is the one the
-// policy has to judge.
+// nat64WellKnown is RFC 6052's well-known prefix. A NAT64 translator strips it
+// and delivers the packet to the IPv4 address in the low 32 bits, so that
+// embedded address is the one the policy has to judge.
 //
-// Neither blocking nor allowing the prefix outright is right. Blocking it cuts
-// an IPv6-only server — the default on IPv6-only cloud subnets, where DNS64
-// synthesises these addresses for every IPv4-only host — off from every IPv4
-// upstream it has. Allowing it hands an attacker every range this table
-// refuses: 64:ff9b::a9fe:a9fe is 169.254.169.254 and the cloud metadata
-// service with it. So it is unwrapped and the embedded address classified.
+// Blocking the prefix cuts an IPv6-only server (DNS64 synthesises these for
+// every IPv4-only host) off from every IPv4 upstream. Allowing it hands an
+// attacker every range this table refuses: 64:ff9b::a9fe:a9fe is
+// 169.254.169.254, the cloud metadata service. So it is unwrapped and the
+// embedded address classified.
 //
-// Known limit, and it is the C-09 contract's limit too: an operator-chosen
+// Known limit, shared with the trust-model contract: an operator-chosen
 // network-specific prefix (RFC 6052 §2.2) is indistinguishable from any other
-// global address, so a NAT64 deployment that uses one is invisible here.
+// global address, so a NAT64 deployment using one is invisible here.
 var nat64WellKnown = netip.MustParsePrefix("64:ff9b::/96")
 
 // ClassifyAddr reports nil when addr is a globally routable unicast address
 // this server may dial, and a wrapped ErrBlockedAddress otherwise.
 //
-// It is exported so a call site can compose it — a Policy.Classify that wraps
-// it to widen or narrow the set is the seam B7's broker and this package's own
-// tests use. Production policies in this repository leave Policy.Classify nil,
-// which selects exactly this function; TestNoProductionOverrideOfClassify
-// keeps it that way.
+// It is exported so a call site can wrap it in a Policy.Classify to widen or
+// narrow the set (the seam this package's own tests use). Production policies
+// leave Policy.Classify nil, which selects exactly this function;
+// TestNoProductionOverrideOfClassify keeps it that way.
 func ClassifyAddr(addr netip.Addr) error {
 	if !addr.IsValid() {
 		return fmt.Errorf("%w: not an IP address", ErrBlockedAddress)

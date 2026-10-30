@@ -7,9 +7,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 const member = (id: number, username: string) => ({
   id,

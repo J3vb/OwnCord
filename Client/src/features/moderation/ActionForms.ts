@@ -1,5 +1,5 @@
 /**
- * A report's moderator actions in the Moderation Center (B9-13): warn or time
+ * A report's moderator actions in the Moderation Center: warn or time
  * out the reported account with the report linked, and lift a timeout taken
  * with it.
  *
@@ -14,7 +14,7 @@
  * only renders and reports intent: Queue.ts sends the write, shows the server's
  * answer (a timeout's voice half included) and reads the report again.
  *
- * Removal, kick and ban (B9-14) each need their own permission bit (HP-5):
+ * Removal, kick and ban each need their own permission bit:
  * MANAGE_MESSAGES, KICK_MEMBERS, BAN_MEMBERS. Each is offered to the holder
  * only while their role has that bit (an unknown role has none), removal only
  * on a reported message, and each is confirmed first. The bit is read again at

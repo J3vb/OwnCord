@@ -1,8 +1,8 @@
 //go:build !wazero
 
-// Default plugin runtime: no Wazero. Plugin manifests are still discovered,
-// persisted, and surfaced through the admin API, but `.wasm` modules are not
-// executed. To enable real WASM execution build with `-tags wazero`.
+// Default plugin runtime: no Wazero. Manifests are still discovered, persisted
+// and surfaced through the admin API, but `.wasm` modules are not executed;
+// build with `-tags wazero` to enable that.
 
 package plugin
 
@@ -10,15 +10,15 @@ import (
 	"context"
 )
 
-// platformInit is a no-op in the default build — there is no Wazero runtime
-// to stand up, and NewRegistry leaves runtimePlatform nil so the lifecycle
-// methods fall through to ErrRuntimeUnavailable.
+// platformInit is a no-op in the default build: NewRegistry leaves
+// runtimePlatform nil so lifecycle methods fall through to
+// ErrRuntimeUnavailable.
 func platformInit(_ Config) (any, func(context.Context) error, error) {
 	return nil, nil, nil
 }
 
-// activateWithRuntime is a no-op in the default build. It is only called from
-// Registry.activate when runtimePlatform is non-nil, which never happens here.
+// activateWithRuntime is a no-op in the default build; Registry.activate calls
+// it only when runtimePlatform is non-nil, which never happens here.
 func (r *Registry) activateWithRuntime(_ context.Context, _ any, _ *Instance) error {
 	return ErrRuntimeUnavailable
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { bindVideoZoom, createZoomPan, type ZoomPanOptions } from "../../src/lib/zoomPan";
+import { bindVideoZoom, createZoomPan, type ZoomPanOptions } from "../../src/lib/ui/zoomPan";
 
 function view(overrides: Partial<ZoomPanOptions> = {}) {
   const apply = vi.fn();

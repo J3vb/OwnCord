@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** NSFW consent copy (B9-7): the pre-load gate and the withdraw control. */
+/** NSFW consent copy: the pre-load gate and the withdraw control. */
 export const nsfwConsentText = defineCatalog("nsfwConsent", {
   "gate.title": "#{name} is age-restricted",
   "gate.body":

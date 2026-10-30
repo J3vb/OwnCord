@@ -4,12 +4,12 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createMenuItem as buildMenuItem, openMenuShell, type OpenMenu } from "@lib/context-menu";
+import { createMenuItem as buildMenuItem, openMenuShell, type OpenMenu } from "@lib/ui/contextMenu";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 import { TIMEOUT_PRESETS } from "../features/moderation/timeoutPresets";
-import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
+import type { VoiceModMenuOptions } from "./channel-sidebar/volumeMenu";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -231,7 +231,7 @@ function appendVoiceRows(
   const reason = typeof mod === "string" ? mod : mod.disabledReason;
   const muted = typeof mod !== "string" && mod.serverMuted === true;
   const deafened = typeof mod !== "string" && mod.serverDeafened === true;
-  // A Move Members-only verdict (WP 8.4b) carries no mute, deafen or
+  // A Move Members-only verdict carries no mute, deafen or
   // disconnect handler, and the member menu offers no Move: show only the
   // rows the options can run. A string (the reason) still shows all three.
   const has = (pick: (m: VoiceModMenuOptions) => unknown): boolean =>

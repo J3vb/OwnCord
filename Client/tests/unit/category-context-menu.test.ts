@@ -1,14 +1,14 @@
 /** Category header right-click menu (N13) and text-before-voice order (N23). */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
+vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
 }));
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
-import { attachChannelContextMenu } from "../../src/components/channel-sidebar/context-menu";
+import { attachChannelContextMenu } from "../../src/components/channel-sidebar/contextMenu";
 import {
   channelsStore,
   setChannels,

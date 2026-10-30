@@ -12,7 +12,7 @@ import {
 } from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
 import { savePref, readMigratedStringPref, appendToggleRows } from "./helpers";
 import {
   SHARE_DIAGNOSTICS_KEY,
@@ -20,12 +20,13 @@ import {
   SHARE_MOTION_POLICY_KEY,
   getShareMotionPolicy,
   isShareMotionPolicy,
-} from "@lib/shareFlags";
+} from "@lib/voice/shareFlags";
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
+import { isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
-import { copyThenRelabel } from "@lib/clipboard";
+import { copyThenRelabel } from "@lib/ui/clipboard";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -95,7 +96,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
 
   // Single point of truth for both the list and the "N entries" counter above
   // it, so every render path (filter change, Clear, Refresh, live entry)
-  // keeps them in sync — see OC-0230.
+  // keeps them in sync.
   function renderLogEntries(): void {
     const entries = getLogBuffer();
     if (countEl !== null) {
@@ -157,7 +158,7 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       { signal: buildSignal },
     );
 
-    // Support bundle (B7-15c): lazily loaded so the zip writer stays off the
+    // Support bundle: lazily loaded so the zip writer stays off the
     // startup path. Everything is read and written on this machine.
     const bundleBtn = createElement(
       "button",
@@ -218,7 +219,10 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       },
       { signal: buildSignal },
     );
-    appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
+    // A page has no log folder (the browser keeps logs in memory), so the web
+    // build offers only the bundle.
+    if (__OWNCORD_WEB__) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
+    else appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
     appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
     section.appendChild(helpCard);
 
@@ -395,35 +399,38 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       ],
       buildSignal,
     );
-    const modeRow = createElement("div", { class: "setting-row" });
-    const modeInfo = createElement("div", {});
-    appendChildren(
-      modeInfo,
-      createElement("div", { class: "setting-label" }, t("logs.shareMode")),
-      createElement("div", { class: "setting-desc" }, t("logs.shareModeDesc")),
-    );
-    const modeSelect = createElement("select", {
-      class: "settings-select",
-      "aria-label": t("logs.shareMode"),
-      "data-testid": "share-motion-policy",
-    });
-    for (const policy of SHARE_MOTION_POLICIES) {
-      modeSelect.appendChild(
-        createElement("option", { value: policy }, t(`logs.shareMode.${policy}`)),
+    // The Linux native capture never applies the share test switch.
+    if (!isLinuxDesktop()) {
+      const modeRow = createElement("div", { class: "setting-row" });
+      const modeInfo = createElement("div", {});
+      appendChildren(
+        modeInfo,
+        createElement("div", { class: "setting-label" }, t("logs.shareMode")),
+        createElement("div", { class: "setting-desc" }, t("logs.shareModeDesc")),
       );
+      const modeSelect = createElement("select", {
+        class: "settings-select",
+        "aria-label": t("logs.shareMode"),
+        "data-testid": "share-motion-policy",
+      });
+      for (const policy of SHARE_MOTION_POLICIES) {
+        modeSelect.appendChild(
+          createElement("option", { value: policy }, t(`logs.shareMode.${policy}`)),
+        );
+      }
+      modeSelect.value = getShareMotionPolicy();
+      modeSelect.addEventListener(
+        "change",
+        () => {
+          if (isShareMotionPolicy(modeSelect.value)) {
+            savePref(SHARE_MOTION_POLICY_KEY, modeSelect.value);
+          }
+        },
+        { signal: buildSignal },
+      );
+      appendChildren(modeRow, modeInfo, modeSelect);
+      shareCard.appendChild(modeRow);
     }
-    modeSelect.value = getShareMotionPolicy();
-    modeSelect.addEventListener(
-      "change",
-      () => {
-        if (isShareMotionPolicy(modeSelect.value)) {
-          savePref(SHARE_MOTION_POLICY_KEY, modeSelect.value);
-        }
-      },
-      { signal: buildSignal },
-    );
-    appendChildren(modeRow, modeInfo, modeSelect);
-    shareCard.appendChild(modeRow);
     section.appendChild(shareCard);
 
     // Live update: subscribe to new log entries

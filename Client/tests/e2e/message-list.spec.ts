@@ -137,7 +137,7 @@ test.describe("Message List — Real-time", () => {
   });
 });
 
-test.describe("Message List — Fast scrolling (DP-12)", () => {
+test.describe("Message List — Fast scrolling", () => {
   test("a fast drag through a long channel ends with rows rendered", async ({ page }) => {
     const messages = Array.from({ length: 500 }, (_, i) => ({
       id: 1000 + i,

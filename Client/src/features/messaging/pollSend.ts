@@ -1,5 +1,5 @@
 /**
- * The three poll requests (WP 6.9b): `poll_create`, `poll_vote` and `poll_end`.
+ * The three poll requests: `poll_create`, `poll_vote` and `poll_end`.
  * Each sends one frame and waits for its own `ok` or an `error` carrying the
  * frame's envelope id, for the connection to drop, or for the wait to time out.
  * None writes a store: the new poll reaches the list as the `chat_message`

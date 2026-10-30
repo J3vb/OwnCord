@@ -1,6 +1,6 @@
 /**
- * GroupDmMemberPanel -- right-side panel listing the members of a group DM
- * (WP 3B-11a): you plus everyone else, a crown on the owner, Add People in the
+ * GroupDmMemberPanel -- right-side panel listing the members of a group DM:
+ * you plus everyone else, a crown on the owner, Add People in the
  * header, and, for the owner, Remove From Group / Make Group Owner on every
  * other member (right-click, the menu key, or the ⋯ button).
  *
@@ -12,14 +12,14 @@
  * profile, Escape closes the panel when focus is inside it.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
-import { dialogOpen } from "@lib/dialogOpen";
+import { dialogOpen } from "@lib/ui/dialogOpen";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { showContextMenu, openMenuOnKeyboard } from "@lib/context-menu";
+import { showContextMenu, openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import type { GroupMemberView, GroupPanelView } from "../features/direct-messages/groupMembers";

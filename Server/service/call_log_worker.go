@@ -14,12 +14,11 @@ import (
 )
 
 // StartCallLogWorker recovers calls a previous run left open, then starts the
-// worker loop. The composition root calls it once, after the hub and the event
-// persister are up and before the router listens; ctx is the worker's
-// lifecycle context. The returned func stops the loop, waits for it to exit
-// and stamps last_seen_at on every call that still has someone in it (or is
-// waiting out its end grace), so the next boot ends those calls at shutdown
-// time. A Start while a worker is running is a no-op; a Start after a stop
+// worker loop. The composition root calls it once, after the hub and event
+// persister are up and before the router listens; ctx is the worker's lifecycle
+// context. The returned func stops the loop, waits for it and stamps last_seen_at
+// on every call still occupied (or in its end grace), so the next boot ends those
+// calls at shutdown time. A Start while a worker runs is a no-op; after a stop it
 // runs a fresh worker.
 func (s *CallLogService) StartCallLogWorker(ctx context.Context) func(context.Context) {
 	s.callLogMu.Lock()
@@ -34,9 +33,9 @@ func (s *CallLogService) StartCallLogWorker(ctx context.Context) func(context.Co
 	s.done = done
 	s.callLogMu.Unlock()
 
-	// A previous loop whose stop gave up waiting may still be finishing. Wait
-	// for it, so two loops never overlap and recovery cannot end a call that
-	// loop still tends. If ctx ends first, this Start does not run.
+	// A previous loop whose stop gave up waiting may still be finishing. Wait for it
+	// so two loops never overlap and recovery cannot end a call that loop still
+	// tends. If ctx ends first, this Start does not run.
 	if prev != nil {
 		select {
 		case <-prev:

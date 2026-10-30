@@ -9,11 +9,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import * as markdown from "../../src/lib/markdown";
+import * as markdown from "../../src/lib/text/markdown";
 import {
   renderMessageContent,
   clearContentParseCache,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 
 /** Count parseBlocks calls while `fn` runs. */
 function parseCalls(fn: () => void): number {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Track } from "livekit-client";
-import { createMicProcessor, GATE_LOOKAHEAD_S } from "../../src/lib/micProcessor";
+import { createMicProcessor, GATE_LOOKAHEAD_S } from "../../src/lib/voice/micProcessor";
 import {
   FakeAudioContext,
   FakeAudioWorkletNode,

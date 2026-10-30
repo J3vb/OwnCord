@@ -1,12 +1,12 @@
 /**
- * Mark Unread, the page's half (WP 3D-5d): the socket sender, and the scan for
+ * Mark Unread, the page's half: the socket sender, and the scan for
  * the message before the one clicked. The shared state (pending request, hold,
  * pointer) lives in lib/read-state.ts, which the startup chunk needs for
  * `read_state` and the refusal; this half is only needed by the main page.
  */
 
 import { beginMarkUnread, setMarkUnreadNotice } from "@lib/read-state";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { getChannelMessages } from "@stores/messages.store";
 import { messagingText } from "../../i18n/messaging";
 

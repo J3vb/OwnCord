@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** Local report intake and the reporter's own report status (B9-10, BPR-070). */
+/** Local report intake and the reporter's own report status. */
 export const reportsText = defineCatalog("reports", {
   "dialog.titleMessage": "Report message",
   "dialog.titleUser": "Report {name}",

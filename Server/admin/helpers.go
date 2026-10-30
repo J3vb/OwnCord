@@ -17,8 +17,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 type errorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`

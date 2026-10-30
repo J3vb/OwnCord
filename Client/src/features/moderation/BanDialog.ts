@@ -1,5 +1,5 @@
 /**
- * The Ban dialog (WP 3C-5c): one place that collects a reason, a ban length and
+ * The Ban dialog: one place that collects a reason, a ban length and
  * how much message history to delete, then sends the ban.
  *
  * The request is the caller's (`submit`); this module owns what the answer
@@ -33,10 +33,10 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { errorText, TransportError, type BanMemberResponse } from "@lib/api";
 import { createElement, setOwnedTimeout, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import type { ToastType } from "@components/Toast";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";

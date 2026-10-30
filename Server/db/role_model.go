@@ -9,7 +9,7 @@ type Role struct {
 	Position    int     `json:"position"`
 	IsDefault   bool    `json:"is_default"`
 	// Hoist makes the role its own member-list group; Mentionable lets any
-	// member ping it (WP 6.3). Both ride roles[] and roles_update.
+	// member ping it. Both ride roles[] and roles_update.
 	Hoist       bool `json:"hoist"`
 	Mentionable bool `json:"mentionable"`
 }

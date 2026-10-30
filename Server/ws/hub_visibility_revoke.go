@@ -10,7 +10,7 @@ import (
 // request: a member's held channels are released as the role change returns.
 // It re-resolves the user from the database, bumps the visibility watermarks,
 // and takes none of the locks a role-refresh round holds across I/O. The role
-// and moderation services call it (through PermissionChangeNotifier, WP 5.1a)
+// and moderation services call it (through PermissionChangeNotifier)
 // for the users they name, ahead of EnqueueRoleRefresh.
 func (h *Hub) RevokeUnreadableChannels(userID int64) {
 	h.revokeUnreadableChannels(userID)
@@ -100,13 +100,10 @@ func (h *Hub) revokeConnTopicsNotIn(ctx context.Context, snap *Client, allowed m
 		if revokeUnreadableChannelsPreActRaceHook != nil {
 			revokeUnreadableChannelsPreActRaceHook(userID)
 		}
-		// Re-resolve the live client immediately before acting: the DB round
-		// trips above (and computeAllowedChannels before the loop) give a
-		// reconnect room to replace this device's *Client in h.clients. Acting
-		// on a snapshot would target the dead socket, and Unsubscribe would
-		// no-op on unsubscribeLocked's identity guard — stranding the
-		// replacement with the revoked topic (audit-2026-08-19 F-2; mirrors
-		// RefreshChannelVisibility's live re-resolve). A nil result means
+		// Re-resolve the live client immediately before acting: the DB round trips above give
+		// a reconnect room to replace this device's *Client in h.clients. Acting on a snapshot
+		// would target the dead socket, and Unsubscribe would no-op on unsubscribeLocked's
+		// identity guard, stranding the replacement with the revoked topic. A nil result means
 		// that device disconnected entirely; nothing left to revoke on it.
 		live := h.sessionClient(userID, snap.tokenHash)
 		if live == nil {

@@ -2,16 +2,16 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/a11y";
+import { isImeCommit } from "@lib/text/ime";
+import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
-import { closeOnBackdropClick } from "@lib/modalFactory";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import { createIcon } from "@lib/icons";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
-import { isChannelMuted } from "@lib/channel-mutes";
-import type { MountableComponent } from "@lib/safe-render";
+import { isChannelMuted } from "@lib/prefs/channelMutes";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 
 export interface QuickSwitcherOptions {
@@ -161,7 +161,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
       input.setAttribute("aria-activedescendant", `qs-option-${activeIndex}`);
       // The results box is a fixed max-height scroller, so the roving
       // highlight otherwise walks off the bottom while Enter still opens the
-      // hidden row. Mirrors the inline autocomplete (OC-0370).
+      // hidden row. Mirrors the inline autocomplete.
       (resultsDiv.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
         block: "nearest",
       });
@@ -216,7 +216,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
 
   function handleGlobalKeydown(e: KeyboardEvent): void {
     // Same case-insensitive, altKey-excluding match as
-    // OverlayManagers.ts's open handler (OC-0150) — otherwise this close
+    // OverlayManagers.ts's open handler — otherwise this close
     // path goes dead under CapsLock and AltGr swallows a keystroke for
     // nothing.
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "k") return;
@@ -296,7 +296,7 @@ export function createQuickSwitcher(options: QuickSwitcherOptions): MountableCom
     // Delegated row click — renderResults() rebuilds every row from scratch
     // on each keystroke, arrow key, and store refresh, so a per-row listener
     // registered against this overlay-lifetime `signal` would never be freed
-    // until the overlay closes (OC-0307). One listener on the (stable)
+    // until the overlay closes. One listener on the (stable)
     // container instead, keyed off the data-channelid each row already
     // carries.
     resultsDiv.addEventListener(

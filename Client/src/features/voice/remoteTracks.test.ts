@@ -1,12 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { Encryption_Type, VideoQuality, type Room } from "livekit-client";
 
-vi.mock("../../lib/screenShare", () => ({
+vi.mock("../../lib/voice/screenShare", () => ({
   getLocalCameraStream: vi.fn(() => "camera"),
   getLocalScreenshareStream: vi.fn(() => "screen"),
 }));
 
-import { getLocalCameraStream, getLocalScreenshareStream } from "../../lib/screenShare";
+import { getLocalCameraStream, getLocalScreenshareStream } from "../../lib/voice/screenShare";
 import { RemoteTracks } from "./remoteTracks";
 
 function roomWith(identity: string, source: string, track: unknown): Room {
@@ -243,7 +243,7 @@ describe("RemoteTracks", () => {
       expect(tracks.isWatched(7, "screenshare")).toBe(false);
     });
 
-    it("auto-plays a camera by default; a screen share stays opt-in (WP 1B-3)", () => {
+    it("auto-plays a camera by default; a screen share stays opt-in", () => {
       const tracks = new RemoteTracks(() => null);
       expect(tracks.isWatched(7, "camera")).toBe(true);
       expect(tracks.isWatched(7, "screenshare")).toBe(false);

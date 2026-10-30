@@ -1,4 +1,4 @@
-// The browser platform's pending-message store (6.13c): kept in the page's
+// The browser platform's pending-message store: kept in the page's
 // memory only, never in Web Storage. Drafts survive a reconnect or a re-login
 // in the same tab, and go with the tab.
 import type { PendingMessageOwner, PendingMessageStore } from "../contracts/pendingMessages";

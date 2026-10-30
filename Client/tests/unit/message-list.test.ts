@@ -334,7 +334,7 @@ describe("MessageList", () => {
     }
   });
 
-  it("OC-0217/OC-0286: repeated jumps do not each register a permanent row listener on the component-lifetime signal", () => {
+  it("repeated jumps do not each register a permanent row listener on the component-lifetime signal", () => {
     // As a user clicking a reply bar's jump arrow, a search hit, or a pinned
     // entry repeatedly does across a live session.
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage({ id: i + 1 }));
@@ -631,7 +631,7 @@ describe("MessageList", () => {
     expect(onScrollTop).toHaveBeenCalledTimes(2);
   });
 
-  it("DP-46: after a failed older-page fetch, scrolling inside the zone waits 5s before retrying", async () => {
+  it("after a failed older-page fetch, scrolling inside the zone waits 5s before retrying", async () => {
     vi.useFakeTimers();
     try {
       setHasMore(1, true);
@@ -706,7 +706,7 @@ describe("MessageList", () => {
     await Promise.resolve();
   });
 
-  it("DP-46: starts loading older history about 1.5 viewports before the top, once", () => {
+  it("starts loading older history about 1.5 viewports before the top, once", () => {
     setHasMore(1, true);
     setMessages(
       1,
@@ -730,7 +730,7 @@ describe("MessageList", () => {
     expect(options.onScrollTop).toHaveBeenCalledOnce();
   });
 
-  it("DP-46: shows a loading row at the top while the older page is pending, on success and failure", async () => {
+  it("shows a loading row at the top while the older page is pending, on success and failure", async () => {
     setHasMore(1, true);
     setMessages(1, [makeMessage({ id: 10 })]);
     messagesStore.flush();
@@ -813,7 +813,7 @@ describe("MessageList", () => {
     expect(container.querySelector(".messages-container")).toBeNull();
   });
 
-  it("disables every reaction control inline while timed out, and re-enables on lift (B9-15)", () => {
+  it("disables every reaction control inline while timed out, and re-enables on lift", () => {
     setConnectionStatus("connected");
     uiStore.flush();
     setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
@@ -843,7 +843,7 @@ describe("MessageList", () => {
     resetSafetyStore();
   });
 
-  it("disables delete while the socket is down and re-enables it on reconnect (CLI-08)", () => {
+  it("disables delete while the socket is down and re-enables it on reconnect", () => {
     setConnectionStatus("connected");
     uiStore.flush();
     setMessages(1, [makeMessage({ id: 1 })]);
@@ -1187,7 +1187,7 @@ describe("MessageList", () => {
   // P4-02: an append at the 500-row cap, a connection flip, a timeout change
   // and a role change must not rebuild the rendered rows. The cap append goes
   // through P4-01's row patch; the three flips are targeted updates.
-  describe("P4-02 targeted updates", () => {
+  describe("targeted updates", () => {
     const current = (): readonly Message[] => messagesStore.getState().messagesByChannel.get(1)!;
 
     it("appends at the 500-row cap without rebuilding the rows that stay", () => {
@@ -1221,7 +1221,7 @@ describe("MessageList", () => {
       expect(container.querySelector("[data-testid='message-501']")).not.toBeNull();
     });
 
-    it("keeps row identity through a connection flip and still gates delete (CLI-08)", () => {
+    it("keeps row identity through a connection flip and still gates delete", () => {
       setConnectionStatus("connected");
       uiStore.flush();
       setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
@@ -1244,7 +1244,7 @@ describe("MessageList", () => {
       expect(options.onDeleteClick).toHaveBeenCalledWith(1, false);
     });
 
-    it("disables reaction controls while timed out without rebuilding rows (B9-15)", () => {
+    it("disables reaction controls while timed out without rebuilding rows", () => {
       setConnectionStatus("connected");
       uiStore.flush();
       setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
@@ -1588,7 +1588,7 @@ describe("MessageList", () => {
       expect(rrAuthor().textContent).toBe("Alicia");
     });
 
-    it("refetches an author's avatar on an avatar-only profile change (OC-0108)", async () => {
+    it("refetches an author's avatar on an avatar-only profile change", async () => {
       membersStore.setState(() => ({
         members: new Map([
           [
@@ -1686,7 +1686,7 @@ describe("MessageList", () => {
     });
   });
 
-  describe("renderWindow rebuild breaker replay (DP-12)", () => {
+  describe("renderWindow rebuild breaker replay", () => {
     beforeEach(() => {
       vi.useFakeTimers();
     });

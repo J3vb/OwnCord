@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readSenderSample, senderSample, senderSampleFromReport } from "./shareSenderStats";
-import { layersText, senderText } from "../../components/video-grid/stream-info";
+import { layersText, senderText } from "../../components/video-grid/streamInfo";
 
 const shareTrack = (entries: Array<[string, Record<string, unknown>]>) => ({
   sender: { getStats: async () => new Map(entries) as unknown as RTCStatsReport },
@@ -18,7 +18,7 @@ const source = (id: string, at: number, frames: number, extra = {}): Entry => [
   { type: "media-source", kind: "video", timestamp: at, frames, ...extra },
 ];
 
-describe("shareSenderStats (M-1)", () => {
+describe("shareSenderStats", () => {
   it("summarises the top sending layer, never a faster lower one", () => {
     const sample = senderSample(
       [

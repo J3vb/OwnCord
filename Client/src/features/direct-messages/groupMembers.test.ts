@@ -184,3 +184,70 @@ describe("the three actions", () => {
     expect(owner).toHaveBeenCalledWith(5, 3);
   });
 });
+
+describe("buildGroupPanelView fallbacks", () => {
+  it("names the viewer by display name when the member list has no entry for them", () => {
+    seed(group([user(2, "alice")]));
+    authStore.setState(() => ({
+      token: "t",
+      user: {
+        id: ME,
+        username: "me",
+        display_name: "Em Eye",
+        avatar: "me.png",
+        role: "member",
+      },
+      serverName: null,
+      motd: null,
+      isAuthenticated: true,
+    }));
+    const self = buildGroupPanelView(5)!.members[0]!;
+    expect([self.name, self.username, self.avatar]).toEqual(["Em Eye", "me", "me.png"]);
+  });
+
+  it("shows the viewer online unless their own status says otherwise", () => {
+    seed(group([user(2, "alice")]));
+    expect(buildGroupPanelView(5)!.members[0]!.status).toBe("online");
+    authStore.setState(() => ({
+      token: "t",
+      user: { id: ME, username: "me", avatar: null, role: "member", status: "idle" },
+      serverName: null,
+      motd: null,
+      isAuthenticated: true,
+    }));
+    expect(buildGroupPanelView(5)!.members[0]!.status).toBe("idle");
+  });
+
+  it("reads an empty recipient avatar as none and keeps a real one", () => {
+    seed(
+      group([
+        { ...user(2, "alice"), avatar: "" },
+        { ...user(3, "carol"), avatar: "carol.png" },
+      ]),
+    );
+    const [, alice, carol] = buildGroupPanelView(5)!.members;
+    expect(alice!.avatar).toBeNull();
+    expect(carol!.avatar).toBe("carol.png");
+  });
+});
+
+describe("group ownership gate", () => {
+  it("never makes the viewer the owner of a conversation that is not a group", () => {
+    const dm = group([user(2, "alice")], { isGroup: false, ownerId: ME });
+    expect(isGroupOwner(dm, ME)).toBe(false);
+  });
+});
+
+describe("groupActionErrorText rate limits", () => {
+  it("reads a 429 as rate limited whatever code it carries", () => {
+    expect(groupActionErrorText(err(429, "SOMETHING_ELSE"), "remove")).toBe(
+      "Too many requests. Try again later.",
+    );
+  });
+
+  it("reads the rate-limited code as rate limited whatever status carries it", () => {
+    expect(groupActionErrorText(err(400, "RATE_LIMITED"), "owner")).toBe(
+      "Too many requests. Try again later.",
+    );
+  });
+});

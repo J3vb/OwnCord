@@ -22,44 +22,34 @@ const (
 	writeTimeout     = 10 * time.Second
 	settingsCacheTTL = 30 * time.Second
 
-	// wsReadLimitBytes is the maximum size of a single inbound WebSocket
-	// message. Must match the client-side upload cap.
+	// wsReadLimitBytes is the maximum inbound WebSocket message size; must match the client upload cap.
 	wsReadLimitBytes = config.MaxMessageBytes
 
-	// preAuthReadLimitBytes caps inbound messages until the auth frame is
-	// accepted; an auth frame is a few hundred bytes.
+	// preAuthReadLimitBytes caps inbound messages until the auth frame is accepted.
 	preAuthReadLimitBytes = 8 << 10
 )
 
-// ServeWS upgrades an HTTP connection to WebSocket, performs in-band auth,
-// then drives the client's read/write loops.
-// Do not wrap with AuthMiddleware — WS does its own auth.
+// ServeWS upgrades an HTTP connection to WebSocket, authenticates in-band, then
+// drives the client's read/write loops. Do not wrap with AuthMiddleware: WS does
+// its own auth.
 //
-// allowedOrigins controls which HTTP origins may open a WebSocket connection.
-// Pass nil or []string{"*"} to allow all origins (insecure, for development).
-// Pass explicit origins such as []string{"https://example.com"} to restrict access.
-//
-// maxConns, when > 0, refuses new connections with 503 once that many clients
-// are registered or still handshaking — a static capacity guardrail
-// (server.max_ws_connections). The check runs before the upgrade so a refused
-// connection costs one HTTP request, not a socket plus goroutines.
+// allowedOrigins controls which origins may connect: nil or {"*"} allows all
+// (insecure, development); explicit origins restrict. maxConns, when > 0, refuses
+// new connections with 503 once that many clients are registered or handshaking
+// (server.max_ws_connections); the check runs before the upgrade so a refusal
+// costs one HTTP request, not a socket plus goroutines.
 func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 	acceptOpts := OriginAcceptOptions(allowedOrigins)
-	// pending counts this handler's admitted sockets that have not yet started
-	// their pumps (authenticating, waiting for a ready-build permit, or
-	// handshaking). admissionMu serializes the capacity decision with the
-	// release, so the check reads the hub's active count and pending as one
-	// consistent pair: registerNow (under h.mu) runs before startPumps'
-	// release, and that release's unlock publishes the registration to the next
-	// admission's lock acquisition, so a stale reader cannot reserve a slot a
-	// just-registered connection has taken. A slot is held across registration,
-	// so hub.ClientCount() + pending never dips below the true reserved count.
-	// Reserving before the upgrade means a refused connection costs one HTTP
-	// request, not a socket plus goroutines.
-	//
-	// pending is atomic only so the unlocked fast-path read below is race-free;
-	// the authoritative check-and-reserve and the release are serialized by
-	// admissionMu.
+	// pending counts admitted sockets that have not started their pumps
+	// (authenticating, waiting for a ready-build permit, or handshaking). admissionMu
+	// serializes the capacity decision with the release so the check reads the hub's
+	// active count and pending as one consistent pair: registerNow (under h.mu) runs
+	// before startPumps' release, and that unlock publishes the registration to the
+	// next admission, so a stale reader cannot reserve a slot a just-registered
+	// connection took. A slot is held across registration, so
+	// hub.ClientCount() + pending never dips below the true reserved count. pending is
+	// atomic only so the unlocked fast-path read is race-free; the authoritative
+	// check-and-reserve and the release are under admissionMu.
 	var admissionMu syncutil.Ranked[lockRankSerialiser]
 	var pending atomic.Int64
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -68,15 +58,13 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 			w.Header().Set("Retry-After", "30")
 			httperr.Write(w, http.StatusServiceUnavailable, httperr.CodeServerBusy, "server at connection capacity")
 		}
-		// Fast-path refusal. It only ever refuses — never admits — so a stale
-		// unlocked read cannot let a connection past the ceiling; the
-		// authoritative check-and-reserve below re-reads under admissionMu.
+		// Fast-path refusal. It only ever refuses, never admits, so a stale unlocked read
+		// cannot let a connection past the ceiling; the check below re-reads under admissionMu.
 		if maxConns > 0 && hub.ClientCount()+int(pending.Load()) >= maxConns {
 			reject()
 			return
 		}
-		// Runs after the capacity comparison and before the reservation, the
-		// window this fix closes. Test-only (nil in production).
+		// Runs after the capacity comparison and before the reservation. Test-only.
 		if serveWSAdmissionRaceHook != nil {
 			serveWSAdmissionRaceHook()
 		}
@@ -125,9 +113,7 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 			writeCancel()
 		}
 
-		// Reconnection with state recovery: if the client sent a last_seq,
-		// try to replay missed events from the ring buffer instead of
-		// sending a full ready payload.
+		// With a last_seq, try to replay missed events instead of a full ready payload.
 		if lastSeq > 0 {
 			if handled, shouldStartPumps := hub.handleReconnect(ctx, conn, c, lastSeq); handled {
 				if shouldStartPumps {
@@ -135,7 +121,6 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 				}
 				return
 			}
-			// Replay failed (seq too old) — fall through to full ready payload.
 			slog.Info("ws replay failed (seq too old), sending full ready", "user_id", c.userID, "last_seq", lastSeq)
 		}
 
@@ -143,62 +128,46 @@ func ServeWS(hub *Hub, allowedOrigins []string, maxConns int) http.HandlerFunc {
 			return
 		}
 
-		// writePump runs in background; readPump blocks.
-		// When readPump returns (disconnect), close the send channel first
-		// so writePump drains any remaining messages, then cancel its context.
+		// writePump runs in the background and readPump blocks. When readPump returns,
+		// close the send channel first so writePump drains remaining messages, then cancel
+		// its context.
 		startPumps()
 	}
 }
 
-// serveWSAdmissionRaceHook, when non-nil, runs once per ServeWS upgrade request
-// after the capacity comparison and before the reservation, so a test can park
-// every concurrent upgrade inside that check-then-reserve window and release
-// them together. Test-only (nil in production), same pattern as
-// handleReconnectPreRegisterRaceHook.
+// serveWSAdmissionRaceHook, when non-nil, runs once per upgrade between the
+// capacity comparison and the reservation, so a test can park concurrent upgrades
+// in that check-then-reserve window. Test-only.
 var serveWSAdmissionRaceHook func()
 
-// handleReconnectPreRegisterRaceHook, when non-nil, runs once inside
-// handleReconnect's h.seqMu critical section immediately before the
-// mustFullResync re-check that guards registerNow. Test-only (nil in
-// production); a real visibility change lands too fast relative to the DB
-// round trips above to reliably land a concurrent goroutine in this window,
-// so tests use this hook to pin it deterministically instead — mirrors the
-// refreshChannelVisibilityRaceHook / voiceJoinPostTokenRaceHook pattern used
-// for the analogous races elsewhere in this package (OC-0206).
+// handleReconnectPreRegisterRaceHook, when non-nil, runs inside handleReconnect's
+// h.seqMu section right before the mustFullResync re-check guarding registerNow.
+// Test-only: a real visibility change is too fast relative to the DB round trips to
+// land in this window reliably.
 var handleReconnectPreRegisterRaceHook func()
 
-// handleReconnectPreSeqMuRaceHook, when non-nil, runs once inside
-// reconnectRegister just before it takes h.seqMu: after the handshake has
-// computed its allowed set and before the final re-check. Test-only (nil in
-// production). A visibility fan-out (RefreshChannelVisibility,
-// revokeUnreadableChannels) takes h.seqMu through beginTargetedFanout, so a
-// test lands one in the handshake window here, never from
-// handleReconnectPreRegisterRaceHook, which runs with h.seqMu held.
+// handleReconnectPreSeqMuRaceHook, when non-nil, runs in reconnectRegister just
+// before it takes h.seqMu, after the allowed set is computed. Test-only. A
+// visibility fan-out takes h.seqMu through beginTargetedFanout, so a test lands one
+// here, never from handleReconnectPreRegisterRaceHook, which runs holding seqMu.
 var handleReconnectPreSeqMuRaceHook func()
 
-// handleReconnectPostCheckPreRegisterRaceHook, when non-nil, runs once
-// inside handleReconnect's h.seqMu critical section immediately AFTER the
-// mustFullResync re-check passes and immediately before registerNow (Codex
-// round 4, item A). Test-only (nil in production): unlike
-// handleReconnectPreRegisterRaceHook (which fires before that re-check),
-// this pins the exact gap a concurrent MarkVisibilityChanged call must not
-// be able to land in unnoticed — since it now also takes h.seqMu, a real
-// concurrent caller starting here is provably blocked until this critical
-// section (and registerNow within it) completes.
+// handleReconnectPostCheckPreRegisterRaceHook, when non-nil, runs inside
+// handleReconnect's h.seqMu section after the mustFullResync re-check passes and
+// before registerNow. Test-only: it pins the gap a concurrent
+// MarkVisibilityChanged must not land in unnoticed; since that call also takes
+// h.seqMu, it is provably blocked until this section completes.
 var handleReconnectPostCheckPreRegisterRaceHook func()
 
-// freshConnectPreRegisterRaceHook, when non-nil, runs once inside
-// handleFreshConnect after refreshUserSnapshot has re-read the user row but
-// before registerNow. Test-only (nil in production); pins the
-// role-reassignment-vs-handshake window (audit-2026-08-19 F-2)
-// deterministically, same pattern as handleReconnectPreRegisterRaceHook.
+// freshConnectPreRegisterRaceHook, when non-nil, runs in handleFreshConnect after
+// refreshUserSnapshot and before registerNow. Test-only; pins the
+// role-reassignment-vs-handshake window.
 var freshConnectPreRegisterRaceHook func()
 
-// refreshUserSnapshot replaces c.user, c.roleName and c.roleIDs
-// with a fresh read of the user row. Handshake paths call it before
-// registerNow, while c is still invisible to every other goroutine, so the
-// plain field writes are safe. Fail closed: callers must not proceed on the
-// stale snapshot when the re-read fails.
+// refreshUserSnapshot replaces c.user, c.roleName and c.roleIDs with a fresh read.
+// Handshake paths call it before registerNow, while c is invisible to other
+// goroutines, so the plain writes are safe. Fail closed: callers must not proceed
+// on the stale snapshot when the re-read fails.
 func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader, c *Client) error {
 	user, err := database.GetUserByID(ctx, c.userID)
 	if err != nil {
@@ -207,30 +176,26 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 	if user == nil {
 		return fmt.Errorf("refreshUserSnapshot: user %d vanished", c.userID)
 	}
-	// A ban committing during the handshake window (after authenticateConn's
-	// own check) must stop the connection here rather than sail through to a
-	// live, fully authorized socket: both callers are already fail-closed on
-	// this function's error (handleFreshConnect closes the conn;
-	// reconnectPrecheck falls back to the full-ready path, which re-reads and
-	// hits this same guard) (OC-0272).
+	// A ban committing during the handshake window (after authenticateConn's check)
+	// must stop the connection here. Both callers fail closed on this error
+	// (handleFreshConnect closes the conn; reconnectPrecheck falls back to full ready,
+	// which hits this guard again).
 	if auth.IsEffectivelyBanned(user) {
 		return fmt.Errorf("refreshUserSnapshot: user %d is banned", c.userID)
 	}
-	// Read the held-role set, not just the users.role_id mirror: adding or
-	// removing a role that is not the member's top role moves their
-	// permissions without moving the mirror (WP 6.3c). Fail closed like the
-	// sibling lookups in upgradeAndAuth and handleFreshConnect: c.roleName is
-	// authoritative on the wire (auth_ok, member_join, every chat_message), so
-	// a lookup failure must not silently substitute "member" and pin the
-	// session to a fabricated role (OC-0299).
+	// Read the held-role set, not just the users.role_id mirror: adding or removing a
+	// non-top role moves permissions without moving the mirror. Fail closed:
+	// c.roleName is authoritative on the wire (auth_ok, member_join, every
+	// chat_message), so a lookup failure must not substitute "member" and pin the
+	// session to a fabricated role.
 	held, roleErr := database.GetMemberRoles(ctx, c.userID)
 	if roleErr != nil || held == nil {
 		return fmt.Errorf("refreshUserSnapshot: role lookup failed for user %d role %d: %w", c.userID, user.RoleID, roleErr)
 	}
 	if user.RoleID != held.Top.ID {
-		// The mirror and the held set disagree (a change landed between the
-		// two reads, or the mirror is damaged). The held set is authoritative;
-		// a mirror naming a role that does not exist is still a refusal.
+		// The mirror and held set disagree (a change landed between reads, or the mirror
+		// is damaged). The held set is authoritative; a mirror naming a nonexistent role
+		// is still a refusal.
 		if mirror, mirrorErr := database.GetRoleByID(ctx, user.RoleID); mirrorErr != nil || mirror == nil {
 			return fmt.Errorf("refreshUserSnapshot: role lookup failed for user %d role %d: %w", c.userID, user.RoleID, mirrorErr)
 		}
@@ -242,14 +207,11 @@ func (h *Hub) refreshUserSnapshot(ctx context.Context, database VisibilityReader
 	return nil
 }
 
-// applyConnectStatus stamps the status this session comes online as and caches
-// it on the client. Which status that is belongs to the presence seam
+// applyConnectStatus stamps the status this session comes online as and caches it
+// on the client. Which status belongs to the presence seam
 // (UserService.StampConnect: a saved idle/dnd/invisible survives a reconnect,
-// anything else becomes online); what stays here is what the hub does with the
-// answer.
-//
-// It runs BEFORE the ready payload is built so the member list the client is
-// handed already agrees with the presence broadcast that follows it.
+// anything else becomes online). It runs before the ready payload is built so the
+// member list agrees with the presence broadcast that follows.
 func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 	if c.user.LastSeen == nil {
 		h.presenceRepair.mark(&h.presenceRepair.joins, c.userID, true)
@@ -257,13 +219,11 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 	status, err := h.presence.StampConnect(ctx, c.userID, c.user.Status)
 	if err != nil {
 		slog.Warn("ws StampConnect", "err", err)
-		// Do not stamp c.user.Status on a failed write: it would make the
-		// auth_ok reply and the presence broadcast below both claim a value
-		// that users.status disagrees with, and buildReady's ListMembers read
-		// of users.status (via presentableMembers, which only ever downgrades
-		// a connected user to offline, never upgrades one) would then never
-		// self-correct for the rest of this session (OC-0298). The live
-		// presence follows the row for the same reason.
+		// Do not stamp c.user.Status on a failed write: auth_ok and the presence broadcast
+		// would claim a value users.status disagrees with, and buildReady's read via
+		// presentableMembers (which only downgrades a connected user to offline) would
+		// never self-correct for the session. The live presence follows the row for the
+		// same reason.
 		text, tag := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 		c.setLivePresence(c.user.Status, text, tag)
 		return
@@ -273,14 +233,12 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 	c.setLivePresence(status, text, tag)
 }
 
-// announceFreshConnect tells every other client that c came online after a
-// full ready. Coming online is presence, not a join: every client's ready
-// already lists every member, so a member_join goes ahead of the presence
-// only for a member other clients cannot have yet — a user still owed one
-// since their first-ever connect (applyConnectStatus marks it before the
-// stamp erases last_seen NULL; announceMember clears it), or the return of a
-// user whose temporary ban lapsed (member_ban removed them everywhere, and
-// users.banned stays 1 until an unban).
+// announceFreshConnect tells every other client that c came online after a full
+// ready. Coming online is presence, not a join (every ready lists every member), so
+// a member_join goes ahead only for a member other clients cannot have yet: a user
+// owed one since their first-ever connect (applyConnectStatus marks it before the
+// stamp erases last_seen NULL; announceMember clears it), or one whose temporary
+// ban lapsed (member_ban removed them everywhere; users.banned stays 1).
 func (h *Hub) announceFreshConnect(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 	p := pendingPresence{status: c.user.Status, customStatus: text}
@@ -292,8 +250,8 @@ func (h *Hub) announceFreshConnect(c *Client) {
 	h.queuePresence(c.userID, p)
 }
 
-// announceConnectPresence fans out the status applyConnectStatus settled on,
-// with the invisible mapping applied.
+// announceConnectPresence fans out the status applyConnectStatus settled on, with
+// the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 	h.QueuePresence(c.userID, c.user.Status, text)
@@ -301,12 +259,11 @@ func (h *Hub) announceConnectPresence(c *Client) {
 
 // gateResumeChannel resolves the read-permission set a resume fallback
 // (lastSeq > 0) registers with and settles c.channelID against it before
-// registerNow subscribes it. It returns nil for a pure fresh connect.
+// registerNow subscribes. It returns nil for a pure fresh connect.
 func (h *Hub) gateResumeChannel(ctx context.Context, database ReadySnapshotReader, c *Client) map[int64]bool {
-	// Only the replay-failure fallback (lastSeq > 0) can inherit voice state
-	// from the previous connection, so that is the only case where registerNow
-	// needs the read-permission set. Fail closed on error: nil denies the
-	// inherited voice-channel subscription.
+	// Only the replay-failure fallback can inherit voice state from the previous
+	// connection, so only it needs the set. Fail closed: nil denies the inherited
+	// voice-channel subscription.
 	var allowedChannelIDs map[int64]bool
 	if c.lastSeq > 0 {
 		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
@@ -317,34 +274,27 @@ func (h *Hub) gateResumeChannel(ctx context.Context, database ReadySnapshotReade
 			allowedChannelIDs = allowed
 		}
 	}
-	// The auth frame's active_channel_id was honoured only along
-	// handleReconnect's replay-capable path. On a full resync (last_seq > 0
-	// but replay forced "none" — every post-restart resume, since the fresh
-	// per-boot seq floor renumbers the space and the boot bumps the
-	// visibility watermark) registerNow copies the subscription from the OLD
-	// client entry, which readPump's unregister has normally already deleted.
-	// Without this promotion the socket holds no ChannelTopic subscription
-	// until its post-ready channel_focus round trip lands, and every channel
-	// frame broadcast in that window (auth_ok + ready write, pump startup,
-	// one RTT) is delivered to nobody and can never be re-requested, because
-	// the client only reports max(seq). Honoured only when READ-visible, the
-	// same fail-closed gate handleReconnect applies, and only on a resume
-	// (last_seq > 0), as docs/protocol.md specifies; the re-gate below stays
-	// as defence for the abort-path promotion it already documents.
+	// The auth frame's active_channel_id was honoured only on handleReconnect's
+	// replay path. On a full resync (last_seq > 0 but replay forced "none", e.g. every
+	// post-restart resume: the new per-boot seq floor renumbers and the boot bumps the
+	// watermark) registerNow copies the subscription from the old client entry, which
+	// readPump's unregister has normally deleted. Without this promotion the socket
+	// holds no ChannelTopic subscription until its post-ready channel_focus lands, and
+	// every channel frame in that window is delivered to nobody and can never be
+	// re-requested (the client reports only max(seq)). Honoured only when
+	// READ-visible (the gate handleReconnect applies) and only on a resume
+	// (docs/protocol.md); the re-gate below covers the abort-path promotion.
 	if c.lastSeq > 0 && c.authChannelID != 0 && allowedChannelIDs[c.authChannelID] {
 		c.mu.Lock()
 		c.channelID = c.authChannelID
 		c.mu.Unlock()
 	}
 	// handleReconnect may have promoted an auth-frame active_channel_id into
-	// c.channelID (serve.go, honoured only when it was READ-visible at that
-	// moment) and then aborted on one of its own re-checks — most notably the
-	// final mustFullResync check, tripped by a permission revocation that
-	// landed mid-handshake. None of those abort paths undo the c.channelID
-	// write. registerNow subscribes c.channelID's ChannelTopic
-	// unconditionally, so re-gate it here against the freshly recomputed
-	// permission set before registering. Fail closed: a nil allowedChannelIDs
-	// (lastSeq == 0, or the computeAllowedChannels error branch above) denies.
+	// c.channelID (READ-visible then) and then aborted on one of its re-checks, e.g.
+	// the final mustFullResync check tripped by a mid-handshake revocation. Abort paths
+	// do not undo the write, and registerNow subscribes c.channelID's topic
+	// unconditionally, so re-gate it against the fresh permission set. Fail closed: a
+	// nil allowedChannelIDs denies.
 	if chID := c.getChannelID(); chID != 0 && !allowedChannelIDs[chID] {
 		c.mu.Lock()
 		c.channelID = 0

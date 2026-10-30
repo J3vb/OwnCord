@@ -1,16 +1,16 @@
 /**
- * Settings > Advanced > Activity > "Your games" (WP 8.3d): every game this
+ * Settings > Advanced > Activity > "Your games": every game this
  * device has detected or the user added, with rename, "Show to others" and
  * remove, and the "Add a game" picker over the programs running now.
  *
- * Everything here is a device-local choice (`@lib/gameActivityPrefs`); the loop
- * in `@lib/gameActivity` reads it on its next scan, and hiding the game being
+ * Everything here is a device-local choice (`@lib/prefs/gameActivityPrefs`); the loop
+ * in `@lib/presence/gameActivity` reads it on its next scan, and hiding the game being
  * shown clears it at once. The list of running programs is read only when the
  * picker opens, is shown only here and is never stored or sent.
  */
 
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import {
   MAX_GAME_NAME_CHARS,
@@ -26,7 +26,7 @@ import {
   withManual,
   withRename,
   withoutManual,
-} from "@lib/gameActivityPrefs";
+} from "@lib/prefs/gameActivityPrefs";
 import { desktop } from "../../platform/desktop";
 import type { RunningProgram } from "../../platform/contracts/gameDetector";
 import { gameActivityText as t } from "../../i18n/gameActivity";

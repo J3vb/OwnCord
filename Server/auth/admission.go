@@ -10,55 +10,53 @@ import (
 )
 
 // AdmissionBudget bounds how much deliberately expensive authentication work
-// runs at once — the bcrypt compares behind every password confirmation, the
-// bcrypt hashes behind registration, password change and recovery-code
-// issue, and the recovery-code match at verify (B4-4, SEC-01). One process
-// holds one budget (inside the shared RateLimiter), so every route that pays
-// for bcrypt takes the same server-owned admission decision: a slot is taken
-// atomically before the computation starts and given back after it. An
-// over-budget attempt either waits its turn in a bounded FIFO queue (Acquire:
-// the login, registration and recovery-code routes, so a login burst is slow
-// rather than refused — P5-S02) or is refused up front (TryAcquire: the
-// sensitive confirmations). A refusal runs no compare and charges no lockout
-// attempt.
+// runs at once: the bcrypt compares behind every password confirmation, the
+// hashes behind registration, password change and recovery-code issue, and the
+// recovery-code match at verify. One process holds one budget (inside the
+// shared RateLimiter), so every route that pays for bcrypt takes the same
+// server-owned admission decision: a slot is taken atomically before the
+// computation and given back after. An over-budget attempt either waits in a
+// bounded FIFO queue (Acquire: the login, registration and recovery-code
+// routes, so a login burst is slow rather than refused) or is refused up front
+// (TryAcquire: the sensitive confirmations). A refusal runs no compare and
+// charges no lockout attempt.
 //
-// The size counts concurrent computations, not requests per second: bcrypt
-// at cost 12 is a quarter second of one core, so the budget is what keeps a
-// burst of password attempts from growing the CPU-bound backlog without
-// bound. The default is twice the core count — enough that legitimate
-// traffic rarely queues, small enough that each queued caller moves up
-// quickly.
+// The size counts concurrent computations, not requests per second: bcrypt at
+// cost 12 is a quarter second of one core, so the budget keeps a burst of
+// password attempts from growing the CPU-bound backlog without bound. The
+// default is twice the core count, enough that legitimate traffic rarely
+// queues and small enough that each queued caller moves up quickly.
 type AdmissionBudget struct {
 	size     int
 	queueCap int
 	mu       sync.Mutex
 	// held counts slots taken; waiters are Acquire callers queued for one,
-	// oldest first. A released slot passes straight to the oldest waiter,
-	// so held never drops while anyone waits and nobody can jump the queue.
+	// oldest first. A released slot passes straight to the oldest waiter, so
+	// held never drops while anyone waits and nobody can jump the queue.
 	held    int
 	waiters list.List // of chan struct{}, closed when handed a slot
-	// avgHold is a moving average of how long a slot is held, the service
-	// time behind the retry hint.
+	// avgHold is a moving average of how long a slot is held, the service time
+	// behind the retry hint.
 	avgHold  time.Duration
 	inFlight atomic.Int64
 	peak     atomic.Int64
 }
 
 const (
-	// minDefaultAdmissionBudget keeps the computed default useful on a
-	// one- or two-core host; an explicit configuration may go lower.
+	// minDefaultAdmissionBudget keeps the computed default useful on a one- or
+	// two-core host; an explicit configuration may go lower.
 	minDefaultAdmissionBudget = 4
 	// maxAdmissionBudget is where a budget stops bounding anything.
 	maxAdmissionBudget = 4096
-	// AdmissionWait is how long an Acquire caller on the login, registration
-	// and recovery-code paths waits in the queue before it is refused.
+	// AdmissionWait is how long an Acquire caller on the login, registration and
+	// recovery-code paths waits in the queue before it is refused.
 	AdmissionWait = 10 * time.Second
-	// queueSlotsPerSecond caps the queue at four waiters per slot per second
-	// of AdmissionWait. It is only an upper bound: it matches what the budget
-	// serves inside the wait when a compare holds a slot a quarter second,
-	// but slots outnumber cores by default, so holds run longer. Acquire
-	// refuses earlier, from the measured hold time, whenever the wait it
-	// would face already exceeds its maxWait.
+	// queueSlotsPerSecond caps the queue at four waiters per slot per second of
+	// AdmissionWait. It is only an upper bound: it matches what the budget
+	// serves inside the wait when a compare holds a slot a quarter second, but
+	// slots outnumber cores by default so holds run longer. Acquire refuses
+	// earlier, from the measured hold time, whenever the wait it would face
+	// already exceeds its maxWait.
 	queueSlotsPerSecond = 4
 	// initialAvgHold seeds the retry hint before any slot has been released.
 	initialAvgHold = 250 * time.Millisecond
@@ -85,10 +83,9 @@ func NewAdmissionBudget(size int) *AdmissionBudget {
 }
 
 // TryAcquire takes one slot without waiting. ok is false when the budget is
-// exhausted or callers are already queued for it: nothing was taken and
-// release is a no-op. release is idempotent, so a caller can give the slot
-// back as soon as the expensive step is done and still defer it as a safety
-// net.
+// exhausted or callers are already queued: nothing was taken and release is a
+// no-op. release is idempotent, so a caller can give the slot back as soon as
+// the expensive step is done and still defer it as a safety net.
 func (b *AdmissionBudget) TryAcquire() (release func(), ok bool) {
 	b.mu.Lock()
 	ok = b.held < b.size && b.waiters.Len() == 0
@@ -102,12 +99,11 @@ func (b *AdmissionBudget) TryAcquire() (release func(), ok bool) {
 	return b.admitted(), true
 }
 
-// Acquire takes one slot, waiting in arrival order for up to maxWait when
-// the budget is exhausted. ok is false when the queue is already full or its
-// estimated wait already exceeds maxWait, when maxWait passes, or when ctx
-// ends first: nothing was taken, release is a no-op, and retryAfter
-// estimates when a slot is likely to be free. A refusal is still the B4-4
-// refusal — no computation runs and it charges no lockout attempt.
+// Acquire takes one slot, waiting in arrival order for up to maxWait when the
+// budget is exhausted. ok is false when the queue is full or its estimated wait
+// already exceeds maxWait, when maxWait passes, or when ctx ends first: nothing
+// was taken, release is a no-op, and retryAfter estimates when a slot is likely
+// free. A refusal runs no computation and charges no lockout attempt.
 func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (release func(), retryAfter time.Duration, ok bool) {
 	b.mu.Lock()
 	if b.held < b.size && b.waiters.Len() == 0 {
@@ -136,8 +132,8 @@ func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (r
 	b.mu.Lock()
 	select {
 	case <-ready:
-		// Handed a slot while giving up: pass it on rather than hold it for
-		// a caller that no longer wants it.
+		// Handed a slot while giving up: pass it on rather than hold it for a
+		// caller that no longer wants it.
 		b.mu.Unlock()
 		b.admitted()()
 		b.mu.Lock()
@@ -149,14 +145,14 @@ func (b *AdmissionBudget) Acquire(ctx context.Context, maxWait time.Duration) (r
 	return func() {}, retryAfter, false
 }
 
-// estimatedWaitLocked is how long a caller joining the queue now would wait
-// for a slot: the queue ahead of it divided by the budget's throughput.
+// estimatedWaitLocked is how long a caller joining the queue now would wait:
+// the queue ahead of it divided by the budget's throughput.
 func (b *AdmissionBudget) estimatedWaitLocked() time.Duration {
 	return time.Duration(b.waiters.Len()+1) * b.avgHold / time.Duration(b.size)
 }
 
 // retryAfterLocked estimates how long a caller refused now should wait before
-// trying again: its estimated wait, never under a second.
+// retrying: its estimated wait, never under a second.
 func (b *AdmissionBudget) retryAfterLocked() time.Duration {
 	return max(b.estimatedWaitLocked(), time.Second)
 }
@@ -194,8 +190,8 @@ func (b *AdmissionBudget) Size() int { return b.size }
 // InFlight is the number of computations admitted right now.
 func (b *AdmissionBudget) InFlight() int { return int(b.inFlight.Load()) }
 
-// Peak is the most computations ever admitted at once — the figure the
-// bounded-work tests hold against Size.
+// Peak is the most computations ever admitted at once, which the bounded-work
+// tests hold against Size.
 func (b *AdmissionBudget) Peak() int { return int(b.peak.Load()) }
 
 // CheckPassword runs CheckPassword inside one admitted slot. admitted is

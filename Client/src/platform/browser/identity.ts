@@ -1,4 +1,4 @@
-// The browser platform's identity store (6.13c): the client's own identity
+// The browser platform's identity store: the client's own identity
 // key blob and peers' pinned public keys, in IndexedDB. Two object stores in
 // one database: `keys` by host (the app folds the user id into that string),
 // and `pins` by host and user id.
@@ -6,7 +6,7 @@
 // The contract's outcomes hold as on desktop. A key read that fails rejects,
 // so the app never takes an unreadable store for "no key". A pin read that
 // fails — including a database that will not open, or a stored value that is
-// not a pin — answers "unavailable", never "unpinned" (DC-08, `lib/identity.ts`).
+// not a pin — answers "unavailable", never "unpinned" (`lib/net/identity.ts`).
 // A page whose IndexedDB is missing or cannot be reached answers the same way
 // as a failing store: this adapter only runs where a store is expected, and
 // the inert registry member is the one that answers "no store".

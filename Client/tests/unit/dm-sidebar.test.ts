@@ -907,7 +907,7 @@ describe("DmSidebar — unread and mention badges", () => {
     expect(container.querySelector('[data-testid="dm-mentions-7"]')).toBeNull();
   });
 
-  describe("empty state (WP 3B-3)", () => {
+  describe("empty state", () => {
     const empty = (): HTMLElement | null =>
       container.querySelector<HTMLElement>("[data-testid='dm-empty-state']");
 
@@ -958,7 +958,7 @@ describe("DmSidebar — unread and mention badges", () => {
     });
   });
 
-  describe("row menu items (WP 3B-2)", () => {
+  describe("row menu items", () => {
     const labels = (): string[] =>
       [...document.querySelectorAll(".dm-context-menu .context-menu-item")].map(
         (el) => el.textContent ?? "",

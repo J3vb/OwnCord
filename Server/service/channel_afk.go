@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── AFK channel (WP 6.10a) ──────────────────────────────────────────────────
+// ─── AFK channel ──────────────────────────────────────────────────
 
 // AFKStore is the persistence slice behind ChannelService.SetAFKChannel.
 // SetAFKChannel reads the old flag, clears it and sets the new one in one

@@ -31,8 +31,8 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 		grants.Perms = role.Perms
 	}
 
-	// Single visibility predicate shared with REST ListVisibleChannels and the
-	// ws ready payload, so no site can drift.
+	// Single visibility predicate shared with REST ListVisibleChannels and the ws
+	// ready payload, so no site can drift.
 	visibleIDs := s.perms.Checker().VisibleChannelIDs(grants, channelRefs(channels))
 	var ids []int64
 	for i := range channels {
@@ -41,14 +41,11 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 		}
 	}
 
-	// Also include DM channels the user participates in. Only the IDs are
-	// needed here, so skip the full DM query's preview/unread work.
-	//
-	// A failed lookup must not silently shrink the accessible set to guild
-	// channels only — SearchMessages (message_query.go) treats this list as
-	// authoritative and would otherwise report a successful, DM-stripped
-	// result instead of failing. Same posture as the ws sibling,
-	// computeAllowedChannels in ws/serve.go.
+	// Include the user's DM channels; only IDs are needed, so skip the full DM
+	// query's preview/unread work. A failed lookup must not silently shrink the set
+	// to guild channels: SearchMessages (message_query.go) treats this list as
+	// authoritative and would report a DM-stripped result instead of failing (as the
+	// ws sibling computeAllowedChannels does).
 	dmIDs, err := s.st.GetUserDMChannelIDs(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch DM channels: %w", ErrInternal, err)
@@ -58,15 +55,11 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 	return ids, nil
 }
 
-// ReadableChannelIDs is GetAccessibleChannelIDs narrowed to CONTENT (B5-7):
-// the visible set minus any labelled channel the user has not acknowledged.
-// Backs SearchMessages' global branch, so a hit inside an unacknowledged
-// labelled channel is silently absent from results rather than returned —
-// the leak path the plan calls out as the one that "would ship silently".
-//
-// Costs nothing beyond GetAccessibleChannelIDs when nothing in the visible
-// set is labelled: the acknowledgement lookup only runs per labelled
-// channel, and only when one is actually in the caller's visible set.
+// ReadableChannelIDs is GetAccessibleChannelIDs narrowed to CONTENT: the visible
+// set minus any labelled channel the user has not acknowledged. It backs
+// SearchMessages' global branch, so a hit in an unacknowledged labelled channel is
+// absent rather than returned. The acknowledgement lookup runs only per labelled
+// channel in the visible set.
 func (s *MessageService) ReadableChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	ids, err := s.GetAccessibleChannelIDs(ctx, userID)
 	if err != nil {
@@ -96,8 +89,7 @@ func (s *MessageService) ReadableChannelIDs(ctx context.Context, userID int64) (
 			readable = append(readable, id)
 			continue
 		}
-		// Fail closed: a lookup failure is treated as unacknowledged rather
-		// than silently widening the readable set.
+		// Fail closed: a lookup failure counts as unacknowledged.
 		ok, ackErr := s.st.HasNSFWAcknowledgement(ctx, userID, id)
 		if ackErr == nil && ok {
 			readable = append(readable, id)
@@ -106,11 +98,9 @@ func (s *MessageService) ReadableChannelIDs(ctx context.Context, userID int64) (
 	return readable, nil
 }
 
-// CanPost reports whether userID may post into channelID, applying the same
-// checks as a real message send: channel permissions via the cached checker
-// for regular channels; participant membership AND block status for DMs.
-// Exists so gates outside the send flow (the plugin broadcast path) share
-// exactly this policy instead of hand-rolling a weaker copy.
+// CanPost reports whether userID may post into channelID with the same checks as
+// a real send (channel permissions; DM membership and block status), so gates
+// outside the send flow (the plugin broadcast path) share this policy.
 func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) error {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
@@ -119,11 +109,10 @@ func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) e
 	return s.checkSendPermission(ctx, userID, ch)
 }
 
-// ChannelIsDM reports whether channelID is a DM channel. Used by the plugin
-// broadcast path (ws/handlers_command.go, Codex B5-6 P1-2) to pick between a
-// plain topic-based ChannelEvent and the sender-aware DM audience — a plugin
-// slash command's broadcast is a DM interaction like any other and must not
-// bypass the first-contact gate via unrestricted channel fan-out.
+// ChannelIsDM reports whether channelID is a DM. The plugin broadcast path
+// (ws/handlers_command.go) uses it to pick the sender-aware DM audience: a slash
+// command's broadcast is a DM interaction and must not bypass the first-contact
+// gate via channel fan-out.
 func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool, error) {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil {
@@ -136,28 +125,25 @@ func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool
 }
 
 // checkSendPermission is permissions.CanSendMessage over the resolved subject:
-// READ|SEND in the channel, MANAGE_MESSAGES on top for announcement channels,
-// never into an archive; DM membership and no block. Every caller —
-// SendMessage, EditMessage, CanPost, and typing via ChannelService — asks that
-// one predicate, so none can drift (S-01, S-12).
+// READ|SEND, MANAGE_MESSAGES for announcement channels, never into an archive;
+// DM membership and no block. SendMessage, EditMessage, CanPost and typing all
+// ask this one predicate.
 func (s *MessageService) checkSendPermission(ctx context.Context, userID int64, ch *db.Channel) error {
 	if err := s.checkSendVerdict(ctx, userID, ch); err != nil {
 		return err
 	}
-	// A forum holds no messages: its posts are threads, and a post is created
-	// through the forum post path (checkSendVerdict alone). Refused after the
-	// permission verdict so a caller who cannot read the forum learns nothing
-	// about its type; the messages trigger (migration 075) is the
-	// schema-level backstop.
+	// A forum holds no messages: its posts are threads, created through the forum
+	// post path (checkSendVerdict alone). Refused after the permission verdict so a
+	// caller who cannot read the forum learns nothing about its type; the messages
+	// trigger (migration 075) is the schema backstop.
 	if ch.Type == db.ForumTypeName {
 		return fmt.Errorf("%w: a forum holds no messages, post in one of its posts", ErrBadRequest)
 	}
 	return nil
 }
 
-// checkSendVerdict is CanSendMessage over ch for userID, mapped onto the
-// service's error kinds: the part of checkSendPermission a forum post create
-// shares with a send.
+// checkSendVerdict is CanSendMessage over ch for userID mapped onto service
+// errors: the part of checkSendPermission a forum post create shares.
 func (s *MessageService) checkSendVerdict(ctx context.Context, userID int64, ch *db.Channel) error {
 	sub, err := channelSubject(ctx, s.st, s.perms, userID, ch, true)
 	if err != nil {
@@ -166,19 +152,14 @@ func (s *MessageService) checkSendVerdict(ctx context.Context, userID int64, ch 
 	return denial(permissions.CanSendMessage(sub))
 }
 
-// channelSubject resolves what the channel predicates need for userID in ch:
-// role bits and both override layers from the permission cache, the
-// channel's flags, and for a DM its membership and, when withBlock is set,
-// the two-party block state. A perms.Subject failure (which now includes the
-// timeout lookup, B5-9) is PROPAGATED rather than
-// collapsed into a permissive zero-bit Subject (P2-11, Codex review): a
-// zero Subject fails closed for a non-DM channel (no SEND_MESSAGES bit,
-// TimedOut also defaults false) but a DM's CanSendMessage/CanAddReaction
-// consult DMParticipant/DMBlocked/TimedOut, not RolePerms, so silently
-// substituting TimedOut=false on an unknown-state error let a DM message
-// or reaction through while the real timeout state was unknown. Every
-// caller already checks this error and fails closed on it (typing drops
-// the indicator, everything else answers Forbidden/Internal).
+// channelSubject resolves what the channel predicates need for userID in ch: role
+// bits, both override layers, the channel's flags, and for a DM its membership
+// and, when withBlock is set, the block state. A perms.Subject failure (timeout
+// lookup included) is PROPAGATED, not collapsed into a zero Subject: that fails
+// closed for a non-DM channel, but a DM's CanSendMessage/CanAddReaction consult
+// DMParticipant/DMBlocked/TimedOut, not RolePerms, so a substituted
+// TimedOut=false would let a DM message or reaction through while the timeout
+// state was unknown. Every caller fails closed on this error.
 func channelSubject(ctx context.Context, st Store, perms *PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
 	sub, err := perms.Subject(ctx, userID, ch.ID)
 	if err != nil {
@@ -205,9 +186,8 @@ func channelSubject(ctx context.Context, st Store, perms *PermissionService, use
 	return sub, nil
 }
 
-// denial maps a predicate verdict onto the service's error kinds: a block is
-// ErrBlocked (its own client-visible code), every other refusal ErrForbidden
-// carrying the predicate's reason.
+// denial maps a predicate verdict onto service errors: a block is ErrBlocked (its
+// own client-visible code), everything else ErrForbidden with the predicate's reason.
 func denial(err error) error {
 	switch {
 	case err == nil:
@@ -221,12 +201,10 @@ func denial(err error) error {
 	}
 }
 
-// requireNotTimedOut is CanSendMessage's timeout clause for the writes a
-// timeout refuses beyond sends, edits, reactions and voice joins, which have
-// no channel predicate of their own: creating a new DM or group DM, renaming
-// a group DM, ringing a DM call, pinning in a DM, and setting a custom status.
-// TimedOut is resolved exactly as for a send (administrators exempt) and
-// refused with the same ErrTimedOut.
+// requireNotTimedOut is CanSendMessage's timeout clause for writes a timeout
+// refuses that have no channel predicate: creating a DM or group DM, renaming a
+// group DM, ringing a DM call, pinning in a DM, setting a custom status.
+// Administrators are exempt, as for a send.
 func requireNotTimedOut(ctx context.Context, perms *PermissionService, userID int64) error {
 	sub, err := perms.Subject(ctx, userID, 0)
 	if err != nil {
@@ -238,26 +216,18 @@ func requireNotTimedOut(ctx context.Context, perms *PermissionService, userID in
 	return nil
 }
 
-// readSubject resolves what CanReadContent needs for userID in ch: role bits
-// and overrides from the permission cache, the channel's flags, and for a DM
-// the participant flag. Unlike channelSubject (the send path's builder) a DM
-// lookup failure folds into "not a participant" rather than surfacing as an
-// internal error — requireChannelRead's long-standing posture that an
-// outsider learns nothing about a DM's existence, even on a transient
-// failure.
+// readSubject resolves what CanReadContent needs for userID in ch. Unlike
+// channelSubject, a DM lookup failure folds into "not a participant" so an
+// outsider learns nothing about a DM's existence even on a transient failure.
 //
-// Archived is deliberately NOT propagated into Channel — docs/protocol.md's
-// channel_update section documents "History stays readable" for an archived
-// channel as a locked contract; CanViewChannel (which CanReadContent calls
-// first) refuses an archived channel outright, and this read gate must not
-// silently withdraw that documented guarantee as a side effect of adding the
-// NSFW check. Only the WRITE gate (requireChannelWritable) and the
-// visibility/audience predicates (CanViewChannel's own direct callers) see
-// the real flag.
+// Archived is deliberately NOT propagated into Channel: docs/protocol.md
+// documents "History stays readable" for an archived channel, CanViewChannel
+// (called first by CanReadContent) refuses an archived channel outright, and this
+// read gate must not withdraw that guarantee. Only the WRITE gate
+// (requireChannelWritable) and the visibility/audience predicates see the flag.
 //
-// The NSFW acknowledgement is resolved live (never cached) and only when the
-// channel is actually labelled — an unlabelled channel's read costs nothing
-// beyond what channelSubject already costs.
+// The NSFW acknowledgement is resolved live (never cached), only for a labelled
+// channel.
 func readSubject(ctx context.Context, st Store, perms *PermissionService, userID int64, ch *db.Channel) permissions.Subject {
 	sub, err := perms.Subject(ctx, userID, ch.ID)
 	if err != nil {
@@ -275,14 +245,12 @@ func readSubject(ctx context.Context, st Store, perms *PermissionService, userID
 	return sub
 }
 
-// readContentDenial maps a CanReadContent verdict onto the service's error
-// kinds. ErrNotDMParticipant becomes ErrNotFound, matching requireChannelRead
-// and SearchMessages' long-standing "a DM an outsider is not in does not
-// exist" posture; ErrNSFWUnacknowledged wraps BOTH ErrForbidden (so ordinary
-// FORBIDDEN handling still applies) and the permissions sentinel itself (so a
-// caller that wants the specific NSFW_ACKNOWLEDGEMENT_REQUIRED code can match
-// it with errors.Is); everything else (missing READ_MESSAGES, archived) is
-// ErrForbidden carrying the predicate's own reason.
+// readContentDenial maps a CanReadContent verdict onto service errors.
+// ErrNotDMParticipant becomes ErrNotFound ("a DM an outsider is not in does not
+// exist"); ErrNSFWUnacknowledged wraps both ErrForbidden (ordinary FORBIDDEN
+// handling) and the permissions sentinel (so callers can match
+// NSFW_ACKNOWLEDGEMENT_REQUIRED); everything else is ErrForbidden with the
+// predicate's reason.
 func readContentDenial(err error) error {
 	switch {
 	case err == nil:
@@ -297,21 +265,14 @@ func readContentDenial(err error) error {
 }
 
 // requireChannelWritable refuses a write against an archived non-DM channel.
-// `archived` used to be consulted only by the visibility predicate
-// (VisibleChannelIDs / RefreshChannelVisibility), so it hid a channel without
-// protecting it: any caller that still held the id — a custom client, or a
-// stock client racing the channel_delete that archiving triggers — could keep
-// posting, editing, reacting, pinning, or bulk-deleting in an archive
-// indefinitely. History stays readable; only writes are refused.
-//
-// DMs carry no archive flag/concept and are exempt. ch == nil is treated as
-// "nothing to check" rather than a panic — the caller's own nil handling (a
-// failed channel lookup) decides what happens next.
-//
-// Single shared gate for every write sink: checkSendPermission (so
-// SendMessage, EditMessage and CanPost inherit it), plus DeleteMessage,
-// handleReaction, SetMessagePinned and PurgeMessages, which route their own
-// permission checks and so call it directly instead.
+// Archived was once consulted only by the visibility predicate, which hid a
+// channel without protecting it: a custom client, or a stock client racing the
+// archiving channel_delete, could keep writing to an archive. History stays
+// readable. DMs have no archive flag and are exempt; ch == nil is "nothing to
+// check" and the caller's own nil handling decides. It is the single gate for
+// every write sink: checkSendPermission (so SendMessage, EditMessage, CanPost),
+// plus DeleteMessage, handleReaction, SetMessagePinned and PurgeMessages, which
+// call it directly.
 func requireChannelWritable(ch *db.Channel) error {
 	if ch == nil || ch.Type == "dm" || !ch.Archived {
 		return nil
@@ -320,12 +281,11 @@ func requireChannelWritable(ch *db.Channel) error {
 }
 
 // dmUnreachableText is the one sentence every refused 1:1 interaction carries,
-// whatever the cause, so the sender cannot tell the causes apart.
+// so the sender cannot tell the causes apart.
 const dmUnreachableText = "you can't message this user"
 
-// DMBlockReader is the narrow read set the 1:1 reachability check needs —
-// Store satisfies it, and so do consumer-side seams (ws.DispatchReader) that
-// carry just these four reads.
+// DMBlockReader is the read set the 1:1 reachability check needs; Store and
+// consumer-side seams (ws.DispatchReader) satisfy it.
 type DMBlockReader interface {
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
@@ -333,16 +293,15 @@ type DMBlockReader interface {
 	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
-// DMPrivacyReader is the one privacy read the 1:1 reachability check adds.
-// It is deliberately not part of Store (the Store method ratchet): *db.DB
-// satisfies it, and storeDMReader reaches it from a Store.
+// DMPrivacyReader is the privacy read the check adds. It is deliberately not part
+// of Store (the Store method ratchet); storeDMReader reaches it from a Store.
 type DMPrivacyReader interface {
 	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
-// storeDMReader lets a Store stand in as a DMBlockReader. A Store that does not
-// also satisfy DMPrivacyReader (a test double) fails closed with ErrInternal
-// rather than skipping the check.
+// storeDMReader lets a Store stand in as a DMBlockReader. A Store without
+// DMPrivacyReader (a test double) fails closed with an error rather than skipping
+// the check.
 type storeDMReader struct{ Store }
 
 func (r storeDMReader) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
@@ -354,44 +313,29 @@ func (r storeDMReader) DMRefusesSender(ctx context.Context, recipientID, senderI
 }
 
 // RequireDMReachable reports ErrBlocked when userID cannot reach the other
-// participant of DM channelID: the two have blocked each other in either
-// direction, or the other participant has turned off direct messages from
-// members and does not trust userID (trusted_senders, any source). Both causes
-// return the same error.
+// participant of DM channelID: they blocked each other in either direction, or
+// the other participant turned off DMs from members and does not trust userID
+// (trusted_senders, any source). Both causes return the same error.
 //
-// It is the single block-check implementation, called from every DM
-// interaction sink — send, edit, react, pin, typing and call rings
-// (DMService.RingTargets) — and, outside this package, from voice
-// join/token-refresh (ws/voice_join.go): st only needs to be a DMBlockReader,
-// and both *db.DB and Store satisfy it.
+// It is the single block-check implementation, called from every DM sink (send,
+// edit, react, pin, typing, call rings via DMService.RingTargets) and from voice
+// join/token-refresh (ws/voice_join.go); st only needs to be a DMBlockReader.
+// Enforcing it on send alone left a blocked user an open channel: an edit fans
+// MessageEditedDMEvent out to every participant, and reactions and typing did the
+// same.
 //
-// Enforcing it on the
-// send path alone left a blocked user an open channel to the blocker: editing
-// an already-sent message fans MessageEditedDMEvent out to every participant,
-// so arbitrary new text still reached the person who blocked them, and
-// reactions and typing indicators did the same.
-//
-// Callers keep their own IsDMParticipant check. Its failure mode is
-// deliberately different per sink (ErrForbidden for edit, ErrBadRequest for
-// reactions, ErrNotFound for pins so a foreign DM's existence stays hidden)
-// and flattening them here would change client-visible status codes.
-//
+// Callers keep their own IsDMParticipant check: its failure mode differs per
+// sink (ErrForbidden edit, ErrBadRequest reactions, ErrNotFound pins so a foreign
+// DM stays hidden), and flattening it would change client-visible status codes.
 // A failed read of the recipient's privacy state fails closed as ErrInternal,
-// never ErrBlocked, so it cannot read as a refusal by the other party.
+// never ErrBlocked. A GetDMRecipient failure or a DM with no other participant
+// is "not blocked" (both the block check and privacy read are skipped), carrying
+// over the send path's posture rather than newly failing closed on all sinks.
 //
-// A GetDMRecipient lookup failure or a DM with no other participant is treated
-// as "not blocked", carrying over the posture the send path has always had
-// rather than newly failing closed on all five sinks at once.
-//
-// Group DMs are exempt, which is Discord's rule and the only coherent one for
-// a shared room: there is no single "the other party" to be blocked by, and
-// dropping one member's messages for one other member would leave the two of
-// them reading different conversations under the same name. Blocks are instead
-// enforced when the group is *created* (DMService.CreateGroupDM), where the
-// question "may these two be in a room together" still has one answer.
-//
-// When the recipient lookup fails or the DM has no other participant, both the
-// block check and the privacy read are skipped.
+// Group DMs are exempt (Discord's rule): there is no single "other party", and
+// dropping one member's messages for another would leave two members reading
+// different conversations. Blocks are enforced at group creation
+// (DMService.CreateGroupDM) instead.
 func RequireDMReachable(ctx context.Context, st DMBlockReader, userID, channelID int64) error {
 	isGroup, gErr := st.IsGroupDM(ctx, channelID)
 	if gErr == nil && isGroup {

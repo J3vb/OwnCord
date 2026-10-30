@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { copyWithToast, isDeveloperMode } from "./developerTools";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 function setDeveloperMode(on: boolean): void {
   localStorage.setItem("owncord:settings:developerMode", on ? "true" : "false");
@@ -41,5 +41,21 @@ describe("developerTools", () => {
     await vi.waitFor(() =>
       expect(showToast).toHaveBeenCalledWith("Couldn't copy the message ID", "error"),
     );
+  });
+});
+
+describe("developerTools default", () => {
+  afterEach(() => {
+    setDeveloperMode(false);
+  });
+
+  it("turns off again when the preference is removed", () => {
+    setDeveloperMode(true);
+    expect(isDeveloperMode()).toBe(true);
+    localStorage.removeItem("owncord:settings:developerMode");
+    window.dispatchEvent(
+      new CustomEvent("owncord:pref-change", { detail: { key: "developerMode" } }),
+    );
+    expect(isDeveloperMode()).toBe(false);
   });
 });

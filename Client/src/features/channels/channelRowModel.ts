@@ -1,10 +1,10 @@
 /**
- * Pure builders for the text channel row and category group models (5.4d): the
+ * Pure builders for the text channel row and category group models: the
  * inputs in, the drawn values out. No builder reads a store, a preference or
  * the mute list; the sidebar hands them a `ChannelListInputs` snapshot and the
  * injected `isMuted`, and `tests/unit/channel-row-model.test.ts` runs them
  * under the store-read guard. `isMuted` is not a store, so the guard cannot see
- * it: no builder may import `lib/channel-mutes`.
+ * it: no builder may import `lib/prefs/channelMutes`.
  *
  * Voice channels share the one keyed list. Their wrapper keeps its own chrome
  * model (`voiceRowModel.ts`); `VoiceChannelRowModel` here is only what makes
@@ -13,7 +13,7 @@
 
 import { categoryGroups, groupLabel } from "../../stores/channels.store";
 import type { Channel, ChannelsState } from "../../stores/channels.store";
-import { mutedRowHidden } from "../../lib/hide-muted-channels";
+import { mutedRowHidden } from "../../lib/prefs/hideMutedChannels";
 import {
   hasPermission,
   memberHasPermissionIn,

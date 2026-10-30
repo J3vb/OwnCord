@@ -32,7 +32,7 @@ func (q *Queries) CountActiveMessages(ctx context.Context) (int64, error) {
 }
 
 const countChannels = `-- name: CountChannels :one
-SELECT COUNT(*) FROM channels
+SELECT COUNT(*) FROM channels WHERE import_pending = 0
 `
 
 func (q *Queries) CountChannels(ctx context.Context) (int64, error) {
@@ -410,9 +410,11 @@ func (q *Queries) SetSetting(ctx context.Context, arg SetSettingParams) error {
 }
 
 const userCount = `-- name: UserCount :one
-SELECT COUNT(*) FROM users
+SELECT COUNT(*) FROM users WHERE registration_status <> 'system'
 `
 
+// The hidden import account (registration_status 'system') is not a member: it must
+// not make a fresh server look set up, nor count in the member totals.
 func (q *Queries) UserCount(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, userCount)
 	var count int64

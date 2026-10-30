@@ -15,8 +15,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ─── User Operations ──────────────────────────────────────────────────────────
-
 // CreateUser inserts a new user record and returns the assigned ID.
 func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
 	res, err := d.writer.ExecContext(ctx,
@@ -29,23 +27,21 @@ func (d *DB) CreateUser(ctx context.Context, username, passwordHash string, role
 	return res.LastInsertId()
 }
 
-// The durable first-run gate (migration 043). SetupCompletedKey is written
-// in the same transaction as the first owner and never cleared by the
-// server; an operator re-opens the wizard by setting it back to SetupOpen
-// with filesystem access to the database (docs/security.md, "First-run
-// setup"). Any other value is treated as closed, this being the gate in
-// front of an unauthenticated endpoint.
+// The durable first-run gate. SetupCompletedKey is written in the same
+// transaction as the first owner and never cleared by the server; an operator
+// re-opens the wizard by setting it to SetupOpen (docs/security.md, "First-run
+// setup"). Any other value counts as closed, since this gates an
+// unauthenticated endpoint.
 const (
 	SetupCompletedKey = "setup_completed"
 	SetupOpen         = "0"
 	SetupClosed       = "1"
 )
 
-// CloseSetupGate records that this installation has been set up, whatever
-// the users table says. The erasure markers call it at start-up: a marker
-// proves an account existed here, it lives outside the database a restore
-// overwrites, and a backup taken before the first owner rolls both the users
-// table and the flag back to their fresh state — which would otherwise
+// CloseSetupGate records that this installation has been set up, whatever the
+// users table says. The erasure markers call it at start-up: a marker lives
+// outside the database a restore overwrites, and a backup taken before the
+// first owner rolls both the users table and the flag back, which would
 // reopen the unauthenticated setup endpoint. Idempotent.
 func (d *DB) CloseSetupGate(ctx context.Context) error {
 	if _, err := d.writer.ExecContext(ctx,
@@ -57,9 +53,9 @@ func (d *DB) CloseSetupGate(ctx context.Context) error {
 	return nil
 }
 
-// CreateOwnerIfEmpty atomically checks that no users exist and inserts the
-// first owner in a single transaction. Returns ErrConflict if any user already
-// exists, closing the TOCTOU race in the setup endpoint (BUG-119).
+// CreateOwnerIfEmpty checks that no users exist and inserts the first owner in
+// one transaction, closing the TOCTOU race in the setup endpoint. It returns
+// ErrConflict if any user exists.
 func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -67,19 +63,15 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	// The durable gate (migration 043): setup_completed is set by the first
-	// owner's creation below and never cleared by the server, so an emptied
-	// users table — an erasure, or a marker replay past the last-admin guard
-	// on a restored backup — cannot reopen the unauthenticated setup
-	// endpoint. Read inside this transaction, like the count it backs up, so
-	// two concurrent requests cannot both pass.
+	// The durable gate: setup_completed is set by the first owner's creation and
+	// never cleared by the server, so an emptied users table (an erasure, or a
+	// marker replay past the last-admin guard) cannot reopen the unauthenticated
+	// setup endpoint. It is read inside this transaction like the count, so two
+	// concurrent requests cannot both pass.
 	//
-	// Only SetupOpen lets the count decide. The server writes SetupClosed and
-	// the documented re-open writes SetupOpen, so any other value is
-	// corruption or someone's guess at the schema, and this gate stands in
-	// front of an unauthenticated endpoint: an unrecognised value refuses. A
-	// missing row is the one exception, being what every pre-migration
-	// database looks like.
+	// Only SetupOpen lets the count decide; any other value is corruption or a
+	// guess at the schema and refuses. A missing row is the exception, being what
+	// a pre-migration database looks like.
 	var completed string
 	switch err := tx.QueryRow(`SELECT value FROM settings WHERE key = ?`, SetupCompletedKey).Scan(&completed); {
 	case errors.Is(err, sql.ErrNoRows):
@@ -91,7 +83,7 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	}
 
 	var count int64
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users WHERE registration_status <> 'system'`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("CreateOwnerIfEmpty count: %w", err)
 	}
 	if count > 0 {
@@ -111,8 +103,7 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 		return 0, fmt.Errorf("CreateOwnerIfEmpty last_id: %w", err)
 	}
 
-	// Setup is closed from this commit on, in the same transaction as the
-	// owner it belongs to.
+	// Setup closes at this commit, in the same transaction as the owner.
 	if _, err := tx.Exec(
 		`INSERT INTO settings (key, value) VALUES (?1, ?2)
 		 ON CONFLICT(key) DO UPDATE SET value = ?2`, SetupCompletedKey, SetupClosed); err != nil {
@@ -125,12 +116,10 @@ func (d *DB) CreateOwnerIfEmpty(ctx context.Context, username, passwordHash stri
 	return uid, nil
 }
 
-// CreateUserWithInvite atomically consumes an invite, creates the user and
-// inserts the account's first session in one transaction, so a failure at any
-// step — the session insert included (OC-0376) — leaves no half-registered
+// CreateUserWithInvite consumes an invite, creates the user and inserts the
+// first session in one transaction, so a failure leaves no half-registered
 // account and does not burn the invite. sessionTokenHash must already be
-// hashed. The H-6 session cap needs no eviction here: the user has no sessions
-// yet.
+// hashed. No session-cap eviction is needed: the user has no sessions yet.
 func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -167,10 +156,9 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 	if err != nil {
 		return 0, fmt.Errorf("CreateUserWithInvite last insert id: %w", err)
 	}
-	// The redemption record (migration 055) commits with the account and the
-	// invite's use_count: a leaked invite can now be traced to its redeemer
-	// (O1). Best-effort is wrong here — it is part of the same transaction, so
-	// a failure rolls back the whole registration.
+	// The redemption record commits with the account and the invite's use_count,
+	// so a leaked invite can be traced to its redeemer; a failure rolls back the
+	// whole registration.
 	if err := d.q.WithTx(tx).CreateInviteRedemption(ctx, dbgen.CreateInviteRedemptionParams{
 		UserID: &uid,
 		Code:   inviteCode,
@@ -187,9 +175,8 @@ func (d *DB) CreateUserWithInvite(ctx context.Context, username, passwordHash st
 }
 
 // CreateUserWithSession creates the account and its first session in one
-// transaction — open-mode registration (B4-1), where no invite is consumed.
-// Like CreateUserWithInvite, a failure at any step leaves no half-registered
-// account (OC-0376). sessionTokenHash must already be hashed.
+// transaction (open-mode registration, no invite consumed); a failure leaves
+// no half-registered account. sessionTokenHash must already be hashed.
 func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -221,11 +208,11 @@ func (d *DB) CreateUserWithSession(ctx context.Context, username, passwordHash s
 // the approval queue already holds maxPending rows.
 var ErrPendingQueueFull = errors.New("approval queue is full")
 
-// CreatePendingUser records an approval-mode application (B4-1): the account
-// row exists, holding the username, as registration_status = 'pending' with
-// no session, so it cannot sign in until ApprovePendingUser. The queue cap is
-// enforced by the insert itself (one serialized statement), so concurrent
-// applications cannot overshoot it; ErrPendingQueueFull when it is full.
+// CreatePendingUser records an approval-mode application: the account row
+// exists with registration_status = 'pending' and no session, so it cannot
+// sign in until ApprovePendingUser. The queue cap is enforced by the insert
+// itself, so concurrent applications cannot overshoot it; ErrPendingQueueFull
+// when full.
 func (d *DB) CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error) {
 	res, err := d.q.CreatePendingUser(ctx, dbgen.CreatePendingUserParams{
 		Username:   username,
@@ -276,7 +263,7 @@ func (d *DB) CountPendingUsers(ctx context.Context) (int64, error) {
 }
 
 // ApprovePendingUser unlocks an application. ErrNotFound when the id is not a
-// pending application (already decided, or never one).
+// pending application.
 func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
 	res, err := d.q.ApprovePendingUser(ctx, userID)
 	if err != nil {
@@ -293,22 +280,18 @@ func (d *DB) ApprovePendingUser(ctx context.Context, userID int64) error {
 }
 
 // anonymiseNameAttempts is how many names DenyPendingUser will try: the
-// canonical "[denied-<id>]" plus randomly suffixed variants. Exhausting it
-// means the generator collided repeatedly, which is not something an
-// attacker can force.
+// canonical "[denied-<id>]" plus randomly suffixed variants.
 const anonymiseNameAttempts = 4
 
-// DenyPendingUser denies an application: the row is anonymised (the username
-// is released as "[denied-{id}]", the password and profile cleared) and locked
-// as 'denied' for good — the convention the pre-B4-9 account deletion used,
-// because audit rows reference the id. Only a still-pending row is touched;
-// an approved account never goes through here. ErrNotFound when nothing
-// pending matches.
+// DenyPendingUser anonymises an application (username released as
+// "[denied-{id}]", password and profile cleared) and locks it as 'denied' for
+// good, because audit rows reference the id. Only a still-pending row is
+// touched; ErrNotFound when nothing pending matches.
 func (d *DB) DenyPendingUser(ctx context.Context, userID int64) error {
-	// users.username is UNIQUE COLLATE NOCASE and the "[denied-…]" namespace
-	// is reserved at registration (auth.ValidateUsername), but a row from
-	// before the reservation could hold the plain name; fall back to randomly
-	// suffixed variants rather than leave the application pending.
+	// users.username is UNIQUE COLLATE NOCASE and the "[denied-...]" namespace is
+	// reserved at registration, but an older row could hold the plain name; fall
+	// back to randomly suffixed variants rather than leave the application
+	// pending.
 	var lastErr error
 	for attempt := range anonymiseNameAttempts {
 		name := fmt.Sprintf("[denied-%d]", userID)
@@ -385,9 +368,8 @@ func (d *DB) UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string)
 	return nil
 }
 
-// UpdateUserIdentityKey sets or clears the E2EE identity public key for a user
-// (F3 voice E2EE TOFU). Last write wins; key changes are audited at the
-// service layer so peers can detect a rotation.
+// UpdateUserIdentityKey sets or clears the E2EE identity public key. Last
+// write wins; the service audits key changes so peers can detect a rotation.
 func (d *DB) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error {
 	if err := d.q.UpdateUserIdentityKey(ctx, dbgen.UpdateUserIdentityKeyParams{
 		IdentityPublicKey: key,
@@ -398,10 +380,10 @@ func (d *DB) UpdateUserIdentityKey(ctx context.Context, id int64, key *string) e
 	return nil
 }
 
-// ResetAllUserStatuses clears the "online" status left behind by a previous
-// run or crash. Called on server startup. Chosen statuses (idle/dnd/invisible)
-// are left standing — they are what the user picked, not evidence of a session,
-// and the read path already renders a user with no live connection as offline.
+// ResetAllUserStatuses clears the "online" status left by a previous run or
+// crash, at startup. Chosen statuses (idle/dnd/invisible) stay: they are what
+// the user picked, and the read path already shows a user with no connection
+// as offline.
 func (d *DB) ResetAllUserStatuses(ctx context.Context) error {
 	if err := d.q.ResetAllUserStatuses(ctx); err != nil {
 		return fmt.Errorf("ResetAllUserStatuses: %w", err)
@@ -436,23 +418,16 @@ func (d *DB) UnbanUser(ctx context.Context, id int64) error {
 	return nil
 }
 
-// ─── Session Operations ───────────────────────────────────────────────────────
-
-// maxSessionsPerUser is the maximum number of concurrent sessions allowed per
-// user. When exceeded, the oldest session is evicted. This prevents unbounded
-// session accumulation from credential stuffing or token theft (H-6).
+// maxSessionsPerUser caps concurrent sessions per user; the oldest is evicted
+// beyond it, bounding accumulation from credential stuffing or token theft.
 const maxSessionsPerUser = 25
 
-// CreateSession inserts a new session and returns the session ID.
-// tokenHash must already be hashed (never store plaintext tokens).
-// H-6: Enforces a per-user session cap by evicting the oldest session when
-// the limit is reached.
+// CreateSession inserts a new session and returns its ID, evicting the oldest
+// session at the per-user cap. tokenHash must already be hashed.
 func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
-	// Evict oldest sessions if at or above the cap. A failed eviction must
-	// not block the login (the DELETE trims to the cap again on the next
-	// successful CreateSession, and a persistent DB failure fails the
-	// InsertSession below anyway), but an H-6 control failing is never
-	// allowed to be invisible.
+	// Evict oldest sessions at or above the cap. A failed eviction must not
+	// block login (the next CreateSession trims again, and a persistent failure
+	// fails InsertSession anyway), but it must not be invisible.
 	if err := d.q.EvictOldestSessions(ctx, dbgen.EvictOldestSessionsParams{
 		UserID: userID,
 		Offset: maxSessionsPerUser - 1,
@@ -464,17 +439,15 @@ func (d *DB) CreateSession(ctx context.Context, userID int64, tokenHash, device,
 	return insertSession(ctx, d.q, userID, tokenHash, device, ip, true)
 }
 
-// CreateFirstSession inserts an account's first session already seen: there is
-// no other device to tell, so it must not surface as an unreviewed new login.
-// Being the only session, it needs no cap eviction.
+// CreateFirstSession inserts an account's first session already seen, since
+// there is no other device to tell, and needs no cap eviction.
 func (d *DB) CreateFirstSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error) {
 	return insertSession(ctx, d.q, userID, tokenHash, device, ip, false)
 }
 
-// insertSession inserts one session row through q — d.q, or d.q.WithTx(tx)
-// when the row must commit with other writes (CreateUserWithInvite).
-// unseen marks the row as a new login the account has not acknowledged yet
-// (B4-7); a registration's first session has no other device to tell.
+// insertSession inserts one session row through q (d.q, or d.q.WithTx(tx) when
+// it must commit with other writes). unseen marks a new login the account has
+// not acknowledged.
 func insertSession(ctx context.Context, q *dbgen.Queries, userID int64, tokenHash, device, ip string, unseen bool) (int64, error) {
 	expiresAt := time.Now().Add(sessionTTL).UTC().Format(dbtime.ISOLayout)
 	deviceCopy, ipCopy := device, ip
@@ -507,8 +480,7 @@ func (d *DB) GetSessionByTokenHash(ctx context.Context, tokenHash string) (*Sess
 	return &sess, nil
 }
 
-// SessionWithBanStatus combines session data with user ban fields
-// in a single query, avoiding two sequential DB round-trips.
+// SessionWithBanStatus combines session data with user ban fields in one query.
 type SessionWithBanStatus struct {
 	Session
 	Banned     bool
@@ -541,13 +513,12 @@ func (d *DB) GetSessionWithBanStatus(ctx context.Context, tokenHash string) (*Se
 	}, nil
 }
 
-// GetSessionsWithBanStatusBatch returns session+ban rows for every token hash
-// in tokenHashes, keyed by token hash. Hashes with no session row are simply
-// absent from the map. Used by the ws revoked-session sweep so N connected
-// clients cost one query per sweep instead of N.
+// GetSessionsWithBanStatusBatch returns session+ban rows for every token hash,
+// keyed by hash; hashes with no session are absent. The ws revoked-session
+// sweep uses it to cost one query instead of N.
 func (d *DB) GetSessionsWithBanStatusBatch(ctx context.Context, tokenHashes []string) (map[string]*SessionWithBanStatus, error) {
 	result := make(map[string]*SessionWithBanStatus, len(tokenHashes))
-	// Chunk the IN list to stay far below SQLite's bound-parameter limit.
+	// Chunk the IN list far below SQLite's bound-parameter limit.
 	const chunkSize = 500
 	for start := 0; start < len(tokenHashes); start += chunkSize {
 		chunk := tokenHashes[start:min(start+chunkSize, len(tokenHashes))]
@@ -612,9 +583,8 @@ func (d *DB) DeleteSession(ctx context.Context, tokenHash string) error {
 	return nil
 }
 
-// DeleteOtherSessions removes all sessions for the given user except the one
-// with keepSessionID. Used after password change or 2FA state change to
-// invalidate all other sessions (BUG-108).
+// DeleteOtherSessions removes all of the user's sessions except keepSessionID
+// (after a password or 2FA change).
 func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error) {
 	result, err := d.q.DeleteOtherSessions(ctx, dbgen.DeleteOtherSessionsParams{
 		UserID: userID,
@@ -627,11 +597,10 @@ func (d *DB) DeleteOtherSessions(ctx context.Context, userID, keepSessionID int6
 	return n, nil
 }
 
-// DeleteExpiredSessions removes all sessions whose expires_at is in the past.
-// The comparison is plain text against idx_sessions_expires_at, so the cutoff
-// MUST use dbtime.ISOLayout — the exact stored format (migration 031
-// normalized legacy rows). A space-separated cutoff would compare wrong and
-// silently delete nothing (' ' sorts before 'T').
+// DeleteExpiredSessions removes sessions whose expires_at is past. The
+// comparison is plain text against idx_sessions_expires_at, so the cutoff must
+// use dbtime.ISOLayout, the stored format; a space-separated cutoff would
+// compare wrong (' ' sorts before 'T') and delete nothing.
 func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
 	cutoff := time.Now().UTC().Format(dbtime.ISOLayout)
 	if err := d.q.DeleteExpiredSessions(ctx, cutoff); err != nil {
@@ -639,8 +608,6 @@ func (d *DB) DeleteExpiredSessions(ctx context.Context) error {
 	}
 	return nil
 }
-
-// ─── Invite Operations ────────────────────────────────────────────────────────
 
 // CreateInvite generates a random invite code, persists it, and returns the
 // code. maxUses=0 means unlimited. expiresAt=nil means never expires.
@@ -692,18 +659,11 @@ func (d *DB) GetInvite(ctx context.Context, code string) (*Invite, error) {
 	}, nil
 }
 
-// UseInviteAtomic validates and increments the use_count in a single SQL
-// statement, eliminating the TOCTOU race that exists when GetInvite and
-// UseInvite are called as separate operations.
-//
-// The UPDATE only matches rows where:
-//   - the code exists
-//   - revoked = 0
-//   - max_uses IS NULL (unlimited) OR uses < max_uses
-//   - expires_at IS NULL (never) OR expires_at > now
-//
-// If zero rows are affected the invite is missing, revoked, expired, or
-// exhausted — an error is returned in all such cases.
+// UseInviteAtomic validates and increments use_count in one statement,
+// avoiding the TOCTOU race of GetInvite then UseInvite. The UPDATE matches
+// only a code that exists, is not revoked, is within max_uses (NULL is
+// unlimited) and is not expired; zero rows affected means missing, revoked,
+// expired or exhausted, and returns an error.
 func (d *DB) UseInviteAtomic(ctx context.Context, code string) error {
 	result, err := d.q.UseInviteAtomic(ctx, code)
 	if err != nil {
@@ -727,8 +687,6 @@ func (d *DB) RevokeInvite(ctx context.Context, code string) error {
 	return nil
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 // FormatMemberCreatedAt renders a users.created_at value (SQLite's
 // datetime('now') text, "2006-01-02 15:04:05", or an RFC 3339 instant) in the
 // member wire layout, so member_join and ready.members[] agree. A value it
@@ -743,10 +701,9 @@ func FormatMemberCreatedAt(raw string) string {
 	return raw
 }
 
-// MemberGeneration returns the member generation: a counter SQLite triggers
-// bump, in the same commit, on every write that can change ListMembers'
-// result except a users.status change (migration 057). Equal generations mean
-// no such write committed in between.
+// MemberGeneration returns a counter that SQLite triggers bump, in the same
+// commit, on every write that can change ListMembers' result except a
+// users.status change. Equal generations mean no such write committed between.
 func (d *DB) MemberGeneration(ctx context.Context) (int64, error) {
 	gen, err := d.q.GetMemberGeneration(ctx)
 	if err != nil {
@@ -755,10 +712,10 @@ func (d *DB) MemberGeneration(ctx context.Context) (int64, error) {
 	return gen, nil
 }
 
-// NextMemberBanLapse returns when the earliest temporary ban ListMembers is
-// still hiding lapses, as the "2006-01-02T15:04:05Z"-shaped text ListMembers
-// compares against SQLite's clock, or "" when none is pending. A lapse changes
-// ListMembers' result without any write, so it bumps no generation.
+// NextMemberBanLapse returns when the earliest temporary ban ListMembers still
+// hides lapses, as "2006-01-02T15:04:05Z"-shaped text ListMembers compares
+// against SQLite's clock, or "" when none is pending. A lapse changes the
+// result without a write, so it bumps no generation.
 func (d *DB) NextMemberBanLapse(ctx context.Context) (string, error) {
 	at, err := d.q.NextMemberBanLapse(ctx)
 	if err != nil {

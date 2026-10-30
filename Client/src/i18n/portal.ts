@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * The single-server web portal's copy (WP 6.13e). Only branches written behind
+ * The single-server web portal's copy. Only branches written behind
  * `__OWNCORD_WEB__` read it, so the desktop build drops them, and this module
  * with them: that is why it is not part of connect.ts, whose data sits in the
  * startup chunk and cannot be tree-shaken. The call is marked pure so the

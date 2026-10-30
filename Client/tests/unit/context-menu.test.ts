@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { showContextMenu, createSubmenuTrigger } from "../../src/lib/context-menu";
+import { showContextMenu, createSubmenuTrigger } from "../../src/lib/ui/contextMenu";
 
 describe("showContextMenu", () => {
   let ac: AbortController;
@@ -377,7 +377,7 @@ describe("showContextMenu", () => {
     expect(menu).not.toBeNull();
   });
 
-  describe("OC-0057: abort-listener teardown on the caller signal", () => {
+  describe("abort-listener teardown on the caller signal", () => {
     it("does not re-invoke menu cleanup off the caller signal after the menu was already dismissed", () => {
       showContextMenu({
         x: 0,
@@ -826,7 +826,7 @@ describe("submenus and radio rows (3D-3a)", () => {
     menu.append(trigger, flyout);
     document.body.appendChild(menu);
     // Same keyboard model every menu gets.
-    return import("../../src/lib/context-menu").then(({ enableMenuKeyboard }) => {
+    return import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
       enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
       trigger.focus();
       key(trigger, "Enter");
@@ -852,7 +852,7 @@ describe("submenus and radio rows (3D-3a)", () => {
     menu.append(trigger, flyout);
     document.body.appendChild(menu);
     // Same keyboard model every menu gets.
-    return import("../../src/lib/context-menu").then(({ enableMenuKeyboard }) => {
+    return import("../../src/lib/ui/contextMenu").then(({ enableMenuKeyboard }) => {
       enableMenuKeyboard(menu, { signal: ac.signal, onClose: () => menu.remove() });
       trigger.focus();
       key(trigger, " ");

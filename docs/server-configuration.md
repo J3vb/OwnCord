@@ -124,6 +124,7 @@ start-up output. This also applies after you re-open setup by clearing the
 | `upload.allowed_extensions` | list   | `[]`                                                                                                                                                                                                                                | Allow-only mode when non-empty: only files whose final extension is listed are accepted (a blocked extension stays blocked). Empty accepts any type not blocked. The admin panel can replace it like `blocked_extensions`. An entry that cannot be an extension fails startup                                                                                                                                                                                                                                                      |
 | `upload.storage_dir`        | string | `"data/uploads"`                                                                                                                                                                                                                    | Directory where uploaded files are stored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `upload.user_quota_mb`      | int    | `0`                                                                                                                                                                                                                                 | Total bytes one user may hold in upload storage — attachments and avatars (including profile pictures), counted where the bytes are written. Custom emoji are excluded on purpose: they are server-wide assets, bounded by the emoji cap (200 files × 512 KiB) and still gated by the disk-headroom floor. `0` = unlimited (the default, so no existing install changes on upgrade). An upload that would cross the quota is refused with `507 STORAGE_QUOTA_EXCEEDED`. A negative value falls back to the default with a warning. |
+| `upload.import_max_mb`      | int    | `500`                                                                                                                                                                                                                               | Largest Discord export file (`.json` or `.zip`) the admin panel's Import from Discord takes, in MiB. The upload streams to a temp file under `data/import-tmp`, so the volume needs that much free space while an import runs; an upload over the cap is refused with `413 PAYLOAD_TOO_LARGE` before it is stored. It is separate from `upload.max_size_mb`, which bounds each attachment copied out of the export. Editable in the admin panel's config page. `0` or a negative value falls back to the default with a warning.   |
 
 ### Web Push (`push`)
 
@@ -222,7 +223,7 @@ Controls the OpenTelemetry SDK. Requires building with `-tags otel` (see [Contri
 | `telemetry.otlp_insecure` | bool   | `false`            | Disable TLS for the OTLP gRPC connection. Only set `true` in development / private-network deployments. |
 | `telemetry.service_name`  | string | `"owncord-server"` | OTel `service.name` resource attribute                                                                  |
 
-> **Local development:** Run `make otel-up` (from `Server/`) to start Jaeger + Prometheus via Docker.
+> **Local development:** Run `make otel-up` (from `Server/`) to start Jaeger + Prometheus via Docker (compose file in `deploy/docker/`).
 > Jaeger UI: `http://localhost:16686` — Prometheus UI: `http://localhost:9090`
 
 ### Plugins (`plugins`)
@@ -517,7 +518,7 @@ anyway, so the panel would add risk and save no work. To move it:
 
 <!-- gendocs:config:start -->
 
-Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 77 keys.
+Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 78 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -585,6 +586,7 @@ Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags 
 | `tls.mode`                                  | TLS (`tls`)                             |
 | `upload.allowed_extensions`                 | Uploads (`upload`)                      |
 | `upload.blocked_extensions`                 | Uploads (`upload`)                      |
+| `upload.import_max_mb`                      | Uploads (`upload`)                      |
 | `upload.max_size_mb`                        | Uploads (`upload`)                      |
 | `upload.storage_dir`                        | Uploads (`upload`)                      |
 | `upload.user_quota_mb`                      | Uploads (`upload`)                      |

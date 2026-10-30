@@ -1,5 +1,5 @@
 /**
- * The voice-message player (WP 8.9): an attachment that carries a waveform and a
+ * The voice-message player: an attachment that carries a waveform and a
  * length renders as this, whatever MIME the server sniffed for its bytes.
  *
  * The bars come from the attachment's own metadata, so nothing is downloaded
@@ -10,7 +10,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setOwnedTimeout } from "@lib/dom";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { createIcon } from "@lib/icons";
 import type { Attachment } from "@lib/types";
 import { voiceMessagesText } from "../../i18n/voiceMessages";

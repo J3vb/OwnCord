@@ -15,7 +15,7 @@ import {
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
-import { removeStored, storedKeys } from "@lib/preferences";
+import { removeStored, storedKeys } from "@lib/prefs/preferences";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
 import { settingsText as t } from "../../i18n/settings";
@@ -54,9 +54,9 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
     for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
   }
 
-  // Share the game you are playing (WP 8.3): desktop only, nothing to show on the web.
+  // Share the game you are playing: desktop only, nothing to show on the web.
   for (const el of buildGameActivityRows(signal)) section.appendChild(el);
-  // Share the music you're listening to (WP 8.10): the same section, desktop only.
+  // Share the music you're listening to: the same section, desktop only.
   for (const el of buildMusicActivityRows(signal)) section.appendChild(el);
 
   // ---- Debug section (dev builds only: its one row is DevTools) --------------
@@ -277,7 +277,7 @@ function buildAutostartRow(signal: AbortSignal): HTMLDivElement {
   // Set as soon as the user interacts with the toggle. Guards the init
   // read-back below so a slow `isEnabled()` resolving after the user has
   // already flipped the switch can't clobber their change with a stale
-  // value (see OC-0141).
+  // value.
   let touched = false;
   const toggle = createToggle(false, {
     signal,
@@ -359,7 +359,7 @@ function buildWindowPrefRows(signal: AbortSignal): HTMLDivElement[] {
 
     // The last value the host confirmed; a failed save puts the toggle back.
     let saved = def.fallback;
-    // Set on a click that saved, so a slow initial read cannot undo it (OC-0141).
+    // Set on a click that saved, so a slow initial read cannot undo it.
     let touched = false;
     const show = (on: boolean): void => {
       toggle.classList.toggle("on", on);

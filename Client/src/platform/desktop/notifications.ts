@@ -1,5 +1,5 @@
 // The native notifier: the notification plugin and the window's attention
-// request. Lifted verbatim from `lib/notifications.ts` (B7-5), where the Web
+// request. Lifted verbatim from `lib/notifications.ts`, where the Web
 // Notification fallback stays — it is the caller's, not the seam's.
 //
 // The plugins stay dynamic `import()`s: neither is part of the startup chunk

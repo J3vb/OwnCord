@@ -5,16 +5,16 @@ import { ApiClientError } from "../../src/lib/api";
 // listener at load. The re-import below reuses these instances, so the
 // vi.resetModules() does not install a second copy of each listener.
 import * as attachments from "@components/message-list/attachments";
-import * as formatting from "@lib/formatting";
+import * as formatting from "@lib/text/formatting";
 import * as media from "@components/message-list/media";
-import * as channelMutes from "@lib/channel-mutes";
+import * as channelMutes from "@lib/prefs/channelMutes";
 import { setAvailableUpdate } from "../../src/features/updates/availableUpdate";
 
 const APP_LIFETIME_MODULES = [
   ["@components/message-list/attachments", attachments],
-  ["@lib/formatting", formatting],
+  ["@lib/text/formatting", formatting],
   ["@components/message-list/media", media],
-  ["@lib/channel-mutes", channelMutes],
+  ["@lib/prefs/channelMutes", channelMutes],
 ] as const;
 
 const mockAppVersion = vi.hoisted(() => vi.fn());
@@ -60,7 +60,7 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
   setVoiceSensitivity: vi.fn(),
@@ -735,7 +735,7 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("keeps a partial-success warning in the form instead of the green success (OC-0314)", async () => {
+  it("keeps a partial-success warning in the form instead of the green success", async () => {
     // The server answers 200 + warning when the password changed but the
     // other sessions could not be revoked; the form must carry that
     // instruction, not clear the fields under an unqualified green

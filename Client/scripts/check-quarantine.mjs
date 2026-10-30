@@ -38,11 +38,20 @@ export const REQUIRED_FIELDS = {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/** RegExp matching every quarantined test, by `file` then `title`. */
+/**
+ * RegExp matching every quarantined test, by `file` then `title`. Playwright
+ * greps the spec path relative to the config's own folder, so the same spec
+ * reads `tests/e2e/native/x.spec.ts` under the root config and
+ * `../native/x.spec.ts` under one in `tests/e2e/config/`. The pattern matches
+ * the part below `tests/e2e/`, which both spellings share.
+ */
 export function quarantinePattern(entries) {
   if (!entries || entries.length === 0) return undefined;
   const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(entries.map((e) => `${escape(e.file)}.*${escape(e.title)}`).join("|"));
+  const below = (file) => file.replace(/^tests\/e2e\//, "");
+  return new RegExp(
+    entries.map((e) => `(?:^|/)${escape(below(e.file))}.*${escape(e.title)}`).join("|"),
+  );
 }
 
 /**

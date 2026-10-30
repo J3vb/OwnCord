@@ -15,10 +15,10 @@ import type {
 import { membersStore } from "@stores/members.store";
 import { channelsStore, isAfkChannel } from "@stores/channels.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { noteJoinSucceeded } from "../features/voice/joinBackoff";
-import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
-import { loadPref, savePref } from "@lib/preferences";
+import { setVoiceDeafened, setVoiceInSession } from "@lib/voice/voiceDeafened";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 
 export interface VoiceUser {
   readonly userId: number;
@@ -63,7 +63,7 @@ export interface VoiceConfig {
  *                   the announce signature did not verify; the peer is blocked.
  *   - "unknown":    the local pin store could not be read (keyring error), so
  *                   no trust decision was possible — the announce was rejected
- *                   (fail closed, DC-08). Distinct from "unverified" so a
+ *                   (fail closed). Distinct from "unverified" so a
  *                   storage fault never reads as "never pinned". */
 export interface PeerVerification {
   readonly userId: number;
@@ -71,7 +71,7 @@ export interface PeerVerification {
   /** Safety number (identity-key fingerprint) for out-of-band verification;
    *  null for legacy/unverified/mismatch/unknown peers. */
   readonly safetyNumber: string | null;
-  /** Fingerprint of the peer's ephemeral session key (OC-0003). Set whenever
+  /** Fingerprint of the peer's ephemeral session key. Set whenever
    *  the announce was accepted (verified or unverified), null when it was
    *  rejected. Changes every call, so it is NOT an identity — it is the only
    *  thing an unverified peer has that can be compared out of band. */
@@ -156,7 +156,7 @@ export interface VoiceState {
    *  and resetVoiceStore clear it. Your own watching is read from the local
    *  RemoteTracks set, not from here. Optional for the fixture reason above. */
   readonly peerWatching?: ReadonlyMap<number, readonly number[]>;
-  /** Fingerprint of the local user's own ephemeral session key (OC-0003), so
+  /** Fingerprint of the local user's own ephemeral session key, so
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
   readonly localSessionFingerprint?: string | null;
@@ -199,7 +199,7 @@ export const voiceStore = createStore<VoiceState>(INITIAL_STATE);
 
 // Keep the sound module's session flag in step with channel membership on every
 // edge (join, leave, channel switch, reconnect roster, logout) without that
-// module importing this store (DP-40). localDeafened itself is mirrored
+// module importing this store. localDeafened itself is mirrored
 // synchronously by setLocalDeafened/resetVoiceStore.
 // App-lifetime: the store and this listener live as long as the app.
 void voiceStore.subscribeSelector((state) => state.currentChannelId !== null, setVoiceInSession);
@@ -221,7 +221,7 @@ void channelsStore.subscribeSelector((state) => state.channels, syncInAfkChannel
 
 /** Incremented by the incremental roster mutators (updateVoiceState,
  *  removeVoiceUser) — never by setVoiceStates, which replaces the whole
- *  roster on the initial `ready` and on a full resync. DP-40's voice UI sounds
+ *  roster on the initial `ready` and on a full resync. The voice UI sounds
  *  read it to tell a live join/leave edge from a wholesale replacement, so a
  *  reconnect replay cannot produce a sound storm. Module state, not store
  *  state: a listener only needs the delta since its last read, and a test
@@ -533,7 +533,7 @@ export function setVoiceStatus(status: VoiceStatus): void {
   );
 }
 
-/** Mark whether the live E2EE encryption has degraded (OC-0002) — set true
+/** Mark whether the live E2EE encryption has degraded — set true
  *  from roomEventHandlers.ts when the room reports RoomEvent.EncryptionError
  *  (the SDK's own signal that the per-room worker died). Single-writer aside
  *  from the join/leave resets above, which clear it for a fresh session. */
@@ -563,7 +563,7 @@ export function setLocalMuted(muted: boolean): void {
 
 /** Toggle local deafen state. */
 export function setLocalDeafened(deafened: boolean): void {
-  // Mirror into the leaf the always-loaded sound module reads (DP-40), so
+  // Mirror into the leaf the always-loaded sound module reads, so
   // notification and voice sounds stay silent while deafened without that
   // module importing this store.
   setVoiceDeafened(deafened);

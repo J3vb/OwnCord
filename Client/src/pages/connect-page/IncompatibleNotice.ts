@@ -1,5 +1,5 @@
 // IncompatibleNotice — the actionable, exitable state for a protocol-epoch
-// mismatch on the connect page (B7-12, Decision 2).
+// mismatch on the connect page.
 //
 // A dedicated component, not an UpdateNotifier state (which would teach
 // "install" to say "update the server") and not the generic transient-error

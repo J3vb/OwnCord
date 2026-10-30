@@ -12,19 +12,19 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref } from "./helpers";
-import { vkName, pttReleaseDelayMs, PTT_RELEASE_DELAY_MAX_MS } from "@lib/ptt";
-import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
+import { vkName, pttReleaseDelayMs, PTT_RELEASE_DELAY_MAX_MS } from "@lib/voice/ptt";
+import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
 import {
   functionKeyVk,
   globalKeysErrorCode,
   markPortalBound,
   portalHoldsShortcuts,
-} from "@lib/globalKeys";
+} from "@lib/ui/globalKeys";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { desktop } from "../../platform/desktop";
-import { REBINDABLE_ACTIONS, loadEffectiveKeybinds } from "@lib/keybinds";
+import { REBINDABLE_ACTIONS, loadEffectiveKeybinds } from "@lib/prefs/keybinds";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
-import { actionLabel } from "@lib/keybindLabels";
+import { actionLabel } from "@lib/prefs/keybindLabels";
 import { beginCapture } from "./comboCapture";
 import { settingsText as t } from "../../i18n/settings";
 
@@ -273,7 +273,7 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
     t("keybinds.pttHint"),
   );
 
-  // DP-30: how long the mic keeps transmitting after the key is released.
+  // How long the mic keeps transmitting after the key is released.
   const delayHeader = createElement(
     "div",
     { class: "settings-field-label" },

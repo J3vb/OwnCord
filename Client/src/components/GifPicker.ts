@@ -2,14 +2,14 @@
 // (which proxies Klipy). Uses @lib/dom helpers exclusively. Never sets
 // innerHTML with user content.
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { ApiClientError } from "@lib/api";
-import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
-import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/gifProvider";
-import { createGifPager } from "@lib/gifPager";
+import { searchGifs, getTrendingGifs } from "@lib/media/gifProvider";
+import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/media/gifProvider";
+import { createGifPager } from "@lib/media/gifPager";
 import { gifFavoritesStore, isGifFavorite, toggleGifFavorite } from "@stores/gifFavorites.store";
 import {
   fetchExternalImage,
@@ -176,7 +176,7 @@ export function createGifPicker(options: GifPickerOptions): {
   root.appendChild(header);
 
   // Grid area (scrollable). Announced as a flat listbox of GIF options with
-  // roving tabindex (DC-13); the inner .gp-grid is layout only.
+  // roving tabindex; the inner .gp-grid is layout only.
   const gridArea = createElement("div", {
     class: "gp-grid-area",
     role: "listbox",
@@ -413,7 +413,7 @@ export function createGifPicker(options: GifPickerOptions): {
     gridArea.appendChild(loadingEl);
   }
 
-  // B9-8: the picker is one external item. Until the viewer consents, not
+  // The picker is one external item. Until the viewer consents, not
   // even the query reaches the server's GIF proxy.
   let consentBtn: HTMLButtonElement | null = null;
   function showConsent(): void {
@@ -490,7 +490,7 @@ export function createGifPicker(options: GifPickerOptions): {
           gridArea.appendChild(errEl);
         } else {
           // A transient provider/network failure keeps the query and offers a
-          // bounded retry; it never turns into the empty-results state (B9-9).
+          // bounded retry; it never turns into the empty-results state.
           showLoadError(contentText("gif.failed"), () => {
             // The retry is replaced by the loading line, so keyboard focus
             // moves to the search field rather than falling to <body>.

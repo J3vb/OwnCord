@@ -71,7 +71,7 @@ fn require_non_empty(value: &str, field: &str) -> Result<(), String> {
 // Cross-command serialization
 // ---------------------------------------------------------------------------
 //
-// B4-3 moved every command below to `#[tauri::command(async)]` so the
+// Every command below is `#[tauri::command(async)]` so the
 // blocking keyring/DPAPI I/O runs off Tauri's IPC main thread instead of
 // freezing the UI on it. Before that, Tauri ran all (sync) commands one at a
 // time on that thread, so two overlapping invocations were always fully
@@ -99,9 +99,7 @@ static CREDENTIAL_LOCK: Mutex<()> = Mutex::new(());
 /// distrust) rather than propagated, so a panic inside one command cannot
 /// permanently wedge every credential operation for the rest of the process.
 fn with_credential_lock<T>(f: impl FnOnce() -> T) -> T {
-    let _guard = CREDENTIAL_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = crate::sync::lock(&CREDENTIAL_LOCK);
     f()
 }
 
@@ -1229,7 +1227,7 @@ mod tests {
         assert!(parse_http_response(&raw).is_err());
     }
 
-    /// B4-3 follow-up: all 7 commands moved to `#[tauri::command(async)]`,
+    /// All 7 commands moved to `#[tauri::command(async)]`,
     /// which runs each invocation on the async runtime's thread pool instead
     /// of Tauri's single IPC main thread. Two overlapping invocations (e.g.
     /// `identity.ts`'s save-then-delete legacy-key migration, or a logout's

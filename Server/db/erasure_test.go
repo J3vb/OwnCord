@@ -105,6 +105,10 @@ func seedEraseSubject(t *testing.T, database *db.DB) eraseSubject {
 	exec(`INSERT INTO channels (name, type, parent_channel_id) VALUES ('erase thread', 'thread', ?)`, chID)
 	exec(`INSERT INTO thread_members (thread_id, user_id) SELECT id, ? FROM channels WHERE name = 'erase thread'`, uid)
 	exec(`INSERT INTO thread_members (thread_id, user_id) SELECT id, ? FROM channels WHERE name = 'erase thread'`, other)
+	// Voice channel password grants (migration 086, class 18e): the subject's
+	// row is erased, another user's on the same channel survives.
+	exec(`INSERT INTO channel_password_grants (channel_id, user_id, password_version) VALUES (?, ?, 0)`, chID, uid)
+	exec(`INSERT INTO channel_password_grants (channel_id, user_id, password_version) VALUES (?, ?, 0)`, chID, other)
 	exec(`INSERT INTO voice_states (user_id, channel_id, joined_at) VALUES (?, ?, datetime('now'))`, uid, chID)
 	exec(`INSERT INTO channel_retention (channel_id, days, updated_by) VALUES (?, 30, ?)`, chID, uid)
 	// Message requests and trusted senders (migration 046, B5-6, classes 14c
@@ -435,6 +439,9 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM thread_members`); n != 1 {
 		t.Errorf("thread follows left = %d, want 1 (the other user's)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM channel_password_grants`); n != 1 {
+		t.Errorf("channel password grants left = %d, want 1 (the other user's)", n)
 	}
 }
 

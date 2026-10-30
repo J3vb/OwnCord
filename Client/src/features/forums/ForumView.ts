@@ -1,5 +1,5 @@
 /**
- * A forum channel's post list (WP 6.9d), mounted in the messages slot in place
+ * A forum channel's post list, mounted in the messages slot in place
  * of the message list: the guidelines banner (the channel topic), New Post, the
  * sort toggle, the tag filter, then the posts, then "Older posts" (archived).
  *
@@ -19,8 +19,8 @@ import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { avatarInitial, resolveDisplayName } from "@lib/avatar";
-import { loadPref, savePref } from "@lib/preferences";
+import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import type { ForumTag, ThreadInfo } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";

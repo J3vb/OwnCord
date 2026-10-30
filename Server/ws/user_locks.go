@@ -8,28 +8,24 @@ import (
 
 // userLocks is a refcounted per-user lock. The hub keeps two instances:
 //
-//   - voiceMod serializes a voice-moderation DB transition with its paired
-//     LiveKit call, for BOTH the timeout path (muteForTimeout/unmuteForTimeout)
-//     and the manual voice-mod-mute endpoint (round 4, Codex review Part B).
-//     Whichever caller takes the lock for a given userID runs its DB write AND
-//     its SFU call before the other can start either half of its own pair, so
-//     a late unmute from one path can never interleave with a fresh mute from
-//     the other (Codex 12), and a rollback on an SFU failure (Codex 14) is
-//     guaranteed to run against the same, unchanged DB state its own mute just
+//   - voiceMod serializes a voice-moderation DB transition with its paired LiveKit
+//     call, for BOTH the timeout path (muteForTimeout/unmuteForTimeout) and the
+//     manual voice-mod-mute endpoint. Whichever caller takes the lock for a userID
+//     runs its DB write AND its SFU call before the other can start either half, so
+//     a late unmute from one path never interleaves with a fresh mute from the
+//     other, and an SFU-failure rollback runs against the DB state its own mute
 //     produced. It is held across a LiveKit RPC.
-//   - voiceMember (WP 1D-10) serializes every change to a user's voice
-//     membership. It lives in voiceRegistry; the lock order for both
-//     instances is written down in lock_order.go. voiceMod comes right
-//     after voiceMember in that order, and a path holding voiceMod never
-//     calls a membership path.
+//   - voiceMember serializes every change to a user's voice membership. It lives in
+//     voiceRegistry; the lock order for both is in lock_order.go. voiceMod comes
+//     right after voiceMember, and a path holding voiceMod never calls a membership
+//     path.
 //
 // R is the rank the instance's entries carry (lock_order.go): voiceMember and
 // voiceMod are the same type with different ranks, so the deadlock build
 // tells them apart. The map's own mu is a leaf whatever R is.
 //
-// Entries are reference-counted and evicted once nobody holds or is waiting
-// on them (round 5, Codex review P3): a long-lived server with a large,
-// ever-churning population must not grow this map forever.
+// Entries are reference-counted and evicted once nobody holds or waits on them, so
+// a large, ever-churning population does not grow this map forever.
 type userLocks[R syncutil.LockRank] struct {
 	mu    syncutil.Ranked[lockRankLeaf]
 	locks map[int64]*userLockEntry[R]
@@ -130,7 +126,7 @@ func (h *Hub) leaveParkedVoiceLocked(userID int64, reason string) {
 // c.setVoiceState. sweepStaleVoicePreDeleteRaceHook, when non-nil, runs in
 // sweepStaleVoiceStates after the live-client recheck, immediately before
 // LeaveIfMatch. Test-only (always nil in production): together they hold a
-// join and the sweep inside the window the voice lock closes (WP 1D-10).
+// join and the sweep inside the window the voice lock closes.
 var (
 	voiceJoinPostCommitRaceHook      func(*Client)
 	sweepStaleVoicePreDeleteRaceHook func(userID, channelID int64, joinedAt string)

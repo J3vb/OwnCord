@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@lib/channel-mutes", () => ({
+vi.mock("@lib/prefs/channelMutes", () => ({
   isChannelMuted: (id: number) => id === 2,
 }));
 

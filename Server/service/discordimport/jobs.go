@@ -1,0 +1,143 @@
+package discordimport
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/syncutil"
+)
+
+// live is every job running in this process, across Runners; a running job in
+// the database that is not in it is left over and a new start may take it over.
+// startMu makes inserting and registering a job one step.
+var live = struct {
+	startMu syncutil.Mutex
+	mu      syncutil.Mutex
+	ids     map[int64]struct{}
+}{ids: map[int64]struct{}{}}
+
+func liveJobIDs() []int64 {
+	live.mu.Lock()
+	defer live.mu.Unlock()
+	ids := make([]int64, 0, len(live.ids))
+	for id := range live.ids {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func setLive(id int64, on bool) {
+	live.mu.Lock()
+	defer live.mu.Unlock()
+	if on {
+		live.ids[id] = struct{}{}
+	} else {
+		delete(live.ids, id)
+	}
+}
+
+// ErrServerStopped is the reason recorded on a job a shutdown cut short.
+var ErrServerStopped = errors.New("the server stopped before the import finished")
+
+// abandonBudget caps the time spent retrying one clean-up.
+const abandonBudget = 10 * time.Second
+
+// abandon ends an unfinished job and deletes its channel, retrying a busy
+// database with a doubling wait for at most abandonBudget; a closed halt (the
+// server is stopping) ends the retries early and boot clean-up finishes it.
+func (r *Runner) abandon(ctx context.Context, halt <-chan struct{}, jobID, channelID int64, status, reason string, pr db.ImportProgress) {
+	delay := r.retryDelay
+	deadline := time.Now().Add(abandonBudget)
+	var err error
+	for attempt := 1; attempt <= abandonAttempts; attempt++ {
+		endCtx, cancel := context.WithTimeout(ctx, finishTimeout)
+		err = r.cfg.Store.AbandonImport(endCtx, jobID, channelID, status, reason, pr)
+		cancel()
+		if err == nil || errors.Is(err, db.ErrNotFound) {
+			return
+		}
+		if attempt == abandonAttempts || time.Until(deadline) < delay {
+			break
+		}
+		wait := time.NewTimer(delay)
+		select {
+		case <-wait.C:
+		case <-halt:
+			wait.Stop()
+			slog.Error("discord import clean-up failed", "job_id", jobID, "error", err)
+			return
+		}
+		delay *= 2
+	}
+	slog.Error("discord import clean-up failed", "job_id", jobID, "error", err)
+}
+
+// chunkOverdue reports whether the files copied for the open chunk have passed
+// the byte budget or have waited too long for the chunk to commit.
+func (r *Runner) chunkOverdue(st *runState) bool {
+	if st.chunkBytes == 0 {
+		return false
+	}
+	return r.cfg.ChunkBytes > 0 && st.chunkBytes >= r.cfg.ChunkBytes ||
+		r.cfg.ChunkAge > 0 && r.now().Sub(st.chunkSince) >= r.cfg.ChunkAge
+}
+
+// now reads the configured clock.
+func (r *Runner) now() time.Time {
+	if r.cfg.Now != nil {
+		return r.cfg.Now()
+	}
+	return time.Now()
+}
+
+func (r *Runner) track(j *Job, on bool) {
+	r.jobsMu.Lock()
+	defer r.jobsMu.Unlock()
+	if on {
+		r.jobs[j.ID] = j
+	} else {
+		delete(r.jobs, j.ID)
+	}
+}
+
+// Running returns the job with that id while it is running here, else nil.
+func (r *Runner) Running(id int64) *Job {
+	r.jobsMu.Lock()
+	defer r.jobsMu.Unlock()
+	return r.jobs[id]
+}
+
+// CategoryExists reports whether a category can hold the import's channel;
+// id 0 means no category and always can.
+func (r *Runner) CategoryExists(ctx context.Context, id int64) (bool, error) {
+	if id == 0 {
+		return true, nil
+	}
+	c, err := r.cfg.Store.GetChannelCategory(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("looking up the category: %w", err)
+	}
+	return c != nil, nil
+}
+
+// Status returns a job's stored state, db.ErrNotFound when there is none.
+func (r *Runner) Status(ctx context.Context, id int64) (*db.ImportJob, error) {
+	j, err := r.cfg.Store.GetImportJob(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("import status: %w", err)
+	}
+	return j, nil
+}
+
+// Latest returns the newest job's stored state, db.ErrNotFound when none ran.
+func (r *Runner) Latest(ctx context.Context) (*db.ImportJob, error) {
+	j, err := r.cfg.Store.GetLatestImportJob(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("latest import: %w", err)
+	}
+	return j, nil
+}

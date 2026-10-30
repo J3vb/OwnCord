@@ -6,8 +6,8 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
-import { isServerRowKind } from "@lib/messageKind";
-import type { MountableComponent } from "@lib/safe-render";
+import { isServerRowKind } from "@lib/text/messageKind";
+import type { MountableComponent } from "@lib/text/safeRender";
 import {
   messagesStore,
   getChannelMessages,
@@ -25,7 +25,7 @@ import { safetyStore } from "../features/safety/store";
 import { registerReadingAnchor } from "../features/messaging/readingAnchor";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { uiStore } from "@stores/ui.store";
-import { discardMedia } from "@lib/media-visibility";
+import { discardMedia } from "@lib/prefs/mediaVisibility";
 
 /** How often rendered `<t:…:R>` timestamps are rewritten. */
 const RELATIVE_TIMESTAMP_REFRESH_MS = 60_000;
@@ -46,20 +46,20 @@ import {
 } from "./message-list/renderers";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { refreshReactionLocks } from "./message-list/reactions";
-import { ROW_FOCUSABLE_SELECTOR } from "./message-list/message-actions";
-import { withMessageMenu } from "./message-list/message-menu-loader";
+import { ROW_FOCUSABLE_SELECTOR } from "./message-list/messageActions";
+import { withMessageMenu } from "./message-list/messageMenuLoader";
 import { preloadInlineEdit, withInlineEdit } from "../features/messaging/inlineEditLoader";
 import type { InlineEditSession } from "../features/messaging/inlineEdit";
 import {
   clearContentParseCache,
   relabelInlineTimestamps,
   resyncMentions,
-} from "./message-list/content-parser";
-import { highlightsCurrentUser } from "@lib/mentions";
-import { applyPickedMentions, tokensToPickedText } from "@lib/pickedMentions";
+} from "./message-list/contentParser";
+import { highlightsCurrentUser } from "@lib/text/mentions";
+import { applyPickedMentions, tokensToPickedText } from "@lib/text/pickedMentions";
 import { canManageMessages } from "@lib/permissions";
-import { readableRoleColor } from "@lib/themes";
-import { resolveDisplayName } from "@lib/avatar";
+import { readableRoleColor } from "@lib/prefs/themes";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
 import {
   UNREAD_COUNT_CAP,
@@ -69,7 +69,7 @@ import {
   formatMessageTimestamp,
   resolveAuthor,
   userRoleColorVar,
-} from "@lib/formatting";
+} from "@lib/text/formatting";
 import {
   isAudioMime,
   isGalleryImage,
@@ -83,10 +83,10 @@ import {
   fitImageBox,
   getImageBox,
   knownImageHeight,
-} from "./message-list/image-sizes";
+} from "./message-list/imageSizes";
 import { extractUrls, isDirectImageUrl } from "./message-list/media";
 import { FenwickTree } from "./message-list/fenwick";
-import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/row-heights";
+import { rememberRowHeight, rememberedRowHeight, rowHeightKey } from "./message-list/rowHeights";
 import type { PollOutcome } from "../features/messaging/pollSend";
 import { messagingText } from "../i18n/messaging";
 import {
@@ -102,9 +102,9 @@ import {
   onMarkUnreadFailed,
   setLiveTailInView,
 } from "@lib/read-state";
-import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
+import { idMentionsEnabled, readPointerEnabled } from "@lib/net/serverCapabilities";
 import { markMessageUnread } from "./message-list/mark-unread";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 // -- Options ------------------------------------------------------------------
 
@@ -138,20 +138,20 @@ export interface MessageListOptions {
   readonly onDeleteClick: (messageId: number, shiftKey: boolean) => void;
   readonly onReactionClick: (messageId: number, emoji: string) => void;
   readonly onPinClick: (messageId: number, channelId: number, currentlyPinned: boolean) => void;
-  /** Report someone else's message or one of its attachments (B9-10). No button without it. */
+  /** Report someone else's message or one of its attachments. No button without it. */
   readonly onReportClick?: (messageId: number) => void;
-  /** Opens the Forward picker for a message (WP 6.9a). Absent, the menu offers no Forward. */
+  /** Opens the Forward picker for a message. Absent, the menu offers no Forward. */
   readonly onForwardClick?: (messageId: number) => void;
-  /** Set the viewer's whole selection on a poll (`[]` removes the vote); absent disables voting (WP 6.9b). */
+  /** Set the viewer's whole selection on a poll (`[]` removes the vote); absent disables voting. */
   readonly onPollVote?: (
     messageId: number,
     answerIds: readonly number[],
   ) => Promise<PollOutcome<unknown>>;
-  /** End a poll now; absent hides End poll (WP 6.9b). */
+  /** End a poll now; absent hides End poll. */
   readonly onPollEnd?: (messageId: number) => Promise<PollOutcome<unknown>>;
-  /** Opens the Create Thread dialog for a message (WP 6.9c). Absent, the menu offers no Create Thread. */
+  /** Opens the Create Thread dialog for a message. Absent, the menu offers no Create Thread. */
   readonly onCreateThreadClick?: (messageId: number) => void;
-  /** Opens a thread's side panel (the starter chip, WP 6.9c). Absent, the chip is inert text. */
+  /** Opens a thread's side panel (the starter chip). Absent, the chip is inert text. */
   readonly onOpenThread?: (threadId: number) => void;
   /** Retry a failed optimistic send (by its correlation id). */
   readonly onRetry?: (correlationId: string) => void;
@@ -173,19 +173,19 @@ export interface MessageListOptions {
    * "Jump to Present" pill, which only appears while the window is detached.
    */
   readonly onJumpToPresent?: () => void;
-  /** Send the 👋 reply to a welcome row (WP 8.6). Absent, the row has no Wave button. */
+  /** Send the 👋 reply to a welcome row. Absent, the row has no Wave button. */
   readonly onWave?: (messageId: number) => boolean;
   /** Open the pinned-messages panel ("pinned messages" link of a pin row). It never closes an open panel. */
   readonly onOpenPins?: () => void;
-  /** Join the DM call a live call log row stands for (WP 3B-9c). No Join button without it. */
+  /** Join the DM call a live call log row stands for. No Join button without it. */
   readonly onJoinCall?: (channelId: number) => void;
 }
 
 // -- Constants ----------------------------------------------------------------
 
 const SCROLL_TOP_THRESHOLD = 50;
-/** Older history starts loading this many viewport heights before the top
- *  (DP-46), so the next page is usually in before the reader gets there. */
+/** Older history starts loading this many viewport heights before the top,
+ *  so the next page is usually in before the reader gets there. */
 const SCROLL_TOP_VIEWPORTS = 2;
 /** Newer history (below a detached window) starts loading this many viewport
  *  heights before the bottom, mirroring SCROLL_TOP_VIEWPORTS. */
@@ -601,11 +601,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
    * at once, so its listeners never outlive it — every row used to register
    * against `disposable.signal` directly, retaining a full window of detached
    * rows (and everything they reference: videos, images, embeds, tooltips)
-   * per rebuild (OC-0286). destroy() releases the rest.
+   * per rebuild. destroy() releases the rest.
    */
   const rowOwners = new Map<HTMLElement, Disposable>();
   /**
-   * The open inline editor (WP 3A-8): at most one per list. `session` is null
+   * The open inline editor: at most one per list. `session` is null
    * while the lazy chunk loads; `gen` tells a late load that it was superseded.
    */
   let edit: { readonly messageId: number; session: InlineEditSession | null; gen: number } | null =
@@ -766,7 +766,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // A pointer places the line inside the around-window too (never scrolled to).
       return linePointer === undefined ? -1 : byPointer();
     }
-    // A revisit renders the cached window while its tail is refetched (DP-10).
+    // A revisit renders the cached window while its tail is refetched.
     // Those rows predate what arrived while away, so counting back from their
     // end would mark messages already read; wait for the fetched tail.
     newDividerDeferred = unreadOnOpen > 0 && getHistoryLoadState(options.channelId) === "loading";
@@ -1013,7 +1013,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     return true;
   }
 
-  /** P4-03 step B: the bar shows while the visit has unread it has not dismissed. */
+  /** The bar shows while the visit has unread it has not dismissed. */
   function updateUnreadBar(): void {
     if (unreadBar === null || unreadBarLabel === null) return;
     let text = "";
@@ -1084,11 +1084,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   }
 
   /**
-   * P4-03 step A: the channel is read once the reader has seen its bottom with
+   * The channel is read once the reader has seen its bottom with
    * the window focused. Fires on every scroll and on window focus; the
    * hasUnread gate keeps a plain scroll from spending the server's 5/s
-   * mark_read budget, and the bottom of a detached window is not the present
-   * (OC-0204), so that case is excluded too (isChannelAway, lib/read-state.ts).
+   * mark_read budget, and the bottom of a detached window is not the present,
+   * so that case is excluded too (isChannelAway, lib/read-state.ts).
    * The bottom-in-view check alone also covers focus returning while the reader
    * is scrolled up.
    */
@@ -1357,7 +1357,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   }
 
   /** Abort every rendered row's listeners before a rebuild discards the rows,
-   *  so a stale row can never outlive the render that replaced it (OC-0286).
+   *  so a stale row can never outlive the render that replaced it.
    *  The row patch (patchRows) releases only the rows it replaces. */
   function beginRowRender(): void {
     for (const owner of rowOwners.values()) owner.destroy();
@@ -1381,7 +1381,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   let renderWindowResetTimer = 0;
   // Set when the breaker below drops a rebuild. Like renderAllSuppressed, the
   // 2s reset replays renderWindow once, so a fast scrollbar drag that trips it
-  // still ends with the rows for where it stopped (DP-12). Once per burst, not
+  // still ends with the rows for where it stopped. Once per burst, not
   // per dropped call, so the image-height oscillation it stops cannot restart.
   let renderWindowSuppressed = false;
 
@@ -1681,7 +1681,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   }
 
   /**
-   * Fast path for a store update that changes a few rows (P4-01): diff the new
+   * Fast path for a store update that changes a few rows: diff the new
    * items against the rendered ones by key and touch only what changed — a
    * reaction, edit, delete or send confirmation re-renders its own row, plus a
    * neighbour whose grouping changed and any loaded reply whose quoted
@@ -2151,7 +2151,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   function handleScroll(): void {
     if (root === null) return;
 
-    // Load older messages well before the top (DP-46); the floor keeps the
+    // Load older messages well before the top; the floor keeps the
     // trigger working when the viewport has no height yet.
     // The frame's only layout read: everything below, and the rAF's renderWindow,
     // works from this snapshot, so the DOM writes in between cannot force a
@@ -2201,7 +2201,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // Before markReadIfSeen, which asks isChannelAway. The 100 px auto-scroll
     // threshold on purpose: inside it a new message is scrolled into view.
     setLiveTailInView(options.channelId, isNearBottom(SCROLL_BOTTOM_THRESHOLD, m));
-    // Reaching the bottom counts as seeing it (P4-03 step A).
+    // Reaching the bottom counts as seeing it.
     markReadIfSeen(m);
 
     // Debounce virtual window updates to animation frames
@@ -2455,11 +2455,11 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       { signal: disposable.signal },
     );
 
-    // Focus returning with the bottom already in view counts as seeing it
-    // (P4-03 step A). Owned by disposable.signal so destroy() releases it.
+    // Focus returning with the bottom already in view counts as seeing it.
+    // Owned by disposable.signal so destroy() releases it.
     window.addEventListener("focus", () => markReadIfSeen(), { signal: disposable.signal });
 
-    // Shift reveals the hover bar's Pin and Delete (WP 3A-7): one pair of
+    // Shift reveals the hover bar's Pin and Delete: one pair of
     // window listeners toggles a class on the list root, and CSS shows the
     // extra buttons. A lost keyup (focus left the window, the tab was hidden)
     // would leave them out, so both of those reset it. Owned by disposable.signal.
@@ -2672,7 +2672,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
     // Re-render the (empty) region when the first-page fetch transitions
     // between loading / error / idle. Shown rows are left alone: a revisit's
-    // refetch finishing must not rebuild them (DP-10), and any change the
+    // refetch finishing must not rebuild them, and any change the
     // fetch made reaches the messagesByChannel subscriber above. A NEW divider
     // still waiting for that fetch is patched in on its own (R2).
     unsubscribers.push(
@@ -2712,8 +2712,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     );
 
     // A membership, role or profile (rename/avatar) change repaints only the
-    // author identity of the rendered rows that changed, not the whole list
-    // (P4-02, OC-0108). The store bumps roleRevision on every such mutation, so
+    // author identity of the rendered rows that changed, not the whole list.
+    // The store bumps roleRevision on every such mutation, so
     // selecting the counter avoids touching a role map per presence update.
     // The signed-in user's own role change can also change their per-row
     // affordances (pin/delete), so that case — and only it — falls back to a
@@ -2777,8 +2777,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       ),
     );
 
-    // A timeout starting or ending toggles the reaction controls' lock in place
-    // (B9-15); no row is rebuilt, so video, spoilers and focus survive.
+    // A timeout starting or ending toggles the reaction controls' lock in place;
+    // no row is rebuilt, so video, spoilers and focus survive.
     unsubscribers.push(
       safetyStore.subscribeSelector(
         (s) => s.timeout,
@@ -2789,7 +2789,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     );
 
     // A thread's count, name or archive state changes far more often than its
-    // starter row is rebuilt: repaint the chips on screen in place (WP 6.9c).
+    // starter row is rebuilt: repaint the chips on screen in place.
     const repaintThreadChips = (): void => {
       if (contentContainer === null) return;
       refreshThreadChips(contentContainer, {
@@ -2804,7 +2804,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       threadsStore.subscribeSelector((s) => s.deleted, repaintThreadChips),
     );
 
-    // Delete (CLI-08) and reactions are disabled while the socket is down; flip
+    // Delete and reactions are disabled while the socket is down; flip
     // the gates on the rendered controls in place, without a rebuild.
     unsubscribers.push(
       uiStore.subscribeSelector(
@@ -2847,7 +2847,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
 
   /**
    * Repaint author identity on the rendered rows whose author changed after a
-   * members-store update, without rebuilding them (P4-02). A row stores the
+   * members-store update, without rebuilding them. A row stores the
    * key it was drawn from in `data-author-key`; only a differing key patches
    * that row's avatar, name and role colour, so a rename or a role change
    * touches the affected rows and a presence update touches none.
@@ -2866,7 +2866,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       // @mention resolution depends on the live member store, so a rename or a
       // membership change must re-resolve it on every rendered row — including
       // rows that merely mention the renamed member, not just those it authored
-      // — without re-parsing or rebuilding them (P4-02, F3). A system row draws
+      // — without re-parsing or rebuilding them. A system row draws
       // its mentions with no server info, so it resyncs the same way.
       if (el.classList.contains("message")) {
         const mentionInfo = {
@@ -2882,6 +2882,8 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
       } else {
         resyncMentions(el);
       }
+      // An imported author is not a member: no rename or role change reaches it.
+      if (msg.importedAuthor !== undefined) continue;
       const roleColor = userRoleColorVar(msg.user.id);
       const author = resolveAuthor(msg.user);
       const key = authorAvatarKey(author, roleColor);
@@ -2919,7 +2921,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     for (const bar of row.querySelectorAll<HTMLElement>(".msg-reply-ref")) {
       const replyTo = Number(bar.dataset["replyTo"] ?? "0");
       const parent = replyParents.find((m) => m.id === replyTo);
-      if (parent === undefined || parent.deleted) continue;
+      if (parent === undefined || parent.deleted || parent.importedAuthor !== undefined) continue;
       if (bar.classList.contains("msg-reply-ref--blocked")) continue;
       const roleColor = userRoleColorVar(parent.user.id);
       const author = resolveAuthor(parent.user);
@@ -3164,7 +3166,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
   }
 
   // ---------------------------------------------------------------------------
-  // Inline edit (WP 3A-8)
+  // Inline edit
   // ---------------------------------------------------------------------------
 
   /** True while the open editor's textarea (or its links) holds focus. */
@@ -3239,7 +3241,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     }
     // A server-written row (call log, group event) is read-only.
     if (isServerRowKind(msg.kind)) return false;
-    // A sticker message has no text to edit (WP 8.8); the server refuses it.
+    // A sticker message has no text to edit; the server refuses it.
     if (msg.sticker !== undefined) return false;
     if (edit?.messageId === messageId) {
       if (takeFocus) edit.session?.focusEnd();
@@ -3250,7 +3252,7 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     const gen = ++editGen;
     edit = { messageId, session: null, gen };
     // Stored `<@id>` / `<@&id>` tokens read as `@name` in the box, and the
-    // spans left intact turn back into tokens on save (WP 6.3e).
+    // spans left intact turn back into tokens on save.
     const names = {
       user: (id: number) => {
         const member = membersStore.getState().members.get(id);

@@ -14,7 +14,7 @@ import (
 // Only the enable direction of voice_camera / voice_screenshare is gated on
 // the permission, so a flag set before a revocation would otherwise stay at 1
 // until the user leaves: the camera keeps a voice_max_video slot and every
-// roster keeps showing a stream the SFU no longer carries (ARCH-015). The
+// roster keeps showing a stream the SFU no longer carries. The
 // SFU grant itself is withdrawn by the reconciliation that follows.
 //
 // It runs under the user's voice lock and only touches the session it was

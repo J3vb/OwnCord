@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// The recovery kit's routes (B4-5). Enrolment and status sit beside the
+// The recovery kit's routes. Enrolment and status sit beside the
 // other credential routes under /users/me; redemption is public, like login,
 // and rate-limited the same way.
 
@@ -35,13 +35,12 @@ type recoveryKitStatusResponse struct {
 type recoverRequest struct {
 	Username  string `json:"username"`
 	KitSecret string `json:"kit_secret"`
-	// Credential is an owner-issued recovery credential (B4-6); either
+	// Credential is an owner-issued recovery credential; either
 	// field carries the secret, told apart by shape.
 	Credential  string `json:"credential"`
 	NewPassword string `json:"new_password"`
 }
 
-// handleEnrolRecoveryKit processes POST /api/v1/users/me/recovery-kit.
 func handleEnrolRecoveryKit(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)
@@ -62,7 +61,6 @@ func handleEnrolRecoveryKit(svc AuthService) http.HandlerFunc {
 	}
 }
 
-// handleRecoveryKitStatus processes GET /api/v1/users/me/recovery-kit.
 func handleRecoveryKitStatus(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)
@@ -80,7 +78,7 @@ func handleRecoveryKitStatus(svc AuthService) http.HandlerFunc {
 }
 
 // handleRecover processes POST /api/v1/auth/recover: a recovery secret — the
-// kit's, or an owner-issued credential (B4-6) — plus a new password sign the
+// kit's, or an owner-issued credential — plus a new password sign the
 // account holder in without the second factor.
 func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 	proxyNets := parseCIDRList(trustedProxies)

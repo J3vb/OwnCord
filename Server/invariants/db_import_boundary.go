@@ -23,13 +23,13 @@ const dbImportPath = "github.com/J3vb/OwnCord/Server/db"
 // DispositionBoundary is the one disposition that owns a handle outright.
 const DispositionBoundary = "boundary"
 
-// DBImportEntry is one row of the B3-0 boundary inventory: why a production
-// file above the domain layer is allowed to import db, and where B3-8 sends
-// it. Dispositions are the layout-refactor supplement's four:
+// DBImportEntry is one row of the boundary inventory: why a production
+// file above the domain layer is allowed to import db, and where the layout
+// refactor sends it. Dispositions are the layout-refactor supplement's four:
 //
 //   - move:     persistence or domain decisions that belong behind a service;
-//     Family names the service that takes them. B3-8 emptied this: no row
-//     carries it any more, which is the phase's exit criterion. A new one is
+//     Family names the service that takes them. The refactor emptied this: no row
+//     carries it any more, which was its exit criterion. A new one is
 //     a deliberate statement that something is on its way out, not a parking
 //     space — the alternative to writing it is moving the code.
 //   - adapter:  a transport adapter that uses db types or pure helpers only
@@ -40,7 +40,7 @@ const DispositionBoundary = "boundary"
 //
 // docs/architecture/server-boundaries.md is generated from this map by
 // `go run ./cmd/dbinventory`; edit here, then regenerate.
-// B6-14 added Calls and Hands, because an import is not the access: the handle
+// Calls and Hands exist because an import is not the access: the handle
 // is stored on Hub.db and on App.database, so a file in either package can use
 // it without importing db at all. Both are exact multisets in the
 // AuthzResidueEntry.Calls sense — measured by cmd/dbinventory against the tree,
@@ -70,8 +70,8 @@ type DBImportEntry struct {
 
 // DBImportAllow is the inventory. A production file outside db/ and service/
 // that imports db and is not listed here fails db-import-boundary; a listed
-// file that stops importing db fails TestDBImportAllowIsLive. B3-2 and B3-8
-// deleted rows as families moved — the list only shrinks, and every row left
+// file that stops importing db fails TestDBImportAllowIsLive. Rows were
+// deleted as families moved — the list only shrinks, and every row left
 // is an adapter (db types, no persistence call) or a boundary that
 // legitimately owns a handle.
 var DBImportAllow = map[string]DBImportEntry{
@@ -114,13 +114,13 @@ var DBImportAllow = map[string]DBImportEntry{
 	"auth/helpers.go": {Disposition: "adapter", Note: "db.User type in a helper signature"},
 	"auth/resolve.go": {Disposition: "adapter", Note: "Session/APIToken/Role/User types; resolution is injected"},
 	// ── composition roots and tools ───────────────────────────────────────
-	// B3-3 moved the process composition root out of main.go: internal/app
-	// owns the handle from open to close, and main.go no longer imports db.
+	// The process composition root is internal/app, not main.go: internal/app
+	// owns the handle from open to close, and main.go does not import db.
 	"internal/app/app.go":      {Disposition: "boundary", Note: "the App holds the handle for its lifetime; no calls"},
-	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot, and writes the pre-migration safety copy and the staged-restore audit row", Calls: calls{"BackupToSafe": 1, "ClearAllVoiceStates": 1, "LogAudit": 1, "ResetAllUserStatuses": 1}},
+	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot, and writes the pre-migration safety copy and the staged-restore audit row", Calls: calls{"BackupToSafe": 1, "ClearAllVoiceStates": 1, "FailInterruptedImports": 1, "LogAudit": 1, "ResetAllUserStatuses": 1}},
 	"internal/app/erasure.go":  {Disposition: "boundary", Note: "opens the deletion-marker file and replays it against the handle before anything serves (B4-10)", Calls: calls{"CheckpointErasureWAL": 1, "Close": 2}, Hands: calls{"service.NewErasureService": 1, "service.NewRetentionService": 1}},
 	"internal/app/hub.go":      {Disposition: "boundary", Note: "hands the handle to the hub and the service layer it builds", Hands: calls{"auth.NewPersistentRateLimiter": 1, "service.New": 1, "service.NewAuthService": 1, "service.PoolStatsSources": 1, "service.WriterWaitSource": 1, "ws.DBReaders": 1, "ws.HubOptions": 1}},
-	// B6-14: no import of its own — the start/stop sequence opens the handle
+	// No import of its own — the start/stop sequence opens the handle
 	// through openDatabase (the package's own constructor, not db.Open*),
 	// registers its Close and wires it into everything, all of which is handle
 	// use the import-only gate could not see. The Hands multiset is that
@@ -146,12 +146,12 @@ var DBImportAllow = map[string]DBImportEntry{
 	"ws/handlers_chat.go":       {Disposition: "adapter", Note: "pure NewDMChannelInfo helper"},
 	"ws/permission_notifier.go": {Disposition: "adapter", Note: "service.PermissionChangeNotifier adapter; db.Channel in a signature only"},
 	"ws/hub.go":                 {Disposition: "boundary", Note: "Hub state holds the handle the families read through; no calls"},
-	// B6-14: no import of its own — the replay purge reaches Hub.db directly,
-	// and deliberately. Since WP 2A-7 (ARCH-007) purgeReplay installs the
+	// No import of its own — the replay purge reaches Hub.db directly,
+	// and deliberately. purgeReplay installs the
 	// tombstones and drops the ring's copies under seqMu, releases it, flushes
 	// the persister and only then deletes the persisted rows, all under the
 	// purge lock that cold-tier reads wait on, so no frame naming the purged
-	// ids is sequenced after the tombstones (HP-4 decision 1) and the delete
+	// ids is sequenced after the tombstones and the delete
 	// no longer holds up live delivery.
 	// Routing the delete through the EventStore seam would not be a pure
 	// refactor: h.eventStore is set only when event persistence is enabled,
@@ -187,7 +187,7 @@ var DBImportAllow = map[string]DBImportEntry{
 
 // dbImportBoundary fails on any production file above the domain layer that
 // imports db without an inventory row. db/ and service/ are the layers that
-// may import it; everything else must be in DBImportAllow, which is the B3-0
+// may import it; everything else must be in DBImportAllow, which is the boundary
 // inventory (docs/architecture/server-boundaries.md is generated from it).
 var dbImportBoundary = Rule{
 	ID:    dbImportBoundaryID,

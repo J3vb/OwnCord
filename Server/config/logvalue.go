@@ -2,12 +2,10 @@ package config
 
 import "log/slog"
 
-// This file makes secret-bearing config types safe to log by construction.
-// Without it, "never log secrets" holds only by call-site discipline — a
-// single slog.Info("cfg", "voice", cfg.Voice) would dump the LiveKit key. By
-// implementing slog.LogValuer, secrets are redacted no matter how the value
-// reaches a log record. Non-secret fields stay visible so the logs remain
-// useful for debugging.
+// Secret-bearing config types implement slog.LogValuer so secrets are redacted
+// however a value reaches a log record; "never log secrets" must not depend on
+// call-site discipline (one slog.Info("cfg", "voice", cfg.Voice) would dump the
+// LiveKit key). Non-secret fields stay visible.
 
 // redactSecret masks a secret for logging. An empty value stays empty (so an
 // unset credential is still visible as "unset"); anything else becomes a fixed

@@ -560,7 +560,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "listening_activity": true, "thread_follows": true, "voice_messages": true }`. `voice_messages` (WP 8.9) means `POST /api/v1/uploads` accepts the `voice_duration_ms` and `voice_waveform` query parameters and an attachment of a voice message carries `duration_ms` and `waveform` (see `docs/api.md`, File Upload and Serving); a client that does not see it offers no voice message recorder. `listening_activity` (WP 8.10a) means the server understands `listening_update`, carries a member's song as `listening` on `presence` and `presence_batch` and as `ready.listening`, and has member activity switched on right now; it follows the same admin switch as `game_activity` and is `false` while it is off. A client that does not see it sends no `listening_update` and shows no song. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "game_activity": true, "listening_activity": true, "thread_follows": true, "voice_messages": true, "channel_media": true }`. `channel_media` (WP 8.17) means the server answers `GET /api/v1/channels/{id}/media` and `GET /api/v1/channels/{id}/media/months` (see `docs/api.md`); a client that does not see it shows no media gallery. `voice_messages` (WP 8.9) means `POST /api/v1/uploads` accepts the `voice_duration_ms` and `voice_waveform` query parameters and an attachment of a voice message carries `duration_ms` and `waveform` (see `docs/api.md`, File Upload and Serving); a client that does not see it offers no voice message recorder. `listening_activity` (WP 8.10a) means the server understands `listening_update`, carries a member's song as `listening` on `presence` and `presence_batch` and as `ready.listening`, and has member activity switched on right now; it follows the same admin switch as `game_activity` and is `false` while it is off. A client that does not see it sends no `listening_update` and shows no song. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -610,6 +610,12 @@ means nothing; the two voice limits are the values
 the voice-join path enforces with `CHANNEL_FULL` / `VIDEO_LIMIT`, shipped so a
 client can show "3/5" and explain a refusal it could have predicted.
 
+`password_protected` is always present on every guild channel object (`ready`
+`channels[]`, `channel_create`, `channel_update`) and is `true` only for a voice
+channel that has a password (see `voice_join`). It is the same for every viewer: there
+is no per-viewer "unlocked" flag, a client tries the join and reacts to
+`PASSWORD_REQUIRED`. The password and its hash are never sent.
+
 `private` (3D-6) is the channel-level lock flag, always present on every guild
 channel object (`ready` `channels[]`, `channel_create`, `channel_update`), voice
 channels included, and never on a DM, so a client can draw a lock icon. A channel is
@@ -634,8 +640,9 @@ servers omit it.
 `can_move_voice` is whether the caller may move voice participants in that
 channel regardless of rank. It is `permissions.AuthorizeVoiceMover`: the base
 role must hold `MOVE_MEMBERS` and the effective permission after both override
-layers must hold `READ_MESSAGES | MOVE_MEMBERS` (Administrator bypasses the
-bits). It is independent of `can_moderate_voice`: a caller with only
+layers must hold `READ_MESSAGES | MOVE_MEMBERS`. The base role must hold
+`MOVE_MEMBERS` explicitly: `ADMINISTRATOR` does not stand in for it, though an
+Administrator that holds it ignores channel overrides as usual. It is independent of `can_moderate_voice`: a caller with only
 `MOVE_MEMBERS` gets `can_move_voice` true and `can_moderate_voice` false and may
 move but not mute, deafen or disconnect. The owner is a valid move target only
 while the owner-only setting `voice_owner_movable` is on, and each target takes
@@ -1349,6 +1356,17 @@ the parent was deleted never receives its text and falls back to the unknown
 parent bar. A client that holds a snippet redacts it (`deleted: true`, no
 `user`, no `content`) on `chat_deleted` and `chat_bulk_deleted` when the
 deleted message is the parent.
+
+A message imported from a Discord export is owned by one hidden account, so its
+`user` is not the author. It carries `imported_author: {name, color?}` instead:
+the Discord display name and, when the export had one, a `#rrggbb` role colour
+(treat any other value as absent). The field is omitted for an ordinary message.
+It appears on every shape that names an author: history, `around` and pins
+messages, search results, and the `referenced_message` snippet of a reply to an
+imported message (the reply's `chat_message` frame included). The Discord user id
+is never sent. An imported author has no profile, cannot be mentioned or direct
+messaged, and a client shows the `name` with an "imported" tag in place of the
+`user`. Older servers omit the field.
 
 Mentions are resolved server-side at send time against existing usernames
 (case-insensitive, whole-word, capped at 20 per message, plus the replied-to
@@ -2815,7 +2833,7 @@ Voice uses LiveKit as the SFU. WebSocket messages handle signaling (join/leave/s
 ### voice_join (Client -> Server)
 
 ```json
-{ "type": "voice_join", "payload": { "channel_id": 10, "user_initiated": true } }
+{ "type": "voice_join", "payload": { "channel_id": 10, "user_initiated": true, "password": "..." } }
 ```
 
 `user_initiated` is optional: the client sets it when the user chose the join
@@ -2828,6 +2846,22 @@ interaction_ under DM Authorization).
 
 The caller needs `CONNECT_VOICE` in the channel and, outside a DM,
 `READ_MESSAGES` too: a voice channel hidden from the caller is not joinable.
+
+`password` is optional and only read for a channel with `password_protected: true`.
+A voice channel can have a password. A member who has not entered the current one
+yet must send it with the join; the server then stores that they did, and never asks
+that member again until the password changes. A join without it answers
+`PASSWORD_REQUIRED`, a password that does not match answers `WRONG_PASSWORD`, and
+nothing is joined either way. An Administrator and anyone holding `MANAGE_CHANNELS`
+in that channel join without it. Guesses are limited to 5 per minute per member and
+channel and answer `RATE_LIMITED` beyond that. Changing the password makes every
+member enter the new one on their next join; removing it opens the channel again;
+setting one does not remove anybody already inside. Only the member's own
+`voice_join` asks: a moderator's move and the AFK move put the member in without
+the password (the server stores the grant before it sends `voice_moved`), and
+`voice_token_refresh` never asks. A client that sends the join of an automatic
+rejoin with no password gets in on the stored grant, and sees `PASSWORD_REQUIRED`
+only if the password changed meanwhile. Older servers ignore `password`.
 
 A channel with `voice_max_users` set refuses a join with `CHANNEL_FULL` once it
 holds that many users, except for a caller with `can_moderate_voice` in that
@@ -2852,7 +2886,8 @@ rolls back only the join that was refused, never on an error answering another
 command. Servers before this change sent join refusals with no `id`; the client
 still treats an id-less error as a refusal when its code is one a join can
 return (`CHANNEL_FULL`, `VOICE_ERROR`, `FORBIDDEN`, `NOT_FOUND`, `BAD_REQUEST`,
-`RATE_LIMITED`, `ALREADY_JOINED`, `INTERNAL`, `TIMED_OUT`).
+`RATE_LIMITED`, `ALREADY_JOINED`, `INTERNAL`, `TIMED_OUT`, `PASSWORD_REQUIRED`,
+`WRONG_PASSWORD`).
 
 ### voice_token (Server -> Client, direct)
 
@@ -3003,24 +3038,21 @@ Rate limited: 1 per 60 seconds. Must be in a voice channel.
 
 ## Voice Moderation
 
-Four moderator commands act on another user's voice session. Mute, deafen,
-disconnect and, for a target the actor outranks, move run
-`permissions.AuthorizeVoiceModerator`; `voice_mod_move` can also be authorized
-by `MOVE_MEMBERS` through `permissions.AuthorizeVoiceMover` (see `voice_mod_move`
-below). Each runs its authorizer against the actor in the TARGET's channel:
-the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR` bypasses the bit;
-for mute, deafen and disconnect never the hierarchy, and as it also passes
-`AuthorizeVoiceMover`, an Administrator may move anyone), and the effective permission after both override layers
-must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny holds and a
-room the actor cannot see cannot be moderated. For a DM call the actor must be a
-participant. The actor must strictly outrank the target by role position, except
-for a move authorized by `MOVE_MEMBERS`. The target must currently be in a voice
-channel. Each is rate limited to 5/sec and
+Four moderator commands act on another user's voice session. Mute, deafen and
+disconnect run `permissions.AuthorizeVoiceModerator`; `voice_mod_move` runs only
+`permissions.AuthorizeVoiceMover` (see `voice_mod_move` below). Each runs its
+authorizer against the actor in the TARGET's channel. For mute, deafen and
+disconnect the actor's base role must hold `MUTE_MEMBERS` (`ADMINISTRATOR`
+bypasses the bit, never the hierarchy), and the effective permission after both
+override layers must hold `READ_MESSAGES | MUTE_MEMBERS`, so a channel-level deny
+holds and a room the actor cannot see cannot be moderated; the actor must
+strictly outrank the target by role position. For a DM call the actor must be a
+participant. The target must currently be in a voice channel. Each is rate limited to 5/sec and
 written to the audit log (`voice_mod_mute`, `voice_mod_deafen`, `voice_mod_move`,
 `voice_mod_kick`, target type `user`).
 
-Failures: `FORBIDDEN` (missing bit, or a target of equal/higher rank on the
-`MUTE_MEMBERS` path),
+Failures: `FORBIDDEN` (missing bit, or a target of equal/higher rank for mute,
+deafen and disconnect),
 `VOICE_ERROR` (target not in voice, not in the named channel, or not
 connected), `BAD_REQUEST` (self-target, non-voice destination),
 `NOT_FOUND` (unknown destination channel), `CHANNEL_FULL` (destination at
@@ -3063,14 +3095,14 @@ the moderator did and restates it with `voice_deafen`.
 { "type": "voice_mod_move", "payload": { "user_id": 7, "to_channel_id": 12 } }
 ```
 
-Authorized by either of two paths. A `MUTE_MEMBERS` holder moves members they
-strictly outrank, exactly as before `MOVE_MEMBERS` existed (no owner switch, no
-per-target limit). A `MOVE_MEMBERS` holder (base role, effective in the target's
-channel) may move a member of any rank, the owner included; the owner is skipped
+Authorized only by `MOVE_MEMBERS`, held explicitly on the base role and
+effective in the target's channel. Neither `MUTE_MEMBERS` nor `ADMINISTRATOR`
+opens a move, so taking `MOVE_MEMBERS` off a role stops it moving anyone. A
+holder may move a member of any rank, the owner included; the owner is skipped
 (`FORBIDDEN`, "the owner cannot be moved") while the owner-only setting
 `voice_owner_movable` is `false` (default `true`), and a move of a member of
 equal or higher rank is further limited to 3 per 30 seconds per target (a
-move that then fails at eviction still counts). An actor holding neither bit
+move that then fails at eviction still counts). An actor without the bit
 gets the same refusal whether the target is in voice or not. On every move the
 mover must also be able to see the destination channel; one they cannot see
 answers `NOT_FOUND` ("channel not found"), the same as a missing one.
@@ -3729,6 +3761,8 @@ The full list is `error_codes.ws` of `protocol/schema.json`, generated into the
 | `RATE_LIMITED`             | Too many requests (the error carries only `code` and `message`; REST 429s carry a `Retry-After` header, WS errors do not)                                                                                                                     |
 | `ALREADY_JOINED`           | Already in this voice channel                                                                                                                                                                                                                 |
 | `CHANNEL_FULL`             | Voice channel at capacity                                                                                                                                                                                                                     |
+| `PASSWORD_REQUIRED`        | `voice_join` into a password-protected channel without the password. Nothing was joined. Refines `FORBIDDEN`.                                                                                                                                 |
+| `WRONG_PASSWORD`           | `voice_join` with a password that does not match, or that changed while the join ran. Nothing was joined. Refines `FORBIDDEN`.                                                                                                                |
 | `VOICE_ERROR`              | Voice-specific error                                                                                                                                                                                                                          |
 | `VIDEO_LIMIT`              | Maximum video streams reached                                                                                                                                                                                                                 |
 | `BANNED`                   | User is banned                                                                                                                                                                                                                                |

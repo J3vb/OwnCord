@@ -88,7 +88,7 @@ async function waitForCapturedCall(
 /** One custom emoji, seeded through GET /api/v1/emoji (dispatcher.ts calls
  *  this once on `ready`; emoji.store.ts is the sole source custom-emoji
  *  autocomplete and rendering read from — see EmojiAutocomplete.ts and
- *  message-list/custom-emoji.ts). */
+ *  message-list/customEmoji.ts). */
 const SEEDED_CUSTOM_EMOJI = { id: 1, shortcode: "partyparrot", url: "/api/v1/emoji/1/image" };
 
 async function mockSessionWithCustomEmoji(page: Page): Promise<void> {

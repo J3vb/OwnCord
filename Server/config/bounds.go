@@ -6,9 +6,9 @@ import (
 )
 
 // boundedKey is one integer key with a legal range. Out-of-range values are
-// clamped to the nearest bound and warned about, never rejected: Load is
-// warn-only by design (a warning must not brick a working install), and a
-// clamped value is the nearest thing to what the operator wrote.
+// clamped and warned about, never rejected: Load is warn-only so a warning
+// cannot brick a working install, and the clamp is the nearest thing to what the
+// operator wrote.
 type boundedKey struct {
 	key      string
 	ptr      *int
@@ -26,18 +26,17 @@ type boundedKey struct {
 	highToDef bool
 }
 
-// boundedKeys is the one place a bounded configuration key states its range
-// (B5-2). A new integer key with a range adds a row here — not a clamp in the
-// package that consumes it — so the checks stay together and every warning
-// reads the same. Bounds are on the MiB values as written; the byte helpers
-// (UserQuotaBytes, MinFreeDiskBytes) shift by 20, and maxMiB keeps that shift
-// inside int64.
+// boundedKeys is the one place a bounded key states its range; a new ranged
+// integer key adds a row here, not a clamp in its consumer, so the warnings read
+// the same. Bounds are on the MiB values as written; maxMiB keeps the byte
+// helpers' shift by 20 inside int64.
 func boundedKeys(cfg *Config) []boundedKey {
 	const maxMiB = math.MaxInt64 >> 20
 	def := defaults()
 	return []boundedKey{
 		{"upload.max_size_mb", &cfg.Upload.MaxSizeMB, 0, maxMiB, def.Upload.MaxSizeMB, "the default, 100 MB", false},
 		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited", false},
+		{"upload.import_max_mb", &cfg.Upload.ImportMaxMB, 1, maxMiB, def.Upload.ImportMaxMB, "the default, 500 MB", false},
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it", false},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content", false},
 		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows", false},

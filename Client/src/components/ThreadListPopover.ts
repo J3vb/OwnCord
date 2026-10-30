@@ -1,5 +1,5 @@
 /**
- * The channel header's thread list (WP 6.9c): a popover under the Threads
+ * The channel header's thread list: a popover under the Threads
  * button listing the channel's open threads, newest activity first, then its
  * archived ones. Each list is paged with the server's opaque `next_before`
  * cursor, one page per "Load more".
@@ -10,7 +10,7 @@
  * first use, never at startup.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";

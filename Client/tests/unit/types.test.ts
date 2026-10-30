@@ -6,7 +6,6 @@ import type {
   VoiceSpeakersPayload,
   ReadyPayload,
   ChatMessagePayload,
-  Permission,
 } from "../../src/lib/types";
 import { Permission as P } from "../../src/lib/types";
 import { parseRegistrationMode, retentionNotice } from "../../src/lib/types";
@@ -132,7 +131,7 @@ describe("ServerMessage discriminated union", () => {
   });
 });
 
-describe("AUDIT Critical: threshold_mode (CRIT-2, CRIT-3)", () => {
+describe("AUDIT Critical: threshold_mode", () => {
   it("VoiceConfigPayload uses threshold_mode NOT mode", () => {
     const config: VoiceConfigPayload = sampleVoiceConfig.payload;
     expect(config.threshold_mode).toBe("forwarding");
@@ -278,7 +277,7 @@ describe("parseRegistrationMode", () => {
   });
 });
 
-describe("retentionNotice (B7-15c)", () => {
+describe("retentionNotice", () => {
   const info = (retention: unknown) =>
     ({ name: "s", protocol_epoch: 1, browser_client_enabled: false, retention }) as never;
 

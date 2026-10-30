@@ -1,11 +1,12 @@
-// The browser platform implementation (WP 6.13b): every `Platform` member.
-// Transport, storage and identity are real browser adapters (6.13c), one file
+// The browser platform implementation: every `Platform` member.
+// Transport, storage and identity are real browser adapters, one file
 // each, used only in a secure context: on a page that is not one, they stay
 // inert, so the app reaches no host and stores nothing rather than half-work.
-// The rest is 6.13d: notifications (Web Notification API, also secure-context
+// The rest: notifications (Web Notification API, also secure-context
 // only), file save (a download), logs (a memory ring), invite deep links
-// (`?invite=`) and external content (refused) are browser adapters, one file
-// each; every other member either refuses (a rejected promise, or the typed
+// (`?invite=`), external content (through the server's broker, secure context
+// only) and the URL opener (a new tab) are
+// browser adapters, one file each; every other member either refuses (a rejected promise, or the typed
 // "unavailable" answer its contract defines) or does nothing, exactly as its
 // contract allows, and the four contracts a Settings control sits on say so
 // through `available: false`. Push-to-talk stays unsupported: an in-tab key
@@ -23,6 +24,7 @@ import type {
   Autostart,
   CredentialStore,
   DevTools,
+  ExternalContentBroker,
   GameDetector,
   MediaDetector,
   GlobalShortcuts,
@@ -38,14 +40,13 @@ import type {
   SocketTransport,
   SystemIdle,
   TrayStatus,
-  UrlOpener,
   WindowControl,
   WindowPrefs,
 } from "../contracts";
 import type { SocketConnection } from "../contracts/socket";
 import { credentials as browserCredentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
-import { externalContent } from "./externalContent";
+import { externalContent as browserExternalContent } from "./externalContent";
 import { fileSaver } from "./fileSave";
 import { http as browserHttp } from "./http";
 import { identity as browserIdentity } from "./identity";
@@ -57,6 +58,7 @@ import { pendingMessages as browserPendingMessages } from "./pendingMessages";
 import { settings as browserSettings } from "./settings";
 import { socket as browserSocket } from "./socket";
 import { inertUnsubscribe, refuse, UnsupportedKeysError } from "./unavailable";
+import { urlOpener } from "./urlOpener";
 
 const appAudio: AppAudio = {
   available: async () => false,
@@ -64,8 +66,13 @@ const appAudio: AppAudio = {
   stop: async () => undefined,
 };
 
+// The version is the one the bundle was built from: the server embeds the
+// bundle of its own release, so it is also the server's.
 const appMetadata: AppMetadata = {
-  getVersion: () => refuse(),
+  getVersion: () => {
+    const version = import.meta.env.OWNCORD_APP_VERSION;
+    return version === undefined || version === "" ? refuse() : Promise.resolve(version);
+  },
 };
 
 const appProcess: AppProcess = {
@@ -111,6 +118,11 @@ const globalShortcuts: GlobalShortcuts = {
   configurePortal: () => Promise.reject(new UnsupportedKeysError()),
   onStatusChange: inertUnsubscribe,
   onShortcut: inertUnsubscribe,
+};
+
+const inertExternalContent: ExternalContentBroker = {
+  preview: async () => ({ ok: false, failure: "unavailable" }),
+  image: async () => ({ ok: false, failure: "unavailable" }),
 };
 
 const inertHttp: HttpClient = {
@@ -162,7 +174,7 @@ const pushToTalk: PushToTalk = {
   supported: async () => false,
 };
 
-// The web build is only ever served by one server's portal (6.13a), so the page
+// The web build is only ever served by one server's portal, so the page
 // is bound to its own host. `location.host` is already canonical (lower case,
 // no default port), the form every credential and profile key takes.
 const serverScope: ServerScope = { fixedHost: globalThis.location.host };
@@ -191,6 +203,7 @@ const inertSocket: SocketTransport = { create: createConnection };
 /** The members that run only in a secure context. */
 interface SecureMembers {
   readonly credentials: CredentialStore;
+  readonly externalContent: ExternalContentBroker;
   readonly http: HttpClient;
   readonly identity: IdentityStore;
   readonly notifier: Notifier;
@@ -209,6 +222,7 @@ function isSecurePage(): boolean {
 const secureMembers: SecureMembers = isSecurePage()
   ? {
       credentials: browserCredentials,
+      externalContent: browserExternalContent,
       http: browserHttp,
       identity: browserIdentity,
       notifier: browserNotifier,
@@ -219,6 +233,7 @@ const secureMembers: SecureMembers = isSecurePage()
     }
   : {
       credentials: inertCredentials,
+      externalContent: inertExternalContent,
       http: inertHttp,
       identity: inertIdentity,
       notifier: inertNotifier,
@@ -259,10 +274,6 @@ const updater: AppUpdater = {
   subscribeToInstall: inertUnsubscribe,
 };
 
-const urlOpener: UrlOpener = {
-  open: () => refuse(),
-};
-
 const windowControl: WindowControl = {
   available: false,
   isMaximized: async () => false,
@@ -287,7 +298,6 @@ export const browser: Platform = {
   autostart,
   deepLinks,
   devTools,
-  externalContent,
   fileSaver,
   gameDetector,
   mediaDetector,

@@ -1,4 +1,4 @@
-// user_note_handler.go — private per-user profile notes (migration 069, WP 6.11a).
+// user_note_handler.go — private per-user profile notes (migration 069).
 //
 // A note is private to its owner: both routes key on the session user and
 // there is no route that reads another user's notes. Sync across devices is by
@@ -21,7 +21,6 @@ type userNoteJSON struct {
 	Note   string `json:"note"`
 }
 
-// parseNoteTarget reads the {userId} path parameter.
 func parseNoteTarget(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, ok := pathID(r, "userId")
 	if !ok {

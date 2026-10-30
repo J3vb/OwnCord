@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const showActionToast = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/toast", () => ({ showActionToast }));
+vi.mock("../../lib/ui/toast", () => ({ showActionToast }));
 
 import {
   dismissMediaLostNotice,
@@ -65,7 +65,7 @@ describe("showMediaLostNotice", () => {
   });
 });
 
-describe("restoreLostMedia (WP 1C-6)", () => {
+describe("restoreLostMedia", () => {
   let on: { camera: boolean; screenshare: boolean };
   let current: boolean;
   let r: RestoreMedia & {

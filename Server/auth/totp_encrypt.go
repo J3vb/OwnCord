@@ -17,9 +17,8 @@ const (
 	// totpKeyBytes is the required length for the AES-256 encryption key.
 	totpKeyBytes = 32
 
-	// minEncryptedHexLen is the minimum hex-encoded length of a valid
-	// nonce+ciphertext (12-byte nonce + at least 16-byte GCM tag = 28 bytes
-	// = 56 hex chars).
+	// minEncryptedHexLen is the minimum hex length of a valid nonce+ciphertext:
+	// a 12-byte nonce plus at least a 16-byte GCM tag, 28 bytes, 56 hex chars.
 	minEncryptedHexLen = 56
 )
 
@@ -31,9 +30,9 @@ const (
 //
 // Only a confirmed absence may fall through to generation: every stored TOTP
 // secret is ciphertext under this key, so replacing the file on a read error
-// (EACCES after a permissions change, EIO, a directory at the path, a
-// dangling symlink) would orphan every second factor on the server with no
-// way back (OC-0321). The corrupt-content branches fail closed too.
+// (EACCES after a permissions change, EIO, a directory at the path, a dangling
+// symlink) would orphan every second factor with no way back. The
+// corrupt-content branches fail closed too.
 func LoadOrGenerateTOTPKey(dataDir string) ([]byte, error) {
 	return loadOrGenerateKeyFile(keyFileSpec{
 		env:       "OWNCORD_TOTP_KEY",
@@ -46,29 +45,27 @@ func LoadOrGenerateTOTPKey(dataDir string) ([]byte, error) {
 }
 
 // keyFileSpec describes one key the server keeps beside its data: the
-// environment variable that overrides it, the file name under the data
-// directory, the exact byte length, and the words the logs and errors use.
+// environment variable that overrides it, its file name under the data
+// directory, its exact byte length, and the words logs and errors use.
 type keyFileSpec struct {
 	env, file string
 	size      int
 	what      string
-	// orphans names what a regenerated key would silently abandon; it is
-	// why a read error refuses rather than replaces.
+	// orphans names what a regenerated key would silently abandon; it is why a
+	// read error refuses rather than replaces.
 	orphans string
 	// generated is the operator advice logged when a key is auto-generated.
 	generated string
-	// valid, when non-nil, is checked only on the generate branch: random
-	// bytes that fail it are discarded and regenerated rather than written.
-	// nil means every byte string of the right length is valid (every
-	// existing caller). The push VAPID key uses this because a uniform
-	// random 32-byte scalar has a small chance of falling outside the P-256
-	// curve order.
+	// valid, when non-nil, is checked only on the generate branch: random bytes
+	// failing it are discarded and regenerated. nil means every byte string of
+	// the right length is valid. The push VAPID key uses it because a uniform
+	// random 32-byte scalar can fall outside the P-256 curve order.
 	valid func([]byte) bool
 }
 
 // loadOrGenerateKeyFile is the fail-closed key loader the TOTP key and the
-// erasure marker key (B4-10) share: the environment variable, else the file,
-// else a fresh key written atomically — and only on a confirmed absence.
+// erasure marker key share: the environment variable, else the file, else a
+// fresh key written atomically, and only on a confirmed absence.
 func loadOrGenerateKeyFile(spec keyFileSpec, dataDir string) ([]byte, error) {
 	if envKey := os.Getenv(spec.env); envKey != "" {
 		key, err := hex.DecodeString(envKey)
@@ -97,8 +94,8 @@ func loadOrGenerateKeyFile(spec keyFileSpec, dataDir string) ([]byte, error) {
 		return key, nil
 	case errors.Is(err, fs.ErrNotExist):
 		// ReadFile follows symlinks, so ENOENT also describes a symlink whose
-		// target is missing. That is something at the path, not nothing:
-		// refuse rather than write a new key through it.
+		// target is missing. That is something at the path: refuse rather than
+		// write a new key through it.
 		if _, lstatErr := os.Lstat(keyPath); lstatErr == nil {
 			return nil, fmt.Errorf("%s at %s is a symlink whose target does not exist; restore the target or remove the link", spec.file, keyPath)
 		}
@@ -125,13 +122,12 @@ func loadOrGenerateKeyFile(spec keyFileSpec, dataDir string) ([]byte, error) {
 	return key, nil
 }
 
-// writeKeyFileAtomic writes a key file through a sibling temp file and a
-// rename, so a crash mid-write can never leave a truncated key that the
-// next start refuses (docs/architecture/data-lifecycle.md, O7 A1). The
-// rename is the only step that makes the key visible, and it is atomic on
-// every filesystem the server runs on. A stale temp file from an earlier
-// interrupted run is removed first rather than failing the exclusive create.
-// Shared by the TOTP key and the erasure marker key (B4-10).
+// writeKeyFileAtomic writes a key file through a sibling temp file and a rename,
+// so a crash mid-write never leaves a truncated key the next start refuses
+// (docs/architecture/data-lifecycle.md). The rename is atomic on every
+// filesystem the server runs on. A stale temp file from an interrupted run is
+// removed first rather than failing the exclusive create. Shared by the TOTP
+// key and the erasure marker key.
 func writeKeyFileAtomic(keyPath string, contents []byte) error {
 	name := filepath.Base(keyPath)
 	tmpPath := keyPath + ".tmp"
@@ -184,14 +180,12 @@ func EncryptTOTPSecret(key []byte, plaintext string) (string, error) {
 }
 
 // DecryptTOTPSecret decrypts a hex-encoded AES-256-GCM ciphertext back to the
-// plaintext TOTP secret. For backwards compatibility, if the value does not
-// look like valid encrypted data (not valid hex, or too short for
-// nonce+tag), it is returned as-is so that existing unencrypted secrets
-// continue to work.
+// plaintext TOTP secret. For backwards compatibility a value that does not look
+// encrypted (not valid hex, or too short for nonce+tag) is returned as-is so
+// existing unencrypted secrets keep working.
 func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
-	// Backwards compatibility: if it doesn't look encrypted, return as-is.
-	// M-4: Log a warning so operators can detect unencrypted TOTP secrets
-	// and migrate them (e.g. after key rotation or initial setup).
+	// Backwards compatibility: warn when a value doesn't look encrypted, so
+	// operators can detect and migrate unencrypted TOTP secrets.
 	if len(ciphertext) < minEncryptedHexLen {
 		slog.Warn("TOTP secret returned as plaintext (too short for encrypted format) — consider encrypting legacy secrets")
 		return ciphertext, nil
@@ -224,12 +218,11 @@ func DecryptTOTPSecret(key []byte, ciphertext string) (string, error) {
 	nonce, sealed := data[:nonceSize], data[nonceSize:]
 	plaintext, err := gcm.Open(nil, nonce, sealed, nil)
 	if err != nil {
-		// The value has the full encrypted shape (valid hex, long enough for
-		// nonce+tag) but GCM authentication failed. That is a real error — a
-		// wrong TOTP_ENCRYPTION_KEY or a tampered/corrupted ciphertext — not a
-		// legacy plaintext secret (those are caught by the not-hex and
-		// too-short branches above). Fail CLOSED: returning the ciphertext as
-		// if it were the secret would silently mask key misconfiguration.
+		// The value has the full encrypted shape but GCM authentication failed:
+		// a wrong TOTP_ENCRYPTION_KEY or tampered/corrupted ciphertext, not a
+		// legacy plaintext secret (the not-hex and too-short branches catch
+		// those). Fail closed: returning the ciphertext as the secret would mask
+		// key misconfiguration.
 		slog.Error("TOTP secret decryption failed — check TOTP_ENCRYPTION_KEY", "error", err)
 		return "", fmt.Errorf("decrypting TOTP secret: %w", err)
 	}

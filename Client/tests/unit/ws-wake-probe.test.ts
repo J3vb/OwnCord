@@ -193,7 +193,7 @@ describe("wake probe (U7d)", () => {
 
 // DP-02: the network or the screen coming back while the client is waiting out
 // a reconnect backoff dials at once rather than after up to 30 s.
-describe("wake kick while reconnecting (DP-02)", () => {
+describe("wake kick while reconnecting", () => {
   let client: ReturnType<typeof createWsClient>;
 
   beforeEach(() => {

@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The message right-click menu (message-list/message-menu.ts). Its own
+/** The message right-click menu (message-list/messageMenu.ts). Its own
  *  catalog so the copy loads with that lazy module, not at startup. The link
  *  rows, the message-link and ID toasts and Reply reuse the messaging and
  *  image-menu catalogs. */

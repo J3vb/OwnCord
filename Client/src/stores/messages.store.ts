@@ -10,7 +10,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { adoptStarterThreads } from "./threadsLoader";
 import type {
   ChatMessagePayload,
@@ -114,7 +114,7 @@ export function addOptimisticMessage(params: {
   content: string;
   replyTo: number | null;
   attachments?: readonly Attachment[];
-  /** A sticker send (WP 8.8): the row shows the image at once; `content` is the server's fallback text. */
+  /** A sticker send: the row shows the image at once; `content` is the server's fallback text. */
   sticker?: MessageStickerInfo;
   timestamp: string;
   /** "uploading" for a send queued behind its files; absent means "pending". */
@@ -178,14 +178,14 @@ export function setChannelLoadError(channelId: number): void {
  *  carried over when they are pending/failed, or "sent" but newer than
  *  anything in the snapshot.
  *
- *  A revisit's refetch (DP-10) reconciles into the cached window: a row the
+ *  A revisit's refetch reconciles into the cached window: a row the
  *  page left unchanged keeps its object. While the window is still exactly
  *  the latest page, a page that changes nothing leaves the channel's array
  *  reference as it was. A post-only page only appends when the channel's
  *  whole history fits in one page (hasMore false). Otherwise cached "sent"
  *  rows older than the page are dropped, so nothing deleted or edited while
  *  away stays on screen (scrolling up loads them again). A revisit's refetch
- *  (MessageController.loadMessages, P4-01 R3) pages backwards from the newest
+ *  (MessageController.loadMessages) pages backwards from the newest
  *  message until the fetched range reaches the oldest cached row, so the rows
  *  it keeps are revalidated by that range; when the cached window plus the
  *  unseen gap outruns the paging bound, the fetched range is kept and the
@@ -300,7 +300,7 @@ export function invalidateChannelMessageWindow(channelId: number): void {
 /**
  * Forget every delivered row of one channel along with its window state, so
  * nothing from it can render again until a fresh fetch — used when NSFW
- * consent for the channel is gone (B9-7). Carries pending/failed rows, the
+ * consent for the channel is gone. Carries pending/failed rows, the
  * user's own unsent text, like every other window-replacing writer.
  */
 export function clearChannelContent(channelId: number): void {
@@ -384,7 +384,7 @@ export function deleteMessage(payload: ChatDeletedPayload): void {
 }
 
 /**
- * A sticker_update removed stickers (WP 8.8): every loaded sticker message
+ * A sticker_update removed stickers: every loaded sticker message
  * whose sticker is no longer in `liveIds` becomes a deleted-sticker row, the
  * same shape the server sends for history (id and url null, name kept). Lists
  * with nothing to change keep their identity, so only the affected channels
@@ -508,7 +508,7 @@ export function updateReaction(payload: ReactionUpdatePayload, currentUserId: nu
   messagesStore.setState((prev) => reduceUpdateReaction(prev, payload, currentUserId));
 }
 
-/** Apply a poll_update (WP 6.9b): counts in version order, the viewer's own selection by its own watermark. */
+/** Apply a poll_update: counts in version order, the viewer's own selection by its own watermark. */
 export function updatePoll(payload: PollUpdatePayload, currentUserId: number): void {
   messagesStore.setState((prev) => reducePollUpdate(prev, payload, currentUserId));
 }

@@ -4,13 +4,13 @@
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows, savePref } from "./helpers";
-import { playNotificationSound } from "@lib/notificationSound";
+import { playNotificationSound } from "@lib/media/notificationSound";
 import {
   APP_SOUNDS_VOLUME_KEY,
   SOUND_SWITCH_KEYS,
   loadAppSoundsGain,
   type SoundSwitch,
-} from "@lib/soundPrefs";
+} from "@lib/prefs/soundPrefs";
 import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
 import {
   CHANNEL_MUTE_CHANGED,
@@ -18,7 +18,7 @@ import {
   getChannelMutesHost,
   listMutedChannels,
   unmuteChannel,
-} from "@lib/channel-mutes";
+} from "@lib/prefs/channelMutes";
 import { Disposable } from "@lib/disposable";
 import { clockAndDate } from "../muteMenu";
 import {
@@ -31,13 +31,13 @@ import {
   listChannelNotificationOverrides,
   setChannelNotificationLevel,
   type NotificationLevel,
-} from "@lib/notificationLevel";
-import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
+} from "@lib/prefs/notificationLevel";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 const LEVEL_LABELS: Readonly<Record<NotificationLevel, () => string>> = {
   all: () => t("notifications.level.all"),
@@ -112,7 +112,7 @@ function buildLevelRow(signal: AbortSignal): HTMLDivElement {
  * The connected server's override of the global level, shown only while
  * connected. "Follow global setting" clears the override; the three levels set
  * an explicit value, so one noisy community can be quieted without muting every
- * other server. Stored against the host (see @lib/notificationLevel), so the
+ * other server. Stored against the host (see @lib/prefs/notificationLevel), so the
  * choice returns when you switch back.
  */
 function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {
@@ -154,7 +154,7 @@ function buildServerLevelRow(signal: AbortSignal): HTMLDivElement | null {
   return row;
 }
 
-/** Label and description of each per-sound switch (WP M-8). */
+/** Label and description of each per-sound switch. */
 const SOUND_SWITCH_TEXT: Readonly<
   Record<SoundSwitch, { label: () => string; desc: () => string }>
 > = {
@@ -216,7 +216,7 @@ function valueText(percent: number): string {
 }
 
 /**
- * The "App sounds volume" slider (WP M-8): scales the master gain every app
+ * The "App sounds volume" slider: scales the master gain every app
  * sound shares. 100% is today's level, 0% is silent. The value is saved on
  * every move (the player re-reads it on its next sound); letting go of the
  * thumb plays the message chime once so the level can be judged.

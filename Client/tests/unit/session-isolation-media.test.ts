@@ -189,8 +189,8 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/preferences")>()),
+vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/preferences")>()),
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -204,7 +204,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/noise-suppression", () => ({
+vi.mock("@lib/voice/noiseSuppression", () => ({
   createRNNoiseProcessor: vi.fn(),
 }));
 
@@ -218,7 +218,7 @@ const mockIdentityKeyPair = vi.hoisted(() => ({
   privateKey: { type: "id-private" } as unknown as CryptoKey,
 }));
 
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => mockKeyPair),
   exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
   importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
@@ -237,7 +237,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
 }));
 
 // F3 TOFU: identity keyring + peer pin store (Tauri-backed; mocked here).
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
@@ -257,14 +257,14 @@ import {
   isVoiceSessionActive,
   setServerHost,
   setWsClient,
-} from "../../src/lib/livekitSession";
+} from "../../src/lib/voice/livekitSession";
 
 /** Rooms built and not yet disconnected. */
 function liveRooms(): number {
   return rooms.constructed.filter((room) => room.disconnect.mock.calls.length === 0).length;
 }
 
-describe("one live media session across a profile switch (B7-13)", () => {
+describe("one live media session across a profile switch", () => {
   beforeEach(() => {
     rooms.constructed.length = 0;
     rooms.events.length = 0;

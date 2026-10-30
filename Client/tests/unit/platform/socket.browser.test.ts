@@ -10,6 +10,7 @@ import type {
   SocketConnectionState,
   SocketTransport,
 } from "../../../src/platform/contracts/socket";
+import { sessionToken } from "../../../src/platform/browser/session";
 import { socket } from "../../../src/platform/browser/socket";
 import { describeSocketTransportSuite } from "./socket.suite";
 
@@ -191,6 +192,22 @@ describe("browser socket", () => {
     expect(frames).toEqual(['{"type":"live"}']);
     expect(live.sent).toEqual(['{"type":"ping"}']);
     expect(stale.sent).toEqual([]);
+  });
+
+  it("holds the dialled token as the tab's session until it disconnects", async () => {
+    void connection.connect(options);
+    expect(sessionToken()).toBe("tok");
+    latest().fireClose();
+    // A lost connection reconnects with the same session.
+    expect(sessionToken()).toBe("tok");
+
+    const other = socket.create();
+    void other.connect({ ...options, token: "tok-2" });
+    await connection.disconnect();
+    // The connection that took over keeps its own session.
+    expect(sessionToken()).toBe("tok-2");
+    await other.disconnect();
+    expect(sessionToken()).toBeNull();
   });
 
   it("settles a connect that a disconnect cancels", async () => {

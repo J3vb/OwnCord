@@ -3,16 +3,16 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { createLogger } from "@lib/logger";
 import { openSettings, closeSettings, uiStore, setTransientError } from "@stores/ui.store";
-import type { Compatibility, HealthStatus } from "@lib/profiles";
+import type { Compatibility, HealthStatus } from "@lib/presence/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
 import type { RegistrationMode } from "@lib/types";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
 import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
-import { loadCredential } from "@lib/credentials";
+import { loadCredential } from "@lib/net/credentials";
 import { desktop } from "../platform/desktop";
 
 const log = createLogger("ConnectPage");
@@ -48,7 +48,7 @@ export interface ConnectPageCallbacks {
   getRetentionNotice?(host: string): string | null;
   /** A typed host settled in register mode; probe its `server-info` if unknown. */
   onHostSettled?(host: string): void;
-  /** The name `server-info` reported for a host, if known (the portal card's subtitle, WP 6.13e). */
+  /** The name `server-info` reported for a host, if known (the portal card's subtitle). */
   getServerName?(host: string): string | null;
 }
 
@@ -108,7 +108,7 @@ export function createConnectPage(
   let container: Element | null = null;
   let root: HTMLDivElement;
 
-  // The one host a web portal signs in to (WP 6.13e). Read only behind
+  // The one host a web portal signs in to. Read only behind
   // `__OWNCORD_WEB__`: the server panel is built but not mounted, and a header
   // names the server.
   const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
@@ -201,7 +201,7 @@ export function createConnectPage(
         loginForm.setAutoConnect(autoConnect ?? true);
         loginForm.setRememberPassword(rememberPassword ?? false);
         // The notice appears only for the host the user selects — never for a
-        // background-probe profile (Decision 2).
+        // background-probe profile.
         selectHost(host);
       },
       onCredentialLoaded(host: string, username: string, hasPassword?: boolean) {

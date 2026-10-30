@@ -4,8 +4,8 @@ import {
   isHideMutedChannels,
   mutedRowHidden,
   setHideMutedChannels,
-} from "../../src/lib/hide-muted-channels";
-import { invalidateMuteCache, muteChannel } from "../../src/lib/channel-mutes";
+} from "../../src/lib/prefs/hideMutedChannels";
+import { invalidateMuteCache, muteChannel } from "../../src/lib/prefs/channelMutes";
 import type { Channel } from "../../src/stores/channels.store";
 
 function ch(overrides: Partial<Channel> = {}): Channel {

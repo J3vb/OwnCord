@@ -262,15 +262,15 @@ vi.mock("../../../platform/desktop", () => ({
 
 import { createNativeRoom } from "./nativeRoom";
 import { desktop } from "../../../platform/desktop";
-import { savePref } from "../../../lib/preferences";
+import { savePref } from "../../../lib/prefs/preferences";
 import { NativeScreenAudioTrack } from "./screenAudioTrack";
 import type { NativeScreenTrack } from "./screenTrack";
 import { nativeCounters } from "./counters";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "../cameraSwitch";
 import { setEncryptionDegraded, setLocalDeafened, voiceStore } from "../../../stores/voice.store";
-import { createConnectionStatsPoller } from "../../../lib/connectionStats";
+import { createConnectionStatsPoller } from "../../../lib/voice/connectionStats";
 import { readSenderSample } from "../shareSenderStats";
-import { createRoomEventHandlers, type RoomEventDeps } from "../../../lib/roomEventHandlers";
+import { createRoomEventHandlers, type RoomEventDeps } from "../../../lib/voice/roomEventHandlers";
 
 const audio = {
   echoCancellation: true,
@@ -976,7 +976,7 @@ describe("NativeRoom room surface", () => {
     expect(muted).toHaveBeenCalledTimes(1);
   });
 
-  it("OC-0473: re-reports a remote decrypt failure the way the web worker does until it clears", async () => {
+  it("re-reports a remote decrypt failure the way the web worker does until it clears", async () => {
     vi.useFakeTimers();
     try {
       const room = createNativeRoom(audio);
@@ -1018,7 +1018,7 @@ describe("NativeRoom room surface", () => {
     }
   });
 
-  it("OC-0473: a native decrypt degradation clears once the peer decrypts again", async () => {
+  it("a native decrypt degradation clears once the peer decrypts again", async () => {
     vi.useFakeTimers();
     try {
       const room = createNativeRoom(audio);
@@ -1156,7 +1156,7 @@ describe("NativeRoom remote video", () => {
     expect(unsubscribed).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards the layer controls RemoteTracks drives to the native session (P3-07)", async () => {
+  it("forwards the layer controls RemoteTracks drives to the native session", async () => {
     const room = createNativeRoom(audio);
     await room.connect("u", "t");
     emit({
@@ -1326,7 +1326,7 @@ describe("NativeRoom remote video", () => {
     vi.unstubAllGlobals();
   });
 
-  it("auto-played cameras (WP 1B-3): the backend's subscription is kept, and Stop watching drops it", async () => {
+  it("auto-played cameras: the backend's subscription is kept, and Stop watching drops it", async () => {
     const room = createNativeRoom(audio);
     // RemoteTracks' rule with auto-play on: a camera is watched unless stopped.
     const stopped = new Set<number>();
@@ -2223,7 +2223,7 @@ const layer = (fps: number) => ({
   active: true,
 });
 
-describe("NativeRoom stats (LP-5)", () => {
+describe("NativeRoom stats", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -2414,7 +2414,7 @@ describe("NativeRoom stats (LP-5)", () => {
   });
 });
 
-describe("NativeRoom screen-share audio (LP-8c)", () => {
+describe("NativeRoom screen-share audio", () => {
   beforeEach(() => {
     (HTMLCanvasElement.prototype as unknown as { captureStream: () => unknown }).captureStream =
       () => ({ getVideoTracks: () => [{ stop() {} }] });

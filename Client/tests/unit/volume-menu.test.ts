@@ -1,5 +1,5 @@
 /**
- * Tests for src/components/channel-sidebar/volume-menu.ts (was 77.7% statements
+ * Tests for src/components/channel-sidebar/volumeMenu.ts (was 77.7% statements
  * / 50% functions, no test file — every event handler was unexercised).
  *
  * The menu is transient DOM appended to document.body with two AbortControllers
@@ -14,14 +14,14 @@ const getUserVolume = vi.fn();
 const setUserLocalMute = vi.fn();
 const getUserLocalMute = vi.fn((..._args: unknown[]) => false);
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
   getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,
   setUserLocalMute: (...args: unknown[]) => setUserLocalMute(...args) as unknown,
   getUserLocalMute: (...args: unknown[]) => getUserLocalMute(...args) as unknown,
 }));
 
-const { showUserVolumeMenu } = await import("@components/channel-sidebar/volume-menu");
+const { showUserVolumeMenu } = await import("@components/channel-sidebar/volumeMenu");
 
 function menuEl(): HTMLElement | null {
   return document.querySelector(".user-vol-menu");
@@ -164,7 +164,7 @@ describe("reset button", () => {
   });
 });
 
-describe("local Mute (WP 1D-5)", () => {
+describe("local Mute", () => {
   function muteItem(): HTMLElement | null {
     return document.querySelector<HTMLElement>('.user-vol-menu [data-action="local-mute"]');
   }
@@ -270,7 +270,7 @@ describe("dismissal", () => {
     expect(menuEl()).toBeNull();
   });
 
-  it("[B3-4] ties the parent-signal abort bridge to the menu's own dismiss signal, so it does not outlive a dismissed menu", () => {
+  it("ties the parent-signal abort bridge to the menu's own dismiss signal, so it does not outlive a dismissed menu", () => {
     // Without a { signal } option, this bridge listener (and the closure
     // retaining a detached .user-vol-menu subtree) survives every future
     // right-click for the parent's entire lifetime — the outside-click and
@@ -342,7 +342,7 @@ describe("re-opening", () => {
   });
 });
 
-describe("moderation section with only Move to (WP 8.4b)", () => {
+describe("moderation section with only Move to", () => {
   const actions = (): string[] =>
     [...document.querySelectorAll<HTMLElement>(".user-vol-menu [data-action]")].map(
       (el) => el.dataset.action ?? "",

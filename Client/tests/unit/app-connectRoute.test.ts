@@ -12,8 +12,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "@lib/api";
-import type { ProfileManager } from "@lib/profiles";
-import type { RenderRecovery } from "@lib/safe-render";
+import type { ProfileManager } from "@lib/presence/profiles";
+import type { RenderRecovery } from "@lib/text/safeRender";
 
 const hoisted = vi.hoisted(() => ({
   callbacks: null as Record<string, (...args: never[]) => unknown> | null,
@@ -35,8 +35,8 @@ vi.mock("@lib/logger", () => ({
     error: hoisted.logError,
   }),
 }));
-vi.mock("@lib/safe-render", () => ({ safeMount: vi.fn() }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
+vi.mock("@lib/net/credentials", () => ({
   deleteCredential: vi.fn(),
   loginWithSavedPassword: vi.fn(),
   parseRelayedLogin: vi.fn(),

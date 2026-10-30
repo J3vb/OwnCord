@@ -7,7 +7,7 @@ import "context"
 // because the gate could not be read. Replay cannot fill it, so every
 // connected recipient is marked: its user's next resume takes the full ready
 // (presenceRepair.users), and its socket's next cseq skips one, so a client
-// that stays connected sees the gap and resumes (WP 2A-5).
+// that stays connected sees the gap and resumes.
 //
 // Lock order: markLoss runs on the dispatch goroutine under seqMu and takes
 // h.mu (read) or ps.mu (read), releasing each before marking.

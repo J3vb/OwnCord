@@ -9,11 +9,11 @@ import {
   loadUserStatus,
   saveStatusTimer,
   saveUserStatus,
-} from "@lib/userStatus";
+} from "@lib/presence/userStatus";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
-import { savePref } from "@lib/preferences";
-import { createPresenceSender } from "@lib/presence";
-import { createPresenceLimiter } from "@lib/rate-limiter";
+import { savePref } from "@lib/prefs/preferences";
+import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 
 function setUser(custom: string | null = null): void {
@@ -163,7 +163,7 @@ describe("SelfProfileCard from the user bar", () => {
     expect(loadCustomStatus()).toBe("");
   });
 
-  it("shows a hint and does not send an over-limit custom status (WP 3C-9)", () => {
+  it("shows a hint and does not send an over-limit custom status", () => {
     trigger().click();
     const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;
     const hint = q<HTMLElement>("[data-testid='spc-custom-hint']")!;

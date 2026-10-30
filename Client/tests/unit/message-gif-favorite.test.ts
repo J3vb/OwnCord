@@ -21,11 +21,11 @@ import {
   resetGifFavorites,
   toggleGifFavorite,
 } from "@stores/gifFavorites.store";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { ApiClientError } from "@lib/api";
-import type { GifFavoritesApi } from "@lib/gifProvider";
+import type { GifFavoritesApi } from "@lib/media/gifProvider";
 
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 const URL_ = "https://media.klipy.com/full/cat.gif";
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));

@@ -1,10 +1,10 @@
 package config
 
-// SettingCopy is the owner-facing text for one panel-editable key: a plain
-// label, what the setting does, the value most owners should run and why, and
-// what changing it affects. Every override applies at the next restart, so the
-// page states that once instead of per key. The completeness test pins that
-// every editable key has a full entry.
+// SettingCopy is the owner-facing text for one panel-editable key: label, what
+// it does, the value most owners should run and why, and what changing it
+// affects. Every override applies at the next restart, so the page says so once
+// rather than per key. The completeness test pins that every editable key has an
+// entry.
 type SettingCopy struct {
 	Label       string `json:"label"`
 	Description string `json:"description"`
@@ -12,7 +12,6 @@ type SettingCopy struct {
 	Effect      string `json:"effect"`
 }
 
-// SettingCopyFor returns the copy for an editable key.
 func SettingCopyFor(key string) (SettingCopy, bool) {
 	c, ok := settingCopy[key]
 	return c, ok
@@ -23,7 +22,6 @@ func sc(label, description, recommended, effect string) SettingCopy {
 }
 
 var settingCopy = map[string]SettingCopy{
-	// Attention panel thresholds.
 	"attention.delivery_drops_per_min": sc("Message-drop warning rate",
 		"Warn when the server drops or sheds this many live messages per minute.",
 		"1 (default). Raise it only if the warning fires on a busy server that is otherwise healthy.",
@@ -41,7 +39,6 @@ var settingCopy = map[string]SettingCopy{
 		"5000 (default).",
 		"Lower warns about smaller slowdowns; higher hides them. Only the Attention panel is affected."),
 
-	// Database.
 	"database.max_readers": sc("Database read connections",
 		"How many read connections the database keeps open. 0 chooses automatically.",
 		"0 (default). The automatic size suits almost every server.",
@@ -55,7 +52,6 @@ var settingCopy = map[string]SettingCopy{
 		"data/chatserver.db (default). Change it only when moving the data to another drive.",
 		"Pointing at a different path starts with whatever database is there, not your current one. Copy the file first."),
 
-	// Event persistence.
 	"event_persistence.batch_flush_ms": sc("Event save delay (ms)",
 		"The longest wait before buffered events are written to the event log.",
 		"100 (default).",
@@ -85,13 +81,11 @@ var settingCopy = map[string]SettingCopy{
 		"24 (default).",
 		"Longer lets members who were offline for days catch up quickly, at the cost of disk space."),
 
-	// Logging.
 	"logging.level": sc("Log detail level",
 		"How much the server writes to its logs.",
 		"info (default). Use debug only while troubleshooting.",
 		"debug is very verbose and may fill the disk; warn and error hide routine events."),
 
-	// Moderation.
 	"moderation.action_retention_days": sc("Warning and timeout history (days)",
 		"How long old warnings and timeouts are kept before being retired.",
 		"90 (default). 0 keeps them forever.",
@@ -101,7 +95,6 @@ var settingCopy = map[string]SettingCopy{
 		"180 (default). 0 keeps them forever.",
 		"After this the report's outcome is kept but its evidence and notes are deleted."),
 
-	// Plugins.
 	"plugins.cpu_budget_ms": sc("Plugin time limit (ms)",
 		"The most processing time one plugin call may use.",
 		"100 (default).",
@@ -123,7 +116,6 @@ var settingCopy = map[string]SettingCopy{
 		"64 (default).",
 		"Higher lets bigger plugins run but raises the server's memory use."),
 
-	// Push.
 	"push.contact": sc("Push contact address",
 		"An email address sent to push services so they can reach you about problems.",
 		"Your admin email, if push is on. Empty is fine otherwise.",
@@ -141,7 +133,6 @@ var settingCopy = map[string]SettingCopy{
 		"90 (default).",
 		"Shorter cleans up sooner but may drop phones that are rarely opened; they simply re-register."),
 
-	// Security.
 	"security.auth_rate_limit_multiplier": sc("Sign-in limit multiplier",
 		"Scales how many sign-in and registration attempts one IP address gets. 0 means 1.",
 		"1 (default). Raise it only if many members share one address, such as a school or office.",
@@ -151,7 +142,6 @@ var settingCopy = map[string]SettingCopy{
 		"0 (default).",
 		"Lower protects a small server from a sign-in flood but can make real sign-ins queue up."),
 
-	// Server.
 	"server.admin_allowed_cidrs": sc("Who can open this admin panel",
 		"Network ranges (CIDR, comma-separated) allowed to reach the admin panel.",
 		"Your home or office network only. The default allows local and private networks.",
@@ -221,7 +211,6 @@ var settingCopy = map[string]SettingCopy{
 		"2 (default).",
 		"Higher catches more but wrongly blocks more normal traffic. Only matters when the firewall is on."),
 
-	// TLS.
 	"tls.acme_cache_dir": sc("Certificate cache folder",
 		"Where automatically obtained certificates are stored.",
 		"data/acme_certs (default).",
@@ -243,7 +232,6 @@ var settingCopy = map[string]SettingCopy{
 		"self_signed (default) for private use. acme for a public domain.",
 		"off sends everything unencrypted. A wrong mode can stop members connecting. A typed confirmation is required."),
 
-	// Telemetry.
 	"telemetry.enabled": sc("Enable telemetry export",
 		"Turns on detailed performance data for monitoring tools.",
 		"Off (default) unless you run a monitoring system.",
@@ -265,7 +253,6 @@ var settingCopy = map[string]SettingCopy{
 		"owncord-server (default). Change it if you run several servers.",
 		"Only affects how the server is labelled in your monitoring."),
 
-	// Upload.
 	"upload.max_size_mb": sc("Largest upload (MB)",
 		"The biggest file one member can upload.",
 		"100 (default). Keep it modest on a small drive.",
@@ -274,18 +261,20 @@ var settingCopy = map[string]SettingCopy{
 		"Where uploaded files and avatars are stored.",
 		"data/uploads (default).",
 		"Existing uploads are not moved, so old files show as missing until you copy them. A typed confirmation is required."),
+	"upload.import_max_mb": sc("Discord import size limit (MB)",
+		"The largest Discord export file the admin panel accepts for Import from Discord.",
+		"500 (default), or a limit that fits your drive. The file is held on disk while it imports.",
+		"A larger export is refused before it is stored."),
 	"upload.user_quota_mb": sc("Storage limit per member (MB)",
 		"The total upload space each member may use. 0 means no limit.",
 		"0 (default), or a limit that fits your drive.",
 		"Members at their limit cannot upload until they delete files."),
 
-	// Backup.
 	"backup.dir": sc("Backup folder",
 		"Where database backups are written.",
 		"data/backups (default). Better on a separate drive.",
 		"Backups on the same drive are lost with it. Existing backups are not moved. A typed confirmation is required."),
 
-	// GIF, GitHub.
 	"gif.api_key": sc("GIF service key",
 		"The Klipy key that turns on the GIF picker. Write-only.",
 		"Empty (default) unless you want GIFs.",
@@ -303,7 +292,6 @@ var settingCopy = map[string]SettingCopy{
 		"Empty (default).",
 		"Without one, update checks use GitHub's public limits."),
 
-	// Voice.
 	"voice.advertise_internal_ip": sc("Allow voice on the local network",
 		"Also offers the server's local address so people on your LAN can join voice.",
 		"Off (default). Turn on when members join from home and away.",

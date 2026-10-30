@@ -31,19 +31,19 @@ vi.mock("../../lib/read-state", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/read-state")>();
   return { ...actual, markChannelRead: vi.fn() };
 });
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../../lib/notifications", () => ({
   notifyMention: vi.fn(),
   notifyChannelActivity: vi.fn(),
 }));
 let lastChannel: number | null = null;
-vi.mock("../../lib/last-channel", () => ({
+vi.mock("../../lib/prefs/lastChannel", () => ({
   loadLastChannel: () => lastChannel,
   rememberLastChannel: vi.fn(),
   setLastChannelHost: vi.fn(),
 }));
 import { markChannelRead } from "../../lib/read-state";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { notifyChannelActivity, notifyMention } from "../../lib/notifications";
 
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -76,7 +76,7 @@ afterEach(() => {
   hasFocus.mockRestore();
 });
 
-describe("channel categories (WP 6.5a)", () => {
+describe("channel categories", () => {
   beforeEach(() => resetChannelsStore());
 
   it("ready carries the managers' list into the store, and its absence empties it", () => {
@@ -140,7 +140,7 @@ describe("applyReadyActiveChannel", () => {
     expect(seen).toBeNull();
   });
 
-  it("restores the server's last channel instead of the first text channel (UX-8)", () => {
+  it("restores the server's last channel instead of the first text channel", () => {
     lastChannel = 5;
 
     const seen = applyReadyActiveChannel(
@@ -151,7 +151,7 @@ describe("applyReadyActiveChannel", () => {
     expect(seen).toBeNull();
   });
 
-  it("falls back to the first text channel when the remembered one is gone (UX-8)", () => {
+  it("falls back to the first text channel when the remembered one is gone", () => {
     lastChannel = 999;
 
     applyReadyActiveChannel(ready([channel(1, "text", 0), channel(2, "text", 1)]));
@@ -159,7 +159,7 @@ describe("applyReadyActiveChannel", () => {
     expect(channelsStore.getState().activeChannelId).toBe(1);
   });
 
-  it("keeps channel 1's unread badge when the restored last channel is 5 (UX-8)", () => {
+  it("keeps channel 1's unread badge when the restored last channel is 5", () => {
     lastChannel = 5;
     setChannels([{ ...channel(1, "text", 0), unread_count: 4 }, { ...channel(5, "text", 1) }]);
 
@@ -254,7 +254,7 @@ describe("handleChannelDelete", () => {
 });
 
 describe("handleMentionCount", () => {
-  describe("notifies for a mention in another channel (WP 2B-1)", () => {
+  describe("notifies for a mention in another channel", () => {
     // The alert waits MENTION_ALERT_GRACE_MS for a channel_activity frame
     // (WP 2B-2); these cases model a server that never sends one.
     beforeEach(() => {
@@ -452,7 +452,7 @@ function activityEntry(
   return { channel_id, message_id, mentions_you: false, mentions_everyone: false, ...flags };
 }
 
-describe("handleChannelActivity (WP 2B-2)", () => {
+describe("handleChannelActivity", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     messagesStore.setState((prev) => ({ ...prev, messagesByChannel: new Map() }));

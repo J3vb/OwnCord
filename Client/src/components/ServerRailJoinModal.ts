@@ -5,7 +5,7 @@
  */
 
 import { appendChildren, createElement, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { shellText } from "../i18n/shell";
 import { serverRailText } from "../i18n/serverRail";
 

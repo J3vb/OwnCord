@@ -25,7 +25,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
   getShareDiagnostics: vi.fn().mockReturnValue(null),
 }));
@@ -53,9 +53,14 @@ const { mockExportSupportBundle } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mockExportSupportBundle: vi.fn<any>(),
 }));
+const linuxDesktop = vi.hoisted(() => ({ on: false }));
+vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+  isLinuxDesktop: () => linuxDesktop.on,
+}));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
 import { createLogsTab } from "../../src/components/settings/LogsTab";
 import type { TabName } from "../../src/components/SettingsOverlay";
 
@@ -590,6 +595,7 @@ describe("LogsTab", () => {
       );
       expect([...shareSelect(el).options].map((o) => [o.value, o.textContent])).toEqual([
         ["legacy", "Normal (default)"],
+        ["detail-resolution", "Sharp text, keep resolution"],
         ["detail-balanced", "Sharp text, smooth fallback"],
         ["detail-framerate", "Sharp text, keep frame rate"],
         ["motion-resolution", "Smooth motion, keep resolution"],
@@ -597,6 +603,17 @@ describe("LogsTab", () => {
         ["motion-framerate", "Smooth motion, keep frame rate"],
       ]);
       expect(shareSelect(el).value).toBe("legacy");
+    });
+
+    it("leaves out the test mode on Linux, whose native capture never applies it", () => {
+      linuxDesktop.on = true;
+      try {
+        const el = buildLogsPane(controller.signal);
+        expect(shareCard(el).textContent).toContain("Record screen-share details");
+        expect(el.querySelector("[data-testid='share-motion-policy']")).toBeNull();
+      } finally {
+        linuxDesktop.on = false;
+      }
     });
 
     it("persists the recording toggle", () => {

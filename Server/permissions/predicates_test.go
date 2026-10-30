@@ -158,9 +158,10 @@ func TestAuthorizeVoiceModerator(t *testing.T) {
 }
 
 // TestAuthorizeVoiceMover pins WP 8.4a's move authorizer: the actor's BASE
-// role must hold MOVE_MEMBERS (MUTE_MEMBERS no longer suffices), a channel
-// override cannot manufacture it, a channel deny still holds, and
-// Administrator passes the base gate.
+// role must hold MOVE_MEMBERS explicitly (neither MUTE_MEMBERS nor
+// ADMINISTRATOR suffices), a channel override cannot manufacture it, and a
+// channel deny still holds for everyone but an Administrator, who ignores
+// overrides (so the owner cannot be locked out of a channel).
 func TestAuthorizeVoiceMover(t *testing.T) {
 	const moverBits = memberBits | MoveMembers
 	runPredicate(t, "AuthorizeVoiceMover", AuthorizeVoiceMover, []predicateCase{
@@ -168,7 +169,9 @@ func TestAuthorizeVoiceMover(t *testing.T) {
 		{"MUTE_MEMBERS alone refused", Subject{RolePerms: modBits, Channel: voice(false)}, ErrPermissionDenied},
 		{"no bits refused", Subject{RolePerms: memberBits, Channel: voice(false)}, ErrPermissionDenied},
 		{"channel override alone cannot manufacture the base bit", Subject{RolePerms: memberBits, Override: allow(MoveMembers), Channel: voice(false)}, ErrPermissionDenied},
-		{"admin without the base bit allowed via the Administrator bypass", Subject{RolePerms: Administrator, Channel: voice(false)}, nil},
+		{"Administrator without the bit refused", Subject{RolePerms: Administrator, Channel: voice(false)}, ErrPermissionDenied},
+		{"Administrator with the bit allowed", Subject{RolePerms: Administrator | MoveMembers, Channel: voice(false)}, nil},
+		{"Administrator with the bit ignores a channel deny", Subject{RolePerms: Administrator | MoveMembers, Override: deny(MoveMembers), Channel: voice(false)}, nil},
 		{"base bit present but a channel deny still refuses", Subject{RolePerms: moverBits, Override: deny(MoveMembers), Channel: voice(false)}, ErrPermissionDenied},
 		{"base bit present but channel hidden still refuses", Subject{RolePerms: moverBits, Override: deny(ReadMessages), Channel: voice(false)}, ErrPermissionDenied},
 		{"dm non-participant refused", Subject{RolePerms: moverBits, Channel: dm()}, ErrNotDMParticipant},
@@ -431,7 +434,8 @@ func TestVoiceMoverBase(t *testing.T) {
 		ok    bool
 	}{
 		{"move bit alone", MoveMembers, true},
-		{"administrator", Administrator, true},
+		{"administrator without the bit", Administrator, false},
+		{"administrator with the bit", Administrator | MoveMembers, true},
 		{"mute only", MuteMembers | ReadMessages, false},
 		{"none", 0, false},
 	}
@@ -574,5 +578,31 @@ func TestCanChangeOwnerGrantOnly_AdministratorTierBits(t *testing.T) {
 	}
 	if CanChangeOwnerGrantOnly(ManageRoles|ViewDiagnostics|EraseAccounts, ModeratorRoleID, 60) {
 		t.Error("a MANAGE_ROLES holder of the bits must not change administrator-tier bits")
+	}
+}
+
+func TestCanPassChannelPassword(t *testing.T) {
+	member := Subject{RolePerms: memberBits, Channel: voice(false)}
+	cases := []struct {
+		name      string
+		s         Subject
+		protected bool
+		granted   bool
+		want      error
+	}{
+		{"unprotected channel", member, false, false, nil},
+		{"granted member", member, true, true, nil},
+		{"plain member without a grant", member, true, false, ErrPasswordRequired},
+		{"administrator", Subject{RolePerms: Administrator, Channel: voice(false)}, true, false, nil},
+		{"manage channels by role", Subject{RolePerms: memberBits | ManageChannels, Channel: voice(false)}, true, false, nil},
+		{"manage channels by member override", Subject{RolePerms: memberBits, Override: userAllow(ManageChannels), Channel: voice(false)}, true, false, nil},
+		{"manage channels denied in this channel", Subject{RolePerms: memberBits | ManageChannels, Override: userDeny(ManageChannels), Channel: voice(false)}, true, false, ErrPasswordRequired},
+		{"zero subject", Subject{}, true, false, ErrPasswordRequired},
+	}
+	for _, c := range cases {
+		got := CanPassChannelPassword(c.s, c.protected, c.granted)
+		if !errors.Is(got, c.want) || (c.want == nil) != (got == nil) {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }

@@ -1,4 +1,4 @@
-//! The taskbar and tray unread badge (DP-27). The renderer computes the count
+//! The taskbar and tray unread badge. The renderer computes the count
 //! (`src/features/unread-badge/unreadBadge.ts`) and pushes it when it changes,
 //! and again when the window is shown or focused (Windows drops the overlay
 //! when the taskbar button is recreated); this draws it:
@@ -222,7 +222,7 @@ fn send_launcher_count(desktop_names: &[String], count: u32) {
     use std::sync::Mutex;
 
     static SESSION: Mutex<Option<Connection>> = Mutex::new(None);
-    let mut session = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    let mut session = crate::sync::lock(&SESSION);
     if session.is_none() {
         match Connection::new_session() {
             Ok(conn) => *session = Some(conn),

@@ -105,7 +105,7 @@ function type(doc: Document, id: string, value: string): void {
   el.dispatchEvent(new doc.defaultView!.Event("input", { bubbles: true }));
 }
 
-describe("Server/admin/static — Roles and Channels (AO-5)", () => {
+describe("Server/admin/static — Roles and Channels", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();
@@ -158,7 +158,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     });
   });
 
-  it("offers hoist and mentionable on the create form and sends both (WP 6.3g)", async () => {
+  it("offers hoist and mentionable on the create form and sends both", async () => {
     const calls: FetchCall[] = [];
     const booted = await boot(calls);
     dom = booted.dom;
@@ -185,7 +185,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     });
   });
 
-  it("loads each flag into the edit form and sends the changed one (WP 6.3g)", async () => {
+  it("loads each flag into the edit form and sends the changed one", async () => {
     const calls: FetchCall[] = [];
     const booted = await boot(calls);
     dom = booted.dom;
@@ -207,7 +207,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     });
   });
 
-  it("sends the mask it loaded with a role edit (WP 5.1b)", async () => {
+  it("sends the mask it loaded with a role edit", async () => {
     const calls: FetchCall[] = [];
     const booted = await boot(calls);
     dom = booted.dom;
@@ -225,7 +225,7 @@ describe("Server/admin/static — Roles and Channels (AO-5)", () => {
     });
   });
 
-  it("explains a refused edit and reloads the role instead of overwriting it (WP 5.1b)", async () => {
+  it("explains a refused edit and reloads the role instead of overwriting it", async () => {
     const calls: FetchCall[] = [];
     const latest = SEEDED.map((r) => (r.id === 3 ? { ...r, permissions: 0x3 } : { ...r }));
     const booted = await boot(

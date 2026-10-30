@@ -80,6 +80,14 @@ gates only Send (and a picked GIF), leaving the draft editable. A
 refused Send shows the reason on the composer's refusal line (linked by
 `aria-describedby`, kept current as the slow-mode countdown ticks).
 
+**Chat bar buttons (user setting).** Settings → Text & Images has one switch
+each for the emoji, sticker, GIF, Poll and voice-message buttons
+(`features/messaging/composerButtons.ts`, local prefs `composerShow*`, all on
+by default). A switch hides its button in every open composer at once through
+`onPrefChange`; it only removes the icon, so the emoji and GIF shortcuts still
+open the picker. Switching a button back on never shows one the server or host
+left out (no stickers, polls or voice messages). Send and "+" cannot be hidden.
+
 > **✓ Implemented (2026-07).** The server sends an authoritative per-channel
 > `can_send` in the ready payload (`ws/serve.go` `channelCanSend`, mirroring
 > `MessageService.checkSendPermission`: READ|SEND, plus MANAGE_MESSAGES for
@@ -323,7 +331,7 @@ survives a reconnect or a REST reload of the DM list instead of resetting to 0.
 Every affordance that can jump — a search hit, a pinned entry, the quoted
 reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
 opened from the OS, a clicked message notification — goes through one path
-(`lib/message-navigation.ts` registry → `main-page/MessageJump.ts`), so they
+(`lib/nav/messageNavigation.ts` registry → `main-page/MessageJump.ts`), so they
 behave identically. A reply never groups into the previous message, so it
 always keeps its quoted-parent header (`shouldGroup`).
 
@@ -467,8 +475,8 @@ the same signal in future.
 `src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/components/SearchOverlay.ts`, `src/components/PinnedMessages.ts`,
-`src/components/MentionAutocomplete.ts`, `src/lib/mentions.ts`,
-`src/components/message-list/content-parser.ts` (+ `syntax-highlight.ts`),
-`src/lib/markdown.ts`, `src/lib/channel-navigation.ts`, `src/lib/notifications.ts`;
+`src/components/MentionAutocomplete.ts`, `src/lib/text/mentions.ts`,
+`src/components/message-list/contentParser.ts` (+ `syntax-highlight.ts`),
+`src/lib/text/markdown.ts`, `src/lib/nav/channelNavigation.ts`, `src/lib/notifications.ts`;
 server `Server/service/message.go`, `Server/service/mentions.go`,
 `Server/ws/handlers_chat.go`.

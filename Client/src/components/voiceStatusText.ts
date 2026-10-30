@@ -1,6 +1,6 @@
 /**
  * Pure voice-status helpers shared by always-loaded code (MainPage,
- * DmCallPanel) and the lazily loaded VoiceWidget (O-6b). Kept apart so a
+ * DmCallPanel) and the lazily loaded VoiceWidget. Kept apart so a
  * caller does not pull the widget into the main-page chunk.
  */
 

@@ -9,27 +9,27 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// Round tuning. Vars so tests can shrink them.
+// Round tuning; vars so tests can shrink them.
 var (
 	// roleRefreshUserBudget bounds one user's permission resolution.
 	roleRefreshUserBudget = 5 * time.Second
 	// roleRefreshListBudget bounds the once-per-round channel list.
 	roleRefreshListBudget = 5 * time.Second
-	// roleRefreshChunk is how many sidebar frames go to a client before the
-	// worker waits for its queue to drain.
+	// roleRefreshChunk is how many sidebar frames go to a client before the worker
+	// waits for its queue to drain.
 	roleRefreshChunk = 64
-	// roleRefreshDrainWait is how long the worker waits for a client's queue
-	// to fall to its threshold (room for two chunks before the first chunk,
-	// a quarter of its capacity between chunks) before kicking it.
+	// roleRefreshDrainWait is how long the worker waits for a client's queue to fall to
+	// its threshold (room for two chunks before the first, a quarter of capacity
+	// between chunks) before kicking it.
 	roleRefreshDrainWait = 500 * time.Millisecond
-	// memberUpdateBatch is how many member_update frames are enqueued before
-	// the worker waits for dispatch to catch up, then pauses memberUpdatePause.
+	// memberUpdateBatch is how many member_update frames are enqueued before the worker
+	// waits for dispatch, then pauses memberUpdatePause.
 	memberUpdateBatch = 64
-	// roleRefreshListAttempts is how many consecutive rounds may fail to read
-	// the channel list before the affected users are closed.
+	// roleRefreshListAttempts is how many consecutive rounds may fail to read the
+	// channel list before the affected users are closed.
 	roleRefreshListAttempts = 3
-	// roleRefreshRetryBackoff is the wait before a round that could not read
-	// the channel list runs again.
+	// roleRefreshRetryBackoff is the wait before re-running a round that could not read
+	// the channel list.
 	roleRefreshRetryBackoff = 500 * time.Millisecond
 	// memberUpdatePause is the breathing space between member_update batches.
 	memberUpdatePause = 5 * time.Millisecond
@@ -41,8 +41,8 @@ type roleFrame struct {
 	channelID int64
 	remove    bool
 	msg       []byte
-	// chType is the channel's type, for a create frame: the client features
-	// are checked against it when the frame is sent (sendRoleRefreshFrames).
+	// chType is a create frame's channel type, checked against client features at send
+	// time (sendRoleRefreshFrames).
 	chType string
 }
 
@@ -53,12 +53,12 @@ type roleChannels struct {
 	known   map[int64]struct{} // every channel id in the snapshot
 }
 
-// runRoleRound is one round: sidebar and topics for the Visibility users, a
-// paced member_update per MemberUpdate user, the timeout views of the users
-// whose role changed, then one roles_update. When the channel list cannot be
-// read it puts the whole batch back and returns the backoff before the next
-// attempt; after roleRefreshListAttempts consecutive failures the users are
-// closed instead (they reconnect onto a full ready) and the round goes on.
+// runRoleRound is one round: sidebar and topics for the Visibility users, a paced
+// member_update per MemberUpdate user, the timeout views of users whose role
+// changed, then one roles_update. If the channel list cannot be read it puts the
+// batch back and returns the backoff; after roleRefreshListAttempts consecutive
+// failures the users are closed instead (they reconnect onto a full ready) and the
+// round goes on.
 func (h *Hub) runRoleRound(ctx context.Context, b roleBatch) time.Duration {
 	s := &h.roleRefresh
 	vis := b.usersWith(rrVisibility)
@@ -114,20 +114,17 @@ func (h *Hub) connectedUserIDs() []int64 {
 	return h.connectedUserIDsLocked()
 }
 
-// beginVisibilityRefresh marks the start of a visibility refresh: it bumps
-// timeoutView.gen first (the 3C-7c contract: the caller invalidated, then this
-// bump, so a publish that resolved earlier resolves again), and moves the
-// watermark before the slow part so a reconnect handshake's re-check sees this
-// change (OC-0206).
+// beginVisibilityRefresh bumps timeoutView.gen first (the caller invalidated, then
+// this bump, so a publish that resolved earlier resolves again) and moves the
+// watermark before the slow part so a reconnect handshake's re-check sees this change.
 func (h *Hub) beginVisibilityRefresh() {
 	h.bumpTimeoutViewGen()
 	h.bumpVisibilityWatermark()
 }
 
-// refreshVisibilityUsers is the synchronous refresh of ids: it reads the
-// channel list once and runs refreshUserVisibility per user. A list that
-// cannot be read closes each user's socket. done, when set, is called after
-// each user's step.
+// refreshVisibilityUsers is the synchronous refresh of ids: it reads the channel
+// list once and runs refreshUserVisibility per user. A list that cannot be read
+// closes each user's socket. done, when set, is called after each user's step.
 func (h *Hub) refreshVisibilityUsers(ctx context.Context, ids []int64, done func(int64)) {
 	h.beginVisibilityRefresh()
 	if h.db == nil || len(ids) == 0 {
@@ -141,8 +138,8 @@ func (h *Hub) refreshVisibilityUsers(ctx context.Context, ids []int64, done func
 	h.refreshUsersWith(ctx, ids, done, rc)
 }
 
-// closeUsers closes ids' sockets (never BANNED); each reconnects onto a full
-// ready built from committed state.
+// closeUsers closes ids' sockets (never BANNED); each reconnects onto a full ready
+// built from committed state.
 func (h *Hub) closeUsers(ids []int64, done func(int64)) {
 	for _, uid := range ids {
 		for _, c := range h.clientsOf(uid) {
@@ -161,13 +158,13 @@ type userSend struct {
 	frames []roleFrame
 }
 
-// refreshUsersWith refreshes ids over the round's channel snapshot in two
-// passes. The first resolves every user's verdicts and releases their held
-// topics, so a user's revocation never waits behind another user's sends or
-// drain waits. The second sends each user's frames, then moves the watermark,
-// then stops covering the user: a reconnect that finds the user settled also
-// finds a watermark at or above every seq that client could have acknowledged,
-// and the targeted frames sit in the normal FIFO ahead of any later seq.
+// refreshUsersWith refreshes ids over the round's channel snapshot in two passes.
+// The first resolves every user's verdicts and releases their held topics, so a
+// revocation never waits behind another user's sends or drain waits. The second
+// sends each user's frames, then moves the watermark, then stops covering the user:
+// a reconnect that finds the user settled also finds a watermark at or above every
+// seq that client could have acknowledged, and the targeted frames sit in the
+// normal FIFO ahead of any later seq.
 func (h *Hub) refreshUsersWith(ctx context.Context, ids []int64, done func(int64), rc *roleChannels) {
 	settle := func(uid int64) {
 		h.bumpVisibilityWatermark()
@@ -199,8 +196,8 @@ func (h *Hub) refreshUsersWith(ctx context.Context, ids []int64, done func(int64
 	}
 }
 
-// listRoleChannels reads the channel list and each server channel's private
-// flag once for the round. A failed list reports false.
+// listRoleChannels reads the channel list and each server channel's private flag
+// once for the round. A failed list reports false.
 func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 	ctx, cancel := context.WithTimeout(ctx, roleRefreshListBudget)
 	defer cancel()
@@ -212,8 +209,8 @@ func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 	rc := &roleChannels{known: make(map[int64]struct{}, len(channels)), dms: make(map[int64]struct{})}
 	for i := range channels {
 		if channels[i].IsThread() {
-			// A thread has no sidebar entry and no verdict of its own: the
-			// verdict loop settles the one a socket holds from its parent's.
+			// A thread has no sidebar entry or verdict of its own: the verdict loop settles a
+			// held one from its parent's.
 			continue
 		}
 		rc.known[channels[i].ID] = struct{}{}
@@ -230,11 +227,10 @@ func (h *Hub) listRoleChannels(ctx context.Context) (*roleChannels, bool) {
 }
 
 // prepareUserVisibility is a user's first-pass step: resolve their verdicts and
-// release their held topics, so the content they lost access to stops before
-// anything is sent. It returns the sidebar frames to send, and false when
-// there is nothing to send: the user is not connected, was closed because their
-// permissions could not be resolved (never sent BANNED; they reconnect onto a
-// full ready), or went away during the step.
+// release held topics so content they lost access to stops before anything is
+// sent. It returns the sidebar frames, and false when there is nothing to send:
+// the user is not connected, was closed because permissions could not be resolved
+// (never BANNED; they reconnect onto a full ready), or went away during the step.
 func (h *Hub) prepareUserVisibility(ctx context.Context, uid int64, rc *roleChannels) ([]roleFrame, bool) {
 	if conns := h.clientsOf(uid); len(conns) == 0 || conns[0].user == nil {
 		return nil, false
@@ -266,9 +262,9 @@ func (h *Hub) prepareUserVisibility(ctx context.Context, uid int64, rc *roleChan
 	return frames, true
 }
 
-// heldDMs is the DMs uid holds a topic on, all allowed: a role change never
-// revokes a DM. Only held DMs matter, so the cost follows the user's
-// subscriptions rather than every DM on the server.
+// heldDMs is the DMs uid holds a topic on, all allowed (a role change never revokes
+// a DM). Only held DMs matter, so cost follows the user's subscriptions, not every
+// DM on the server.
 func (h *Hub) heldDMs(uid int64, rc *roleChannels) map[int64]bool {
 	allowed := make(map[int64]bool, len(rc.servers))
 	for _, topic := range h.topicsOfUser(uid) {
@@ -281,11 +277,10 @@ func (h *Hub) heldDMs(uid int64, rc *roleChannels) map[int64]bool {
 	return allowed
 }
 
-// roleRefreshVerdicts resolves uid's subject once per server channel, through
-// the permission cache. It returns the frame to send for each channel (a
-// channel_create with this user's affordances, or a channel_delete) and the
-// set of channels the user may keep a topic on: the visible ones plus every
-// DM the user holds, which a role change never revokes.
+// roleRefreshVerdicts resolves uid's subject once per server channel through the
+// permission cache. It returns the frame for each channel (a channel_create with
+// this user's affordances, or a channel_delete) and the channels the user may keep
+// a topic on: the visible ones plus every DM held.
 func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChannels) (frames []roleFrame, allowed map[int64]bool, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, roleRefreshUserBudget)
 	defer cancel()
@@ -304,8 +299,8 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 		allowed[e.ch.ID] = true
 		frames = append(frames, roleFrame{channelID: e.ch.ID, chType: e.ch.Type, msg: buildChannelCreateFor(e.ch, e.private, affordancesFor(sub))})
 	}
-	// A channel created after the snapshot and held by this user is resolved
-	// now, so it is kept and sent when the user may view it.
+	// A channel created after the snapshot and held by this user is resolved now, so it
+	// is kept and sent when the user may view it.
 	for _, topic := range h.topicsOfUser(uid) {
 		chID := channelTopicID(topic)
 		if _, in := rc.known[chID]; chID == 0 || in {
@@ -324,8 +319,8 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 			continue
 		}
 		if ch.IsThread() {
-			// A held thread topic follows its parent's verdict and gets no
-			// sidebar frame: threads are never channel_create'd.
+			// A held thread topic follows its parent's verdict and gets no sidebar frame
+			// (threads are never channel_create'd).
 			v, err := h.roleThreadVerdict(ctx, uid, ch, allowed)
 			if err != nil {
 				return nil, nil, false
@@ -348,28 +343,27 @@ func (h *Hub) roleRefreshVerdicts(ctx context.Context, uid int64, rc *roleChanne
 	return frames, allowed, true
 }
 
-// sendRoleRefreshFrames queues frames in chunks to each of uid's live
-// connections, waiting between chunks for its queue to drain. A client that
-// does not drain in time is kicked, never sent BANNED, and converges on a full
-// ready; the user's other devices are unaffected.
+// sendRoleRefreshFrames queues frames in chunks to each of uid's live connections,
+// waiting between chunks for its queue to drain. A client that does not drain in
+// time is kicked (never BANNED) and converges on a full ready; the user's other
+// devices are unaffected.
 func (h *Hub) sendRoleRefreshFrames(ctx context.Context, uid int64, frames []roleFrame) {
 	for _, snap := range h.clientsOf(uid) {
 		h.sendRoleRefreshFramesTo(ctx, snap, frames)
 	}
 }
 
-// sendRoleRefreshFramesTo is sendRoleRefreshFrames for one device, identified
-// by the session of snap; a same-session reconnect during the round is followed
-// to its replacement.
+// sendRoleRefreshFramesTo is sendRoleRefreshFrames for one device, identified by
+// snap's session; a same-session reconnect during the round is followed to its
+// replacement.
 func (h *Hub) sendRoleRefreshFramesTo(ctx context.Context, snap *Client, frames []roleFrame) {
 	for start := 0; start < len(frames); start += roleRefreshChunk {
 		live := h.sessionClient(snap.userID, snap.tokenHash)
 		if live == nil {
 			return
 		}
-		// The first chunk needs room for itself plus a chunk's worth of
-		// frames from concurrent dispatch; later chunks wait for the queue
-		// to fall to a quarter of its capacity.
+		// The first chunk needs room for itself plus a chunk's worth of concurrent dispatch
+		// frames; later chunks wait for the queue to fall to a quarter of capacity.
 		limit := sendBufSize / 4
 		if start == 0 {
 			limit = sendBufSize - 2*roleRefreshChunk
@@ -381,10 +375,10 @@ func (h *Hub) sendRoleRefreshFramesTo(ctx context.Context, snap *Client, frames 
 			return
 		}
 		for _, f := range frames[start:min(start+roleRefreshChunk, len(frames))] {
-			// A socket without the forums feature is sent no forum row (see
-			// client_features.go). The client is read here, at send time and
-			// from the same value that gets the frame: a reconnect during the
-			// round's lookups replaced it with one that made its own declaration.
+			// A socket without the forums feature is sent no forum row (client_features.go).
+			// The client is read at send time from the same value that gets the frame: a
+			// reconnect during the round's lookups replaced it with one that made its own
+			// declaration.
 			if !f.remove && !live.features.allowsType(f.chType) {
 				continue
 			}
@@ -393,7 +387,8 @@ func (h *Hub) sendRoleRefreshFramesTo(ctx context.Context, snap *Client, frames 
 	}
 }
 
-// waitSendDrain waits until c's normal queue holds at most limit frames, for at most roleRefreshDrainWait. It reports whether it drained.
+// waitSendDrain waits until c's normal queue holds at most limit frames, for at most
+// roleRefreshDrainWait, and reports whether it drained.
 func waitSendDrain(ctx context.Context, c *Client, limit int) bool {
 	if len(c.send) <= limit {
 		return true
@@ -443,10 +438,9 @@ func (h *Hub) roleNameNow(ctx context.Context, uid int64) (name string, roleIDs 
 }
 
 // sendMemberUpdates enqueues one member_update per user, connected or not, in
-// batches. Each batch waits for dispatch to catch up and then pauses, so a role
-// with thousands of holders does not flood the dispatch queue. An enqueue that
-// is refused waits for dispatch and tries once more; the drop is already
-// recorded as a loss for resumers.
+// batches. Each batch waits for dispatch to catch up and then pauses, so a role with
+// thousands of holders does not flood the queue. A refused enqueue waits for
+// dispatch and retries once; the drop is already recorded as a loss for resumers.
 func (h *Hub) sendMemberUpdates(ctx context.Context, ids []int64) {
 	sent := 0
 	for _, uid := range ids {
@@ -486,8 +480,8 @@ func (h *Hub) broadcastRolesNow(ctx context.Context) {
 	defer cancel()
 	roles, err := h.readers.Ready.ListRoles(ctx)
 	if err != nil {
-		// The mutation already committed; clients converge on their next
-		// reconnect rather than seeing a failed request.
+		// The mutation already committed; clients converge on their next reconnect rather
+		// than seeing a failed request.
 		slog.Warn("hub: role refresh roles_update skipped, role list unreadable", "err", err)
 		return
 	}

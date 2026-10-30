@@ -7,7 +7,7 @@ import {
   findSticker,
   stickersLoaded,
 } from "../../src/stores/stickers.store";
-import { runSessionResets } from "../../src/lib/sessionRegistry";
+import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 
 const wave = { id: 1, name: "Wave", emoji: "👋", url: "/api/v1/stickers/1/image" };
 const party = { id: 2, name: "Party", emoji: null, url: "/api/v1/stickers/2/image" };

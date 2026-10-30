@@ -1,5 +1,5 @@
 /**
- * Private profile notes (WP 6.11c): one note per member you keep about them,
+ * Private profile notes: one note per member you keep about them,
  * shown in the profile popup and the DM side panel.
  *
  * With the server's `user_notes` capability the note lives on the server
@@ -17,10 +17,10 @@
 import { ApiClientError, type ApiClient, type UserNote } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { setOwnedTimeout } from "@lib/dom";
-import { migrateLegacyValue } from "@lib/legacyKeyMigration";
-import { readStored, removeStored, writeStored } from "@lib/preferences";
+import { migrateLegacyValue } from "@lib/net/legacyKeyMigration";
+import { readStored, removeStored, writeStored } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { userNotesEnabled } from "@lib/serverCapabilities";
+import { userNotesEnabled } from "@lib/net/serverCapabilities";
 
 const log = createLogger("user-notes");
 
@@ -100,7 +100,7 @@ export function loadLocalNote(host: string, userId: number): string {
   // opened post-upgrade and no other. User ids are per-server autoincrement
   // integers, so a legacy note left readable would show server A's private
   // note about user N for the unrelated user N on every other server
-  // (OC-0329) — the same shape channel-mutes.ts fixed for OC-0288.
+  // — the same shape channel-mutes.ts fixed.
   return migrateLegacyValue(legacyNoteKey(userId), scopedNoteKey(userId, host)) ?? "";
 }
 

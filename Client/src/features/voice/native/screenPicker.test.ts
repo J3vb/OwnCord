@@ -158,7 +158,7 @@ describe("pickScreenSource", () => {
   });
 });
 
-describe("armScreenRestart (WP 1C-6)", () => {
+describe("armScreenRestart", () => {
   beforeEach(() => {
     host.sources = x11;
     setScreenSourcePicker((opts) => Promise.resolve(host.pick(opts)));

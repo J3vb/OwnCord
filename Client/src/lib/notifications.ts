@@ -3,10 +3,10 @@
  * and plays sounds for incoming messages based on user preferences.
  */
 
-import { loadPref } from "./preferences";
-import { getChannelMutesHost, notificationAllowed } from "./channel-mutes";
-import { channelNotificationLevel, shouldNotifyForLevel } from "./notificationLevel";
-import { loadUserStatus } from "./userStatus";
+import { loadPref } from "./prefs/preferences";
+import { getChannelMutesHost, notificationAllowed } from "./prefs/channelMutes";
+import { channelNotificationLevel, shouldNotifyForLevel } from "./prefs/notificationLevel";
+import { loadUserStatus } from "./presence/userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -14,15 +14,15 @@ import { isWindowDetached } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
 import type { ChannelActivityEntry, ChatMessagePayload } from "./types";
-import { isServerRowKind } from "./messageKind";
-import { mentionsCurrentUser } from "./mentions";
-import { jumpToMessage } from "./message-navigation";
+import { isServerRowKind } from "./text/messageKind";
+import { mentionsCurrentUser } from "./text/mentions";
+import { jumpToMessage } from "./nav/messageNavigation";
 import { createLogger } from "./logger";
-import { registerSessionReset } from "./sessionRegistry";
-import { cleanupNotificationAudio, playNotificationSound } from "./notificationSound";
-import { soundSwitchOn } from "./soundPrefs";
-import { resolveAuthor } from "@lib/formatting";
-import { resolveDisplayName } from "@lib/avatar";
+import { registerSessionReset } from "./net/sessionRegistry";
+import { cleanupNotificationAudio, playNotificationSound } from "./media/notificationSound";
+import { soundSwitchOn } from "./prefs/soundPrefs";
+import { resolveAuthor } from "@lib/text/formatting";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { desktop } from "../platform/desktop";
 import type { NotificationTarget } from "../platform/contracts/notifications";
 import { connectText } from "../i18n/connect";
@@ -98,7 +98,7 @@ function resolveNotificationChannel(channelId: number): { name: string; isDm: bo
 }
 
 /**
- * A followed thread an alert is for (WP 6.9c). A thread notifies as its parent
+ * A followed thread an alert is for. A thread notifies as its parent
  * channel does: the parent's level and mute apply, and the popup is titled
  * "#parent › thread". `watching` is true while the reader has the thread open.
  */
@@ -115,7 +115,7 @@ function alertLabel(channelName: string, thread: ThreadNotifyContext | undefined
     : connectText("notifications.inThread", { channel: `#${channelName}`, thread: thread.name });
 }
 
-/** The chime's preference gate (WP M-8): the "Notification Sounds" group switch
+/** The chime's preference gate: the "Notification Sounds" group switch
  *  AND the switch of the sound that would play, a mention's or a plain
  *  message's. Do Not Disturb is the caller's. */
 function chimeEnabled(mentioned: boolean): boolean {
@@ -148,8 +148,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   if (blocksStore.getState().blockedByMe.has(payload.user.id)) return;
 
   // Don't notify if the window is focused AND the message is in the active
-  // channel — UNLESS that channel is showing a detached around-window
-  // (OC-0204). "Active" only means this is the channel on screen; a jump to
+  // channel — UNLESS that channel is showing a detached around-window.
+  // "Active" only means this is the channel on screen; a jump to
   // an old permalink/reply/search hit can leave it detached from the live
   // tail (messages.store's detachedChannels), in which case the user is
   // reading back-history and cannot see the new message at all — addMessage
@@ -161,12 +161,12 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
     return;
   }
 
-  // DP-26 / D3(b): while the app is focused and the message is in some other
+  // While the app is focused and the message is in some other
   // channel, the popup and the taskbar flash are interruptions the user cannot
   // act on without leaving what they are doing, so they are suppressed. The
   // chime still plays (Discord desktop's behaviour) — but the window being
   // focused on a *different* channel is the only case: a detached
-  // around-window in the active channel (OC-0204) must still popup and flash,
+  // around-window in the active channel must still popup and flash,
   // because the new message is not on screen at all.
   const focusedElsewhere = focused && payload.channel_id !== activeChannelId;
 
@@ -201,7 +201,7 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
   // flash, because a flashing taskbar is exactly the interruption the mute was
   // asked for. The unread badge is untouched (it is drawn from the store, not
   // from here) and just renders dimmed. A message that names the reader is
-  // never silenced: see @lib/channel-mutes.
+  // never silenced: see @lib/prefs/channelMutes.
   if (!notificationAllowed(payload.channel_id, mentioned)) return;
 
   // Do Not Disturb — the settings panel promises "You will not receive desktop
@@ -259,8 +259,8 @@ export function notifyIncomingMessage(payload: ChatMessagePayload): void {
 }
 
 /**
- * Announce a mention in a channel the reader is not looking at (WP 2B-1,
- * interim). The server's `mention_count` frame is the only thing that reaches
+ * Announce a mention in a channel the reader is not looking at (an interim
+ * alert). The server's `mention_count` frame is the only thing that reaches
  * the client for such a channel (its `chat_message` goes to the focused
  * channel alone), and it carries a total, not the message — so this alert has
  * no author or body and its target opens the channel, not a message.
@@ -311,7 +311,7 @@ export function notifyMention(channelId: number, thread?: ThreadNotifyContext): 
 
 /**
  * Announce one `channel_activity` entry: a new message in a channel the reader
- * is not viewing (WP 2B-2). The frame carries no content, so the popup has a
+ * is not viewing. The frame carries no content, so the popup has a
  * title and no body; it names the author when the frame does, and opens the
  * message itself.
  *
@@ -415,10 +415,10 @@ function sanitizeNotif(s: string, maxLen: number): string {
  * on a lock screen before anyone clicked to reveal it. A dynamic import of the
  * markdown tokenizer keeps it out of the startup closure. An attachment-only
  * message has no visible words, so it falls back to a count ("sent 2
- * attachments") rather than an empty body (DP-28).
+ * attachments") rather than an empty body.
  */
 async function plainBody(rawContent: string, attachmentCount: number): Promise<string> {
-  const { markdownToPlainText } = await import("./markdown");
+  const { markdownToPlainText } = await import("./text/markdown");
   const text = markdownToPlainText(rawContent, connectText("notifications.spoiler"));
   if (text === "" && attachmentCount > 0) {
     return connectText("notifications.attachment", { count: attachmentCount });

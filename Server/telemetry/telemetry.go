@@ -1,12 +1,10 @@
 // Package telemetry wires the OpenTelemetry SDK for OwnCord.
 //
-// Phase B Step 8 — Add OpenTelemetry for Observability.
-//
 // This file provides the public API surface and a no-op default implementation
 // that compiles without any external dependencies. The real OpenTelemetry
 // providers live in telemetry_otel.go behind the `otel` build tag, so the
-// default build (`go build ./...`) ships a stub that satisfies every call site
-// at zero binary cost. To enable real OTel:
+// default build ships a stub that satisfies every call site at zero binary
+// cost. To enable real OTel:
 //
 //	go get go.opentelemetry.io/otel \
 //	       go.opentelemetry.io/otel/sdk \
@@ -15,9 +13,9 @@
 //	       go.opentelemetry.io/contrib/instrumentation/github.com/go-chi/chi/otelchi
 //	go build -tags otel ./...
 //
-// The fallback API is intentionally tiny: it lets the rest of the codebase
-// reference Tracer / Meter / Counter / Histogram without caring whether the
-// real SDK is compiled in.
+// The fallback API is intentionally tiny: the rest of the codebase can use
+// Tracer / Meter / Counter / Histogram without caring whether the real SDK is
+// compiled in.
 package telemetry
 
 import (
@@ -116,8 +114,6 @@ func GlobalTracer(name string) Tracer { return Global().Tracer(name) }
 
 // GlobalMeter is a convenience that fetches a meter from the global provider.
 func GlobalMeter(name string) Meter { return Global().Meter(name) }
-
-// ── No-op implementation ────────────────────────────────────────────────────
 
 type noopProvider struct{}
 

@@ -1,4 +1,4 @@
-// Group DM member management (WP 3B-11a): the panel's view model, the gates for
+// Group DM member management: the panel's view model, the gates for
 // Add People / Remove / Make Group Owner, and the three REST actions with their
 // error texts. The panel, the picker and the page controller all go through
 // here, so the rules live in one place.
@@ -13,7 +13,7 @@ import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { connectText } from "../../i18n/connect";
 import { accountText } from "../../i18n/account";
 import { groupDmText } from "../../i18n/groupDm";

@@ -6,7 +6,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// mentionCountPayload is the mention_count frame's payload (DP-27): targeted
+// mentionCountPayload is the mention_count frame's payload: targeted
 // at one reader, unsequenced, not replayed. channel_id names the channel whose
 // read_states.mention_count changed; count is the reader's total after the
 // bump. A client uses it to repaint that channel's badge live when the channel

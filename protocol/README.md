@@ -135,9 +135,9 @@ Run it locally from the repository root. It needs the release tags and an
 `npm ci` of the old client, and removes its temporary worktree afterwards:
 
 ```bash
-node scripts/protocol-n1-compat.mjs                  # newest release tag
-node scripts/protocol-n1-compat.mjs --tag v2.2.0-beta.3
-node scripts/protocol-n1-compat.mjs --keep           # keep the worktree to debug in
+node scripts/ci/protocol-n1-compat.mjs                  # newest release tag
+node scripts/ci/protocol-n1-compat.mjs --tag v2.2.0-beta.3
+node scripts/ci/protocol-n1-compat.mjs --keep           # keep the worktree to debug in
 ```
 
 If it fails, the change breaks the last release's clients. Do not edit the

@@ -9,7 +9,7 @@
  */
 
 import { createElement, appendChildren, setText } from "../../lib/dom";
-import { readableRoleColor } from "../../lib/themes";
+import { readableRoleColor } from "../../lib/prefs/themes";
 import type { UserStatus } from "../../lib/types";
 import { statusLabel } from "../../i18n/shell";
 import { createIcon, type IconName } from "../../lib/icons";
@@ -32,7 +32,7 @@ export type MemberRowModel = {
   readonly customStatus: string | null;
   /** "Playing <game>" or "Listening to <player>" for the second line; null when
    *  there is none. Always null while a custom status is set, which wins the
-   *  line (WP 8.3); a game beats music (WP 8.10). */
+   *  line; a game beats music. */
   readonly activity: string | null;
   /** The icon that goes with `activity`: the controller or the music note. */
   readonly activityIcon: IconName;

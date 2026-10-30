@@ -1,5 +1,5 @@
 /**
- * Stickers store — the server's custom-sticker set (WP 8.8).
+ * Stickers store — the server's custom-sticker set.
  *
  * Loaded once from GET /api/v1/stickers when the session goes ready (only on a
  * server that advertises the `stickers` capability), then replaced wholesale on
@@ -11,7 +11,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 /** One custom sticker as the server describes it. */
 export interface Sticker {

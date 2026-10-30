@@ -9,7 +9,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
 import { errorText } from "@lib/api";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 
 export interface DeleteChannelModalOptions {

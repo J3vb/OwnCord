@@ -2,10 +2,10 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, TransportError, errorText } from "@lib/api";
-import { normaliseInviteCode } from "@lib/deep-link";
+import { normaliseInviteCode } from "@lib/nav/deepLink";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
@@ -18,7 +18,7 @@ import {
   usernameProblemText,
   MAX_USERNAME_LEN,
   type LimitHint,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ export type FormState = "idle" | "loading" | "totp" | "connecting" | "error" | "
 /** Form mode: login or register. */
 export type FormMode = "login" | "register";
 
-/** A connect-form field a validation error can be tied to (B9-23). */
+/** A connect-form field a validation error can be tied to. */
 type FieldId = "host" | "username" | "password" | "invite";
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ export interface LoginFormOptions {
    */
   readonly getRegistrationMode?: (host: string) => RegistrationMode | null;
   /** The server-default retention sentence for a host, shown at sign-up;
-   *  null when unknown, and then nothing is shown (B7-15c). */
+   *  null when unknown, and then nothing is shown. */
   readonly getRetentionNotice?: (host: string) => string | null;
   /** The host box settled (debounced) in register mode, or register mode was
    *  entered with a host typed; lets the owner fetch that host's mode. */
@@ -115,7 +115,7 @@ export interface LoginFormOptions {
   /** The host box was edited; the owner may apply a matching saved profile's settings. */
   readonly onHostInput?: (host: string) => void;
   /**
-   * The one host this page signs in to (the web portal, WP 6.13e). Read only
+   * The one host this page signs in to (the web portal). Read only
    * in `__OWNCORD_WEB__` builds: the host box is filled and hidden, a host
    * given later is ignored, and the form offers "Stay signed in" only.
    */
@@ -247,7 +247,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // or an error replaces it.
   let noticeMessage = "";
   /**
-   * The field the current banner error belongs to (B9-23), so the error is
+   * The field the current banner error belongs to, so the error is
    * linked to its input with aria-describedby/aria-invalid and focus moves
    * there. Null for a server error that names no field.
    */
@@ -385,7 +385,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       id: "connect-error-banner",
     });
 
-    // Informational notice (P4-18): a green/neutral status line for a fact the
+    // Informational notice: a green/neutral status line for a fact the
     // user needs (pending approval), never the red error banner.
     infoNotice = createElement("div", { class: "info-notice", role: "status" });
 
@@ -665,7 +665,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // announcement, so a screen reader got nothing. The message is the
     // input's description and focus returns to the input, so it is read once
     // with the field; it is a live alert only when the input already has
-    // focus and so is not re-read (B9-23).
+    // focus and so is not re-read.
     totpError = createElement("div", {
       class: "form-error",
       id: "totp-error",
@@ -887,7 +887,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function updateErrorBanner(): void {
     // A field error is linked to its input and focus moves there, so a
     // keyboard/screen-reader user lands on the control to fix rather than on
-    // an unassociated sentence (B9-23). The banner is only a live alert when
+    // an unassociated sentence. The banner is only a live alert when
     // focus does not move — a server error naming no field, or a field that
     // already has focus — so each error is announced once.
     const field = formState === "error" ? errorField : null;
@@ -987,7 +987,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   // ---------------------------------------------------------------------------
-  // Registration mode (B7-15a)
+  // Registration mode
   // ---------------------------------------------------------------------------
 
   /**

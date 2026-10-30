@@ -351,3 +351,31 @@ func TestWAFMiddleware_BlocksArgumentLimitOverflow(t *testing.T) {
 		})
 	}
 }
+
+func TestWAFMiddleware_AllowsLargeDiscordImportUploadBody(t *testing.T) {
+	requestBody := strings.Repeat("A", 3<<20) // above the 1 MiB inline body limit
+	middleware := NewWAFMiddlewareCRS(2, CRSModeDetect)
+
+	called := false
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll: %v", err)
+		}
+		if len(body) != len(requestBody) {
+			t.Fatalf("body len = %d, want %d", len(body), len(requestBody))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/api/discord-imports/upload?filename=x.json", strings.NewReader(requestBody))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.RemoteAddr = "127.0.0.1:9999"
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if !called || rr.Code != http.StatusNoContent {
+		t.Fatalf("called = %v, status = %d, body = %s", called, rr.Code, rr.Body.String())
+	}
+}

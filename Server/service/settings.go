@@ -14,11 +14,10 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// SettingsService owns the server-settings policy the admin panel writes and
-// the rest of the server reads: which keys exist, how boolean values are
-// normalized, the require_2fa preconditions, and the atomic apply. Handlers
-// are thin adapters over it (B3-8 settings/audit family); the hub reads
-// server identity through it instead of the raw handle.
+// SettingsService owns the server-settings policy the admin panel writes and the
+// server reads: which keys exist, boolean normalization, the require_2fa
+// preconditions and the atomic apply. Handlers are thin adapters; the hub reads
+// server identity through it.
 type SettingsService struct {
 	st Store
 	mu syncutil.Mutex
@@ -29,9 +28,8 @@ func NewSettingsService(st Store) *SettingsService {
 	return &SettingsService{st: st}
 }
 
-// allowedSettingKeys is the whitelist of keys that may be written via the
-// admin settings PATCH. Derived from the settings table in SCHEMA.md. The
-// policy lives here so no handler can grow its own copy.
+// allowedSettingKeys is the whitelist of keys the admin settings PATCH may write.
+// The policy lives here so no handler grows its own copy.
 var allowedSettingKeys = map[string]struct{}{
 	"server_name":       {},
 	"server_icon":       {},
@@ -40,32 +38,25 @@ var allowedSettingKeys = map[string]struct{}{
 	"registration_mode": {},
 	"backup_schedule":   {},
 	"backup_retention":  {},
-	// The server-wide message-retention window in days (B4-11): 0 keeps
-	// everything, anything else is at least RetentionMinDays.
-	db.RetentionDaysKey: {},
-	// The upload file-type lists (upload_filetypes.go).
+	// Server-wide message-retention days: 0 keeps everything, else at least RetentionMinDays.
+	db.RetentionDaysKey:        {},
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
-	// How long a member must be idle before the AFK channel sweep may move
-	// them (WP 6.10). A missing row means AFKTimeoutDefaultSeconds.
-	AFKTimeoutKey: {},
-	// Whether a member holding MOVE_MEMBERS may move the owner (WP 8.4a).
+	// Idle time before the AFK sweep may move a member; missing means AFKTimeoutDefaultSeconds.
+	AFKTimeoutKey:        {},
 	VoiceOwnerMovableKey: {},
-	// Whether members' game activity is shown on this server (WP 8.3e-2).
-	// MANAGE_SERVER may change it; it is not owner-only.
+	// Whether game activity is shown; MANAGE_SERVER may change it.
 	GameActivityEnabledKey: {},
-	// The channel that greets each new member (WP 8.6). Empty means off.
-	WelcomeChannelKey: {},
+	WelcomeChannelKey:      {},
 }
 
-// VoiceOwnerMovableKey is the settings key holding whether MOVE_MEMBERS
-// holders may move the owner between voice channels: "true" or "false". A
-// missing row means true.
+// VoiceOwnerMovableKey holds whether MOVE_MEMBERS holders may move the owner
+// between voice channels ("true"/"false"); a missing row means true.
 const VoiceOwnerMovableKey = "voice_owner_movable"
 
-// VoiceOwnerMovable reads a stored VoiceOwnerMovableKey value: true for an
-// unset (blank) value, the parsed boolean otherwise, and false for anything
-// unparseable so a damaged row never lets the owner be moved on a guess.
+// VoiceOwnerMovable reads a stored value: true when blank, the parsed boolean
+// otherwise, false when unparseable so a damaged row never lets the owner be moved
+// on a guess.
 func VoiceOwnerMovable(stored string) bool {
 	if strings.TrimSpace(stored) == "" {
 		return true
@@ -74,13 +65,13 @@ func VoiceOwnerMovable(stored string) bool {
 	return err == nil && v
 }
 
-// GameActivityEnabledKey is the settings key holding whether game activity is
-// shown on this server: "true" or "false". A missing row means true.
+// GameActivityEnabledKey holds whether game activity is shown ("true"/"false");
+// a missing row means true.
 const GameActivityEnabledKey = "game_activity_enabled"
 
-// GameActivityEnabled reads a stored GameActivityEnabledKey value: true for an
-// unset (blank) value, the parsed boolean otherwise, and false for anything
-// unparseable so a damaged row never shows a game the admin may have hidden.
+// GameActivityEnabled reads a stored value: true when blank, the parsed boolean
+// otherwise, false when unparseable so a damaged row never shows a game the admin
+// may have hidden.
 func GameActivityEnabled(stored string) bool {
 	if strings.TrimSpace(stored) == "" {
 		return true
@@ -89,10 +80,9 @@ func GameActivityEnabled(stored string) bool {
 	return err == nil && v
 }
 
-// GameActivityEnabledFromRead interprets the result of reading
-// GameActivityEnabledKey: a missing row (db.ErrNotFound) means on, a stored
-// value is parsed as GameActivityEnabled does, and any other error is a read
-// that failed: ok is false and the error is returned, for the caller to fail
+// GameActivityEnabledFromRead interprets a read of GameActivityEnabledKey: a
+// missing row (db.ErrNotFound) means on, a value parses as GameActivityEnabled
+// does, and any other error returns ok=false and the error for the caller to fail
 // closed on and log.
 func GameActivityEnabledFromRead(stored string, err error) (enabled, ok bool, readErr error) {
 	if err != nil {
@@ -107,72 +97,61 @@ func GameActivityEnabledFromRead(stored string, err error) (enabled, ok bool, re
 // AFKTimeoutKey is the settings key holding the AFK timeout in seconds.
 const AFKTimeoutKey = "afk_timeout_seconds"
 
-// AFKTimeoutDefaultSeconds is the timeout in force while AFKTimeoutKey is
-// unset.
+// AFKTimeoutDefaultSeconds is the timeout while AFKTimeoutKey is unset.
 const AFKTimeoutDefaultSeconds = 300
 
-// afkTimeoutChoices are the only values AFKTimeoutKey accepts, in seconds
-// (1, 5, 15, 30 and 60 minutes): the admin card offers exactly these.
+// afkTimeoutChoices are the only accepted AFK values, the admin card's offers.
 var afkTimeoutChoices = []int{60, 300, 900, 1800, 3600}
 
-// inertSettingKeys are rows the setup wizard still writes and GET /settings
-// still shows, but that no code reads at runtime: config.yaml owns the real
-// limits (upload.max_size_mb, voice.quality). A PATCH is refused rather than
+// inertSettingKeys are rows the setup wizard writes and GET /settings shows but
+// no code reads (config.yaml owns the limits); a PATCH is refused rather than
 // accepted and ignored.
 var inertSettingKeys = map[string]struct{}{
 	"max_upload_bytes": {},
 	"voice_quality":    {},
 }
 
-// ownerOnlySettingKeys are the settings that decide the owner-only backup
-// policy (BPR-072). They stay on the read surface — the admin panel renders
-// them and GET /settings is MANAGE_SERVER — but a PATCH carrying either must
-// come from the Owner, because they indirectly control which of the owner's
-// backups survive: backup_retention is what the maintenance sweep prunes by,
-// and backup_schedule is whether new copies are taken at all.
+// ownerOnlySettingKeys decide the owner-only backup policy. They stay readable
+// (GET /settings is MANAGE_SERVER) but a PATCH touching them must come from the
+// Owner, as they control which of the owner's backups survive: backup_retention is
+// what the sweep prunes by and backup_schedule whether copies are taken.
 var ownerOnlySettingKeys = map[string]struct{}{
 	"backup_schedule":  {},
 	"backup_retention": {},
-	// The upload file-type policy decides which files members can share, so
-	// it is the owner's call too.
+	// The upload file-type policy decides what members can share; owner-only too.
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
-	// Whether Move Members holders may move the owner is the owner's call
-	// (WP 8.4a).
-	VoiceOwnerMovableKey: {},
+	VoiceOwnerMovableKey:       {},
 }
 
-// IsOwnerOnlySettingKey reports whether a setting key changes the owner-only
-// backup policy, so the admin PATCH can require the Owner for just those keys
-// without growing a second copy of the list.
+// IsOwnerOnlySettingKey reports whether a key changes the owner-only backup
+// policy, so the PATCH requires the Owner for just those keys.
 func IsOwnerOnlySettingKey(key string) bool {
 	_, ok := ownerOnlySettingKeys[key]
 	return ok
 }
 
-// Backup retention bounds. The minimum is deliberately well above 1: a single
-// low value would let the maintenance sweep prune the owner's history down to
-// the newest file. The maximum mirrors the message-retention ceiling, past
-// which pruneExpiredBackups' -days*24h arithmetic would overflow.
+// Backup retention bounds. The minimum is well above 1 so a low value cannot let
+// the sweep prune the history to the newest file; the maximum mirrors the
+// message-retention ceiling, past which pruneExpiredBackups' -days*24h overflows.
 const (
 	BackupRetentionMinDays = 7
 	BackupRetentionMaxDays = db.RetentionMaxDays
 )
 
-// List returns every setting as a key→value map.
+// List returns every setting as a key-to-value map.
 func (s *SettingsService) List(ctx context.Context) (map[string]string, error) {
 	return s.st.GetAllSettings(ctx)
 }
 
-// Setting returns one setting's value. Errors wrap db.ErrNotFound for a
-// missing key, exactly as the store reports it — the hub's identity reads
-// and the backup scheduler both branch on that.
+// Setting returns one setting's value; a missing key wraps db.ErrNotFound as the
+// store reports it (the hub's identity reads and the backup scheduler branch on it).
 func (s *SettingsService) Setting(ctx context.Context, key string) (string, error) {
 	return s.st.GetSetting(ctx, key)
 }
 
-// ServerName returns the server_name setting, or "" when it is missing or
-// blank so the caller can fall back to config.yaml's server.name.
+// ServerName returns server_name, or "" when missing or blank so the caller falls
+// back to config.yaml's server.name.
 func (s *SettingsService) ServerName(ctx context.Context) (string, error) {
 	name, err := s.st.GetSetting(ctx, "server_name")
 	if err != nil {
@@ -184,27 +163,24 @@ func (s *SettingsService) ServerName(ctx context.Context) (string, error) {
 	return strings.TrimSpace(name), nil
 }
 
-// RegistrationMode returns the live registration policy, defaulting to invite
-// for a missing setting and failing closed for an unparseable value.
+// RegistrationMode returns the live policy: invite for a missing setting, fail
+// closed for an unparseable one.
 func (s *SettingsService) RegistrationMode(ctx context.Context) (RegistrationMode, error) {
 	return RegistrationModeOf(ctx, s.st)
 }
 
-// Patch validates, normalizes and atomically applies updates, then writes
-// one audit row per changed key attributed to actorID. The returned map is
-// the full settings table after the apply (the admin panel re-renders from
-// it). Validation failures return ErrBadRequest with the reason; nothing is
-// written unless every key passes.
+// Patch validates, normalizes and atomically applies updates, then writes one
+// audit row per changed key. The returned map is the full settings table after the
+// apply. Validation failures return ErrBadRequest; nothing is written unless every
+// key passes.
 func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[string]string) (map[string]string, error) {
-	// One patch at a time: the registration-mode transition row names the
-	// value it replaced, which is only true if nobody applied another value
-	// between the read below and the apply.
+	// One patch at a time: the registration-mode transition row names the value it
+	// replaced, true only if nobody applied another between the read and the apply.
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Validate all keys against the whitelist before writing anything so the
-	// operation is atomic from the caller's perspective. The %.0w verb wraps
-	// ErrBadRequest without adding its text: the admin surface's response
-	// bodies are pinned to exactly these messages, prefix-free.
+	// Validate all keys before writing anything so the operation is atomic. %.0w
+	// wraps ErrBadRequest without its text: the admin response bodies are pinned to
+	// exactly these messages, prefix-free.
 	for key := range updates {
 		if _, inert := inertSettingKeys[key]; inert {
 			return nil, fmt.Errorf("%s is set in config.yaml, not here%.0w", key, ErrBadRequest)
@@ -222,7 +198,7 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	if value, ok := normalized[WelcomeChannelKey]; ok {
 		canonical, err := validateWelcomeChannel(ctx, s.st, value)
 		if err != nil {
-			// A store fault is the server's, not a bad request: let it through.
+			// A store fault is the server's, not a bad request.
 			if errors.Is(err, ErrInternal) {
 				return nil, err
 			}
@@ -232,14 +208,14 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	}
 
 	if err := s.validateRequire2FAUpdate(ctx, normalized); err != nil {
-		// A store fault is the server's, not a bad request: let it through.
+		// A store fault is the server's, not a bad request.
 		if errors.Is(err, ErrInternal) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("%w%.0w", err, ErrBadRequest)
 	}
 
-	// Read the mode before the apply so the transition row can name both ends.
+	// Read the mode before the apply so the transition row names both ends.
 	previousMode := ""
 	if _, changingMode := normalized[registrationModeKey]; changingMode {
 		mode, err := registrationModeSetting(ctx, s.st)
@@ -248,7 +224,7 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 		}
 		previousMode = string(mode)
 	}
-	// Same for the retention window: the policy change is audited old -> new.
+	// Likewise the retention window, audited old -> new.
 	previousRetention := ""
 	if _, changing := normalized[db.RetentionDaysKey]; changing {
 		days, err := s.st.ServerRetentionDays(ctx)
@@ -263,8 +239,8 @@ func (s *SettingsService) Patch(ctx context.Context, actorID int64, updates map[
 	}
 	for key := range normalized {
 		slog.Info("setting changed", "actor_id", actorID, "key", key)
-		// A registration-mode transition is audited by name — old and new
-		// mode — rather than as an anonymous "updated" (B4-1, BPR-041).
+		// A registration-mode transition is audited by name (old and new), not as
+		// "updated".
 		if key == registrationModeKey && previousMode != normalized[key] {
 			db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "registration_mode_change", "setting", 0,
 				fmt.Sprintf("registration_mode %s -> %s", previousMode, normalized[key]))
@@ -347,9 +323,8 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 	return normalized, nil
 }
 
-// AFKTimeoutSeconds reads a stored AFKTimeoutKey value: the seconds when it is
-// one of the allowed choices, AFKTimeoutDefaultSeconds for anything else
-// (unset, blank, hand-edited to a value the PATCH would refuse).
+// AFKTimeoutSeconds reads a stored value: the seconds when allowed,
+// AFKTimeoutDefaultSeconds for anything else (unset, blank, hand-edited).
 func AFKTimeoutSeconds(stored string) int {
 	secs, err := strconv.Atoi(strings.TrimSpace(stored))
 	if err != nil || !slices.Contains(afkTimeoutChoices, secs) {
@@ -358,8 +333,7 @@ func AFKTimeoutSeconds(stored string) int {
 	return secs
 }
 
-// normalizeAFKTimeout accepts only the choices in afkTimeoutChoices and
-// returns the value in canonical decimal form.
+// normalizeAFKTimeout accepts only afkTimeoutChoices, in canonical decimal form.
 func normalizeAFKTimeout(key, value string) (string, error) {
 	secs, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || !slices.Contains(afkTimeoutChoices, secs) {
@@ -368,8 +342,8 @@ func normalizeAFKTimeout(key, value string) (string, error) {
 	return strconv.Itoa(secs), nil
 }
 
-// normalizeRetentionDays accepts 0 (keep forever) or a day count in
-// [minDays, maxDays] and returns it in canonical decimal form.
+// normalizeRetentionDays accepts 0 (keep forever) or [minDays, maxDays], in
+// canonical decimal form.
 func normalizeRetentionDays(key, value string, minDays, maxDays int) (string, error) {
 	days, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || days < 0 || (days != 0 && days < minDays) || days > maxDays {
@@ -387,21 +361,19 @@ func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates 
 		return nil
 	}
 
-	// The preconditions only matter when this request touches require_2fa
-	// or the registration mode. Without this guard, an unrelated PATCH
-	// (motd, server name, backup settings, ...) inherits require_2fa's
-	// *current* value via targetBoolSetting's DB fallback and gets rejected
-	// by a precondition about a value it never touches — wedging the whole
-	// settings page once any non-banned user without TOTP exists.
+	// The preconditions matter only when this request touches require_2fa or the
+	// registration mode. Otherwise an unrelated PATCH inherits require_2fa's current
+	// value via targetBoolSetting's DB fallback and is rejected for a value it never
+	// touches, wedging the settings page once any non-banned user without TOTP exists.
 	_, changingRequire2FA := updates["require_2fa"]
 	_, changingMode := updates[registrationModeKey]
 	if !changingRequire2FA && !changingMode {
 		return nil
 	}
 
-	// Nobody can enrol before their first login, so a server that admits new
-	// accounts cannot demand 2FA of everyone: the mode must be closed — and
-	// stays closed while require_2fa is on (B4-1).
+	// Nobody can enrol before their first login, so a server admitting new accounts
+	// cannot demand 2FA of everyone: the mode must be closed, and stay closed while
+	// require_2fa is on.
 	mode, err := s.targetRegistrationMode(ctx, updates)
 	if err != nil {
 		return err
@@ -410,8 +382,7 @@ func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates 
 		return fmt.Errorf("require_2fa cannot be enabled unless registration is closed")
 	}
 
-	// The enrollment count only matters when this request is actually turning
-	// require_2fa on.
+	// The enrollment count only matters when turning require_2fa on.
 	if !changingRequire2FA {
 		return nil
 	}
@@ -426,8 +397,8 @@ func (s *SettingsService) validateRequire2FAUpdate(ctx context.Context, updates 
 	return nil
 }
 
-// targetRegistrationMode is the mode after this patch: the update's value
-// when it carries one (already normalized), else the live setting.
+// targetRegistrationMode is the mode after this patch: the update's (normalized)
+// value, else the live setting.
 func (s *SettingsService) targetRegistrationMode(ctx context.Context, updates map[string]string) (RegistrationMode, error) {
 	if value, ok := updates[registrationModeKey]; ok {
 		mode, ok := ParseRegistrationMode(value)
@@ -457,10 +428,9 @@ func (s *SettingsService) targetBoolSetting(ctx context.Context, updates map[str
 	return parseSettingsPatchBool(value)
 }
 
-// parseSettingsPatchBool is auth.go's parseBooleanSettingValue with the
-// admin PATCH's own error wording ("invalid boolean value", no "setting").
-// Both messages are pinned by their sides' tests, so the twins stay
-// separate rather than either surface changing its reply.
+// parseSettingsPatchBool is auth.go's parseBooleanSettingValue with the admin
+// PATCH's own error wording. Both messages are pinned by their sides' tests, so
+// the twins stay separate.
 func parseSettingsPatchBool(value string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "1", "true":
@@ -472,16 +442,14 @@ func parseSettingsPatchBool(value string) (bool, error) {
 	}
 }
 
-// AuditLog returns a page of the audit trail — the settings/audit family
-// owns the read the admin panel's log view uses. action and query narrow it
-// as db.SearchAuditLog describes; empty strings return every row, and
-// hideSignins drops the sign-in and connection rows.
+// AuditLog returns a page of the audit trail for the admin log view. action and
+// query narrow it as db.SearchAuditLog describes (empty returns every row);
+// hideSignins drops sign-in and connection rows.
 func (s *SettingsService) AuditLog(ctx context.Context, action, query string, hideSignins bool, limit, offset int) ([]db.AuditEntry, error) {
 	return s.st.SearchAuditLog(ctx, action, query, hideSignins, limit, offset)
 }
 
-// AuditActions returns up to limit distinct action names in the whole audit
-// log, sorted.
+// AuditActions returns up to limit distinct action names in the audit log, sorted.
 func (s *SettingsService) AuditActions(ctx context.Context, limit int) ([]string, error) {
 	return s.st.ListAuditActions(ctx, limit)
 }

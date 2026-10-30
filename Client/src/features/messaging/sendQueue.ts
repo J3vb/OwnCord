@@ -1,5 +1,5 @@
 /**
- * Send while uploading (WP 3A-9), the lazy half. A message sent with files
+ * Send while uploading, the lazy half. A message sent with files
  * still uploading becomes a queued send: the controller keeps one entry per
  * message, this module waits for its uploads and hands the settled ids back
  * through `deps.dispatch`, which posts it as one ordinary `chat_send`. It writes

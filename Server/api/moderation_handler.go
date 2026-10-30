@@ -13,24 +13,21 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// warnRequest is POST /api/v1/moderation/users/{id}/warn's body.
 type warnRequest struct {
 	Reason string `json:"reason"`
 }
 
-// timeoutRequest is POST /api/v1/moderation/users/{id}/timeout's body.
 type timeoutRequest struct {
 	Reason          string `json:"reason"`
 	DurationSeconds int64  `json:"duration_seconds"`
 }
 
-// moderationActionIDResponse is Warn's response body.
 type moderationActionIDResponse struct {
 	ID int64 `json:"id"`
 }
 
 // timeoutResponse is Timeout's response body: Voice is "applied" or
-// "skipped" — decision 6, the actor lacked MUTE_MEMBERS.
+// "skipped" when the actor lacked MUTE_MEMBERS.
 type timeoutResponse struct {
 	ID    int64  `json:"id"`
 	Voice string `json:"voice"`
@@ -38,7 +35,7 @@ type timeoutResponse struct {
 
 // moderationActionResponse is one row of GET .../users/{id}/actions and the
 // queue detail's "actions taken" list. ReportID, when present, is the
-// report's PUBLIC id (P2-9) — the sequential internal id never reaches a
+// report's PUBLIC id — the sequential internal id never reaches a
 // response.
 type moderationActionResponse struct {
 	ID             int64   `json:"id"`
@@ -54,10 +51,10 @@ type moderationActionResponse struct {
 }
 
 // moderationActionResponses maps a ledger slice to the wire shape, resolving
-// each row's internal report_id to its public one (P2-9) — the sequential
+// each row's internal report_id to its public one — the sequential
 // id never reaches a response. viewerID authorizes each row's report link
-// individually through the report's own confidentiality guard (P1-5, Codex
-// review): a moderator who is the SUBJECT of a report linked from their own
+// individually through the report's own confidentiality guard:
+// a moderator who is the SUBJECT of a report linked from their own
 // action ledger must not have that report's id surface here just because
 // they still hold MODERATE_MEMBERS — the id is simply omitted (the rest of
 // the row still renders) rather than the whole read failing.
@@ -227,7 +224,6 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// ownModerationAppeal is the appeal filed against an own ledger row.
 type ownModerationAppeal struct {
 	ID    string `json:"id"`
 	State string `json:"state"`
@@ -285,7 +281,6 @@ type nicknameRequest struct {
 	DisplayName json.RawMessage `json:"display_name"`
 }
 
-// nicknameResponse is the committed nickname, null when cleared.
 type nicknameResponse struct {
 	UserID      int64   `json:"user_id"`
 	DisplayName *string `json:"display_name"`

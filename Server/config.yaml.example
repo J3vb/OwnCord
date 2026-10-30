@@ -71,6 +71,8 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments and avatars); 0 = unlimited
+  # import_max_mb: 500        # largest Discord export (.json or .zip) the admin
+  #                           # panel accepts for "Import from Discord"
   # blocked_extensions: [bat, cmd, ps1]  # refused by name; a list replaces the
   #                           # default (Windows scripts, installers, disk images)
   # allowed_extensions: []    # non-empty = only these extensions may be uploaded
@@ -98,7 +100,7 @@ voice:
   auto_download_livekit: true # download and run livekit-server automatically when
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
-  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.10")
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)

@@ -1,11 +1,11 @@
-// The browser platform's credential store (6.13c): the sign-in token in Web
+// The browser platform's credential store: the sign-in token in Web
 // Storage, keyed by host. A kept token lives in `localStorage`; a
 // session-only one in `sessionStorage`, which the browser drops with the tab.
 // A save that does not say which keeps the token where it already is (kept,
 // when it is nowhere yet), so a refresh never moves it.
 //
 // Tabs share `localStorage`, so one tab must not destroy a token another tab
-// saved. The rules (6.13e review):
+// saved. The rules:
 //  - A save that names its area (an explicit sign-in) writes that area and
 //    removes the other area's copy: a fresh sign-in supersedes this browser's
 //    earlier one, so one copy is left.

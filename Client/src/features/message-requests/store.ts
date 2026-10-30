@@ -1,5 +1,5 @@
 /**
- * The Message Requests store (B9-5): the pending inbox of the signed-in
+ * The Message Requests store: the pending inbox of the signed-in
  * account on the connected server. The dispatcher's handlers and the inbox's
  * own decisions (decisions.ts) are its only writers; sign-out and profile
  * switch empty it.
@@ -15,7 +15,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { MessageRequest } from "./api";
 
 export type RequestsStatus = "loading" | "ready" | "unavailable";

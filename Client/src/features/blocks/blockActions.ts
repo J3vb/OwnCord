@@ -1,5 +1,5 @@
 /**
- * Block / Unblock as one action every surface shares (WP 3B-2): the member
+ * Block / Unblock as one action every surface shares: the member
  * list, the profile popup, the DM profile panel and the DM row menu all end in
  * `toggleBlock`, and the three that did not already confirm go through
  * `confirmAndToggleBlock` first.

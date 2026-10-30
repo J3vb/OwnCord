@@ -33,9 +33,16 @@ import {
   publishIdentityKey,
   ensureIdentityKeyPublished,
   getDeviceIdentityPublicKey,
-} from "@lib/identity";
-import { generateIdentityKeyPair, exportPublicKey, exportIdentityKeyPair } from "@lib/e2eeCrypto";
+} from "@lib/net/identity";
+import {
+  generateIdentityKeyPair,
+  exportPublicKey,
+  exportIdentityKeyPair,
+} from "@lib/net/e2eeCrypto";
 import { authStore } from "@stores/auth.store";
+
+// Logger names are taken when the module loads, before the per-test mock clear.
+const loggerCallsAtLoad = [...createLoggerMock.mock.calls];
 
 /**
  * Stateful keyring double for the legacy-migration tests: a Map keyed by the
@@ -127,7 +134,7 @@ describe("identity keyring wrappers", () => {
   });
 
   it("names its logger 'identity' so these messages are filterable", () => {
-    expect(createLoggerMock).toHaveBeenCalledWith("identity");
+    expect(loggerCallsAtLoad).toContainEqual(["identity"]);
   });
 });
 
@@ -213,7 +220,7 @@ describe("identity pin wrappers", () => {
     expect(await getIdentityPin("chat.example", "42")).toEqual({ status: "unpinned" });
   });
 
-  it("getIdentityPin reports a store error as 'unavailable', never 'unpinned' (DC-08)", async () => {
+  it("getIdentityPin reports a store error as 'unavailable', never 'unpinned'", async () => {
     // The distinction is the whole fix: a transient keyring failure must not
     // masquerade as "never pinned", or verification silently falls through to
     // the first-sight path and re-pins whatever key the server delivered.
@@ -321,7 +328,7 @@ describe("getOrCreateIdentityKeyPair", () => {
     expect(await exportPublicKey(b.publicKey)).not.toBe(await exportPublicKey(a.publicKey));
   });
 
-  it("[B3-3] keeps the memo per user id, not just per host — two accounts on the same host never share an identity keypair", async () => {
+  it("keeps the memo per user id, not just per host — two accounts on the same host never share an identity keypair", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "load_identity_key") return Promise.resolve(null);
       return Promise.resolve(undefined);
@@ -331,7 +338,7 @@ describe("getOrCreateIdentityKeyPair", () => {
     expect(await exportPublicKey(userB.publicKey)).not.toBe(await exportPublicKey(userA.publicKey));
   });
 
-  it("[OC-0118] a scoped host+userId account never collides with a legacy host-only account for a DIFFERENT host", async () => {
+  it("a scoped host+userId account never collides with a legacy host-only account for a DIFFERENT host", async () => {
     // Pre-B3-3 install on some other server reachable as "chat.example:8443"
     // (host string carries an explicit port) stored its identity key under
     // the legacy host-only keyring account `identity:chat.example:8443`. A

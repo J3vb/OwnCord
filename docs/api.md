@@ -25,7 +25,7 @@ In mount order (`Server/api/router.go`):
 5. **Request Logger** -- structured logging of method, path, status, duration.
 6. **Telemetry HTTP middleware** -- OpenTelemetry tracing; a no-op unless the server was built with `-tags otel` and telemetry is enabled.
 7. **SecurityHeadersWithTLS** -- (adds `Strict-Transport-Security` when TLS is on) sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 0`, `Referrer-Policy: strict-origin-when-cross-origin`, `Content-Security-Policy: default-src 'self'`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store`.
-8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), and `/api/v1/users/me/banner` (5 MiB envelope).
+8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), `/api/v1/users/me/banner` (5 MiB envelope), and `/admin/api/discord-imports/upload` (`upload.import_max_mb`, 500 MiB by default).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
 Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 237 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 245 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -83,6 +83,10 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/config`                                                  |
 | GET     | `/admin/api/config/settings`                                         |
 | PATCH   | `/admin/api/config/settings`                                         |
+| GET     | `/admin/api/discord-imports/latest`                                  |
+| POST    | `/admin/api/discord-imports/upload`                                  |
+| GET     | `/admin/api/discord-imports/{id}`                                    |
+| POST    | `/admin/api/discord-imports/{id}/cancel`                             |
 | DELETE  | `/admin/api/logs/level`                                              |
 | GET     | `/admin/api/logs/level`                                              |
 | PATCH   | `/admin/api/logs/level`                                              |
@@ -140,6 +144,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/blocks/{userId}`                                            |
 | PUT     | `/api/v1/blocks/{userId}`                                            |
 | GET     | `/api/v1/channels/`                                                  |
+| GET     | `/api/v1/channels/{id}/media`                                        |
+| GET     | `/api/v1/channels/{id}/media/months`                                 |
 | GET     | `/api/v1/channels/{id}/messages`                                     |
 | GET     | `/api/v1/channels/{id}/messages/around/{messageId}`                  |
 | POST    | `/api/v1/channels/{id}/messages/purge`                               |
@@ -171,6 +177,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/emoji/`                                                     |
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
+| GET     | `/api/v1/external/image`                                             |
+| GET     | `/api/v1/external/preview`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
 | POST    | `/api/v1/files/{id}/link`                                            |
 | GET     | `/api/v1/files/{id}/thumb`                                           |
@@ -347,7 +355,7 @@ body. Any other status, including a 2xx written after the deadline and a
 specific 5xx such as 502 or 507, is never rewritten. Exempt, with no deadline of their own beyond the transfer and
 archive progress deadlines: the WebSocket upgrade, the LiveKit proxy, file
 uploads and downloads, avatar, banner, emoji and group-icon uploads, client-update, the admin
-log stream, archive, backup, restore, update-apply and restart routes, plugin
+log stream, archive, backup, restore, update-apply and restart routes, the Discord import upload, plugin
 install, enable and disable, and account erasure.
 
 ---
@@ -1183,21 +1191,22 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field               | Type   | Description                                                                                                               |
-| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `id`                | int64  | Channel ID                                                                                                                |
-| `name`              | string | Channel name                                                                                                              |
-| `type`              | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
-| `topic`             | string | Channel topic/description                                                                                                 |
-| `category`          | string | Name of the channel's category, `""` when none                                                                            |
-| `category_id`       | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
-| `category_position` | int    | The category's position in the category order, `0` when none                                                              |
-| `position`          | int    | Sort order within category                                                                                                |
-| `slow_mode`         | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
-| `archived`          | bool   | Whether the channel is archived                                                                                           |
-| `nsfw`              | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
-| `voice_max_users`   | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
-| `voice_max_video`   | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| Field                | Type   | Description                                                                                                               |
+| -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | int64  | Channel ID                                                                                                                |
+| `name`               | string | Channel name                                                                                                              |
+| `type`               | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`              | string | Channel topic/description                                                                                                 |
+| `category`           | string | Name of the channel's category, `""` when none                                                                            |
+| `category_id`        | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
+| `category_position`  | int    | The category's position in the category order, `0` when none                                                              |
+| `position`           | int    | Sort order within category                                                                                                |
+| `slow_mode`          | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`           | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`               | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users`    | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video`    | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| `password_protected` | bool   | `true` for a voice channel that has a password (checked on `voice_join`). The password and its hash are never returned    |
 
 #### The `nsfw` flag
 
@@ -1285,6 +1294,11 @@ edit; an `@word` that matches no username, a `<@&id>` the author may not ping,
 or an `@everyone` from a user without the bit, carries no mention semantics and
 stays plain text. The same fields appear on pinned-message responses and on the
 WebSocket `chat_message`/`chat_edited` payloads.
+
+A message imported from a Discord export also carries
+`"imported_author": {"name", "color"}` (`color` omitted when the export had none)
+on history, pins, `around`, search results and `referenced_message`, and is
+omitted for an ordinary message. See [protocol.md](protocol.md).
 
 A DM can also hold a call log row: a message the server writes for a call in
 the DM's voice channel. It carries two more fields, both omitted for an ordinary
@@ -1497,6 +1511,43 @@ Get all pinned messages for a channel.
 #### Response 200 OK
 
 Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (messages pinned before migration 056 have no pin time and sort last). At most 1000 pins are returned; `has_more` is `true` only when the channel holds more and the list was truncated.
+
+---
+
+### GET /api/v1/channels/{id}/media
+
+One page of the files posted in a channel, for the channel's media gallery. Only attachments of live (not deleted) messages appear; media from users the caller blocked is left out. Rate-limited with the `media:` bucket (120 requests a minute, shared with `/media/months`).
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel (the same gate as the history, checked on every page)
+
+| Query    | Description                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `kind`   | `media` (default: `image/*` and `video/*`) or `files` (everything else, voice messages included)                         |
+| `q`      | Keeps file names containing this text (ASCII case-insensitive, matched literally), at most 100 characters                |
+| `from`   | Keeps files posted by this user id                                                                                       |
+| `order`  | `newest` (default) or `oldest`, by message                                                                               |
+| `month`  | `YYYY-MM` in `tz`: newest-first starts at the end of that month, oldest-first at its start. Ignored when `cursor` is set |
+| `tz`     | IANA time zone for `month`; empty means UTC                                                                              |
+| `cursor` | The previous page's `next_cursor`                                                                                        |
+| `limit`  | Page size, default 60, at most 100                                                                                       |
+
+#### Response 200 OK
+
+`{ "items": [ { "attachment": Attachment, "message_id": 123, "user": { "id", "username", "avatar" }, "timestamp": "2026-10-30 05:00:00" } ], "next_cursor": "123_<attachment id>" }`. `attachment` has the same shape as a message's attachments. `next_cursor` is `""` on the last page. The cursor holds the last item's message id and attachment id, so files posted while a viewer pages never repeat or shift a page; several files of one message keep a stable order. `400 BAD_REQUEST` for a malformed query, `403 FORBIDDEN` without read, `404 NOT_FOUND` for an unknown channel.
+
+---
+
+### GET /api/v1/channels/{id}/media/months
+
+How many items each calendar month holds, for the gallery's month scrubber. Takes `kind`, `q`, `from` and `tz` as above.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel
+
+#### Response 200 OK
+
+`{ "months": [ { "month": "2026-10", "count": 42 } ] }`, newest month first, months counted in `tz` (UTC when empty).
 
 ---
 
@@ -4228,6 +4279,7 @@ Authorization is two-layered:
 | `DELETE /admin/api/users/{id}`                                                                                                                       | `ERASE_ACCOUNTS` (`ADMINISTRATOR` passes); the actor must outrank the target (checked in the service) — B4-9, WP 8.4d                                                                                                                                                                                        |
 | `POST /admin/api/users/{id}/recovery-credential`                                                                                                     | Owner role **or** `ISSUE_RECOVERY` (`permissions.CanIssueRecovery`; `ADMINISTRATOR` does not pass); a holder who is not the owner can only issue to a member ranked strictly below them, never the owner — B4-6, WP 8.4d                                                                                     |
 | `GET/POST/PATCH/DELETE /admin/api/channels…` (incl. `/permissions`, `/user-permissions` and `/access/…`)                                             | `MANAGE_CHANNELS`                                                                                                                                                                                                                                                                                            |
+| `/admin/api/discord-imports…`                                                                                                                        | `MANAGE_CHANNELS`                                                                                                                                                                                                                                                                                            |
 | `GET/POST/PATCH/DELETE /admin/api/roles…` (incl. `/roles/reorder`)                                                                                   | `MANAGE_ROLES`                                                                                                                                                                                                                                                                                               |
 | `GET /admin/api/audit-log`                                                                                                                           | `VIEW_AUDIT_LOG`                                                                                                                                                                                                                                                                                             |
 | `GET/PATCH /admin/api/settings`, `PUT /admin/api/afk-channel`                                                                                        | `MANAGE_SERVER`                                                                                                                                                                                                                                                                                              |
@@ -5829,7 +5881,7 @@ The full role list after the reorder, position descending.
 
 `POST /admin/api/channels` takes `{name, type, category_id, category, topic, position}`;
 `PATCH /admin/api/channels/{id}` takes `{name, topic, category_id, category, slow_mode,
-position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
+position, archived, nsfw, voice_max_users, voice_max_video, password}` and seeds every
 omitted field from the current row, so a partial body is safe.
 
 The numeric fields are bounds-checked before anything is written, and an
@@ -5847,6 +5899,16 @@ refused body writes nothing at all:
 on every content path (see "NSFW Acknowledgement"). The
 audit detail names the transition: `updated #foo (marked NSFW)` /
 `(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
+
+`password` (string) on the `PATCH` sets, changes or removes a voice channel's
+password: absent leaves it alone, `""` removes it, anything else (1 to 64
+characters, no control characters) becomes the password and is stored only as a
+bcrypt hash. On a channel that is not a voice channel any value answers `400`.
+Every set, change or removal makes members enter the new password on their next
+join but removes nobody already inside, and the audit detail reads `updated #foo
+(password set)` / `(password changed)` / `(password removed)`, never the password.
+No response, list or broadcast carries the password or its hash; they show
+`password_protected` only.
 
 The voice limits are stored on a channel of any type but are only meaningful on
 a voice one; the desktop client offers them for voice channels alone and omits
@@ -6178,6 +6240,85 @@ Audited as `permission_preview`, target `channel`.
 | 400    | `BAD_REQUEST` | Bad `user_id`, missing or unknown `action`, or not exactly one of the ids |
 | 403    | `FORBIDDEN`   | Missing `MANAGE_CHANNELS`, or the member or role ranks at or above you    |
 | 404    | `NOT_FOUND`   | Unknown or DM channel, unknown role or user                               |
+
+### Discord import
+
+Import one Discord channel's history from a DiscordChatExporter JSON export
+(a `.json` file, or a `.zip` of it with its `_Files` folder) as a new text
+channel. All routes require `MANAGE_CHANNELS` and answer `503
+SERVICE_UNAVAILABLE` on a server with no upload storage. One import runs at a
+time, server-wide.
+
+The channel is built hidden and published in one step when the job ends, with
+every member's read state past the last message and a single `channel_create`
+event; no message events, pings or unread badges are sent. Mentions are stored
+as plain text. Reactions, embeds, stickers, polls, threads and system messages
+are skipped and counted. Attachments are copied only from the zip, under the
+normal file-type and size rules; remote links are never fetched. PNG and GIF
+attachments get their width and height recorded; other images are sized by the
+client when they load.
+
+#### POST /admin/api/discord-imports/upload?filename={name}&category_id={id}
+
+The request body is the export file itself (`application/octet-stream`),
+streamed to a temp file under `data/import-tmp`, never held in memory, and
+removed when the job ends. `filename` must end in `.json` or `.zip`.
+`category_id` is optional; `0` or absent means no category. The body is capped
+by `upload.import_max_mb` (default 500) and runs under the file-upload progress
+deadline with a total time sized for the cap at 2 Mbit/s (never under 10
+minutes). The category is checked and the free disk space (plus
+`server.min_free_disk_mb`) is confirmed before the body is read. Answers `202 Accepted`:
+
+```json
+{ "id": 12, "status": "running" }
+```
+
+| Status | Code                  | When                                                                                     |
+| ------ | --------------------- | ---------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`         | Wrong extension, bad `category_id`, unknown category, empty body, or not a usable export |
+| 409    | `CONFLICT`            | Another import is running (checked before the body is read)                              |
+| 413    | `PAYLOAD_TOO_LARGE`   | The file is over `upload.import_max_mb`                                                  |
+| 507    | `STORAGE_LOW_DISK`    | Not enough free disk space for the upload                                                |
+| 503    | `SERVICE_UNAVAILABLE` | No upload storage, or the server is shutting down                                        |
+
+Audited as `discord_import_start`, and `discord_import_publish` when the job
+finishes (target `channel`).
+
+#### GET /admin/api/discord-imports/latest
+
+The newest job (`null` when none ran) plus what the panel's form shows:
+`retention_days` is the server-wide message window (`0` keeps everything), and
+`max_upload_bytes` the largest file the upload takes. A panel that is reopened
+mid-import finds the running job here.
+
+#### GET /admin/api/discord-imports/{id}
+
+One job, for progress polling. `status` is `running`, `done`, `failed` or
+`cancelled`. `imported` rises after each chunk of about 500 messages; `total`
+is known only once the job finishes. `error` is set on `failed`. `404
+NOT_FOUND` for an unknown id.
+
+```json
+{
+  "id": 12,
+  "status": "done",
+  "source_name": "general.zip",
+  "imported": 4210,
+  "skipped": 36,
+  "skipped_attachments": 2,
+  "total": 4246,
+  "error": null,
+  "created_at": "2026-10-30T09:15:02Z",
+  "finished_at": "2026-10-30T09:15:41Z"
+}
+```
+
+#### POST /admin/api/discord-imports/{id}/cancel
+
+Asks a running job to stop. Answers `202` with `{"id": 12, "status":
+"cancelling"}`; the job then ends as `cancelled`, its channel and files are
+removed, and the status route reports it. `409 CONFLICT` when the job is not
+running, `404 NOT_FOUND` for an unknown id. Audited as `discord_import_cancel`.
 
 ---
 

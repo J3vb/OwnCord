@@ -14,7 +14,7 @@ import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
-import { clearRowHeights } from "@components/message-list/row-heights";
+import { clearRowHeights } from "@components/message-list/rowHeights";
 
 const CHANNEL_ID = 1;
 const ROW = 100;

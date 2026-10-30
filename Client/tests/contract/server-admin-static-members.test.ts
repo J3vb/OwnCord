@@ -94,7 +94,7 @@ afterEach(() => {
   dom = undefined;
 });
 
-describe("Server/admin/static — Members (AO-4)", () => {
+describe("Server/admin/static — Members", () => {
   it("searches, filters by role and lists bans on the server, keeping focus in the search box", async () => {
     const calls: string[] = [];
     const { doc, settle, show, key } = await boot(calls, (p) => {
@@ -477,7 +477,7 @@ describe("Server/admin/static — Members (AO-4)", () => {
   // WP 6.3g: a member can hold several roles. The row lists every one, and the
   // Manage dialog adds and removes them one at a time (PUT/DELETE
   // /users/{id}/roles/{roleId}) instead of replacing the whole set.
-  describe("role chips (WP 6.3g)", () => {
+  describe("role chips", () => {
     const ME = {
       id: 1,
       permissions: ADMINISTRATOR | MANAGE_ROLES,
@@ -593,7 +593,7 @@ describe("Server/admin/static — Members (AO-4)", () => {
   });
   // WP 6.4d: the nickname (users.display_name) in the list and the Manage
   // drawer, edited through PUT /api/v1/moderation/users/{id}/nickname.
-  describe("nickname (WP 6.4d)", () => {
+  describe("nickname", () => {
     const NICK_PATH = "/api/v1/moderation/users/4/nickname";
     const ME = { id: 1, permissions: MANAGE_NICKNAMES, role_position: 80, is_owner: false };
     const member = (extra: Record<string, unknown> = {}) => ({

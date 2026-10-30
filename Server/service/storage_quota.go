@@ -11,34 +11,32 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// The per-user upload byte counter and the reserved-headroom floor (B5-2,
-// plan decision 11, SEC-04). The rows in `attachments` are the truth; the
-// `user_storage` counter is the cached aggregate the upload path admits
-// against. Its safety under concurrency and restart rests on three rules:
+// The per-user upload byte counter and the reserved-headroom floor. The
+// `attachments` rows are the truth; the `user_storage` counter is the cached
+// aggregate uploads are admitted against. Its safety rests on three rules:
 //
-//  1. Charge BEFORE the store write. A crash anywhere after Reserve leaves
-//     the counter high, never low; the maintenance recount lowers it to the
-//     rows. Admission is one guarded UPDATE, so of N uploads racing the last
-//     byte exactly those that fit are admitted (SQLite serialises writers).
-//  2. The in-process half — bytes reserved but not yet written or rowed —
-//     lives under one mutex with the charge. A recount sets a counter to
-//     rows + in-flight, so it can never wipe a live reservation (that would
-//     be an under-count the moment the row lands); the only transient error
-//     is an over-count while a Commit is pending, gone at the next tick.
-//  3. The headroom check is addition only, in the probe's unsigned type:
-//     refuse when free < floor + in-flight + n. A subtraction would wrap
-//     exactly when the disk is full and admit everything.
+//  1. Charge BEFORE the store write. A crash after Reserve leaves the counter
+//     high, never low; the maintenance recount lowers it. Admission is one guarded
+//     UPDATE, so of N uploads racing the last byte exactly those that fit are
+//     admitted (SQLite serialises writers).
+//  2. The in-process half (bytes reserved but not yet written or rowed) lives
+//     under one mutex with the charge. A recount sets rows + in-flight, so it
+//     never wipes a live reservation (an under-count once the row lands); the only
+//     transient error is an over-count while a Commit is pending.
+//  3. The headroom check is addition only, in the probe's unsigned type: refuse
+//     when free < floor + in-flight + n. A subtraction would wrap exactly when the
+//     disk is full and admit everything.
 //
-// Emoji are a bounded exclusion from the quota, not from the floor: they
-// are server-wide assets that change owner on erasure, gated on
-// MANAGE_SERVER and capped at MaxEmojiCount files of api.maxEmojiFileBytes.
+// Emoji are excluded from the quota, not the floor: server-wide assets that change
+// owner on erasure, gated on MANAGE_SERVER, capped at MaxEmojiCount files of
+// api.maxEmojiFileBytes.
 
-// ErrQuotaExceeded is returned by Reserve when the upload would take the
-// user past upload.user_quota_mb. Handlers answer 507 STORAGE_QUOTA_EXCEEDED.
+// ErrQuotaExceeded is returned by Reserve when the upload would pass
+// upload.user_quota_mb; handlers answer 507 STORAGE_QUOTA_EXCEEDED.
 var ErrQuotaExceeded = errors.New("upload would exceed your storage quota")
 
-// ErrLowDisk is returned by Reserve when the upload would take the upload
-// volume under server.min_free_disk_mb. Handlers answer 507 STORAGE_LOW_DISK.
+// ErrLowDisk is returned by Reserve when the upload would take the volume under
+// server.min_free_disk_mb; handlers answer 507 STORAGE_LOW_DISK.
 var ErrLowDisk = errors.New("server storage is below its reserved headroom")
 
 // StorageLimits is what the upload path admits against.
@@ -47,38 +45,36 @@ type StorageLimits struct {
 	UserQuotaBytes int64
 	// MinFreeBytes is the reserved headroom on Dir's volume; 0 is no floor.
 	MinFreeBytes uint64
-	// Dir is the upload storage directory whose volume is probed.
+	// Dir is the upload directory whose volume is probed.
 	Dir string
-	// FreeBytes probes free space; nil means diskutil.FreeBytes. A probe
-	// error is "unknown", never "full" (the repository-wide rule).
+	// FreeBytes probes free space; nil means diskutil.FreeBytes. A probe error is
+	// "unknown", never "full".
 	FreeBytes func(dir string) (uint64, error)
-	// MaxUploadBytes is upload.max_size_mb in bytes — the per-file cap
-	// storage.Storage already enforces during Save. It bounds how much an
-	// unknown-length request can possibly cost, since no single file can
-	// land for more than this; 0 means unset (falls back to the request cap).
+	// MaxUploadBytes is upload.max_size_mb in bytes, the per-file cap
+	// storage.Storage enforces during Save. It bounds what an unknown-length request
+	// can cost; 0 means unset (falls back to the request cap).
 	MaxUploadBytes int64
-	// FileTypes is the config.yaml file-type policy; FileTypePolicy lets a
-	// list saved in the admin panel replace either of its lists.
+	// FileTypes is the config.yaml file-type policy; FileTypePolicy lets a list saved
+	// in the admin panel replace either of its lists.
 	FileTypes storage.FileTypePolicy
 }
 
-// storageQuota is the in-process half of the counter.
 type storageQuota struct {
 	mu     syncutil.Mutex
 	limits StorageLimits
-	// inflight is bytes charged per user whose store write or row insert has
-	// not completed; inflightTotal is the same sum plus headroom-only
-	// reservations, the floor's view of writes still landing.
+	// inflight is bytes charged per user whose store write or row insert is
+	// incomplete; inflightTotal adds headroom-only reservations: the floor's view of
+	// writes still landing.
 	inflight      map[int64]int64
 	inflightTotal uint64
-	// afterRecount is a test seam: called after each user's recount, so a
-	// test can cancel the sweep between users and prove the restart shape.
+	// afterRecount is a test seam called after each user's recount, to cancel the
+	// sweep between users.
 	afterRecount func(userID int64)
 }
 
-// StorageReservation is one admitted write's charge. Exactly one of Commit
-// or Release must follow it; Settle in a defer makes Release the default, so
-// a panic or an early return between Save and Commit cannot leak it.
+// StorageReservation is one admitted write's charge. Exactly one of Commit or
+// Release must follow; a deferred Settle makes Release the default so a panic or
+// early return between Save and Commit cannot leak it.
 type StorageReservation struct {
 	s      *UploadService
 	userID int64
@@ -86,42 +82,37 @@ type StorageReservation struct {
 	// ubytes is bytes as the floor counts it, fixed once n >= 0 is known.
 	ubytes  uint64
 	charged bool
-	// landed is set by Landed once the bytes are on disk: from then on the
-	// probe sees them, so the floor's in-flight sum must not.
+	// landed is set by Landed once the bytes are on disk: the probe then sees them, so
+	// the floor's in-flight sum must not.
 	landed    bool
 	committed bool
 	released  bool
 }
 
-// SetStorageLimits installs the limits; the composition root calls it before
-// the hub first reads the file-type policy.
+// SetStorageLimits installs the limits; the root calls it before the hub first
+// reads the file-type policy.
 func (s *UploadService) SetStorageLimits(l StorageLimits) {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
 	s.quota.limits = l
 }
 
-// MaxUploadBytes reports the configured per-file cap (0 means unset), so a
-// caller that must reserve before it knows a request's true size — an
-// unknown-length body — can bound the reservation by what a single file can
-// ever cost rather than the full request cap.
+// MaxUploadBytes reports the per-file cap (0 means unset), so a caller reserving
+// before it knows a request's size (unknown-length body) bounds the reservation by
+// one file's cost, not the request cap.
 func (s *UploadService) MaxUploadBytes() int64 {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
 	return s.quota.limits.MaxUploadBytes
 }
 
-// fitsLocked reports whether n more bytes leave the floor intact. The probe
-// runs under the lock on purpose: a reading taken before earlier uploads
-// landed, judged after they committed (and so left the in-flight sum),
-// under-counts what the volume holds and over-admits. A statfs is
-// microseconds, and the DB charge has to be inside anyway (see reserve). A
-// backup no longer queues that charge: it runs on the reader pool, not the
-// writer (SRV-02, which is what satisfies PERF-10). No floor or a failed
-// probe is "unknown", never "full", and fits.
-//
-// Addition only: free is unsigned and a subtraction wraps exactly when the
-// disk is full. An addition that itself wraps cannot fit either.
+// fitsLocked reports whether n more bytes leave the floor intact. The probe runs
+// under the lock on purpose: a reading taken before earlier uploads landed, judged
+// after they committed (leaving the in-flight sum), under-counts the volume and
+// over-admits. A statfs is microseconds and the DB charge has to be inside anyway
+// (see reserve). No floor or a failed probe is "unknown", never "full", and fits.
+// Addition only: free is unsigned and a subtraction wraps when the disk is full;
+// an addition that wraps cannot fit either.
 func (q *storageQuota) fitsLocked(n int64) bool {
 	if n < 0 {
 		return false
@@ -144,14 +135,14 @@ func (q *storageQuota) fitsLocked(n int64) bool {
 	return free >= need
 }
 
-// Reserve admits n bytes for userID against both bounds and charges the
-// user's counter, or refuses with ErrQuotaExceeded / ErrLowDisk.
+// Reserve admits n bytes for userID against both bounds and charges the counter,
+// or refuses with ErrQuotaExceeded / ErrLowDisk.
 func (s *UploadService) Reserve(ctx context.Context, userID, n int64) (*StorageReservation, error) {
 	return s.reserve(ctx, userID, n, true)
 }
 
-// ReserveHeadroom admits n bytes against the headroom floor only, for a
-// write that is a bounded exclusion from the per-user quota (emoji).
+// ReserveHeadroom admits n bytes against the headroom floor only, for a write
+// excluded from the per-user quota (emoji).
 func (s *UploadService) ReserveHeadroom(ctx context.Context, n int64) (*StorageReservation, error) {
 	return s.reserve(ctx, 0, n, false)
 }
@@ -180,10 +171,10 @@ func (s *UploadService) reserve(ctx context.Context, userID, n int64, charge boo
 	return &StorageReservation{s: s, userID: userID, bytes: n, ubytes: ubytes, charged: charge}, nil
 }
 
-// chargeLocked charges n against userID's quota. On a refusal it recounts
-// that one user from the rows — a sweep may have freed bytes since the last
-// tick — and tries once more, so a user who deleted files is not made to
-// wait for the tick to use the space. Paid only on the refusal path.
+// chargeLocked charges n against userID's quota. On refusal it recounts that one
+// user from the rows (a sweep may have freed bytes since the last tick) and tries
+// once more, so deleting files frees space without waiting for the tick. Paid only
+// on the refusal path.
 func (s *UploadService) chargeLocked(ctx context.Context, userID, n int64) error {
 	quota := s.quota.limits.UserQuotaBytes
 	ok, err := s.st.ChargeUserStorage(ctx, userID, n, quota)
@@ -206,10 +197,10 @@ func (s *UploadService) chargeLocked(ctx context.Context, userID, n int64) error
 	return nil
 }
 
-// recountLocked sets one user's counter to the rows plus the bytes still in
-// flight for them. Two statements, but under the lock nothing else moves this
-// user between them, and a crash between them leaves the rows' value — right
-// for a process whose in-flight writes died with it.
+// recountLocked sets one user's counter to the rows plus their in-flight bytes.
+// Two statements, but under the lock nothing else moves the user between them, and
+// a crash between leaves the rows' value, right for a process whose in-flight
+// writes died with it.
 func (s *UploadService) recountLocked(ctx context.Context, userID int64) error {
 	if err := s.st.RecountUserStorage(ctx, userID); err != nil {
 		return fmt.Errorf("%w: storage recount: %w", ErrInternal, err)
@@ -222,13 +213,11 @@ func (s *UploadService) recountLocked(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// Landed records that the store write succeeded: the bytes are on the volume
-// and the free-space probe counts them from now on, so the floor's in-flight
-// sum drops them here rather than at Commit. Without this the same bytes
-// count twice — probe plus in-flight — for as long as the row insert takes,
-// and a concurrent upload judged in that window is refused for space that is
-// not being used twice. The per-user quota share stays in flight until the
-// row exists (Commit) or the write is undone (Release).
+// Landed records that the store write succeeded: the bytes are on the volume and
+// the probe counts them, so the floor's in-flight sum drops them here, not at
+// Commit. Otherwise the same bytes count twice (probe plus in-flight) while the
+// row insert runs and a concurrent upload is refused for space not used twice. The
+// per-user quota share stays in flight until Commit or Release.
 func (r *StorageReservation) Landed() {
 	if r == nil || r.landed || r.committed || r.released {
 		return
@@ -240,12 +229,10 @@ func (r *StorageReservation) Landed() {
 	q.inflightTotal -= r.ubytes
 }
 
-// Resize lowers a reservation to the bytes actually written. It never
-// raises one: a larger value is ignored, because bytes above the admitted
-// envelope were never admitted against the quota or the floor. A no-op for
-// n < 0, n >= the reservation's current bytes, or a reservation already
-// committed or released — so a repeat call, or one made too late, is
-// always safe.
+// Resize lowers a reservation to the bytes actually written. It never raises one:
+// bytes above the admitted envelope were never admitted against quota or floor. A
+// no-op for n < 0, n >= current bytes, or a committed/released reservation, so a
+// repeat or late call is safe.
 func (r *StorageReservation) Resize(ctx context.Context, n int64) error {
 	if r == nil || n < 0 {
 		return nil
@@ -275,10 +262,10 @@ func (r *StorageReservation) Resize(ctx context.Context, n int64) error {
 	return nil
 }
 
-// Commit keeps the charge: the bytes are on disk and their row exists. A
-// charged reservation is committed by UploadService.Record, under the same
-// lock as its row insert, so a recount can never see the file both in the
-// rows and in flight; Commit itself is for headroom-only reservations.
+// Commit keeps the charge: the bytes are on disk and their row exists. A charged
+// reservation is committed by UploadService.Record under the same lock as its row
+// insert, so a recount never sees the file in both rows and in flight; Commit is
+// for headroom-only reservations.
 func (r *StorageReservation) Commit() {
 	if r == nil || r.committed || r.released {
 		return
@@ -297,9 +284,8 @@ func (r *StorageReservation) commitLocked() {
 	r.dropInflightLocked()
 }
 
-// Release returns the charge: the write or its row failed. Idempotent, and
-// safe on a cancelled ctx — a client that vanished mid-upload still gets its
-// bytes back.
+// Release returns the charge after a failed write or row. Idempotent, and safe on
+// a canceled ctx: a client that vanished mid-upload still gets its bytes back.
 func (r *StorageReservation) Release(ctx context.Context) {
 	if r == nil || r.committed || r.released {
 		return
@@ -313,13 +299,12 @@ func (r *StorageReservation) Release(ctx context.Context) {
 		return
 	}
 	if err := r.s.st.ReleaseUserStorage(context.WithoutCancel(ctx), r.userID, r.bytes); err != nil {
-		// The counter stays high, which is the safe side; the next recount
-		// lowers it to the rows.
+		// The counter stays high, the safe side; the next recount lowers it.
 		slog.Warn("storage: could not release a charge; the next recount will", "user_id", r.userID, "bytes", r.bytes, "error", err)
 	}
 }
 
-// Settle is Release unless Commit ran — the deferred safety net.
+// Settle is Release unless Commit ran: the deferred safety net.
 func (r *StorageReservation) Settle(ctx context.Context) {
 	if r != nil && !r.committed {
 		r.Release(ctx)
@@ -341,10 +326,9 @@ func (r *StorageReservation) dropInflightLocked() {
 	}
 }
 
-// RecountStorage sets every counter to the truth in its rows plus the bytes
-// still in flight for that user, one user per statement. It reports how many
-// users it finished; a cancelled ctx stops between users and leaves each
-// finished user exact and the rest untouched (still on the high side).
+// RecountStorage sets every counter to its rows plus in-flight bytes, one user per
+// statement, and reports how many it finished; a canceled ctx stops between users,
+// leaving finished users exact and the rest on the high side.
 func (s *UploadService) RecountStorage(ctx context.Context) (int, error) {
 	ids, err := s.st.ListUserStorageIDs(ctx)
 	if err != nil {

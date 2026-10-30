@@ -106,6 +106,9 @@ type Channel struct {
 	ForumDefaultAutoArchiveMinutes int64   `json:"forumDefaultAutoArchiveMinutes"`
 	ThreadPostMessageID            *int64  `json:"threadPostMessageId"`
 	PermissionsSynced              int64   `json:"permissionsSynced"`
+	PasswordHash                   *string `json:"passwordHash"`
+	PasswordVersion                int64   `json:"passwordVersion"`
+	ImportPending                  int64   `json:"importPending"`
 }
 
 type ChannelCategory struct {
@@ -121,6 +124,13 @@ type ChannelOverride struct {
 	RoleID    int64 `json:"roleId"`
 	Allow     int64 `json:"allow"`
 	Deny      int64 `json:"deny"`
+}
+
+type ChannelPasswordGrant struct {
+	ChannelID       int64  `json:"channelId"`
+	UserID          int64  `json:"userId"`
+	PasswordVersion int64  `json:"passwordVersion"`
+	GrantedAt       string `json:"grantedAt"`
 }
 
 type ChannelRetention struct {
@@ -195,6 +205,22 @@ type GifFavorite struct {
 	PreviewUrl string `json:"previewUrl"`
 	Title      string `json:"title"`
 	CreatedAt  string `json:"createdAt"`
+}
+
+type ImportJob struct {
+	ID                 int64   `json:"id"`
+	ChannelID          *int64  `json:"channelId"`
+	CreatedBy          *int64  `json:"createdBy"`
+	SourceName         string  `json:"sourceName"`
+	DiscordChannelID   string  `json:"discordChannelId"`
+	Status             string  `json:"status"`
+	Total              int64   `json:"total"`
+	Imported           int64   `json:"imported"`
+	Skipped            int64   `json:"skipped"`
+	SkippedAttachments int64   `json:"skippedAttachments"`
+	Error              *string `json:"error"`
+	CreatedAt          string  `json:"createdAt"`
+	FinishedAt         *string `json:"finishedAt"`
 }
 
 type Invite struct {
@@ -285,6 +311,13 @@ type MessageGroupEvent struct {
 	TargetUserID *int64  `json:"targetUserId"`
 	Name         *string `json:"name"`
 	IconRemoved  int64   `json:"iconRemoved"`
+}
+
+type MessageImportAuthor struct {
+	MessageID     int64   `json:"messageId"`
+	DiscordUserID string  `json:"discordUserId"`
+	Name          string  `json:"name"`
+	Color         *string `json:"color"`
 }
 
 type MessageMention struct {

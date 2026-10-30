@@ -1270,10 +1270,23 @@ describe("voice store", () => {
   // effect of a dynamically-imported `clearAuth()`).
   describe("module INITIAL_STATE (fresh import, untouched by any reset)", () => {
     it("defaults every flag to false — the describe blocks above only ever observe state after the outer beforeEach's resetStore() has already overwritten it, and that local helper doesn't even set localServerMuted/localServerDeafened/pttGated/encryptionDegraded (they'd read `undefined` there, not the real default)", async () => {
+      // A fresh module graph re-runs every load-time subscription. Under
+      // `vitest related` (how Stryker runs the suite) the logger mock below
+      // does not reach every importer, so the real logger adds its app-lifetime
+      // pref listener; release whatever the import added.
+      const added = vi.spyOn(window, "addEventListener");
       vi.resetModules();
       vi.doMock("../../src/lib/logger", () => appLogger);
-      const fresh = await import("../../src/stores/voice.store");
-      vi.doUnmock("../../src/lib/logger");
+      let fresh: typeof import("../../src/stores/voice.store");
+      try {
+        fresh = await import("../../src/stores/voice.store");
+      } finally {
+        vi.doUnmock("../../src/lib/logger");
+        for (const [type, listener, options] of added.mock.calls) {
+          window.removeEventListener(type, listener, options);
+        }
+        added.mockRestore();
+      }
       const state = fresh.voiceStore.getState();
       expect(state.localMuted).toBe(false);
       expect(state.localDeafened).toBe(false);

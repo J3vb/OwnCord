@@ -12,25 +12,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// RoleService owns create/edit/delete/reorder of roles. It is the only writer
-// of the roles table outside migrations.
-//
-// Every mutation is checked against the ACTOR's role position rather than
-// against a bit alone: MANAGE_ROLES says "may manage roles", the hierarchy says
-// "which ones". Without the position rule any holder of the bit could edit the
-// role above them — or grant themselves ADMINISTRATOR through a role they
-// create — which is the same privilege-escalation hole ChangeUserRole closed
-// for role *assignment*.
+// RoleService owns create/edit/delete/reorder of roles, the only writer of the
+// roles table outside migrations. Every mutation is checked against the ACTOR's
+// role position, not a bit alone: MANAGE_ROLES says "may manage roles", the
+// hierarchy says "which ones". Without it any holder could edit the role above
+// them or grant themselves ADMINISTRATOR through a role they create (the hole
+// ChangeUserRole closed for assignment).
 type RoleService struct {
 	st    Store
 	perms *PermissionService
-	// notifier receives each committed mutation's fan-out (WP 5.1a). Set once
-	// before the server serves; nil is a no-op. Always called outside mu.
+	// notifier receives each committed mutation's fan-out; nil is a no-op. Always
+	// called outside mu.
 	notifier PermissionChangeNotifier
-	// mu serializes the read-check-write mutations: position uniqueness and
-	// the role cap are enforced against a ListRoles snapshot, not by a DB
-	// constraint, so two interleaved mutations can both see the same free
-	// slot. Single-process server — one lock covers every writer.
+	// mu serializes the read-check-write mutations: position uniqueness and the role
+	// cap are enforced against a ListRoles snapshot, not a DB constraint, so
+	// interleaved mutations could both see the same free slot.
 	mu syncutil.Mutex
 }
 
@@ -40,24 +36,22 @@ func NewRoleService(st Store, perms *PermissionService) *RoleService {
 }
 
 const (
-	// maxRoleNameLen bounds the name so a role label cannot be used to blow up
-	// every member list and permission modal that renders it.
+	// maxRoleNameLen bounds the name so a label cannot blow up every member list and
+	// permission modal.
 	maxRoleNameLen = 32
-	// maxRoles bounds how many roles a server can hold. Reorder spreads
-	// positions proportionally through the range strictly below the actor, so N
-	// must stay under the owner position (100) for every role to get a distinct
-	// slot and for the hierarchy to remain expressible.
+	// maxRoles bounds how many roles a server holds. Reorder spreads positions
+	// through the range below the actor, so N must stay under the owner position
+	// (100) for every role to get a distinct slot.
 	maxRoles = 64
 )
 
-// hexColorRe matches the two CSS hex forms the client renders (#rgb, #rrggbb).
-// Anything else — named colors, rgb(), a bare hex without the hash — is
-// rejected rather than normalized: the value is written straight into a style
-// attribute by the desktop client and the admin panel.
+// hexColorRe matches the CSS hex forms the client renders (#rgb, #rrggbb).
+// Anything else is rejected, not normalized: the value is written straight into a
+// style attribute.
 var hexColorRe = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
 
-// RoleInput carries the mutable fields of a role. Pointer fields are "leave
-// unchanged" on update; on create a nil Position means "just below the actor".
+// RoleInput carries a role's mutable fields. Pointer fields mean "leave unchanged"
+// on update; on create a nil Position means "just below the actor".
 type RoleInput struct {
 	Name        *string
 	Color       *string // points at "" to clear the color
@@ -66,14 +60,13 @@ type RoleInput struct {
 	// Hoist and Mentionable are nil to leave unchanged (false on create).
 	Hoist       *bool
 	Mentionable *bool
-	// ExpectedPermissions is the mask the caller loaded before editing. Only
-	// UpdateRole reads it: when set and the stored mask differs, the edit is
-	// refused with ErrConflict and nothing is written. Nil skips the check.
+	// ExpectedPermissions is the mask the caller loaded before editing. UpdateRole
+	// refuses with ErrConflict and writes nothing if it differs; nil skips the check.
 	ExpectedPermissions *int64
 }
 
-// flagsOver returns the hoist and mentionable flags the input asks for, each
-// falling back to the given current value when the input leaves it unset.
+// flagsOver returns the requested hoist and mentionable flags, defaulting to the
+// given current values.
 func (in RoleInput) flagsOver(hoist, mentionable bool) (bool, bool) {
 	if in.Hoist != nil {
 		hoist = *in.Hoist
@@ -84,8 +77,8 @@ func (in RoleInput) flagsOver(hoist, mentionable bool) (bool, bool) {
 	return hoist, mentionable
 }
 
-// RoleWithMembers is a role plus how many users currently hold it. The count
-// is what makes the delete confirmation honest ("12 members move to Member").
+// RoleWithMembers is a role plus its holder count, which makes the delete
+// confirmation honest.
 type RoleWithMembers struct {
 	db.Role
 	MemberCount int `json:"member_count"`
@@ -93,7 +86,7 @@ type RoleWithMembers struct {
 
 // actorRole loads the actor's role through the permission cache and verifies
 // MANAGE_ROLES (ADMINISTRATOR bypasses). Every failure is Forbidden: an
-// unresolvable role must never authorize a role mutation.
+// unresolvable role must never authorize a mutation.
 func (s *RoleService) actorRole(ctx context.Context, actorID int64) (*db.Role, error) {
 	if s.perms == nil {
 		return nil, fmt.Errorf("%w: permission service unavailable", ErrForbidden)
@@ -105,13 +98,12 @@ func (s *RoleService) actorRole(ctx context.Context, actorID int64) (*db.Role, e
 	if !permissions.HasServerPerm(role.Perms, permissions.ManageRoles) {
 		return nil, fmt.Errorf("%w: missing %s permission", ErrForbidden, permissions.Name(permissions.ManageRoles))
 	}
-	// Top role identity (rank) with the OR of every held mask.
 	return role.Effective(), nil
 }
 
-// requireBelowActor enforces the hierarchy rule shared by edit, delete and
-// reorder: the target role must sit strictly below the actor's own position.
-// Equality is refused too, so a peer cannot rewrite the role they both hold.
+// requireBelowActor enforces the edit/delete/reorder hierarchy rule: the target
+// must sit strictly below the actor, equality included, so a peer cannot rewrite
+// a role they both hold.
 func requireBelowActor(actor *db.Role, target *db.Role) error {
 	if target.Position >= actor.Position {
 		return fmt.Errorf("%w: cannot manage a role at or above your own rank", ErrForbidden)
@@ -120,10 +112,9 @@ func requireBelowActor(actor *db.Role, target *db.Role) error {
 }
 
 // requireGrantable enforces "you cannot hand out what you do not hold": every
-// bit being ADDED must be present in the actor's own mask. Removing a bit the
-// actor lacks is allowed — that is a de-escalation, and refusing it would make
-// an over-permissioned role impossible to wind down by anyone but an admin.
-// ADMINISTRATOR bypasses, which is what lets the owner grant anything.
+// bit ADDED must be in the actor's mask. Removing a bit the actor lacks is
+// allowed (de-escalation; refusing it would leave an over-permissioned role
+// unwindable except by an admin). ADMINISTRATOR bypasses.
 func requireGrantable(actor *db.Role, oldPerms, newPerms int64) error {
 	if err := requireOwnerGrantOnly(actor, (oldPerms^newPerms)&permissions.OwnerGrantOnly); err != nil {
 		return err
@@ -139,8 +130,8 @@ func requireGrantable(actor *db.Role, oldPerms, newPerms int64) error {
 	return nil
 }
 
-// validateName trims, bounds and uniqueness-checks a role name. excludeID is
-// the role being renamed (0 on create) so a no-op rename is not a collision.
+// validateName trims, bounds and uniqueness-checks a role name; excludeID is the
+// role being renamed (0 on create) so a no-op rename is not a collision.
 func (s *RoleService) validateName(ctx context.Context, raw string, excludeID int64) (string, error) {
 	name := strings.TrimSpace(raw)
 	if name == "" {
@@ -159,8 +150,7 @@ func (s *RoleService) validateName(ctx context.Context, raw string, excludeID in
 	return name, nil
 }
 
-// validateColor normalizes an optional color. A nil pointer means "unset"; an
-// empty string clears it.
+// validateColor normalizes an optional color: nil means unset, "" clears it.
 func validateColor(raw *string) (*string, error) {
 	if raw == nil {
 		return nil, nil
@@ -176,8 +166,7 @@ func validateColor(raw *string) (*string, error) {
 	return &c, nil
 }
 
-// validatePosition bounds a requested position: non-negative and strictly below
-// the actor's own rank.
+// validatePosition bounds a position: non-negative and strictly below the actor.
 func validatePosition(actor *db.Role, pos int) error {
 	if pos < 0 {
 		return fmt.Errorf("%w: position must not be negative", ErrBadRequest)
@@ -188,8 +177,8 @@ func validatePosition(actor *db.Role, pos int) error {
 	return nil
 }
 
-// ListRoles returns every role, highest position first, with member counts.
-// Gated on MANAGE_ROLES like the mutations — the panel section that shows it is.
+// ListRoles returns every role, highest position first, with member counts,
+// gated on MANAGE_ROLES like the mutations.
 func (s *RoleService) ListRoles(ctx context.Context, actorID int64) ([]RoleWithMembers, error) {
 	if _, err := s.actorRole(ctx, actorID); err != nil {
 		return nil, err
@@ -209,7 +198,7 @@ func (s *RoleService) ListRoles(ctx context.Context, actorID int64) ([]RoleWithM
 	return out, nil
 }
 
-// createRoleLocked creates a role strictly below the actor's own rank.
+// createRoleLocked creates a role strictly below the actor's rank.
 func (s *RoleService) createRoleLocked(ctx context.Context, actorID int64, in RoleInput) (*db.Role, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -229,14 +218,13 @@ func (s *RoleService) createRoleLocked(ctx context.Context, actorID int64, in Ro
 		return nil, err
 	}
 
-	// Unknown bits are dropped rather than rejected, matching the channel
-	// override handlers — a client sending a wider mask than this build knows
-	// about must not be able to persist bits nothing enforces.
+	// Unknown bits are dropped, not rejected (as the channel override handlers do): a
+	// wider mask than this build knows must not persist bits nothing enforces.
 	perms := int64(0)
 	if in.Permissions != nil {
 		perms = *in.Permissions & permissions.AllPerms
 	}
-	// Every bit is "added" on create, so the grantable check runs against 0.
+	// Every bit is "added" on create, so check against 0.
 	if err := requireGrantable(actor, 0, perms); err != nil {
 		return nil, err
 	}
@@ -249,23 +237,20 @@ func (s *RoleService) createRoleLocked(ctx context.Context, actorID int64, in Ro
 		return nil, fmt.Errorf("%w: server already has the maximum of %d roles", ErrBadRequest, maxRoles)
 	}
 
-	// Positions must stay unique: every hierarchy comparison uses >=/<=, so two
-	// roles sharing a position read as equal rank and can never manage each
-	// other's members. Track the slots already taken.
+	// Positions must stay unique: hierarchy comparisons use >=/<=, so roles sharing a
+	// position read as equal rank and can never manage each other's members.
 	taken := make(map[int]bool, len(existing))
 	for _, rl := range existing {
 		taken[rl.Position] = true
 	}
 
-	// Default placement is the highest free slot below the actor — directly
-	// below when that is free, which is what a manager creating a deputy role
-	// expects, but stepping past any occupied position so a second create does
-	// not collide with the first.
+	// Default placement is the highest free slot below the actor: directly below when
+	// free, else stepping past occupied positions so a second create does not collide.
 	position := actor.Position - 1
 	if in.Position != nil {
 		position = *in.Position
-		// Rank first: an at/above-rank position is a hierarchy violation
-		// (ErrForbidden) regardless of whether it also happens to be occupied.
+		// Rank first: an at/above-rank position is a hierarchy violation (ErrForbidden)
+		// even if also occupied.
 		if err := validatePosition(actor, position); err != nil {
 			return nil, err
 		}
@@ -296,29 +281,25 @@ func (s *RoleService) createRoleLocked(ctx context.Context, actorID int64, in Ro
 	return role, nil
 }
 
-// RoleUpdateResult reports what an update actually changed. Both answers come
-// from the pre-update row this service already reads, so a caller never has to
-// re-read it to find out.
+// RoleUpdateResult reports what an update changed, from the pre-update row
+// already read, so callers need no re-read.
 type RoleUpdateResult struct {
-	// PermsChanged is set when the mask actually moved: cached masks and every
-	// channel's audience for this role have to be re-derived, rather than the
-	// cheap roles_update broadcast an unchanged mask needs.
+	// PermsChanged is set when the mask moved: cached masks and every channel's
+	// audience for the role must be re-derived instead of the cheap roles_update
+	// broadcast.
 	PermsChanged bool
-	// Renamed is set when the name actually changed. Clients key a member's
-	// role by NAME (member_update and ready carry a role name string), so
-	// every member of a renamed role holds a name that no longer resolves
-	// against the post-rename list — they lose their role color, member-list
-	// group and permission-gated affordances until they reconnect, unless the
-	// caller re-keys them with one member_update each.
+	// Renamed is set when the name changed. Clients key a member's role by NAME
+	// (member_update, ready), so members of a renamed role lose their color,
+	// member-list group and gated affordances until reconnect unless the caller sends
+	// each a member_update.
 	Renamed bool
-	// ResyncedMembers lists the members holding the role next to another one
-	// whose top role was re-derived because the position moved (WP 6.3c): their
-	// displayed role and role order may have changed.
+	// ResyncedMembers lists members holding the role next to another whose top role
+	// was re-derived because the position moved.
 	ResyncedMembers []int64
 }
 
-// checkExpectedPermissions refuses an edit made from a stale copy: nil skips
-// the check, anything else must equal the stored mask.
+// checkExpectedPermissions refuses an edit from a stale copy: nil skips, else it
+// must equal the stored mask.
 func checkExpectedPermissions(expected *int64, role *db.Role) error {
 	if expected != nil && *expected != role.Permissions {
 		return fmt.Errorf("%w: role permissions changed since it was loaded", ErrConflict)
@@ -326,8 +307,8 @@ func checkExpectedPermissions(expected *int64, role *db.Role) error {
 	return nil
 }
 
-// updateRoleLocked applies a partial change to a role below the actor's rank.
-// Returns the updated role and what the change actually moved.
+// updateRoleLocked applies a partial change to a role below the actor's rank and
+// returns what it moved.
 func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int64, in RoleInput) (updated *db.Role, res RoleUpdateResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -345,8 +326,8 @@ func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int6
 	if err := requireBelowActor(actor, role); err != nil {
 		return nil, RoleUpdateResult{}, err
 	}
-	// Compared under s.mu against the row just read, so two editors holding
-	// the same copy cannot both win: the second sees the first's mask.
+	// Compared under s.mu against the row just read, so two editors with the same
+	// copy cannot both win.
 	if err := checkExpectedPermissions(in.ExpectedPermissions, role); err != nil {
 		return nil, RoleUpdateResult{}, err
 	}
@@ -376,9 +357,8 @@ func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int6
 		if err := validatePosition(actor, position); err != nil {
 			return nil, RoleUpdateResult{}, err
 		}
-		// Positions must stay unique (see CreateRole): tied positions read
-		// as equal rank in every >=/<= hierarchy comparison. Moving onto a
-		// slot another role holds is refused; re-stating our own is fine.
+		// Positions stay unique (see CreateRole). Moving onto another role's slot is
+		// refused; re-stating our own is fine.
 		if position != role.Position {
 			existing, err := s.st.ListRoles(ctx)
 			if err != nil {
@@ -421,11 +401,9 @@ func (s *RoleService) updateRoleLocked(ctx context.Context, actorID, roleID int6
 	return updated, res, nil
 }
 
-// AllRoles is the unscoped role list — every role, highest position first, with
-// no actor filtering and no member counts. It backs the roles_update broadcast
-// every role mutation ends with, which ships the same list to every client.
-// ListRoles is the admin panel's actor-scoped view and is not interchangeable
-// with it.
+// AllRoles is the unscoped role list (highest position first, no actor filter or
+// member counts) behind the roles_update broadcast every mutation ends with.
+// ListRoles is the actor-scoped admin view and not interchangeable.
 func (s *RoleService) AllRoles(ctx context.Context) ([]*db.Role, error) {
 	roles, err := s.st.ListRoles(ctx)
 	if err != nil {
@@ -434,9 +412,9 @@ func (s *RoleService) AllRoles(ctx context.Context) ([]*db.Role, error) {
 	return roles, nil
 }
 
-// deleteRoleLocked removes a role below the actor's rank, moving its members onto the
-// default role. Returns the deleted role, the fallback its members landed on,
-// and the ids of those members so the caller can invalidate and re-sync them.
+// deleteRoleLocked removes a role below the actor's rank, moving its members to
+// the default role. Returns the deleted role, the fallback and the moved member
+// ids for the caller to invalidate and re-sync.
 func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int64) (deleted, fallback *db.Role, movedUserIDs []int64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -454,10 +432,9 @@ func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int6
 	if err := requireBelowActor(actor, role); err != nil {
 		return nil, nil, nil, err
 	}
-	// Belt and braces: the position rule already puts the owner role out of
-	// reach (nothing is above position 100), but the seeded owner is named
-	// explicitly so a database whose positions were edited by hand cannot make
-	// the server ownerless.
+	// Belt and braces: the position rule already puts the owner out of reach, but
+	// naming the seeded owner keeps hand-edited positions from making the server
+	// ownerless.
 	if permissions.IsOwner(role.ID, role.Position) {
 		return nil, nil, nil, fmt.Errorf("%w: the Owner role cannot be deleted", ErrBadRequest)
 	}
@@ -470,8 +447,8 @@ func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int6
 		return nil, nil, nil, fmt.Errorf("%w: failed to resolve the default role: %w", ErrInternal, err)
 	}
 	if fallback == nil {
-		// Fail closed: without a fallback the members would be orphaned on a
-		// role id that no longer exists.
+		// Fail closed: without a fallback the members would be orphaned on a role id
+		// that no longer exists.
 		return nil, nil, nil, fmt.Errorf("%w: no default role is configured", ErrInternal)
 	}
 	if err := requireOwnerGrantOnlyAssign(actor, role.Permissions|fallback.Permissions); err != nil {
@@ -497,14 +474,9 @@ func (s *RoleService) deleteRoleLocked(ctx context.Context, actorID, roleID int6
 }
 
 // reorderRolesLocked rewrites the positions of every role the actor may manage.
-// orderedIDs is highest-rank-first and must name exactly the set of roles
-// strictly below the actor — a partial list is refused rather than silently
-// leaving the omitted roles wherever they were, which is how positions
-// collided in the first place.
-//
-// Positions are normalized to N..1, so they stay unique, stay strictly below
-// the actor (N < actor.Position, enforced by maxRoles), and never collide with
-// the untouched roles above the actor.
+// orderedIDs is highest-rank-first and must name exactly the roles strictly below
+// the actor: a partial list is refused rather than leaving omitted roles in place,
+// which is how positions collided before.
 func (s *RoleService) reorderRolesLocked(ctx context.Context, actorID int64, orderedIDs []int64) (updated []*db.Role, resynced []int64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -533,8 +505,8 @@ func (s *RoleService) reorderRolesLocked(ctx context.Context, actorID int64, ord
 		}
 		seen[id] = true
 		if _, ok := manageable[id]; !ok {
-			// Covers both "unknown role" and "role at or above your rank"; the
-			// two are deliberately indistinguishable to the caller.
+			// Covers "unknown role" and "role at or above your rank"; deliberately
+			// indistinguishable.
 			return nil, nil, fmt.Errorf("%w: role %d is not yours to reorder", ErrForbidden, id)
 		}
 	}
@@ -542,28 +514,17 @@ func (s *RoleService) reorderRolesLocked(ctx context.Context, actorID int64, ord
 		return nil, nil, fmt.Errorf("%w: too many roles to place below your own rank", ErrBadRequest)
 	}
 
-	// Spread the roles evenly through the whole range below the actor rather
-	// than compacting them into a gapless block. CreateRole's default placement
-	// takes the highest free slot below the actor, and an N…1 block leaves
-	// none: one reorder used to wedge role creation permanently for every
-	// manager below the owner, and the refusal it produced told the admin to
-	// "reorder existing roles first", which re-compacted to the same block
-	// (OC-0374).
-	//
-	// Each role takes its proportional share of the range — the k-th from the
-	// bottom lands at k/(N+1) of the actor's position — rather than a fixed
-	// stride below the actor. A fixed stride is the same thing while the range
-	// is wide, but its integer division collapses to 1 once N approaches the
-	// actor's position: with 50 roles under the owner it re-compacted to 50…1
-	// and stranded every free slot from 51 up, leaving the defect in place for
-	// exactly the servers with the most roles to manage. Proportional spacing
-	// uses the whole range instead (50 roles land on 98, 96, … 2), and for the
-	// counts a normal server has it is identical: four roles under the owner
-	// still reproduce their shipped 80/60/40/20.
-	//
-	// len(orderedIDs) < actor.Position is already established above, so
-	// actor.Position/(N+1) >= 1: the positions are strictly decreasing,
-	// distinct, at least 1, and all strictly below the actor's own.
+	// Spread the roles through the whole range below the actor instead of a gapless
+	// block. CreateRole's default placement takes the highest free slot below the
+	// actor and an N..1 block leaves none, wedging role creation (the "reorder
+	// existing roles first" refusal re-compacted to the same block). Each role takes
+	// its proportional share, the k-th from the bottom at k/(N+1) of the actor's
+	// position: a fixed stride's integer division collapses to 1 as N nears the
+	// actor's position (50 roles re-compacted to 50..1), while proportional spacing
+	// uses the whole range (50 roles land on 98, 96, ... 2) and reproduces the
+	// shipped 80/60/40/20 for four roles. len(orderedIDs) < actor.Position holds
+	// above, so actor.Position/(N+1) >= 1: positions are strictly decreasing,
+	// distinct, at least 1 and below the actor.
 	positions := make(map[int64]int, len(orderedIDs))
 	for i, id := range orderedIDs {
 		positions[id] = actor.Position * (len(orderedIDs) - i) / (len(orderedIDs) + 1)
@@ -584,11 +545,10 @@ func (s *RoleService) reorderRolesLocked(ctx context.Context, actorID int64, ord
 	return updated, resynced, nil
 }
 
-// AffectedUserIDs returns the ids of the users holding roleID, and whether the
-// lookup succeeded. Handlers use it to invalidate exactly the permission-cache
-// entries a role edit touches; on ok=false the caller must fall back to a
-// blanket invalidation — a nil list treated as "nobody" silently leaves stale
-// masks in place.
+// AffectedUserIDs returns the users holding roleID and whether the lookup
+// succeeded. Handlers use it to invalidate exactly the cache entries a role edit
+// touches; on ok=false they must invalidate everything, since a nil list read as
+// "nobody" leaves stale masks.
 func (s *RoleService) AffectedUserIDs(ctx context.Context, roleID int64) ([]int64, bool) {
 	ids, err := s.st.ListUserIDsByRole(ctx, roleID)
 	if err != nil {

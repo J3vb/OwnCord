@@ -7,9 +7,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// tokenStore is the DB surface bearer-token resolution needs. *db.DB satisfies
-// it directly; tests use a fake. Kept as a tiny interface (like db.Auditor) so
-// the security-critical resolution logic is unit-testable without a real DB.
+// tokenStore is the DB surface bearer-token resolution needs; *db.DB satisfies
+// it and tests use a fake.
 type tokenStore interface {
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
 	GetActiveAPIToken(ctx context.Context, tokenHash string) (*db.APIToken, error)
@@ -17,8 +16,8 @@ type tokenStore interface {
 	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 }
 
-// Sentinel outcomes, so each caller can reproduce its existing 401/403 responses
-// exactly. A DB outage is NOT one of these — it surfaces as a wrapped error.
+// Sentinel outcomes let each caller reproduce its 401/403 responses. A DB
+// outage is not one of these: it surfaces as a wrapped error.
 var (
 	ErrTokenNotFound = errors.New("auth: no matching session or api token")
 	ErrTokenExpired  = errors.New("auth: session expired")
@@ -28,15 +27,12 @@ var (
 
 // ResolveTokenHash resolves a hashed bearer token to its principal (user + role).
 //
-// It matches a login session FIRST — so every existing session code path is
-// preserved byte-for-byte — and only falls through to an API token when no
-// session row matches. The returned *db.Session is nil for an API-token
-// principal (downstream consumers already guard a nil session).
-//
-// A DB error is returned WRAPPED (never a sentinel) so callers can distinguish
-// an outage from a bad token and never fall through to API-token lookup on an
-// outage. On ErrTokenExpired the matched (expired) session is returned so the
-// caller can schedule its cleanup by hash, exactly as the api middleware does today.
+// A login session is matched first; an API token is tried only when no session
+// row matches. The returned *db.Session is nil for an API-token principal. A DB
+// error is returned wrapped (never a sentinel) so callers can tell an outage
+// from a bad token, and an outage never falls through to API-token lookup. On
+// ErrTokenExpired the expired session is returned so the caller can schedule
+// its cleanup by hash.
 func ResolveTokenHash(ctx context.Context, store tokenStore, hash string) (*db.User, *db.Role, *db.Session, error) {
 	sess, err := store.GetSessionByTokenHash(ctx, hash)
 	if err != nil {
@@ -65,15 +61,16 @@ func ResolveTokenHash(ctx context.Context, store tokenStore, hash string) (*db.U
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if user == nil {
+	if user == nil || user.IsSystemAccount() {
+		// The hidden import account owns no session or token; a row that
+		// somehow names it resolves to no principal.
 		return nil, nil, nil, ErrUserNotFound
 	}
 
-	// A member holding no role returns (nil, nil): the nil check is
-	// load-bearing so a nil role never reaches the context and every downstream
-	// permission check. The role handed back carries the TOP role's identity
-	// (rank, ownership) with the OR of every held role's permissions, which is
-	// what the server-level checks read.
+	// A member holding no role returns (nil, nil); the nil check keeps a nil
+	// role out of the context and every downstream permission check. The role
+	// carries the top role's identity (rank, ownership) with the OR of every
+	// held role's permissions, which the server-level checks read.
 	held, err := store.GetMemberRoles(ctx, user.ID)
 	if err != nil {
 		return nil, nil, nil, err

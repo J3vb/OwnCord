@@ -1,5 +1,5 @@
 // The native socket transport: the host's socket proxy behind the
-// `SocketConnection` contract. Lifted verbatim from `lib/ws.ts` (B7-4) — the
+// `SocketConnection` contract. Lifted verbatim from `lib/ws.ts` — the
 // four proxy commands and the four event registrations, unchanged — so the
 // app-side socket layer in `lib/ws.ts` keeps its state machine, its reconnect
 // policy, its frame parsing and its send-failure codes above this seam.
@@ -128,7 +128,7 @@ function createSocketConnection(): SocketConnection {
   // received during the connect page's health checks, before any WS connect.
   //
   // A "trusted" log line is skipped while the host's last logged status is
-  // already "trusted" (CLI-04(a)): every tunneled REST request re-runs the TOFU
+  // already "trusted": every tunneled REST request re-runs the TOFU
   // check, so a "trusted" event arrives on each one and would otherwise fill the
   // log and any support bundle. "first_use" and "mismatch" always log. Routing
   // below is untouched — the listeners still see every event.
@@ -152,7 +152,7 @@ function createSocketConnection(): SocketConnection {
   // attempt turns out to be stale) is the caller's job — see connect(). This
   // keeps a still-in-flight attempt's registrations from ever being visible to
   // (and therefore clearable by) another attempt that resumes around the same
-  // time; see OC-0219.
+  // time.
   async function setupEventListeners(): Promise<Array<() => void>> {
     if (tauriListen === null) return [];
 
@@ -226,7 +226,7 @@ function createSocketConnection(): SocketConnection {
     // attempt is still current. That ownership split is what stops a stale
     // attempt's cleanup from ever reaching a newer attempt's listeners, even
     // if the newer attempt finished registering its own listeners while this
-    // one was still suspended above (OC-0219).
+    // one was still suspended above.
     cleanupEventListeners();
     const ownUnsubs = await setupEventListeners();
     if (gen !== generation) {

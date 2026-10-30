@@ -8,7 +8,7 @@ import (
 )
 
 // WelcomeRow is the welcome row InsertWelcomeRow wrote: a kind-8 message whose
-// author is the member who just joined (WP 8.6).
+// author is the member who just joined.
 type WelcomeRow struct {
 	MessageID int64
 	ChannelID int64

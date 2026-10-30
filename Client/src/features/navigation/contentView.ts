@@ -1,5 +1,5 @@
 /**
- * The content navigator (B9-4): opens a destination's view in place of the
+ * The content navigator: opens a destination's view in place of the
  * chat column and owns everything about its lifetime.
  *
  * - One view at a time. Opening another, choosing a channel or DM, losing the
@@ -8,14 +8,14 @@
  * - While a view is open no channel is active: nothing is on screen, so
  *   unread counts and notifications keep counting, and MainPage's
  *   active-channel subscriber tears the chat surface down.
- * - Close and Escape take the Q2 back path: the channel the user came from.
+ * - Close and Escape take the back path: the channel the user came from.
  *   Focus returns to the entry that opened the view, or to a fallback when
  *   that entry is gone.
  *
  * The view state lives in `uiStore.activeView`; this is its only writer.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";

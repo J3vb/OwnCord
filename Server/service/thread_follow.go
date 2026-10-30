@@ -10,10 +10,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// Thread follows (WP 6.9c, migration 079). A follow is a notification and
-// sidebar preference kept on the server, never permission: no gate here reads
-// it, and every read that hands a follow to a user is joined with what the
-// parent lets them see.
+// Thread follows (migration 079): a follow is a notification and sidebar
+// preference kept on the server, never permission. No gate reads it, and every
+// read that hands a follow to a user is joined with what the parent lets them see.
 
 // threadFollowWriteTimeout bounds a follow write, which runs detached from the
 // frame's context once the gate has passed.
@@ -43,10 +42,10 @@ func (s *ThreadService) followStore() (ThreadFollowStore, error) {
 	return fs, nil
 }
 
-// SetFollow follows (follow true) or unfollows a thread for userID and returns
-// the thread. Both are idempotent. The thread must be visible to the caller,
-// the gate thread_focus uses; a locked or archived thread can still be
-// (un)followed. A thread the caller cannot see is not found.
+// SetFollow follows or unfollows a thread for userID and returns the thread; both
+// are idempotent. The thread must be visible to the caller (thread_focus's gate);
+// a locked or archived thread can still be (un)followed. An invisible thread is
+// not found.
 func (s *ThreadService) SetFollow(ctx context.Context, userID, threadID int64, follow bool) (*db.ThreadInfo, error) {
 	fs, err := s.followStore()
 	if err != nil {
@@ -69,8 +68,8 @@ func (s *ThreadService) SetFollow(ctx context.Context, userID, threadID int64, f
 	if permissions.CanViewChannel(sub) != nil {
 		return nil, fmt.Errorf("%w: thread not found", ErrNotFound)
 	}
-	// The reply names the thread, which discloses its starter message, so an
-	// unacknowledged member of an NSFW parent cannot follow it yet.
+	// The reply names the thread, disclosing its starter message, so an unacknowledged
+	// member of an NSFW parent cannot follow it yet.
 	if err := readContentDenial(permissions.CanReadContent(readSubject(ctx, s.st, s.perms, userID, ch))); err != nil {
 		return nil, err
 	}
@@ -112,11 +111,10 @@ func (s *ThreadService) Followers(ctx context.Context, threadID int64) ([]int64,
 	return ids, nil
 }
 
-// Followed returns userID's followed open threads, newest activity first, for
-// the ready payload. readableParents is the set of channels the socket can
-// read; a thread whose parent is outside it is left out (membership is not
-// permission, and the row stays so regaining access brings it back). At most
-// MaxFollowedThreads are returned.
+// Followed returns userID's followed open threads, newest activity first, for the
+// ready payload, at most MaxFollowedThreads. readableParents is the set of channels
+// the socket can read; a thread whose parent is outside it is left out (membership
+// is not permission, and the row stays so regaining access brings it back).
 func (s *ThreadService) Followed(ctx context.Context, userID int64, readableParents map[int64]struct{}) ([]db.FollowedThread, error) {
 	fs, err := s.followStore()
 	if err != nil {

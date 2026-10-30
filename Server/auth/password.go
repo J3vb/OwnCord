@@ -2,7 +2,10 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -17,10 +20,9 @@ const (
 var bcryptCost = 12
 
 // SetCostForTesting lowers the bcrypt cost for the current process and resets
-// the dummy timing pad so it is regenerated at the new cost. Intended to be
-// called from TestMain with bcrypt.MinCost: password hashing dominates the
-// api/admin test suites (~264 cost-12 hashes ≈ minutes of pure bcrypt), and
-// nothing about the tests depends on the hash strength.
+// the dummy timing pad so it is regenerated at the new cost. Call it from
+// TestMain with bcrypt.MinCost: password hashing dominates the api/admin test
+// suites (~264 cost-12 hashes) and no test depends on hash strength.
 func SetCostForTesting(cost int) {
 	bcryptCost = cost
 	dummyHashOnce = sync.Once{}
@@ -42,10 +44,9 @@ func HashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// dummyHash is a lazily-computed bcrypt hash used to prevent timing
-// side-channels when the user does not exist. Comparing against this dummy
-// ensures that CheckPassword takes roughly constant time regardless of
-// whether a valid hash was supplied.
+// dummyHash is a lazily computed bcrypt hash used to prevent timing
+// side-channels when the user does not exist, so CheckPassword takes roughly
+// constant time whether or not a valid hash was supplied.
 var (
 	dummyHash     []byte
 	dummyHashOnce sync.Once
@@ -72,11 +73,9 @@ func getDummyHash() []byte {
 // username enumeration.
 func CheckPassword(hash, password string) bool {
 	if hash == "" {
-		// Perform a dummy comparison so the response time is indistinguishable
-		// from a real check, preventing timing-based username enumeration.
-		// The error is intentionally discarded: we always return false here.
-		// The comparison is performed only to consume time and prevent
-		// timing-based username enumeration.
+		// A dummy comparison makes the response time indistinguishable from a
+		// real check, preventing timing-based username enumeration; the error
+		// is discarded because this branch always returns false.
 		_ = bcrypt.CompareHashAndPassword(getDummyHash(), []byte(password))
 		return false
 	}
@@ -92,6 +91,35 @@ func ValidatePasswordStrength(password string) error {
 	}
 	if len(password) > maxPassLen {
 		return ErrPasswordTooLong
+	}
+	return nil
+}
+
+// MaxChannelPasswordLen bounds a voice channel password, in characters.
+const MaxChannelPasswordLen = 64
+
+// ErrChannelPasswordInvalid is wrapped by ValidateChannelPassword; its text is
+// safe to show the admin who typed the password.
+var ErrChannelPasswordInvalid = errors.New("invalid channel password")
+
+// ValidateChannelPassword checks a voice channel password: 1 to
+// MaxChannelPasswordLen characters, no control characters, and short enough
+// for bcrypt (72 bytes). Unlike an account password it has no minimum
+// strength, since it is a shared room key.
+func ValidateChannelPassword(password string) error {
+	n := utf8.RuneCountInString(password)
+	switch {
+	case n < 1:
+		return fmt.Errorf("password must not be empty%.0w", ErrChannelPasswordInvalid)
+	case n > MaxChannelPasswordLen:
+		return fmt.Errorf("password must be at most %d characters%.0w", MaxChannelPasswordLen, ErrChannelPasswordInvalid)
+	case len(password) > maxPassLen:
+		return fmt.Errorf("password must be at most %d bytes%.0w", maxPassLen, ErrChannelPasswordInvalid)
+	}
+	for _, r := range password {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("password must not contain control characters%.0w", ErrChannelPasswordInvalid)
+		}
 	}
 	return nil
 }

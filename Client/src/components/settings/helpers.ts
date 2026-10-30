@@ -3,10 +3,10 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/preferences";
+import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/prefs/preferences";
 
-// Preference persistence lives in `@lib/preferences` so `lib/` and `features/`
-// modules can use it without importing the component layer (ARCH-06).
+// Preference persistence lives in `@lib/prefs/preferences` so `lib/` and `features/`
+// modules can use it without importing the component layer.
 // Re-exported here so the settings tabs keep a single import site — and,
 // critically, so both layers share one implementation (they used to be
 // copy-pasted and had drifted).
@@ -20,7 +20,7 @@ export { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref };
  * Create an accessible toggle switch element with proper ARIA attributes
  * and keyboard support (Enter/Space to toggle). `label` is its accessible
  * name: the visible label beside it is a sibling, not a <label>, so without
- * it a screen reader announces an unnamed "switch" (B9-2).
+ * it a screen reader announces an unnamed "switch".
  */
 export function createToggle(
   isOn: boolean,
@@ -96,7 +96,7 @@ export function appendToggleRows(
 }
 
 // ---------------------------------------------------------------------------
-// Form feedback (B9-2 UI contract)
+// Form feedback
 // ---------------------------------------------------------------------------
 
 /**

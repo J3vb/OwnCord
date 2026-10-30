@@ -11,7 +11,10 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../src/lib/types";
-import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../src/lib/net/serverCapabilities";
 import "@components/UserProfilePopup";
 import "@components/AdminActions";
 

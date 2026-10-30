@@ -131,13 +131,13 @@ vi.stubGlobal("indexedDB", {
 });
 
 import { buildAdvancedTab } from "@components/settings/AdvancedTab";
-import { setChannelMutesHost } from "@lib/channel-mutes";
+import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import {
   getGlobalNotificationLevel,
   getServerNotificationLevel,
   setServerNotificationLevel,
   settleNotificationLevelDefault,
-} from "@lib/notificationLevel";
+} from "@lib/prefs/notificationLevel";
 
 describe("AdvancedTab — Clear All Cache", () => {
   let container: HTMLDivElement;

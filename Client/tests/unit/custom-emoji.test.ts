@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -33,11 +33,11 @@ import {
   MAX_JUMBO_EMOJI,
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
-} from "../../src/components/message-list/custom-emoji";
+} from "../../src/components/message-list/customEmoji";
 import {
   renderMessageContent,
   clearContentParseCache,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 import { renderReactions } from "../../src/components/message-list/reactions";
 import {
   emojiStore,

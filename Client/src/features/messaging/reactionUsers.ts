@@ -9,12 +9,12 @@
  *
  * This lives below the UI layer so `features/messaging/wsHandlers.ts` can
  * invalidate the cache on `reaction_update` without importing the tooltip
- * component that renders it (ARCH-06). MainPage registers the live ApiClient
+ * component that renders it. MainPage registers the live ApiClient
  * fetcher; the tooltip reads the cache.
  */
 
 import { createLogger } from "@lib/logger";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { ReactionUser } from "@lib/types";
 
 const log = createLogger("reaction-tooltip");

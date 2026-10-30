@@ -1,5 +1,5 @@
 /**
- * The forum destination (WP 6.9d): what `navigation/destinations.ts` imports.
+ * The forum destination: what `navigation/destinations.ts` imports.
  * The post list, its tag filter and the New Post dialog load on the first forum
  * a session opens, so a server without forums never pays for them. The channel
  * controller mounts the returned element in the messages slot.

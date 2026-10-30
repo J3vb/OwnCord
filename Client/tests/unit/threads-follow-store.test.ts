@@ -15,7 +15,7 @@ import {
   upsertThread,
 } from "../../src/stores/threads.store";
 import { followedThreadsStore } from "../../src/stores/followedThreads.store";
-import { runSessionResets } from "../../src/lib/sessionRegistry";
+import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 import type { ReadyThread } from "../../src/lib/types";
 import { makeThread } from "../helpers/thread-fixtures";
 

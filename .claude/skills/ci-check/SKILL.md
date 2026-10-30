@@ -90,8 +90,8 @@ still in progress.
 ## Client (from `Client/`)
 
 ```bash
-node --test ../scripts/check-tauri-versions.test.mjs
-node ../scripts/check-tauri-versions.mjs
+node --test ../scripts/checks/check-tauri-versions.test.mjs
+node ../scripts/checks/check-tauri-versions.mjs
 npm test
 npm run typecheck
 npm run typecheck:build   # tsconfig.build.json — the shipped app graph
@@ -130,7 +130,7 @@ storage tests asserting nothing. CI runs Node 26 without setting the variable
 (`ci.yml`), and the full suite was measured passing that way — 337 files /
 7250 passed + 154 expected fail (7405 total) on 2026-09-27.
 `npm audit --audit-level=high` (scoped to shipped deps, via
-`scripts/npm-audit-gate.sh`) and `knip` both run in `Client Static Checks` and
+`scripts/checks/npm-audit-gate.sh`) and `knip` both run in `Client Static Checks` and
 both **block** — they are not advisory. The audit gate forgives only a
 recognised registry outage, fail-closed on every real finding.
 
@@ -140,7 +140,7 @@ recognised registry outage, fail-closed on every real finding.
 npm run check:docs
 ```
 
-Which is `scripts/check-doc-counts.mjs` plus, since B1-6, an actual render of
+Which is `scripts/checks/check-doc-counts.mjs` plus, since B1-6, an actual render of
 the findings ledger:
 
 ```bash

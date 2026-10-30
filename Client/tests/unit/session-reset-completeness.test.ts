@@ -23,10 +23,10 @@ const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 // The attachment cache is probed through its own fetch path: a second fetch of
 // the same file is a cache miss, which is how a reset shows.
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
 }));
-import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
+import { listSessionResets, registerSessionReset } from "../../src/lib/net/sessionRegistry";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
 import { stickersStore, setStickers } from "../../src/stores/stickers.store";
@@ -37,12 +37,12 @@ import {
 } from "../../src/components/message-list/attachments";
 import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
 import { renderInlineImage } from "../../src/components/message-list/media";
-import { getImageBox, setImageBox } from "../../src/components/message-list/image-sizes";
+import { getImageBox, setImageBox } from "../../src/components/message-list/imageSizes";
 import {
   rememberRowHeight,
   rememberedRowHeight,
-} from "../../src/components/message-list/row-heights";
-import { discardMedia, observeMedia } from "../../src/lib/media-visibility";
+} from "../../src/components/message-list/rowHeights";
+import { discardMedia, observeMedia } from "../../src/lib/prefs/mediaVisibility";
 import {
   EXTERNAL_CONSENT_PREF,
   admitDerived,
@@ -51,9 +51,10 @@ import {
 } from "../../src/features/content-consent/external";
 import { handleMentionCount } from "../../src/features/channels/wsHandlers";
 import type { Channel } from "../../src/stores/channels.store";
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 import { expectConsole } from "../helpers/console";
-import { voiceStore } from "../../src/stores/voice.store";
+import { leaveVoiceChannel, voiceStore } from "../../src/stores/voice.store";
+import { promptForChannelPassword } from "../../src/features/voice/passwordPrompt";
 import { messagesStore } from "../../src/stores/messages.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { blocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
@@ -61,6 +62,7 @@ import {
   collapseCategories,
   loadCollapsedCategories,
   setActiveDmUser,
+  setConnectionStatus,
   setSidebarMode,
   uiStore,
 } from "../../src/stores/ui.store";
@@ -80,8 +82,8 @@ import {
 import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
 import { createAvatarElement } from "../../src/components/message-list/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
-import { noteWatchSent, takeWatchRefusal } from "../../src/lib/watchRequest";
-import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
+import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   bindGifFavoritesApi,
   gifFavoritesAvailable,
@@ -96,7 +98,7 @@ import {
 import type { MessageRequest } from "../../src/features/message-requests/api";
 import { loadRequests, requestsApi } from "../../src/features/message-requests/sync";
 import type { DispatchApi } from "../../src/features/connection/dispatchContext";
-import type { GifFavoritesApi } from "../../src/lib/gifProvider";
+import type { GifFavoritesApi } from "../../src/lib/media/gifProvider";
 import type { ReadyMember } from "../../src/lib/types";
 
 interface Probe {
@@ -475,6 +477,23 @@ const PROBES: readonly Probe[] = [
     isInitial: () => !takeWatchRefusal("env-1"),
   },
   {
+    name: "voice:passwordPrompt",
+    mutate: async () => {
+      const priorStatus = uiStore.getState().connectionStatus;
+      // The prompt needs a live socket, a known channel and no call in progress to open.
+      setConnectionStatus("connected");
+      leaveVoiceChannel();
+      channelsStore.setState((s) => ({
+        ...s,
+        channels: new Map([[5, { id: 5, name: "vault", type: "voice" } as Channel]]),
+      }));
+      promptForChannelPassword({ send: vi.fn(), disconnect: vi.fn() }, 5, null);
+      await vi.waitFor(() => expect(passwordDialog()).not.toBeNull());
+      setConnectionStatus(priorStatus);
+    },
+    isInitial: () => passwordDialog() === null,
+  },
+  {
     name: "channel-mutes:host",
     mutate: () => {
       setChannelMutesHost("a.example");
@@ -639,6 +658,9 @@ function registeredNamesInSource(): Set<string> {
 beforeEach(() => {
   vi.useFakeTimers();
 });
+
+const passwordDialog = (): Element | null =>
+  document.querySelector("[data-testid='channel-password-dialog']");
 
 const STILL_GIF_URL = "https://gifs.example/probe.gif";
 const { createObjectURL, revokeObjectURL } = URL;

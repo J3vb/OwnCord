@@ -49,7 +49,7 @@ const EXCLUDED = [
   [/^src\/lib\/protocolTypes\.ts$/, "generated from protocol/schema.json: wire identifiers"],
   [/^src\/lib\/icons\.ts$/, "SVG path markup, no text"],
   [
-    /^src\/components\/message-list\/syntax-highlight\.ts$/,
+    /^src\/components\/message-list\/syntaxHighlight\.ts$/,
     "programming-language keyword tables for code highlighting, never copy",
   ],
   [
@@ -65,7 +65,7 @@ const EXCLUDED = [
  */
 const OWNERS = [
   [
-    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|MemberList|AdminActions|InviteManager|ChannelSidebar|CreateChannelModal|EditChannelModal|DeleteChannelModal|purge-prompt)\.ts|components\/channel-sidebar\/context-menu\.ts|lib\/(safe-render|credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
+    /^src\/(pages\/ConnectPage|pages\/connect-page\/|pages\/main-page\/Sidebar|pages\/main-page\/OverlayManagers|components\/(QuickSwitchOverlay|QuickSwitcher|CertMismatchModal|ServerBanner|ConnectedOverlay|UserBar|StatusPicker|MemberList|AdminActions|InviteManager|ChannelSidebar|CreateChannelModal|EditChannelModal|DeleteChannelModal|purgePrompt)\.ts|components\/channel-sidebar\/contextMenu\.ts|lib\/(text\/safeRender|net\/credentials)\.ts|features\/channels\/wsHandlers\.ts|main\.ts)/,
     "B9-18",
   ],
   [
@@ -396,18 +396,32 @@ export function scanSource(file, source) {
   return { findings, errors };
 }
 
-/** Scan src/. Returns { files: { [file]: finding[] }, errors }. */
+/** Stryker's instrumentation marker: the file on disk is not the source we ship. */
+const INSTRUMENTED = /\bstryMutAct_[0-9a-f]+\(/;
+
+/**
+ * Scan src/. Returns { files: { [file]: finding[] }, errors, instrumented }.
+ * Inside a Stryker sandbox the mutated files are rewritten, which moves their
+ * literals into new syntax positions; they are listed in `instrumented` and
+ * left out, since only the original source says what the UI shows.
+ */
 export function scanTree() {
   const files = {};
   const errors = [];
+  const instrumented = [];
   for (const path of walk(SRC).sort()) {
     const file = posix(relative(CLIENT, path));
     if (excludedReason(file) !== null) continue;
-    const result = scanSource(file, readFileSync(path, "utf8"));
+    const source = readFileSync(path, "utf8");
+    if (INSTRUMENTED.test(source)) {
+      instrumented.push(file);
+      continue;
+    }
+    const result = scanSource(file, source);
     errors.push(...result.errors);
     if (result.findings.length > 0) files[file] = result.findings;
   }
-  return { files, errors };
+  return { files, errors, instrumented };
 }
 
 function counts(findings) {

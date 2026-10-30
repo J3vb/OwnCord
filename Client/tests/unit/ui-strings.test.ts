@@ -25,7 +25,12 @@ const texts = (source: string): string[] =>
 
 describe("UI string inventory", () => {
   const scan = scanTree();
-  const baseline = loadBaseline() ?? {};
+  const fullBaseline = loadBaseline() ?? {};
+  // In a Stryker sandbox the mutated files are not scanned, so their baseline
+  // entries are not compared either.
+  const baseline = Object.fromEntries(
+    Object.entries(fullBaseline).filter(([file]) => !scan.instrumented.includes(file)),
+  );
 
   it("has no new UI text and no stale baseline entry", () => {
     expect(scan.errors).toEqual([]);
@@ -41,7 +46,7 @@ describe("UI string inventory", () => {
   });
 
   it("names an existing file and its owning milestone for every baseline entry", () => {
-    for (const [file, entry] of Object.entries(baseline)) {
+    for (const [file, entry] of Object.entries(fullBaseline)) {
       expect(existsSync(path.join(clientRoot, file)), file).toBe(true);
       expect(entry.owner, file).toBe(ownerOf(file));
       expect(["B9-18", "B9-19", "B9-20"]).toContain(entry.owner);

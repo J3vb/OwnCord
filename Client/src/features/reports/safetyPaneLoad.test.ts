@@ -2,7 +2,7 @@
 // and what the pane says (or leaves alone) when a section cannot load or
 // the tab closes first.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { buildSafetyPane } from "./safetyPane";
 
 // A failed import is attempted again on the next one but a loaded module is

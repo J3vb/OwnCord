@@ -5,8 +5,8 @@ import {
   applyStoredAppearance,
   effectiveSaturation,
   DEFAULT_SATURATION_PCT,
-} from "@lib/appearance";
-import { syncOsMotionListener } from "@lib/os-motion";
+} from "@lib/prefs/appearance";
+import { syncOsMotionListener } from "@lib/ui/osMotion";
 
 const PREFIX = "owncord:settings:";
 const root = document.documentElement;

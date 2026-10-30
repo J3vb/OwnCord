@@ -17,17 +17,14 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// MaintainBackups implements the backup_schedule / backup_retention settings
-// the admin panel has always offered. It is driven by main.go's 15-minute
-// maintenance loop, mirroring the expired-session sweep: read the settings
-// each tick, take a scheduled backup when the newest backup on disk is older
-// than the schedule interval, and prune backups past the retention window.
+// MaintainBackups implements the backup_schedule / backup_retention settings.
+// It is driven by the 15-minute maintenance loop: read the settings each tick,
+// take a scheduled backup when the newest backup on disk is older than the
+// schedule interval, and prune backups past the retention window.
 //
 // Freshness is judged by the newest *.db file's mtime, manual backups
-// included — an operator who clicked "Backup now" this morning does not need
-// a second copy tonight. Retention prunes by mtime in whole days, but never
-// removes the newest backup, so a long-dead schedule cannot delete the last
-// copy in the directory.
+// included. Retention prunes by mtime in whole days but never removes the
+// newest backup, so a long-dead schedule cannot delete the last copy.
 //
 // The returned error feeds the maintenance loop's circuit breaker; settings
 // simply not existing (fresh DB mid-migration) is not an error.
@@ -106,10 +103,9 @@ func freeBackupPath(backupDir, base string) (string, error) {
 	path := filepath.Join(backupDir, base+".db")
 	for i := 2; ; i++ {
 		if _, err := os.Stat(path); err != nil {
-			// ENOENT is the free-slot case. Any OTHER stat error (EACCES on
-			// the dir, an unreadable mount) cannot be fixed by trying more
-			// suffixes — stop probing and let VACUUM INTO surface the real
-			// failure with a legible error instead of spinning this loop.
+			// ENOENT is the free-slot case. Any OTHER stat error (EACCES, an
+			// unreadable mount) cannot be fixed by trying more suffixes: stop
+			// probing and let VACUUM INTO surface the real failure.
 			return path, nil //nolint:nilerr // a stat error means the slot is usable or unfixable by suffixing; see above
 		}
 		if i > 100 {
@@ -154,11 +150,10 @@ func runScheduledBackup(ctx context.Context, database *db.DB, backupDir string, 
 }
 
 // PreRestoreBackupPrefix names the safety copy handleRestoreBackup (and the
-// restore CLI) writes immediately before overwriting the live database. Those
-// copies are not retention history: an operator needs the pre-restore state
-// precisely when they are recovering from a bad restore, which may be long
-// after the retention window, so the day-based retention never removes them.
-// PruneSafetyCopies bounds them by count instead.
+// restore CLI) writes immediately before overwriting the live database. It is
+// not retention history: an operator needs the pre-restore state when
+// recovering from a bad restore, possibly long after the retention window, so
+// day-based retention never removes it. PruneSafetyCopies bounds it by count.
 const PreRestoreBackupPrefix = "pre_restore_"
 
 // PreMigrateBackupPrefix names the safety copy the boot path writes before a
@@ -185,10 +180,9 @@ func SetRemoveSafetyCopyForTest(fn func(string) error) (restore func()) {
 	return func() { removeSafetyCopy = prev }
 }
 
-// isSafetyCopy reports whether a backup file name is a safety copy rather
-// than retention history. Both the pre-restore and pre-migration prefixes
-// count; day-based retention must never prune either (PruneSafetyCopies does,
-// by count).
+// isSafetyCopy reports whether a backup file name is a pre-restore or
+// pre-migration safety copy rather than retention history; day-based retention
+// must never prune either (PruneSafetyCopies does, by count).
 func isSafetyCopy(name string) bool {
 	base := filepath.Base(name)
 	return strings.HasPrefix(base, PreRestoreBackupPrefix) || strings.HasPrefix(base, PreMigrateBackupPrefix)
@@ -308,13 +302,10 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 		return fmt.Errorf("reading backup_retention: %w", err)
 	}
 	// Malformed values parse to 0; zero-or-below or above db.RetentionMaxDays
-	// means retention is off. The write path now validates the value, but the
-	// check stays as defence in depth (a value hand-edited into the settings
-	// table, or written by a future path) so it disables pruning rather than
-	// failing the maintenance tick or, worse, overflowing the cutoff below
-	// into the future and unlinking every backup but the newest (OC-0393; the
-	// message-retention window fails the same way over the identical
-	// -days*24h arithmetic).
+	// means retention is off. The write path validates the value, but this
+	// stays as defence in depth (a hand-edited settings row) so it disables
+	// pruning rather than failing the tick or overflowing the cutoff below into
+	// the future and unlinking every backup but the newest.
 	days, _ := strconv.Atoi(strings.TrimSpace(retStr))
 	if days <= 0 || days > db.RetentionMaxDays {
 		return nil

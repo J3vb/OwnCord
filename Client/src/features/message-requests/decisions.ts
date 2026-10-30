@@ -1,5 +1,5 @@
 /**
- * Message Request decisions (B9-6): accept, ignore, delete or block one
+ * Message Request decisions: accept, ignore, delete or block one
  * pending request, and what the inbox does with the server's answer.
  *
  * Only the server's 200 decides anything. It is applied to the store at once,
@@ -20,7 +20,7 @@
 
 import type { ApiClient, ApiClientError, DmRequestDecision } from "@lib/api";
 import { createConfirmModal } from "../dialogs/confirmModal";
-import type { ModalInstance } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";
 import { setActiveChannel } from "@stores/channels.store";
 import {

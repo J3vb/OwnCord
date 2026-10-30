@@ -1,4 +1,4 @@
-// Legacy binding for the CredentialStore suite: today's `lib/credentials.ts`
+// Legacy binding for the CredentialStore suite: today's `lib/net/credentials.ts`
 // exports, wrapped with no cast against the contract. B7-4 re-runs
 // `credentials.suite.ts` against `platform/desktop` instead of this file.
 import { vi } from "vitest";
@@ -28,7 +28,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-const mod = await import("../../../src/lib/credentials");
+const mod = await import("../../../src/lib/net/credentials");
 const legacy: CredentialStore = {
   save: mod.saveCredential,
   load: mod.loadCredential,

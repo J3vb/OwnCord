@@ -57,17 +57,17 @@ vi.mock("../../stores/voice.store", () => ({
   setLocalScreenshare: vi.fn(),
   setVoiceStatus: vi.fn(),
 }));
-vi.mock("../../lib/preferences", () => ({
+vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) =>
     env.prefs.has(key) ? env.prefs.get(key) : fallback,
 }));
-vi.mock("../../lib/deviceManager", () => ({ isMicPolicyGated: () => env.gated }));
-vi.mock("../../lib/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
+vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => env.gated }));
+vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
 vi.mock("./mediaControl", () => ({ syncShareGrant: vi.fn() }));
 vi.mock("./native/platform", () => ({ isLinuxDesktop: () => env.linux }));
 const createNativeRoom = vi.hoisted(() => vi.fn());
 vi.mock("./native/nativeRoom", () => ({ createNativeRoom }));
-vi.mock("../../lib/screenShare", () => ({
+vi.mock("../../lib/voice/screenShare", () => ({
   CAMERA_PRESETS: { low: {}, high: {}, source: {} },
   CAMERA_PUBLISH_BITRATES: { low: 1, high: 2, source: 3 },
   getCameraQuality: () => env.cameraQuality,
@@ -92,7 +92,7 @@ import {
   bumpGeneration,
   stopManualCameraTrack,
   stopManualScreenTracks,
-} from "../../lib/screenShare";
+} from "../../lib/voice/screenShare";
 import { syncShareGrant } from "./mediaControl";
 import { RoomLifecycle, type RoomLifecycleHost } from "./roomLifecycle";
 

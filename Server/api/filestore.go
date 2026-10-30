@@ -10,24 +10,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/storage"
 )
 
-// FileStore is the consumer-side seam over blob storage, following the repo's
-// interface-at-the-consumer pattern (see service.Store, D3): the api package
-// declares exactly the operations its handlers use, and the concrete
-// *storage.Storage satisfies it. This is deliberately an interface carve-out,
-// NOT an alternative-backend implementation — multi-backend storage (S3 and
-// friends) is out of scope today. What the seam buys now is that the
-// contract an alternative backend would have to meet is written down where
-// it is consumed; note in particular that Open must return a seekable file
-// (storage.File), because the serve paths use http.ServeContent for range
-// requests.
+// FileStore is the consumer-side seam over blob storage: the api package
+// declares exactly the operations its handlers use and *storage.Storage
+// satisfies it. It is an interface carve-out, not an alternative-backend
+// implementation; the contract worth writing down is that Open must return a
+// seekable file (storage.File), because the serve paths use http.ServeContent
+// for range requests.
 type FileStore interface {
 	// Save writes r to a file named by uuid, validating content type by
 	// magic bytes and enforcing the size limit. Filesystem-level failures
 	// carry storage.ErrIO.
 	Save(uuid string, r io.Reader) (int64, error)
-	// Delete removes the stored file named uuid.
 	Delete(uuid string) error
-	// Open opens the stored file named uuid for seekable reading.
 	Open(uuid string) (storage.File, error)
 	// OpenThumb and SaveThumb read and keep the thumbnail of the original
 	// named uuid; Delete removes it with the original. An empty thumbnail
@@ -36,20 +30,15 @@ type FileStore interface {
 	SaveThumb(uuid string, data []byte) error
 }
 
-// compile-time proof the disk implementation satisfies the seam.
 var _ FileStore = (*storage.Storage)(nil)
 
-// saveReserved is the one production path that writes through a FileStore
-// (B5-2, decision 11): every byte the store takes has been admitted first —
-// by UploadService.Reserve, which charges the uploader's counter and checks
-// the headroom floor, or by ReserveHeadroom for the bounded emoji exclusion.
-// A failed write hands the reservation back; a successful one is the
-// caller's to commit once its row exists (UploadService.Record does that
-// under the same lock) or to settle in a defer.
-//
-// TestEveryFileStoreSaveIsReserved fails on any other Save call site. What
-// that proves is exactly "no second call to FileStore.Save"; a write that
-// bypasses the store (os.WriteFile into the directory) is outside it.
+// saveReserved is the one production path that writes through a FileStore: every
+// byte has been admitted first by UploadService.Reserve (charges the uploader's
+// counter, checks the headroom floor) or ReserveHeadroom (the bounded emoji
+// exclusion). A failed write hands the reservation back; a successful one is the
+// caller's to commit (UploadService.Record, under the same lock) or settle in a
+// defer. TestEveryFileStoreSaveIsReserved fails on any other Save call site; a
+// write bypassing the store (os.WriteFile) is outside it.
 func saveReserved(ctx context.Context, res *service.StorageReservation, store FileStore, name string, r io.Reader) (int64, error) {
 	if res == nil {
 		return 0, errors.New("api: store write without a storage reservation")
@@ -59,7 +48,7 @@ func saveReserved(ctx context.Context, res *service.StorageReservation, store Fi
 		res.Release(ctx)
 		return 0, err
 	}
-	// B5-2: an unknown or generous declared length reserves more than the
+	// An unknown or generous declared length reserves more than the
 	// upload turns out to cost; lower the charge to what was actually
 	// written before the reservation lands. A failure here leaves the
 	// counter high — the safe side — and the next maintenance recount
@@ -71,3 +60,16 @@ func saveReserved(ctx context.Context, res *service.StorageReservation, store Fi
 	res.Landed()
 	return written, nil
 }
+
+// ReservedStore lets other packages write through a FileStore via saveReserved,
+// keeping the one Save call site.
+type ReservedStore struct{ Store FileStore }
+
+// SaveReserved writes r under name, handing the reservation back on failure and
+// landing it on success.
+func (s ReservedStore) SaveReserved(ctx context.Context, res *service.StorageReservation, name string, r io.Reader) (int64, error) {
+	return saveReserved(ctx, res, s.Store, name, r)
+}
+
+// Delete removes the stored file named name.
+func (s ReservedStore) Delete(name string) error { return s.Store.Delete(name) }

@@ -43,19 +43,6 @@ ignore = [
   { id = "RUSTSEC-2026-0371", reason = "unmaintained; zbus_names via zbus 4/5, Linux D-Bus only" },
   { id = "RUSTSEC-2026-0372", reason = "unmaintained; zvariant_derive via zbus 4/5, Linux D-Bus only" },
 
-  # zip archive-extraction advisories, fixed in zip 9.0.0, which no dependent
-  # release accepts yet (tauri-plugin-updater 3.0.0-alpha.3 still requires ^4,
-  # webrtc-sys-build 0.3.19 requires ^0.6). zip 4.6.1 is compiled only into the
-  # Windows build (the updater's cfg(windows) `zip` feature) and extracts the
-  # update archive only after its minisign signature is verified against the
-  # pinned key. zip 0.6.6 is a build-dependency (webrtc-sys -> webrtc-sys-build);
-  # CI and release set LK_CUSTOM_WEBRTC to a sha256-pinned copy unpacked by
-  # Client/scripts/linux-webrtc-toolchain.sh, so its extraction does not run.
-  # Drop these when both dependents resolve zip >= 9, or when zip 4 leaves the
-  # graph by turning off the updater's `zip` feature.
-  { id = "RUSTSEC-2026-0367", reason = "zip extract: signed Windows update archive / bypassed build-time path" },
-  { id = "RUSTSEC-2026-0368", reason = "zip extract: signed Windows update archive / bypassed build-time path" },
-  { id = "RUSTSEC-2026-0369", reason = "zip extract: signed Windows update archive / bypassed build-time path" },
 ]
 # --- Rust: Linux native camera (gstreamer-rs) ---
 #
@@ -68,10 +55,9 @@ ignore = [
 #
 # --- Linux native voice (livekit), added with the phase-0 build plumbing ---
 #
-# No new ignore is needed. The whole Linux-only tree — livekit 0.9.5 and its
+# No new ignore is needed. The whole Linux-only tree — livekit 0.10.0 and its
 # livekit-* crates, webrtc-sys, libwebrtc — is Apache-2.0, already allowed
-# above; prost/pbjson/zip/scratch and the rest are Apache-2.0 or MIT. Apart
-# from zip's extraction advisories (ignored above, with their reason), the
+# above; prost/pbjson/zip/scratch and the rest are Apache-2.0 or MIT, and the
 # scanner is clean on them.
 #
 # What cargo-deny CANNOT see, and why no allow entry exists for it: webrtc-sys
