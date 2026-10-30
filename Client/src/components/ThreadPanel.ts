@@ -585,7 +585,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
             ? importedName(msg.importedAuthor)
             : msg.user.display_name || msg.user.username,
           {
-            self: msg.user.id === userId(),
+            self: msg.importedAuthor !== undefined || msg.user.id === userId(),
           },
         );
       },

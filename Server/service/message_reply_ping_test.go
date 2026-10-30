@@ -370,3 +370,26 @@ func TestSendMessage_ReplyPingFalseHashIsUnchanged(t *testing.T) {
 		t.Error("reply_ping=true must change the fingerprint")
 	}
 }
+
+// An imported parent belongs to the hidden import account: replying with the
+// ping on writes no mention row and raises no badge for it.
+func TestSendMessage_ReplyPingToImportedParentMentionsNobody(t *testing.T) {
+	eachSendPath(t, func(t *testing.T, keyed bool) {
+		svc, database, parent := replyPingFixture(t)
+		if _, err := database.ExecContext(context.Background(),
+			`INSERT INTO message_import_authors (message_id, discord_user_id, name, color) VALUES (?, '42', 'Ann', NULL)`, parent); err != nil {
+			t.Fatal(err)
+		}
+
+		res := replyAs(t, svc, keyed, 1, parent, true, "agreed")
+		if len(res.Mentions) != 0 {
+			t.Errorf("Mentions = %v, want none", res.Mentions)
+		}
+		if got := storedMentions(t, database, res.MessageID); len(got) != 0 {
+			t.Errorf("stored mentions = %v, want none", got)
+		}
+		if got := mentionCount(t, database, 2); got != 0 {
+			t.Errorf("parent owner mention_count = %d, want 0", got)
+		}
+	})
+}

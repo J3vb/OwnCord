@@ -173,6 +173,34 @@ describe("createSearchOverlay", () => {
     overlay.destroy?.();
   });
 
+  it("shows an imported result's Discord name as text with the Imported tag and no handle", async () => {
+    const name = "<img src=x onerror=alert(1)>";
+    const results = [
+      makeResult({
+        user: { id: 77, username: "[imported]", avatar: null },
+        imported_author: { name, color: "red; background:url(x)" },
+      }),
+    ];
+    const overlay = createSearchOverlay(
+      makeOptions({ onSearch: vi.fn().mockResolvedValue({ results }) }),
+    );
+    overlay.mount(container);
+
+    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    input.value = "result";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+
+    const item = container.querySelector(".search-result-item")!;
+    expect(item.querySelector(".search-result-author")!.textContent).toBe(name);
+    expect(item.querySelector(".search-result-author img")).toBeNull();
+    expect(item.querySelector(".imported-tag")!.textContent).toBe("Imported");
+    expect(item.querySelector(".search-result-handle")).toBeNull();
+    expect(item.textContent).not.toContain("[imported]");
+
+    overlay.destroy?.();
+  });
+
   it("renders a bare SQLite timestamp (no timezone) the same as its Z-suffixed equivalent", async () => {
     // The server's SearchMessages returns the raw "YYYY-MM-DD HH:MM:SS" column,
     // i.e. UTC with no zone designator. `new Date(ts)` would read that as
