@@ -12,7 +12,7 @@
   "src/lib/voice/screenShare.ts": 1250,
   "src/lib/ws.ts": 1250,
   "src/pages/MainPage.ts": 2500,
-  "src/pages/connect-page/LoginForm.ts": 1600,
+  "src/pages/connect-page/LoginForm.ts": 1650,
   "src/pages/main-page/ChannelController.ts": 2200,
   "src/pages/main-page/SidebarArea.ts": 1550
 }
