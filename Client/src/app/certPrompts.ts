@@ -7,7 +7,7 @@
 // at import time: main.ts calls installCertPrompts() at the point in the boot
 // order where this code used to be inline.
 
-import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
+import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
 import { createLogger } from "@lib/logger";
 import { isCertDeclined, normalizeHostForCertCompare } from "@lib/ws";
 import type { CertTofuEvent, WsClient } from "@lib/ws";
@@ -65,14 +65,15 @@ function dropSessionOnMismatch(host: string): boolean {
 /**
  * Registers the certificate prompts against the ws client and starts the
  * native cert listener. `rerunHealth` re-checks the connect page's servers
- * (a no-op when it is not mounted). Positional rather than an options object:
+ * and resubmits a sign-in the accepted host's certificate refused (a no-op
+ * when the page is not mounted). Positional rather than an options object:
  * object keys survive minification, and this runs in the startup chunk.
  */
 export function installCertPrompts(
   wsClient: WsClient,
   currentPage: () => PageId,
   navigateTo: (page: PageId) => void,
-  rerunHealth: () => void,
+  rerunHealth: (acceptedHost: string) => void,
 ): void {
   ws = wsClient;
   getPage = currentPage;
@@ -103,11 +104,12 @@ export function installCertPrompts(
               try {
                 await ws.acceptCertFingerprint(evt.host, evt.fingerprint);
                 // Refresh server health so the now-trusted host becomes reachable,
-                // and resume a pending connect if one was in flight — but only when
-                // it was pending for THIS host. Accepting a first-use cert for one
+                // resubmit a sign-in this certificate refused, and resume a pending
+                // connect if one was in flight — but only when it was pending for
+                // THIS host. Accepting a first-use cert for one
                 // profile must not force-reconnect (or churn) a session already
                 // live for a different host.
-                rerunHealth();
+                rerunHealth(evt.host);
                 const target = sessionTarget();
                 if (target?.token && evt.host === normalizeHostForCertCompare(target.host)) {
                   ws.connect(target);

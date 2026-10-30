@@ -10,7 +10,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, navigateToMainPageReady } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
+import { Q1, findUnnamedControls, focusIndicator } from "./support/accessibility";
 
 /** A 1x1 transparent PNG, as the sticker image bytes. */
 const PNG_1X1 = [
@@ -73,7 +73,7 @@ async function start(page: Page): Promise<void> {
   await navigateToMainPageReady(page);
 }
 
-test.describe("WP 8.8 stickers and the expression popup", () => {
+test.describe("stickers and the expression popup", () => {
   test.beforeEach(async ({ page }) => {
     await start(page);
   });
@@ -90,6 +90,9 @@ test.describe("WP 8.8 stickers and the expression popup", () => {
     await expect(popup.locator(".sp-item")).toHaveCount(2);
 
     // The tablist is a proper one: arrows move and select, the tab keeps focus.
+    // The picker focuses its search box a frame after it mounts; focusing the
+    // tab before that lands would lose the arrow keys to the search box.
+    await expect(popup.locator("[data-testid='sticker-search']")).toBeFocused();
     const stickersTab = page.locator("[data-testid='xp-tab-sticker']");
     await stickersTab.focus();
     await page.keyboard.press("ArrowRight");
@@ -109,6 +112,43 @@ test.describe("WP 8.8 stickers and the expression popup", () => {
       "aria-selected",
       "true",
     );
+  });
+
+  test("the emoji tab's category rail sits beside the grid and follows the scroll", async ({
+    page,
+  }) => {
+    await page.locator("[data-testid='sticker-btn']").click();
+    await page.locator("[data-testid='xp-tab-emoji']").click();
+    const popup = page.locator("[data-testid='expression-popup']");
+    const rail = popup.locator(".ep-categories");
+    const food = rail.locator(".ep-category-btn[aria-label='Food']");
+    await expect(food).toBeVisible();
+
+    const fit = await popup.evaluate((el) => {
+      const railBox = el.querySelector(".ep-categories")!.getBoundingClientRect();
+      const grid = el.querySelector(".ep-scroll")!.getBoundingClientRect();
+      const header = el.querySelector(".ep-header")!.getBoundingClientRect();
+      const buttons = [...el.querySelectorAll(".ep-category-btn")].map((b) =>
+        b.getBoundingClientRect(),
+      );
+      return {
+        railLeftOfGrid: railBox.right <= grid.left + 0.5,
+        railBelowHeader: railBox.top >= header.bottom - 0.5,
+        sameHeight: Math.abs(railBox.height - grid.height) < 1,
+        buttonsInsideRail: buttons.every((b) => b.left >= railBox.left && b.right <= railBox.right),
+      };
+    });
+    expect(fit).toEqual({
+      railLeftOfGrid: true,
+      railBelowHeader: true,
+      sameHeight: true,
+      buttonsInsideRail: true,
+    });
+
+    await expect(rail.locator(".ep-category-btn").first()).toHaveClass(/\bactive\b/);
+    await food.click();
+    await expect(food).toHaveClass(/\bactive\b/);
+    await expect(rail.locator(".ep-category-btn.active")).toHaveCount(1);
   });
 
   test("the open popup meets the shared accessibility checks", async ({ page }) => {

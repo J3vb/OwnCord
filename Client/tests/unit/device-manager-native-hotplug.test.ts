@@ -13,7 +13,7 @@ const { prefs, nativeWatch } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, val: unknown) => {
     prefs.set(key, val as string);
@@ -53,7 +53,7 @@ vi.mock("../../src/features/voice/native/devices", () => ({
   },
 }));
 
-import { DeviceManager } from "../../src/lib/deviceManager";
+import { DeviceManager } from "../../src/lib/voice/deviceManager";
 
 describe("DeviceManager on the native device watch", () => {
   let dm: DeviceManager;
@@ -64,7 +64,7 @@ describe("DeviceManager on the native device watch", () => {
   };
 
   const nativeChange = async (): Promise<void> => {
-    for (const handler of [...nativeWatch.handlers]) handler();
+    for (const handler of nativeWatch.handlers) handler();
     await vi.advanceTimersByTimeAsync(600);
   };
   const makeRoom = () => ({

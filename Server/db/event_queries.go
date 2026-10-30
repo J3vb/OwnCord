@@ -10,16 +10,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-// ── Event persistence (Phase B Step 7) ──────────────────────────────────────
-//
-// These methods back the cold-tier reconnect replay. They were previously in
-// the store package's SQLiteStore; they moved here (D3) when that pass-through
-// layer was removed. The SQL is unchanged.
-
-// PersistEvent appends a single event to the events table with the
-// caller-supplied seq. The hub assigns seq before this is called so the row
-// seq always matches the wrapped-payload seq, even if the persister drops
-// some events under load.
+// PersistEvent appends one event with the caller-supplied seq. The hub assigns
+// seq beforehand so the row seq always matches the wrapped-payload seq, even if
+// the persister drops events under load.
 func (d *DB) PersistEvent(ctx context.Context, seq int64, eventType string, channelID int64, payload []byte) error {
 	_, err := d.writer.ExecContext(ctx,
 		`INSERT INTO events (seq, event_type, channel_id, payload) VALUES (?, ?, ?, ?)`,
@@ -31,14 +24,12 @@ func (d *DB) PersistEvent(ctx context.Context, seq int64, eventType string, chan
 	return nil
 }
 
-// PersistEvents appends a batch of events in a single transaction with one
-// prepared insert, so the persister's flush pays for one fsync instead of one
-// per event. CreatedAt on the input rows is ignored (the column defaults).
-//
-// Best-effort semantics are preserved: if the batched transaction fails (e.g.
-// one row has a duplicate seq), it falls back to per-row inserts so the good
-// rows still land. Returns the number of rows persisted and, when any row was
-// lost, the first per-row error.
+// PersistEvents appends a batch in one transaction with one prepared insert, so
+// the persister's flush costs one fsync instead of one per event. CreatedAt on
+// the input is ignored (the column defaults). Best effort: if the batch fails
+// (e.g. a duplicate seq) it falls back to per-row inserts so the good rows
+// land. It returns the rows persisted and, if any was lost, the first per-row
+// error.
 func (d *DB) PersistEvents(ctx context.Context, events []PersistedEvent) (int, error) {
 	if len(events) == 0 {
 		return 0, nil
@@ -46,7 +37,7 @@ func (d *DB) PersistEvents(ctx context.Context, events []PersistedEvent) (int, e
 	if err := d.persistEventsTx(ctx, events); err == nil {
 		return len(events), nil
 	}
-	// Fallback: insert rows individually so one bad row doesn't drop the batch.
+	// Fallback: insert rows individually so one bad row does not drop the batch.
 	persisted := 0
 	var firstErr error
 	for _, e := range events {
@@ -108,7 +99,7 @@ func (d *DB) GetEventsSince(ctx context.Context, afterSeq int64, limit int) ([]P
 // GetEventsSinceForChannels filters events to those whose channel_id is 0
 // (global broadcast) or in channelIDs.
 func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, channelIDs []int64, limit int) ([]PersistedEvent, error) {
-	// Build IN clause manually since database/sql does not expand slices.
+	// IN clause is built manually since database/sql does not expand slices.
 	if len(channelIDs) == 0 {
 		// Only global broadcasts.
 		rows, err := d.reader.QueryContext(ctx,
@@ -152,12 +143,10 @@ func (d *DB) GetEventsSinceForChannels(ctx context.Context, afterSeq int64, chan
 	return scanEventRows(rows)
 }
 
-// CountEventsInRange returns the UNFILTERED (all channels) count of events
-// with afterSeq < seq <= uptoSeq. seq is the events table's primary key, so
-// this can only ever come up short of (uptoSeq - afterSeq), never over —
-// callers use that to detect an interior gap left by a lost row (a dropped
-// EventPersister enqueue, or a failed row in a batch flush) without having to
-// enumerate every seq in the range.
+// CountEventsInRange returns the unfiltered (all channels) count of events with
+// afterSeq < seq <= uptoSeq. seq is the primary key, so the count can only fall
+// short of (uptoSeq - afterSeq); callers use that to detect an interior gap
+// left by a lost row without enumerating every seq.
 func (d *DB) CountEventsInRange(ctx context.Context, afterSeq, uptoSeq int64) (int64, error) {
 	var count int64
 	err := d.reader.QueryRowContext(ctx,
@@ -183,16 +172,13 @@ func (d *DB) GetMaxEventSeq(ctx context.Context) (int64, error) {
 	return maxSeq.Int64, nil
 }
 
-// pruneBatchSize bounds each DELETE's work. The pruner deletes in chunks of
-// this many rows instead of one unbounded statement, so at 2,000 online —
-// where a day's presence and content frames are 10^5–10^6 rows — no single
-// statement holds the sole writer connection for a noticeable stretch.
+// pruneBatchSize bounds each DELETE's work. The pruner deletes in chunks so,
+// with a day's frames at 10^5-10^6 rows, no single statement holds the sole
+// writer connection for a noticeable stretch.
 const pruneBatchSize = 5000
 
-// eventPruneStatementHookForTest, when non-nil, runs once per DELETE the
-// prune loop issues. Test-only (nil in production, no exported setter beyond
-// export_test.go): it lets the batching test count statements without a
-// driver-level trace.
+// eventPruneStatementHookForTest runs once per DELETE the prune loop issues, so
+// the batching test can count statements without a driver trace. Test-only.
 var eventPruneStatementHookForTest func()
 
 // PruneEventsOlderThan deletes events older than cutoff in bounded chunks of
@@ -226,8 +212,6 @@ func (d *DB) PruneEventsOlderThan(ctx context.Context, cutoff time.Time) (int64,
 		}
 	}
 }
-
-// ── helpers ─────────────────────────────────────────────────────────────────
 
 type rowsScanner interface {
 	Next() bool

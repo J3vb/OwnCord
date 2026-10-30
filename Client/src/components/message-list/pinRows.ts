@@ -1,12 +1,12 @@
-// "Pinned a message" system row (WP 6.12): "<Name> pinned a message to this
+// "Pinned a message" system row: "<Name> pinned a message to this
 // channel. See all pinned messages." Drawn from `kind` + `replyTo` alone, never
 // from `content` (the server's English fallback for older clients). The pinned
 // message id rides in `replyTo`; once that message is deleted, or purged so the
 // column is NULL, "a message" is plain text with nothing to jump to. DMs use the
 // same wording as channels (design note 6.12, section 1).
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { createElement, setText } from "@lib/dom";
-import { resolveAuthor } from "@lib/formatting";
+import { resolveAuthor } from "@lib/text/formatting";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messagingText } from "../../i18n/messaging";

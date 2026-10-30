@@ -9,30 +9,34 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { vkName } from "@lib/ptt";
-import { loadPref } from "@lib/preferences";
-import { inputMode } from "@lib/inputMode";
+import { vkName } from "@lib/voice/ptt";
+import { loadPref } from "@lib/prefs/preferences";
+import { inputMode } from "@lib/ui/inputMode";
 import {
   keyEventToVk,
   loadGlobalShortcutVks,
   saveGlobalShortcutVk,
   shortcutConflict,
   type GlobalShortcutAction,
-} from "@lib/voiceShortcuts";
-import { globalKeysErrorCode, markPortalBound, portalHoldsShortcuts } from "@lib/globalKeys";
+} from "@lib/voice/voiceShortcuts";
+import { globalKeysErrorCode, markPortalBound, portalHoldsShortcuts } from "@lib/ui/globalKeys";
 import { desktop } from "../../platform/desktop";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { settingsText as t } from "../../i18n/settings";
 import { buildPttControls } from "./pttControls";
-import { KEYBIND_GROUPS, UNBOUND_BY_DEFAULT_ROWS, type KeybindGroupId } from "@lib/keybindCatalog";
+import {
+  KEYBIND_GROUPS,
+  UNBOUND_BY_DEFAULT_ROWS,
+  type KeybindGroupId,
+} from "@lib/prefs/keybindCatalog";
 import {
   REBINDABLE_ACTIONS,
   globalShortcutTakenVks,
   loadEffectiveKeybinds,
   saveKeybind,
   type RebindableId,
-} from "@lib/keybinds";
+} from "@lib/prefs/keybinds";
 import { beginCapture, buildComboCapture, cancelCapture, type ComboCapture } from "./comboCapture";
 
 /** A catalog group's rows as text, with the rebindable action each one is. */

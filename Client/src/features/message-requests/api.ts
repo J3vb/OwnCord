@@ -1,5 +1,5 @@
 /**
- * The Message Requests adapter (B9-5): the one place the B5-6 wire shape
+ * The Message Requests adapter: the one place the wire shape
  * (GET /api/v1/dm-requests and the dm_request frame) becomes the inbox model.
  *
  * The sender's `avatar` is dropped here, on purpose. It can be a

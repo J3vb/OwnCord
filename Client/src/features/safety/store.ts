@@ -1,5 +1,5 @@
 /**
- * Safety store (B9-15): the signed-in user's own moderation notices and
+ * Safety store: the signed-in user's own moderation notices and
  * restrictions. Recipient-only: every fact here came from ready.notices, a
  * targeted mod_action frame or GET /users/me/moderation, never a moderator
  * read. main.ts clears it on sign-out and profile switch; never persisted.
@@ -12,14 +12,14 @@
  *   send (TIMED_OUT) revalidates it against the server.
  * - `history` is the latest GET /users/me/moderation answer; null until one
  *   lands.
- * - `appeals` (B9-16) is the latest GET /appeals/mine answer, patched by a
+ * - `appeals` is the latest GET /appeals/mine answer, patched by a
  *   live appeal_status frame until the next read replaces it.
  */
 
 import type { ApiClient, MyAppeal, OwnModerationAction } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { AppealStatusPayload, ReadyNotice } from "@lib/types";
 
 const log = createLogger("safety");

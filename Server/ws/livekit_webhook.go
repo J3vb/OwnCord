@@ -9,50 +9,43 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/protocol/webhook"
 	"github.com/twitchtv/twirp"
 )
 
-// webhookMaxBodyBytes bounds the webhook request body to prevent unbounded
-// reads from an unauthenticated caller.
+// webhookMaxBodyBytes bounds the request body so an unauthenticated caller cannot force unbounded reads.
 const webhookMaxBodyBytes = 64 * 1024
 
-// NewLiveKitWebhookHandler returns an HTTP handler that processes LiveKit
-// webhook events. It synchronises LiveKit room state back into OwnCord's
-// voice_states DB — primarily for crash recovery when a participant
-// disconnects from LiveKit without sending a WS voice_leave.
-//
-// Speaker detection is handled client-side via LiveKit's
-// RoomEvent.ActiveSpeakersChanged (lower latency than webhooks).
+// NewLiveKitWebhookHandler returns an HTTP handler for LiveKit webhook events,
+// syncing room state back into voice_states, mainly crash recovery when a
+// participant leaves LiveKit without a WS voice_leave. Speaker detection is
+// client-side (RoomEvent.ActiveSpeakersChanged, lower latency).
 func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFunc {
-	// The SDK receiver verifies the token signature AND that the token's sha256
-	// claim matches the request body hash, binding verification to the body so
-	// a captured token cannot be replayed against a forged payload.
+	// The SDK receiver verifies the token signature and that its sha256 claim matches
+	// the body hash, so a captured token cannot be replayed against a forged payload.
 	provider := auth.NewSimpleKeyProvider(apiKey, apiSecret)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check Authorization header BEFORE reading the body to avoid
-		// allocating memory for unauthenticated requests.
+		// Check Authorization before reading the body so unauthenticated requests allocate nothing.
 		if r.Header.Get("Authorization") == "" {
 			slog.Warn("livekit webhook: missing Authorization header")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httperr.Write(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "unauthorized")
 			return
 		}
 
-		// Bound the body before the SDK reads it (ReceiveWebhookEvent uses an
-		// unbounded io.ReadAll internally).
+		// Bound the body before the SDK reads it (ReceiveWebhookEvent uses an unbounded io.ReadAll).
 		r.Body = http.MaxBytesReader(w, r.Body, webhookMaxBodyBytes)
 
-		// ReceiveWebhookEvent verifies the JWT signature, the token's body-hash
-		// claim, and the exp/nbf claims, then parses the payload. This replaces
-		// the previous manual ParseAPIToken/Verify sequence, which was not bound
-		// to the request body (forgery/replay).
+		// ReceiveWebhookEvent verifies the JWT signature, the body-hash claim and
+		// exp/nbf, then parses the payload, so verification is bound to the request body
+		// (no forgery or replay).
 		event, err := webhook.ReceiveWebhookEvent(r, provider)
 		if err != nil {
 			slog.Warn("livekit webhook: verification failed", "error", err)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httperr.Write(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "unauthorized")
 			return
 		}
 
@@ -65,10 +58,9 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 		switch event.Event {
 		case "participant_joined":
 			if err := h.handleWebhookParticipantJoined(r.Context(), event); err != nil {
-				// LiveKit retries failed deliveries. Acknowledging a failed
-				// reconciliation loses the only record of a participant that has
-				// no voice_states row for the periodic DB sweep to discover.
-				http.Error(w, "voice reconciliation temporarily unavailable", http.StatusServiceUnavailable)
+				// LiveKit retries failed deliveries. Acknowledging a failed reconciliation loses
+				// the only record of a participant with no voice_states row for the DB sweep to find.
+				httperr.Write(w, http.StatusServiceUnavailable, httperr.CodeServiceUnavailable, "voice reconciliation temporarily unavailable")
 				return
 			}
 		case "participant_left":
@@ -81,9 +73,8 @@ func (h *Hub) NewLiveKitWebhookHandler(apiKey, apiSecret string) http.HandlerFun
 	}
 }
 
-// parseParticipantIdentity extracts a user ID and optional join token from a
-// LiveKit participant identity formatted as "user-{id}" or
-// "user-{id}:{joinToken}".
+// parseParticipantIdentity extracts a user ID and optional join token from an
+// identity "user-{id}" or "user-{id}:{joinToken}".
 func parseParticipantIdentity(identity string) (int64, string, error) {
 	if !strings.HasPrefix(identity, "user-") {
 		return 0, "", fmt.Errorf("invalid identity format: %s", identity)
@@ -97,8 +88,7 @@ func parseParticipantIdentity(identity string) (int64, string, error) {
 	return userID, joinToken, nil
 }
 
-// parseRoomChannelID extracts a channel ID from a LiveKit room name
-// formatted as "channel-{id}".
+// parseRoomChannelID extracts a channel ID from a room name "channel-{id}".
 func parseRoomChannelID(roomName string) (int64, error) {
 	if !strings.HasPrefix(roomName, "channel-") {
 		return 0, fmt.Errorf("invalid room name format: %s", roomName)
@@ -107,15 +97,11 @@ func parseRoomChannelID(roomName string) (int64, error) {
 }
 
 func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit.WebhookEvent) error {
-	// Detach from the triggering HTTP request before doing any cleanup work,
-	// mirroring every sibling teardown path (readPump's defer and
-	// unregisterFailedHandshake use context.WithoutCancel in serve.go /
-	// serve_pumps.go, rollbackVoiceJoin uses it in voice_join.go, the hub
-	// sweeps use context.Background in hub_sweep.go). Without this, a webhook
-	// sender (LiveKit) that hangs up mid-request cancels r.Context(), and the
-	// rogue-participant GetVoiceState/RemoveParticipant calls below would
-	// either wrongly skip (treating a cancelled read as a transient error, ok)
-	// or fail outright instead of completing the eviction.
+	// Detach from the triggering HTTP request before cleanup, like every sibling
+	// teardown path (readPump's defer, unregisterFailedHandshake, rollbackVoiceJoin,
+	// the hub sweeps). Otherwise LiveKit hanging up mid-request cancels r.Context(),
+	// and the rogue-participant GetVoiceState/RemoveParticipant calls would wrongly
+	// skip (a cancelled read looks like a transient error) or fail instead of evicting.
 	ctx = context.WithoutCancel(ctx)
 
 	p := event.GetParticipant()
@@ -143,29 +129,25 @@ func (h *Hub) handleWebhookParticipantJoined(ctx context.Context, event *livekit
 		"channel_id", channelID,
 		"room", room.Name)
 
-	// Validate that the participant has a matching voice_states row (BUG-127).
-	// A replayed token from a previous session will not have a matching row,
-	// so we remove the rogue participant from LiveKit.
+	// Validate the participant has a matching voice_states row; a replayed token from a
+	// previous session will not, so remove the rogue participant from LiveKit.
 	if h.voice != nil {
 		return h.webhookJoinedEnforceVoiceState(ctx, userID, channelID, joinToken)
 	}
 	return nil
 }
 
-// webhookJoinedEnforceVoiceState is the voice_states reconciliation stage of
-// handleWebhookParticipantJoined: it matches the joining participant against
-// their DB row and removes them from the SFU when the row is missing, points
-// at another channel, or carries a different join token. Callers guarantee
-// h.voice != nil.
+// webhookJoinedEnforceVoiceState is the reconciliation stage of
+// handleWebhookParticipantJoined: it removes the participant from the SFU when
+// their row is missing, points at another channel or carries a different join
+// token. Callers guarantee h.voice != nil.
 func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channelID int64, joinToken string) error {
 	state, stateErr := h.voice.State(ctx, userID)
 	if stateErr != nil {
-		// A transient read failure (I/O error, lock contention, a
-		// maintenance window) is not proof of a rogue participant —
-		// treating it as one would eject a legitimate participant from
-		// the SFU on a single bad read. Leave them connected but make the
-		// webhook retryable: the DB sweep cannot discover SFU participants
-		// that have no matching persisted membership.
+		// A transient read failure (I/O error, lock contention, maintenance) is not proof
+		// of a rogue participant; treating it so would eject a legitimate one on a single
+		// bad read. Leave them connected but make the webhook retryable: the DB sweep
+		// cannot discover SFU participants with no persisted membership.
 		slog.Error("livekit webhook: GetVoiceState failed, skipping rogue-participant check",
 			"error", stateErr, "user_id", userID, "channel_id", channelID)
 		return stateErr
@@ -182,7 +164,7 @@ func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channe
 		}
 		return nil
 	}
-	// Verify join token matches to prevent token replay from old sessions.
+	// Verify the join token matches to prevent replay from old sessions.
 	if joinToken != "" && state.JoinedAt != joinToken {
 		slog.Warn("livekit webhook: stale join token on participant_joined, removing",
 			"user_id", userID, "channel_id", channelID,
@@ -197,8 +179,8 @@ func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channe
 		return nil
 	}
 	// A reconnect can reuse a token issued before a mute or permission change.
-	// Reconcile current grants at the SFU even when the join identity still
-	// matches; the token's original publication rights are no longer authority.
+	// Reconcile current grants at the SFU even when the identity matches; the token's
+	// original publication rights are not authority.
 	if err := h.syncVoiceParticipantPermissions(ctx, userID, channelID, joinToken); err != nil && !liveKitParticipantMissing(err) {
 		slog.Error("livekit webhook: failed to reconcile participant permissions",
 			"error", err, "user_id", userID, "channel_id", channelID)
@@ -207,27 +189,21 @@ func (h *Hub) webhookJoinedEnforceVoiceState(ctx context.Context, userID, channe
 	return nil
 }
 
-// A participant (or room) that disappeared before an eviction or permission
-// update needs no further reconciliation. Other SDK errors remain retryable.
+// liveKitParticipantMissing: a participant (or room) that disappeared before an
+// eviction or permission update needs no reconciliation; other SDK errors stay retryable.
 func liveKitParticipantMissing(err error) bool {
 	var rpcErr twirp.Error
 	return errors.As(err, &rpcErr) && rpcErr.Code() == twirp.NotFound
 }
 
 func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.WebhookEvent) {
-	// Detach from the triggering HTTP request before doing any cleanup work
-	// (OC-0018), mirroring every sibling teardown path (readPump's defer and
-	// unregisterFailedHandshake use context.WithoutCancel in serve.go /
-	// serve_pumps.go, rollbackVoiceJoin uses it in voice_join.go, the hub
-	// sweeps use context.Background in hub_sweep.go). Without this, a webhook
-	// sender (LiveKit) that hangs up mid-request cancels r.Context(), which
-	// makes channelReadAudience's GetChannel call fail and fail closed to an
-	// empty audience (hub_broadcast.go) — silently dropping the voice_leave
-	// for anyone who has READ_MESSAGES on the channel but is not currently in
-	// the room. Unlike the DB row, no sweep ever re-emits that missed
-	// broadcast. The same cancellation would also make both
-	// LeaveVoiceChannelIfMatch branches below fail on their synchronous first
-	// attempt.
+	// Detach from the triggering HTTP request before cleanup, like every sibling
+	// teardown path. Otherwise LiveKit hanging up mid-request cancels r.Context(),
+	// making channelReadAudience's GetChannel fail closed to an empty audience
+	// (hub_broadcast.go) and silently dropping the voice_leave for anyone with
+	// READ_MESSAGES who is not in the room. No sweep re-emits that broadcast, unlike the
+	// DB row. It would also fail both LeaveVoiceChannelIfMatch branches below on their
+	// synchronous first attempt.
 	ctx = context.WithoutCancel(ctx)
 
 	p := event.GetParticipant()
@@ -254,8 +230,7 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 		"user_id", userID,
 		"channel_id", channelID)
 
-	// Clean up voice state if the user disconnected from LiveKit
-	// without sending a WS voice_leave (e.g. crash, network loss, F5 reload).
+	// Clean up if the user left LiveKit without a WS voice_leave (crash, network loss, F5 reload).
 	txn := h.begin(userID)
 	defer txn.end()
 	conns := h.clientsOf(userID)
@@ -263,27 +238,23 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 	if len(conns) > 0 {
 		h.webhookLeftCleanupClient(ctx, txn, conns, userID, channelID, joinToken)
 	} else if h.voice != nil {
-		// Client already disconnected from WS — use channel-conditional delete
-		// to avoid wiping a newer row if the user reconnected and rejoined.
-		// A grace-window entry parking this exact join dies with its row
-		// (deleteRow drops it first).
+		// The client already disconnected from WS: use a channel-conditional delete so a
+		// newer row from a reconnect and rejoin is not wiped. A grace entry parking this
+		// exact join dies with its row (deleteRow drops it first).
 		h.webhookLeftDeleteRow(ctx, txn, userID, channelID, joinToken, "client gone")
 	}
 }
 
 // webhookLeftCleanupClient is the still-connected-client stage of
-// handleWebhookParticipantLeft: it compare-and-clears the client's voice
-// fields for this exact join instance, then either finishes the leave or, when
-// the client has already moved on, clears the stale DB row.
+// handleWebhookParticipantLeft: it compare-and-clears the client's voice fields for
+// this exact join instance, then finishes the leave or, if the client moved on,
+// clears the stale DB row.
 func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, conns []*Client, userID, channelID int64, joinToken string) {
-	// Atomic compare-and-clear of this exact join instance (channel AND
-	// token, one slot critical section): a voice_join committed on the
-	// readPump goroutine in between (a channel switch, or a same-channel
-	// rejoin with a fresh token) must not be wiped out from under the new
-	// session, dropping its VoiceTopic subscription along with it. Like every
-	// clear it resets the completed flag and unsubscribes.
-	// Only the connection that holds the call can match; the user's other
-	// devices have an empty slot and never do.
+	// Atomic compare-and-clear of this exact join instance (channel and token, one slot
+	// critical section): a voice_join committed on the readPump goroutine meanwhile (a
+	// switch, or a same-channel rejoin with a fresh token) must not be wiped from
+	// under the new session along with its VoiceTopic subscription. Only the
+	// connection holding the call can match; other devices have an empty slot.
 	matched := false
 	for _, c := range conns {
 		if txn.clearExact(c, channelID, joinToken) {
@@ -294,27 +265,25 @@ func (h *Hub) webhookLeftCleanupClient(ctx context.Context, txn *voiceTxn, conns
 	if matched {
 		h.webhookLeftFinishLeave(ctx, txn, userID, channelID, joinToken)
 	} else if h.voice != nil {
-		// Client has voiceChID=0 or moved to a different channel (e.g.
-		// after F5 reload), or this webhook is for an older join instance.
+		// The client has voiceChID=0 or moved channel (e.g. after F5), or this webhook is
+		// for an older join instance.
 		h.webhookLeftDeleteRow(ctx, txn, userID, channelID, joinToken, "stale DB row")
 	}
 }
 
-// webhookLeftDeleteRow is the row-only removal of handleWebhookParticipantLeft,
-// used when no live slot matched this join instance (the socket is gone, or
-// has moved on): a channel-conditional row delete, a key-holder re-election
-// and the voice_leave broadcast. deleteRow also drops a grace entry parking
-// this exact join, so expireVoiceGrace -> finishVoiceLeave, which would have
-// re-elected, never runs for it; the election here takes its place. A parked
-// member's slot was cleared when it was parked, so it no longer counts in the
-// election scan, while the key-holder map may still name it. The election runs
-// only when this call removed membership: a row was deleted, or a grace entry
-// parking this exact join (channel AND token) was dropped, even if the delete
-// failed. A late leave for an older join instance removes neither, and must
-// not demote a holder who is merely parked. The grace entry is read before
-// deleteRow takes it, safe because the member lock is held and the expiry and
-// resume paths take entries under that same lock. txn is the caller's
-// Hub.begin(userID) handle; no hub lock is held.
+// webhookLeftDeleteRow is the row-only removal for when no live slot matched this
+// join instance (socket gone or moved on): a channel-conditional row delete, key-holder
+// re-election and the voice_leave broadcast. deleteRow also drops a grace entry
+// parking this exact join, so expireVoiceGrace -> finishVoiceLeave (which would
+// have re-elected) never runs; the election here replaces it. A parked member's
+// slot was cleared when parked, so it no longer counts in the election scan while
+// the key-holder map may still name it. The election runs only when this call
+// removed membership: a row was deleted or a grace entry for this exact join
+// (channel and token) was dropped, even if the delete failed. A late leave for an
+// older join removes neither and must not demote a merely parked holder. The grace
+// entry is read before deleteRow takes it, safe because the member lock is held and
+// expiry/resume take entries under it. txn is the caller's Hub.begin(userID)
+// handle; no hub lock is held.
 func (h *Hub) webhookLeftDeleteRow(ctx context.Context, txn *voiceTxn, userID, channelID int64, joinToken, stage string) {
 	parked := false
 	if e := h.voiceReg.voiceGrace.get(userID); e != nil {
@@ -335,10 +304,9 @@ func (h *Hub) webhookLeftDeleteRow(ctx context.Context, txn *voiceTxn, userID, c
 	}
 }
 
-// webhookLeftFinishLeave is the tear-down stage of webhookLeftCleanupClient,
-// reached once the client's voice fields matched this join instance and were
-// cleared (and unsubscribed from the voice topic): clear the DB row, move the
-// E2EE key holder on, and broadcast the leave.
+// webhookLeftFinishLeave is the tear-down stage of webhookLeftCleanupClient, reached
+// once the client's voice fields matched and were cleared and unsubscribed: clear
+// the DB row, move the E2EE key holder on, broadcast the leave.
 func (h *Hub) webhookLeftFinishLeave(ctx context.Context, txn *voiceTxn, userID, channelID int64, joinToken string) {
 	if h.voice != nil {
 		if err := leaveVoiceChannelWithRetry(ctx, txn, channelID, joinToken); err != nil {
@@ -347,19 +315,16 @@ func (h *Hub) webhookLeftFinishLeave(ctx context.Context, txn *voiceTxn, userID,
 		}
 	}
 
-	// This participant is out of voice, so the E2EE key holder may
-	// need to move. Without this the map keeps naming the departed
-	// user and the real lowest-uid participant's rekey offers are
+	// This participant is out of voice, so the key holder may need to move; otherwise
+	// the map keeps naming them and the real lowest-uid participant's rekey offers are
 	// rejected with NOT_KEY_HOLDER. Safe here: no locks are held.
 	h.updateKeyHolder(channelID)
 
-	// The leaver's own client state was just cleared above, so
-	// broadcastVoiceEvent's still-in-the-room union can no longer see
-	// them — without broadcastVoiceEventWithLeaver's extra term, a
-	// participant without READ_MESSAGES on this channel (voice
-	// membership can outlive a READ revocation) never learns the server
-	// already tore down their call. Mirrors finishVoiceLeave and
-	// CleanupVoiceForChannel, which add the leaver for the same reason.
+	// The leaver's client state was just cleared, so broadcastVoiceEvent's
+	// still-in-the-room union cannot see them; without broadcastVoiceEventWithLeaver's
+	// extra term a participant without READ_MESSAGES (voice membership can outlive a
+	// READ revocation) never learns the server tore down their call. Mirrors
+	// finishVoiceLeave and CleanupVoiceForChannel.
 	h.broadcastVoiceEventWithLeaver(ctx, channelID, buildVoiceLeave(channelID, userID), userID)
 	slog.Info("livekit webhook: cleaned up stale voice state",
 		"user_id", userID,

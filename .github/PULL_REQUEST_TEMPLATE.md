@@ -43,7 +43,8 @@
       `check:hygiene` / `check:docs` run a single stack if that is all you touched
 - [ ] Manual testing done (describe below)
 - [ ] Generated files were regenerated, not hand-edited — `Server/db/dbgen/`,
-      `Server/ws/message_types.go`, `Client/src/lib/protocolTypes.ts`. CI fails on
+      `Server/ws/message_types.go`, `Server/httperr/codes.go`,
+      `Client/src/lib/protocolTypes.ts`. CI fails on
       drift. (`.superpowers/FINDINGS.md` is untracked and rendered in CI; edit the
       ledger, never the rendering)
 - [ ] Docs updated — anything under `docs/architecture/` (incl. `ux/`) whose

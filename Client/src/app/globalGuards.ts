@@ -7,10 +7,11 @@
 import { wantsNativeMenu } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { installFileDropGuard } from "../features/messaging/fileDropGuard";
 import { desktop } from "../platform/desktop";
 import { connectText } from "../i18n/connect";
+import { isAndroidApp } from "../features/voice/native/platform";
 
 const log = createLogger("main");
 
@@ -26,11 +27,15 @@ export function installGlobalGuards(): void {
     typeof window.matchMedia === "function" &&
     window.matchMedia("(any-pointer: coarse)").matches
   ) {
-    import("@lib/touchInput").then(
+    import("@lib/ui/touchInput").then(
       (m) => m.installTouchInput(new Disposable().signal),
       (err: unknown) => log.warn("touch input failed to load", err),
     );
   }
+
+  // The Android app behaves like an app, not a web page: a pinch does not
+  // zoom the whole interface. The image viewer zooms on its own.
+  if (isAndroidApp()) lockPageZoom();
 
   // F12 or Ctrl+Shift+I opens WebView2 DevTools in development builds only.
   // F5 and Ctrl+R are blocked to prevent accidental page reloads which cause
@@ -79,4 +84,11 @@ export function installGlobalGuards(): void {
       );
     }
   });
+}
+
+/** Add `maximum-scale=1, user-scalable=no` to the viewport meta, once. */
+export function lockPageZoom(): void {
+  const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+  if (meta === null || meta.content.includes("user-scalable")) return;
+  meta.content = `${meta.content}, maximum-scale=1, user-scalable=no`;
 }

@@ -3,10 +3,10 @@ import {
   startMusicActivity,
   MUSIC_ACTIVITY_POLL_MS,
   type MusicActivityLoop,
-} from "@lib/musicActivity";
-import { handleActivityRefusal } from "@lib/gameActivityBridge";
-import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/serverCapabilities";
-import { savePref } from "@lib/preferences";
+} from "@lib/presence/musicActivity";
+import { handleActivityRefusal } from "@lib/presence/gameActivityBridge";
+import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/net/serverCapabilities";
+import { savePref } from "@lib/prefs/preferences";
 import {
   EMPTY_MUSIC_PREFS,
   MUSIC_ACTIVITY_PREF_KEY,
@@ -16,7 +16,7 @@ import {
   loadSeenPlayers,
   saveMusicPrefs,
   withPlayerHidden,
-} from "@lib/musicActivityPrefs";
+} from "@lib/prefs/musicActivityPrefs";
 import type { ConnectionState } from "@lib/ws";
 import type { MediaPrefs, MediaReading } from "../../src/platform/contracts/mediaDetector";
 

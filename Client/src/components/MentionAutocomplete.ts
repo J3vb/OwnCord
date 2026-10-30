@@ -9,13 +9,13 @@ import { getChannelMessages } from "@stores/messages.store";
 import { getCurrentUser } from "@stores/auth.store";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
-import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/mentions";
-import { idMentionsEnabled } from "@lib/serverCapabilities";
+import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/text/mentions";
+import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { channelsStore } from "@stores/channels.store";
 import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
-} from "@components/inline-autocomplete";
+} from "@components/inlineAutocomplete";
 import { messagingText } from "../i18n/messaging";
 
 /** Maximum rows shown at once — the popup is a shortcut, not the member list. */
@@ -34,7 +34,7 @@ export interface MentionSuggestion {
   readonly kind: "user" | "broadcast" | "role";
   /** User id, or null for @everyone/@here and for a role. */
   readonly userId: number | null;
-  /** Role id for a role suggestion (WP 6.3e), else null. */
+  /** Role id for a role suggestion, else null. */
   readonly roleId: number | null;
 }
 

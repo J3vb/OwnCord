@@ -13,25 +13,17 @@ import (
 )
 
 const (
-	// maxColdReplay caps how many persisted events a single cold-tier reconnect
-	// replay may return. A gap that reaches the cap cannot be replayed correctly
-	// and falls back to a full ready — see handleReconnect.
+	// maxColdReplay caps persisted events a cold-tier replay may return; a gap
+	// that reaches it cannot be replayed correctly and falls back to a full ready.
 	maxColdReplay = 5000
 )
 
-// handleReconnect attempts to resume a client via replay. Its two return
-// values are independent signals for ServeWS:
-//   - handled reports whether this function owns the outcome of the
-//     connection attempt. false means "replay isn't possible, fall through
-//     to handleFreshConnect for a full ready."
-//   - startPumps reports whether ServeWS should start readPump/writePump.
-//     It is only meaningful when handled is true, and is false on the
-//     handshake-write-failure paths below: those paths already ran the full
-//     unregisterFailedHandshake teardown and closed conn themselves, so no
-//     pump may start — readPump's defer would find the client already gone
-//     (unregisterNow reporting replaced=false) and run that same teardown a
-//     second time (OC-0051): a duplicate StampDisconnect, a duplicate
-//     offline presence broadcast, and a duplicate hub seq for it.
+// handleReconnect attempts to resume a client via replay. handled reports whether
+// this function owns the outcome; false means fall through to handleFreshConnect
+// for a full ready. startPumps is meaningful only when handled and is false on
+// the handshake-write-failure paths: those already ran the full
+// unregisterFailedHandshake teardown and closed conn, and a pump would run it a
+// second time (duplicate StampDisconnect, offline presence broadcast, hub seq).
 func (h *Hub) handleReconnect(
 	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
 ) (handled, startPumps bool) {
@@ -40,20 +32,15 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
-	// Voice membership can outlive READ_MESSAGES (voice_join.go checks it
-	// only at join), so a live participant resuming can have their own room
-	// excluded from allowedChannelIDs entirely — most commonly a DM voice call
-	// after the DM was closed (computeAllowedChannels sources DM IDs from
-	// dm_open_state). Capture it before registerNow performs the same
-	// lookup/transfer, so replay can be supplemented below with the room's own
-	// voice_state/voice_leave even though the room is outside the READ-gated
-	// allowed set. It is never added to allowedChannelIDs itself — that map
-	// also gates the ChannelTopic subscription in registerNow and would leak
-	// the channel's chat to a user who cannot read it.
+	// Voice membership can outlive READ_MESSAGES (checked only at join), so a live
+	// participant resuming can have their room excluded from allowedChannelIDs (e.g.
+	// a DM call after the DM was closed). Capture it before registerNow does the same
+	// lookup/transfer so replay can be supplemented with the room's voice_state and
+	// voice_leave. It is never added to allowedChannelIDs: that map also gates the
+	// ChannelTopic subscription in registerNow and would leak the channel's chat.
 	//
-	// old is nil on almost every ORDINARY reconnect, not just a rare race, so
-	// it is hoisted here for the liveVoiceChID == 0 fallback further down:
-	// liveVoiceEventsSinceForUser (OC-0428), whose doc explains why.
+	// old is nil on almost every ordinary reconnect, hence the liveVoiceChID == 0
+	// fallback below (see liveVoiceEventsSinceForUser).
 	var liveVoiceChID int64
 	old := h.sessionClient(c.userID, c.tokenHash)
 	if old != nil {
@@ -67,41 +54,28 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
-	// Register BEFORE writing replay data so broadcasts that arrive during
-	// the write window are queued in the client's send buffer instead of
-	// being lost (BUG-123). writePump hasn't started yet, so queued messages
-	// will be drained once the pumps begin.
+	// Register before writing replay data so broadcasts arriving during the write
+	// window queue in the client's send buffer (writePump has not started; they drain
+	// once the pumps begin).
 	//
-	// The replay set built above can go stale between being read and c
-	// becoming reachable: deliverBroadcast (the hub's own Run goroutine)
-	// allocates a seq, pushes it to the ring buffer, and publishes to current
-	// subscribers — all under h.seqMu — concurrently with this handshake
-	// goroutine. registerNow is what subscribes this connection, so a
-	// broadcast landing in the gap between the snapshot above and
-	// registration reaches nobody, and the client's max(seq)-only tracking
-	// means it can never be requested again once a later frame arrives.
-	// Close the window by re-reading the ring-buffer-derived portion of
-	// `events` and calling registerNow inside the SAME h.seqMu critical
-	// section deliverBroadcast uses, so no seq can be allocated in between
-	// (reconnectRegister below).
-	// Restore the client's channel subscription BEFORE registration.
+	// The replay set can go stale before c is reachable: deliverBroadcast allocates a
+	// seq, pushes to the ring buffer and publishes to subscribers under h.seqMu,
+	// concurrently with this goroutine. A broadcast landing between the snapshot and
+	// registration reaches nobody, and the client tracks only max(seq) so it can
+	// never ask for it again. Close the window by re-reading the ring-buffer portion
+	// and calling registerNow inside the same h.seqMu section (reconnectRegister).
+	// Restore the client's channel subscription before registration. registerNow
+	// copies it from the old client entry, but when the server already saw the old
+	// socket close there is none to copy, leaving the resumed connection without a
+	// ChannelTopic subscription until its channel_focus round trip completes.
+	// Everything broadcast in that window would reach nobody on this socket and the
+	// client can never ask for it back.
 	//
-	// registerNow copies the channel subscription from the OLD client entry,
-	// but on a resume where the server already observed the previous socket
-	// close there is no old entry to copy from — so without this the resumed
-	// connection holds no ChannelTopic subscription until its post-auth_ok
-	// channel_focus round trip completes. Everything broadcast to that channel
-	// in the window (auth_ok write + up to maxColdReplay replay frames + pump
-	// startup + one RTT) is delivered to nobody on this socket, and the client
-	// can never ask for it back because it only ever reports max(seq).
+	// Set outside the h.seqMu section below since it needs no seq ordering
+	// (seqMu -> c.mu is a normal edge: lock_order.go).
 	//
-	// Set outside the h.seqMu section below: it needs no seq ordering, so it
-	// stays out of that section. (seqMu -> c.mu is a normal edge: lock_order.go.)
-	//
-	// c.authChannelID is attacker-controlled, so it is honoured only when the
-	// freshly computed read-permission set contains it. Fail closed: an
-	// unknown or now-unreadable id leaves channelID at 0, which is exactly the
-	// pre-existing behaviour rather than a new denial.
+	// c.authChannelID is attacker-controlled, so it is honoured only when the freshly
+	// computed read-permission set contains it. Fail closed: otherwise channelID stays 0.
 	if c.authChannelID != 0 {
 		if allowedChannelIDs[c.authChannelID] {
 			c.mu.Lock()
@@ -118,29 +92,22 @@ func (h *Hub) handleReconnect(
 		return false, false
 	}
 
-	// OC-0423: reconnectRegister just made c reachable via h.clients, so this
-	// is the earliest point a revocation racing reconnectPrecheck's DB work
-	// could have found this socket — see postRegisterSessionRecheck's doc.
-	// Deliberately outside reconnectRegister's h.seqMu section: it only needs
-	// to run after that section's registerNow, and a DB round trip has no
-	// business extending the critical section that serializes every broadcast.
+	// reconnectRegister just made c reachable via h.clients, the earliest point a
+	// revocation racing reconnectPrecheck's DB work could find this socket. Kept
+	// outside reconnectRegister's h.seqMu section: a DB round trip must not extend
+	// the critical section that serializes every broadcast.
 	if v := h.postRegisterSessionRecheck(ctx, c); v != postRegisterOK {
-		// Mirrors reconnectWriteReplay's own handshake-failure path below:
-		// the teardown already ran (inside postRegisterSessionRecheck), so
-		// only the conn needs closing. startPumps=false — readPump must
-		// never start on this closed conn (OC-0051).
+		// The teardown already ran inside postRegisterSessionRecheck, so only conn needs
+		// closing; startPumps=false so readPump never starts on it.
 		closeAbortedHandshake(ctx, conn, v)
 		return true, false
 	}
 
-	// P1 (Codex round 2): nsfwReadableChannelIDs was snapshotted back in
-	// reconnectPrecheck, several DB round trips and a seqMu section ago — a
-	// batch-wide recheck taken once more right here would still trust that
-	// single moment for every frame that follows, so an acknowledge, revoke
-	// or re-label landing between two frames of THIS SAME replay would still
-	// leak everything after it. reconnectWriteReplay's write loop re-checks
-	// each content-bearing frame live, immediately before writing it
-	// (frameReadableNow) — no snapshot survives past the one frame it gates.
+	// nsfwReadableChannelIDs was snapshotted in reconnectPrecheck, several DB round
+	// trips and a seqMu section ago. An acknowledge, revoke or re-label landing
+	// between two frames of this replay would leak everything after it, so
+	// reconnectWriteReplay re-checks each content-bearing frame live just before
+	// writing it (frameReadableNow).
 	switch replaySource {
 	case "buffer":
 		h.reconnectTierBuf.Add(1)
@@ -149,21 +116,17 @@ func (h *Hub) handleReconnect(
 	}
 	telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", replaySource))
 
-	// Best-effort supplement: the user's own live voice room may sit outside
-	// allowedChannelIDs (see the capture of liveVoiceChID above), so its
-	// voice_state/voice_leave would otherwise never reach this replay at all.
-	// Tries the ring buffer first, then the cold-tier store; a miss on both
-	// just leaves this one supplement as a no-op, not a regression versus the
-	// pre-fix behaviour.
+	// Best-effort supplement: the user's live voice room may sit outside
+	// allowedChannelIDs (see liveVoiceChID above), so its voice_state/voice_leave
+	// would otherwise never reach this replay. Tries the ring buffer, then the cold
+	// tier; a miss on both is a no-op.
 	switch {
 	case liveVoiceChID != 0 && !allowedChannelIDs[liveVoiceChID]:
 		events = append(events, h.liveVoiceEventsSince(ctx, lastSeq, liveVoiceChID)...)
 	case old == nil:
-		// OC-0428: no still-registered old *Client to source the room from,
-		// so scan by the resuming user's OWN id instead of by channel. A
-		// frame whose channel IS in allowedChannelIDs is skipped — the main
-		// replay above already carries it, and re-adding it would duplicate
-		// the frame on the wire.
+		// No still-registered old *Client to source the room from, so scan by the
+		// resuming user's own id. Frames whose channel is in allowedChannelIDs are
+		// skipped: the main replay carries them and re-adding would duplicate them.
 		for _, evt := range h.liveVoiceEventsSinceForUser(ctx, lastSeq, c.userID) {
 			if !allowedChannelIDs[payloadChannelID(evt)] {
 				events = append(events, evt)
@@ -171,20 +134,15 @@ func (h *Hub) handleReconnect(
 		}
 	}
 
-	// Settle the session's status BEFORE the auth_ok write below, mirroring
-	// handleFreshConnect's ordering: reconnectWriteReplay reads c.user.Status
-	// to build auth_ok, so if this ran after that write the resumed client
-	// would be told its disconnect-time status (routinely "offline", since
-	// StampDisconnect just rewrote it) instead of the status it is about
-	// to come online as and broadcast (OC-0222). Skips member_join — the user
-	// was already known.
+	// Settle the session's status before the auth_ok write, as handleFreshConnect
+	// does: reconnectWriteReplay reads c.user.Status to build auth_ok, and after
+	// StampDisconnect that would be the disconnect-time status (routinely "offline")
+	// rather than the one the user is coming online as. Skips member_join.
 	h.applyConnectStatus(ctx, c)
 
 	if !h.reconnectWriteReplay(ctx, conn, c, lastSeq, events, replaySource) {
-		// startPumps=false: the teardown inside reconnectWriteReplay already ran
-		// in full. Starting readPump on this closed conn would hit an immediate
-		// Read error and its defer would run the identical teardown a second
-		// time (OC-0051).
+		// The teardown inside reconnectWriteReplay already ran in full; a readPump on
+		// this closed conn would hit a Read error and run it a second time.
 		return true, false
 	}
 
@@ -194,20 +152,17 @@ func (h *Hub) handleReconnect(
 }
 
 // reconnectPrecheck runs handleReconnect's two entry guards and, when replay is
-// still on the table, returns the read-permission set replay is filtered by
-// (allowedChannelIDs — visibility) and its B5-7 narrowing (nsfwReadableChannelIDs
-// — visibility minus any labelled channel the user has not acknowledged).
-// ok=false means the caller must fall through to a full ready.
+// still possible, returns the read-permission set replay is filtered by
+// (allowedChannelIDs) and its NSFW narrowing (nsfwReadableChannelIDs: visibility
+// minus unacknowledged labelled channels). ok=false means fall through to a full ready.
 func (h *Hub) reconnectPrecheck(
 	ctx context.Context, c *Client, lastSeq uint64,
 ) (allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool, ok bool) {
-	// The configured seam, never a caller-supplied handle: binding it here is
-	// what lets a service-backed or instrumented reader actually intercept the
-	// two reads below — the same posture handleFreshConnect takes.
+	// Use the configured seam, never a caller-supplied handle, so a service-backed or
+	// instrumented reader intercepts the reads below (as handleFreshConnect does).
 	database := h.readers.Visibility
-	// Replay cannot repair a missed visibility change (targeted and
-	// unsequenced), a shed content frame (SRV-03, never got a seq) or a
-	// presence frame this user's connection dropped (P5-S03): full ready.
+	// Replay cannot repair a missed visibility change (targeted, unsequenced), a shed
+	// content frame (never got a seq) or a dropped presence frame: full ready.
 	if h.mustFullResync(lastSeq) || h.presenceResyncPending(c.userID, c.tokenHash) {
 		slog.Info("ws replay skipped (resync watermark at or past last_seq, or presence dropped), sending full ready",
 			"user_id", c.userID, "last_seq", lastSeq)
@@ -215,20 +170,17 @@ func (h *Hub) reconnectPrecheck(
 		telemetry.NewAppMetrics().WSReconnectTierTotal.Add(ctx, 1, telemetry.String("tier", "full"))
 		return nil, nil, false
 	}
-	// c.user is the auth-time snapshot; a role reassignment landing between
-	// authenticateConn and here would otherwise be resolved from the OLD
-	// RoleID for the rest of this socket's life — revokeUnreadableChannels
-	// cannot reach a mid-handshake socket (it early-returns when the user is
-	// not yet in h.clients), and nothing revalidates handshake-time
-	// subscriptions afterwards (audit-2026-08-19 F-2). Re-read the row so
-	// the permission set below is computed from the CURRENT role.
+	// c.user is the auth-time snapshot; a role change between authenticateConn and
+	// here would otherwise be resolved from the old RoleID for the socket's life
+	// (revokeUnreadableChannels early-returns for a socket not yet in h.clients and
+	// nothing revalidates handshake-time subscriptions). Re-read the row so the
+	// permission set uses the current role.
 	if err := h.refreshUserSnapshot(ctx, database, c); err != nil {
 		slog.Warn("ws handleReconnect: user re-read failed, falling back to full ready",
 			"user_id", c.userID, "err", err)
 		return nil, nil, false
 	}
-	// Compute the set of channel IDs the reconnecting user can access so that
-	// channel-scoped replay events are filtered by current permissions (M3).
+	// Channel-scoped replay events are filtered by the user's current permissions.
 	allowedChannelIDs, err := h.computeAllowedChannels(ctx, database, c.user)
 	if err != nil {
 		slog.Warn("ws handleReconnect: computeAllowedChannels failed, falling back to full ready",
@@ -250,12 +202,10 @@ func (h *Hub) reconnectPrecheck(
 	return allowedChannelIDs, nsfwReadableChannelIDs, true
 }
 
-// reconnectSelectReplay picks the tier that serves this resume — the ring
-// buffer when it still covers lastSeq, otherwise the cold-tier EventStore — and
-// returns the events found, the tier name, and (cold tier only) the persisted
-// rows plus their highest seq, which reconnectRegister needs for its re-read.
-// A nil events return means neither tier can replay and the caller must fall
-// through to a full ready.
+// reconnectSelectReplay picks the tier that serves this resume (the ring buffer if
+// it covers lastSeq, else the cold-tier EventStore) and returns the events, the
+// tier name and, cold tier only, the persisted rows plus their highest seq for
+// reconnectRegister's re-read. Nil events means neither tier can replay.
 func (h *Hub) reconnectSelectReplay(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 ) ([][]byte, string, [][]byte, uint64) {
@@ -270,7 +220,7 @@ func (h *Hub) reconnectSelectReplay(
 		return events, replaySource, persistedTail, maxPersistedSeq
 	}
 	h.noteRingMiss(lastSeq)
-	// Phase B Step 7 — try cold-tier replay from the EventStore before forcing a full ready.
+	// Try cold-tier replay from the EventStore before forcing a full ready.
 	if esp := h.eventStore.Load(); esp != nil {
 		es := *esp
 		channelIDs := make([]int64, 0, len(allowedChannelIDs))
@@ -284,25 +234,19 @@ func (h *Hub) reconnectSelectReplay(
 			slog.Warn("ws handleReconnect: cold-tier replay query failed",
 				"user_id", c.userID, "err", dbErr)
 		case len(persisted) >= coldCap:
-			// The query is "ORDER BY seq ASC LIMIT maxColdReplay", so a full
-			// result means the gap exceeds the cap and the NEWEST events were
-			// dropped. Replaying it would look like a complete resume to the
-			// client — it tracks only max(seq) and cannot detect the hole —
-			// silently losing state events that REST history never repairs.
-			// Leave events nil so the fall-through forces a full ready.
+			// The query is ORDER BY seq ASC LIMIT maxColdReplay, so a full result means the
+			// gap exceeds the cap and the newest events were dropped. Replaying it would look
+			// like a complete resume (the client tracks only max(seq)) and silently lose
+			// state events REST history never repairs. Leave events nil to force a full ready.
 			slog.Warn("ws handleReconnect: cold-tier replay hit the row cap, forcing full ready",
 				"user_id", c.userID, "last_seq", lastSeq, "cap", coldCap)
 		case len(persisted) > 0:
-			// Retention pruning (PruneEventsOlderThan) deletes purely by
-			// created_at with no seq-floor coordination, so this
-			// channel-filtered result can be a surviving suffix left behind
-			// after the events between lastSeq and persisted[0] were
-			// pruned. Accepting it as-is would present a hole as a complete
-			// resume, since the client tracks only max(seq). Probe the
-			// store's oldest surviving seq UNFILTERED before trusting it —
-			// a channel-filtered contiguity check on persisted itself can't
-			// work, since a sparse per-channel result is legitimately
-			// non-contiguous.
+			// Retention pruning deletes purely by created_at with no seq-floor coordination,
+			// so this channel-filtered result can be a surviving suffix after the events
+			// between lastSeq and persisted[0] were pruned, which would present a hole as a
+			// complete resume. Probe the store's oldest surviving seq unfiltered: a
+			// contiguity check on persisted itself cannot work since a sparse per-channel
+			// result is legitimately non-contiguous.
 			oldest, oldestErr := es.GetEventsSince(ctx, 0, 1)
 			switch {
 			case oldestErr != nil:
@@ -327,19 +271,17 @@ func (h *Hub) reconnectSelectReplay(
 	return events, replaySource, persistedTail, maxPersistedSeq
 }
 
-// reconnectVetColdTail turns a cold-tier result into a replayable tail, or
-// returns nil when it cannot be trusted: the range it covers must have no
-// interior gap, and the ring buffer must cover everything newer than its last
-// row. The returned seq is the highest one in persisted.
+// reconnectVetColdTail turns a cold-tier result into a replayable tail, or nil
+// when it cannot be trusted: the range must have no interior gap and the ring
+// buffer must cover everything newer than its last row. The returned seq is the
+// highest in persisted.
 func (h *Hub) reconnectVetColdTail(
 	ctx context.Context, c *Client, es EventStore, lastSeq uint64,
 	persisted []db.PersistedEvent, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 ) ([][]byte, uint64) {
-	// B5-7: a content-bearing row for a channel that is allowed (visible) but
-	// not readable (labelled and unacknowledged) is dropped here — the same
-	// rule EventsSinceFilteredContent applies to the ring buffer. Checked
-	// against the row's own stored EventType/ChannelID, not a JSON parse of
-	// its payload.
+	// A content-bearing row for an allowed but unreadable (labelled, unacknowledged)
+	// channel is dropped, the same rule EventsSinceFilteredContent applies to the
+	// ring buffer. Checked against the row's stored EventType/ChannelID, not its payload.
 	persistedTail := make([][]byte, 0, len(persisted))
 	for _, p := range persisted {
 		if contentBearingKinds[p.EventType] && !nsfwReadableChannelIDs[p.ChannelID] {
@@ -349,16 +291,12 @@ func (h *Hub) reconnectVetColdTail(
 	}
 	maxPersistedSeq := uint64(persisted[len(persisted)-1].Seq) //nolint:gosec // seq is a counter bounded well below MaxInt64
 
-	// persisted is channel-filtered, so a hole in a channel
-	// outside allowedChannelIDs would slip past a contiguity
-	// check on persisted itself — and EventPersister can lose a
-	// row outright (a full queue drops silently in Enqueue, a
-	// per-row insert failure inside a batch flush is logged but
-	// never surfaced here; see event_persister.go). Count the
-	// UNFILTERED range (lastSeq, maxPersistedSeq] and require
-	// every seq in it to be present. seq is the events table's
-	// primary key, so the count can only come up short, never
-	// over.
+	// persisted is channel-filtered, so a hole in a channel outside
+	// allowedChannelIDs would slip past a contiguity check on it, and EventPersister
+	// can lose a row outright (full queue drops silently in Enqueue; a per-row insert
+	// failure in a batch flush is only logged). Count the unfiltered range
+	// (lastSeq, maxPersistedSeq] and require every seq present; seq is the primary
+	// key so the count can only come up short.
 	expectedCount := maxPersistedSeq - lastSeq
 	switch gapCount, gapErr := es.CountEventsInRange(ctx, int64(lastSeq), int64(maxPersistedSeq)); { //nolint:gosec // bounded well below MaxInt64
 	case gapErr != nil:
@@ -373,19 +311,16 @@ func (h *Hub) reconnectVetColdTail(
 	}
 
 	if persistedTail != nil {
-		// The EventPersister flushes asynchronously, so cold rows can
-		// lag the live seq: events broadcast after the last flush sit
-		// only in the ring buffer. Confirm the buffer can cover
-		// everything above the newest persisted row — the
-		// authoritative re-read happens atomically with registerNow
-		// below, but a hole here must still force a full ready
-		// rather than a replay with a silent gap at its end.
+		// EventPersister flushes asynchronously, so cold rows can lag the live seq and
+		// newer events sit only in the ring buffer. Confirm the buffer covers everything
+		// above the newest persisted row; a hole must force a full ready, not a replay
+		// with a silent gap at its end. (The authoritative re-read is atomic with
+		// registerNow.)
 		switch tail := h.ReplayBuffer().EventsSinceFilteredContent(maxPersistedSeq, allowedChannelIDs, nsfwReadableChannelIDs); {
 		case tail != nil:
 		case atomic.LoadUint64(&h.seq) == maxPersistedSeq:
-			// Post-restart empty buffer with the hub seq seeded from
-			// the store max: nothing was broadcast after the last
-			// persisted row, so the cold rows alone are complete.
+			// Post-restart empty buffer with the hub seq seeded from the store max: nothing
+			// was broadcast after the last persisted row.
 		default:
 			slog.Warn("ws handleReconnect: ring buffer cannot cover the post-flush tail, forcing full ready",
 				"user_id", c.userID, "max_persisted_seq", maxPersistedSeq)
@@ -395,16 +330,15 @@ func (h *Hub) reconnectVetColdTail(
 	return persistedTail, maxPersistedSeq
 }
 
-// reconnectRegister re-reads the ring-buffer-derived portion of the replay and
-// registers c inside the SAME h.seqMu critical section deliverBroadcast uses,
-// so no seq can be allocated in between (see the comment in handleReconnect).
-// It returns the events to actually send; ok=false means one of the re-checks
-// tripped and the caller must fall through to a full ready.
+// reconnectRegister re-reads the ring-buffer portion of the replay and registers c
+// inside the same h.seqMu section deliverBroadcast uses, so no seq can be
+// allocated in between. ok=false means a re-check tripped and the caller must
+// fall through to a full ready.
 func (h *Hub) reconnectRegister(
 	ctx context.Context, c *Client, lastSeq uint64, allowedChannelIDs, nsfwReadableChannelIDs map[int64]bool,
 	replaySource string, persistedTail [][]byte, maxPersistedSeq uint64,
 ) (events [][]byte, ok bool) {
-	// RT-8: drop a parked grace entry whose row is gone (a DB read, before h.seqMu).
+	// Drop a parked grace entry whose row is gone (a DB read, so before h.seqMu).
 	txn := h.begin(c.userID)
 	defer txn.end()
 	h.dropOrphanVoiceGrace(ctx, c.userID)
@@ -417,9 +351,8 @@ func (h *Hub) reconnectRegister(
 	case "buffer":
 		fresh := h.ReplayBuffer().EventsSinceFilteredContent(lastSeq, allowedChannelIDs, nsfwReadableChannelIDs)
 		if fresh == nil {
-			// The buffer window closed between the earlier check and this
-			// lock (an extreme write burst evicted lastSeq) — there is
-			// nothing left to fall back to for this attempt but a full ready.
+			// The buffer window closed since the earlier check (an extreme write burst
+			// evicted lastSeq); only a full ready is left.
 			h.observeSeqMuHold(start)
 			h.seqMu.Unlock()
 			slog.Warn("ws handleReconnect: buffer window closed just before registration, forcing full ready",
@@ -448,17 +381,12 @@ func (h *Hub) reconnectRegister(
 	if handleReconnectPreRegisterRaceHook != nil {
 		handleReconnectPreRegisterRaceHook()
 	}
-	// Re-check the watermark one last time, right before registerNow makes
-	// this connection reachable. RefreshChannelVisibility and
-	// revokeUnreadableChannels both iterate h.clients to fan out a targeted,
-	// unsequenced channel_create/channel_delete — a snapshot this
-	// still-mid-handshake connection is absent from. Without this re-check, a
-	// visibility change that lands anywhere between the entry check above and
-	// here is missed twice: the fan-out can't reach an unregistered client,
-	// and the entry check has already passed, so nothing else catches it
-	// before this resume commits to permissions computed before the change
-	// (OC-0206). A fan-out still in flight is caught by the targetedFanouts
-	// counter, a finished one by the watermark it bumped on the way out.
+	// Re-check the watermark right before registerNow makes this connection
+	// reachable. RefreshChannelVisibility and revokeUnreadableChannels fan out a
+	// targeted, unsequenced channel_create/channel_delete over h.clients, a snapshot
+	// this mid-handshake connection is absent from. A change landing after the entry
+	// check would otherwise be missed twice. A fan-out still in flight is caught by
+	// the targetedFanouts counter, a finished one by the watermark it bumped.
 	if h.mustFullResyncAtRegister(lastSeq, c.userID, c.tokenHash) {
 		h.observeSeqMuHold(start)
 		h.seqMu.Unlock()
@@ -477,17 +405,14 @@ func (h *Hub) reconnectRegister(
 	return events, true
 }
 
-// reconnectWriteReplay writes the resume handshake: auth_ok followed by the
-// replayed events. A false return means a write failed, in which case the full
-// unregisterFailedHandshake teardown has already run and conn is closed, so the
-// caller must not start any pump (OC-0051).
+// reconnectWriteReplay writes the resume handshake: auth_ok then the replayed
+// events. False means a write failed, the full unregisterFailedHandshake teardown
+// already ran and conn is closed, so the caller must not start any pump.
 func (h *Hub) reconnectWriteReplay(
 	ctx context.Context, conn *websocket.Conn, c *Client, lastSeq uint64,
 	events [][]byte, replaySource string,
 ) bool {
-	// Replay succeeded — send auth_ok then missed events. The replay tier
-	// is included in the payload so the client can attribute reconnect
-	// behaviour without separate metric scraping.
+	// The replay tier is in the payload so the client can attribute reconnect behaviour without metric scraping.
 	slog.Info("ws sending auth_ok (reconnect)", "user_id", c.userID, "username", c.user.Username, "role", c.roleName, "replay_source", replaySource)
 	if err := handshakeWrite(ctx, conn, h.buildAuthOK(ctx, c.user, c.roleName, c.roleIDs, replaySource)); err != nil {
 		slog.Warn("ws: failed to send auth_ok (reconnect)", "user_id", c.userID, "err", err)
@@ -497,13 +422,10 @@ func (h *Hub) reconnectWriteReplay(
 	}
 	written := 0
 	for _, evt := range events {
-		// P1 (Codex round 2): re-check a content-bearing frame's readability
-		// live, right here, immediately before it goes out — not from a
-		// snapshot taken once for the whole batch (see the comment above
-		// this call site in handleReconnect). Every earlier frame in this
-		// loop has already been written by the time this one is checked, so
-		// a revoke/unlabel landing between two frames of the SAME reconnect
-		// is honoured starting with the very next frame it affects.
+		// Re-check a content-bearing frame's readability live, immediately before it
+		// goes out, not from a batch snapshot (see handleReconnect). A revoke/unlabel
+		// landing between two frames of the same reconnect is honoured from the very next
+		// frame it affects.
 		if contentBearingKinds[extractEventType(evt)] {
 			chID := payloadChannelID(evt)
 			if reconnectFrameReadableRaceHook != nil {
@@ -525,13 +447,12 @@ func (h *Hub) reconnectWriteReplay(
 	return true
 }
 
-// liveVoiceEventsSinceCore is the ring-first / cold-fallback ladder the two
-// liveVoiceEventsSince* supplements share. ringRead returns the ring's answer:
-// nil means "ring miss" (fall through to the cold tier), an empty non-nil
-// slice means "caught up" and is not a miss. coldRead returns the cold-tier
-// payloads, or nil on a lookup failure or when the range exceeded the row cap
-// — both degrade to the best-effort miss those supplements document. keep
-// admits a frame by wire type and, for the per-user variant, by its payload.
+// liveVoiceEventsSinceCore is the ring-first / cold-fallback ladder shared by
+// the liveVoiceEventsSince* supplements. ringRead returning nil means a ring miss
+// (fall through to cold); an empty non-nil slice means caught up. coldRead
+// returns nil on a lookup failure or when the range exceeded the row cap, both
+// degrading to the best-effort miss. keep admits a frame by wire type and, for
+// the per-user variant, by payload.
 func liveVoiceEventsSinceCore(ringRead, coldRead func() [][]byte, keep func([]byte) bool) [][]byte {
 	var raw [][]byte
 	if buf := ringRead(); buf != nil {
@@ -552,14 +473,11 @@ func liveVoiceEventsSinceCore(ringRead, coldRead func() [][]byte, keep func([]by
 }
 
 // liveVoiceEventsSince returns voice_state/voice_leave events for chID at or
-// after afterSeq, bypassing the READ-gated channel filter entirely. Voice
-// membership can outlive READ_MESSAGES (voice_join.go checks it only at
-// join), so a resuming
-// participant's own room is not always in their READ-visible set — a stock
-// example is a DM voice call after the DM was closed. Tries the ring buffer
-// first (fresh, so it observes anything pushed concurrently with the caller),
-// then falls back to the cold-tier store; returns nil, not an error, on a
-// miss in both, since this is a best-effort supplement to the main replay.
+// after afterSeq, bypassing the READ-gated channel filter: voice membership can
+// outlive READ_MESSAGES, so a resuming participant's room (e.g. a DM call after
+// the DM closed) is not always in their READ-visible set. Tries the ring buffer
+// (fresh, so it sees anything pushed concurrently), then the cold tier; returns
+// nil on a miss in both since this is a best-effort supplement.
 func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID int64) [][]byte {
 	if chID == 0 {
 		return nil
@@ -574,25 +492,17 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 			}
 			es := *esp
 			coldCap := h.maxColdReplayLimit()
-			// Fetch one row past the cap so truncation is decided by the presence
-			// of that extra row, not by len == cap: a complete window of exactly
-			// coldCap rows is not truncated and must replay in full (Codex review
-			// on #1436). A result of at most coldCap rows is therefore complete.
+			// Fetch one row past the cap so truncation is decided by the extra row, not
+			// len == cap: a complete window of exactly coldCap rows must replay in full.
 			persisted, err := es.GetEventsSinceForChannels(ctx, int64(afterSeq), []int64{chID}, coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
 			if err != nil {
 				return nil
 			}
 			if len(persisted) > coldCap {
-				// Same failure mode reconnectSelectReplay guards against above:
-				// the query is "ORDER BY seq ASC LIMIT n", so a result past the
-				// cap means the range exceeds it and any cap-sized window would
-				// have silently dropped the NEWEST rows — for a voice room, quite
-				// possibly the peer's voice_leave. Replaying a truncated window
-				// would install a join whose matching leave was discarded, which
-				// is worse than the documented best-effort miss this function
-				// already returns on a plain lookup failure. A full ready isn't
-				// available here (registerNow already ran before this supplement
-				// runs), so nil is the correct degradation.
+				// Same failure mode as reconnectSelectReplay: a result past the cap means the
+				// newest rows would have been dropped, for a voice room possibly the peer's
+				// voice_leave, installing a join whose leave was discarded. A full ready is not
+				// available here (registerNow already ran), so nil is the correct degradation.
 				slog.Warn("ws liveVoiceEventsSince: cold-tier supplement exceeds the row cap, skipping truncated window",
 					"chID", chID, "after_seq", afterSeq, "cap", coldCap)
 				return nil
@@ -613,20 +523,13 @@ func (h *Hub) liveVoiceEventsSince(ctx context.Context, afterSeq uint64, chID in
 	)
 }
 
-// liveVoiceEventsSinceForUser returns voice_state/voice_leave events at or
-// after afterSeq whose OWN payload names userID (eventNamesUser's payload.user_id
-// check), bypassing the READ-gated channel filter — used, unlike
-// liveVoiceEventsSince above, when handleReconnect has no still-registered
-// old *Client to learn the resuming user's live voice channel from (OC-0428).
-// readPump's disconnect-teardown defer (unregisterNow, then handleVoiceLeave)
-// has almost always already run by the time an ordinary reconnect reaches
-// here, and that teardown's own voice_leave already has a seq and sits in the
-// ring buffer/cold tier tagged with the room's channel ID — a channel this
-// function does not need to know in advance, since it filters on the frame's
-// user_id instead of scoping the query to one channel. Tries the ring buffer
-// first, then the cold-tier store; returns nil, not an error, on a miss in
-// both or on a lookup failure, since this is a best-effort supplement to the
-// main replay (same posture as liveVoiceEventsSince).
+// liveVoiceEventsSinceForUser returns voice_state/voice_leave events at or after
+// afterSeq whose own payload names userID, bypassing the READ-gated channel
+// filter. Used when handleReconnect has no still-registered old *Client to learn
+// the live voice channel from: readPump's disconnect teardown has almost always
+// already run, and its voice_leave sits in the ring/cold tier tagged with a
+// channel this function need not know, since it filters on user_id. Returns nil
+// on a miss or lookup failure (best-effort, like liveVoiceEventsSince).
 func (h *Hub) liveVoiceEventsSinceForUser(ctx context.Context, afterSeq uint64, userID int64) [][]byte {
 	if userID == 0 {
 		return nil
@@ -640,14 +543,10 @@ func (h *Hub) liveVoiceEventsSinceForUser(ctx context.Context, afterSeq uint64, 
 			}
 			es := *esp
 			coldCap := h.maxColdReplayLimit()
-			// Fetch one row past the cap so truncation is decided by the presence
-			// of that extra row, not by len == cap (see liveVoiceEventsSince).
-			// Unlike that function this cannot scope the query to one channel —
-			// not knowing the channel is the whole reason this fallback exists —
-			// so the cap is shared with every event of every type in the range; a
-			// busy server can exhaust it before a voice frame is even reached, in
-			// which case this degrades to nil exactly like any other best-effort
-			// miss, never to a truncated window presented as complete.
+			// Fetch one row past the cap (see liveVoiceEventsSince). This cannot scope the
+			// query to one channel, so the cap is shared with every event type in the range;
+			// a busy server can exhaust it before a voice frame, degrading to nil rather than
+			// a truncated window presented as complete.
 			persisted, err := es.GetEventsSince(ctx, int64(afterSeq), coldCap+1) //nolint:gosec // afterSeq is a sequence counter bounded well below MaxInt64
 			if err != nil {
 				return nil

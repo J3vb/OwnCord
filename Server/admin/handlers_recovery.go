@@ -4,10 +4,11 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// POST /admin/api/users/{id}/recovery-credential (B4-6, BPR-045): the server
+// POST /admin/api/users/{id}/recovery-credential: the server
 // owner, having verified the person out of band, receives a 15-minute,
 // single-use recovery credential for the account, shown once. The route is
 // owner-only (ownerOnlyMiddleware) and the service checks the role again.
@@ -29,12 +30,12 @@ func handleIssueRecoveryCredential(authSvc *service.AuthService) http.HandlerFun
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		if authSvc == nil {
 			// Fail closed rather than mint a credential without the service's checks.
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "recovery service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "recovery service unavailable")
 			return
 		}
 		var req issueRecoveryCredentialRequest
@@ -57,11 +58,11 @@ func writeRecoveryErr(w http.ResponseWriter, err error) {
 	// cases, so they are checked first — the admission refusal before the
 	// issuance budget it also matches — and everything else falls through.
 	if errors.Is(err, service.ErrAuthBusy) {
-		writeErr(w, http.StatusTooManyRequests, "AUTH_BUSY", err.Error())
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeAuthBusy, err.Error())
 		return
 	}
 	if errors.Is(err, service.ErrRateLimited) {
-		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", err.Error())
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, err.Error())
 		return
 	}
 	writeSvcErr(w, err, "", "", "failed to issue the recovery credential")

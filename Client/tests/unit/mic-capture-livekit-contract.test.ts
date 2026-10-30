@@ -12,8 +12,8 @@
 // setting stays the same.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocalTracks, LocalAudioTrack } from "livekit-client";
-import { micCaptureOptions, micProcessingOptions } from "../../src/lib/audioPipeline";
-import { savePref } from "../../src/lib/preferences";
+import { micCaptureOptions, micProcessingOptions } from "../../src/lib/voice/audioPipeline";
+import { savePref } from "../../src/lib/prefs/preferences";
 import {
   FakeMediaStream,
   fakeMediaStreamTrack,

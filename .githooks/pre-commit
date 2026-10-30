@@ -61,7 +61,7 @@ if printf '%s\n' "$staged" | grep -qE '^(protocol/schema\.json|Server/cmd/genpro
         # in a git worktree, which is where this repository's own guidance
         # says to do branch work.
         if ! (cd Server && go run ./cmd/genprotocol) \
-            || ! git diff --exit-code Server/ws/message_types.go Client/src/lib/protocolTypes.ts; then
+            || ! git diff --exit-code Server/ws/message_types.go Server/httperr/codes.go Client/src/lib/protocolTypes.ts; then
             fail "protocol constants are stale — run 'go run ./cmd/genprotocol' in Server/ and stage the result"
         fi
     else
@@ -110,8 +110,8 @@ fi
 # watched summaries (WATCHED in the script) with the findings ledger.
 if printf '%s\n' "$changed" | grep -qE '^(docs/|CHANGELOG\.md$|README\.md$|CLAUDE\.md$|\.superpowers/findings-ledger\.json$)'; then
     if command -v node >/dev/null 2>&1; then
-        node scripts/check-doc-counts.mjs \
-            || fail "a doc states a ledger count the ledger contradicts — update the number named above (or the ledger) and re-stage; check with 'node scripts/check-doc-counts.mjs'"
+        node scripts/checks/check-doc-counts.mjs \
+            || fail "a doc states a ledger count the ledger contradicts — update the number named above (or the ledger) and re-stage; check with 'node scripts/checks/check-doc-counts.mjs'"
     else
         printf 'pre-commit: WARNING: node not installed; skipping the doc-counts check. CI will run it.\n' >&2
     fi
@@ -128,10 +128,10 @@ if printf '%s\n' "$changed" | grep -qE '^Server/.*\.go$|^docs/architecture/serve
 fi
 
 # Every mutated Client/src file must sit in exactly one shard of
-# Client/stryker.shard.config.mjs; an added or deleted file breaks the union.
+# Client/tests/mutation/stryker.shard.config.mjs; an added or deleted file breaks the union.
 if printf '%s\n' "$changed" | grep -qE '^Client/src/.*\.ts$|^Client/stryker\.(shard\.)?config\.mjs$'; then
     (cd Client && node scripts/check-mutation-shards.mjs) \
-        || fail "the mutation shards no longer match Client/src — update Client/stryker.shard.config.mjs"
+        || fail "the mutation shards no longer match Client/src — update Client/tests/mutation/stryker.shard.config.mjs"
 fi
 
 # ---------- Formatting (repository-wide) ----------

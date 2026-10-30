@@ -4,10 +4,10 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Channel Permission Override Handlers ────────────────────────────────────
 //
 // These endpoints manage per-role and per-user allow/deny permission
 // overrides on a channel. Denying ReadMessages hides the channel from a role
@@ -15,14 +15,14 @@ import (
 // ListVisibleChannels, the WS ready payload, and the per-message permission
 // checks.
 //
-// Thin adapters over service.ChannelService (B3-8 channel family, part 2):
+// Thin adapters over service.ChannelService:
 // the escalation guard (clearing a deny is a grant), the hierarchy rules,
 // mask clamping, the writes and their audit rows all live in the service.
 // The handlers decode, delegate and respond; the service also invalidates
-// cached permissions and refreshes channel visibility (WP 5.1a).
+// cached permissions and refreshes channel visibility.
 
 // getPermChannel resolves the channel for an override request through the
-// one S-04 policy (service.ChannelService.ResolveGuildChannel): a DM id
+// one guild-channel policy (service.ChannelService.ResolveGuildChannel): a DM id
 // answers exactly like a missing id, so this surface no longer confirms
 // which ids are private conversations (A-2026-08-02). Returns nil when a
 // response has already been written.
@@ -47,7 +47,7 @@ type channelPermissionsResponse struct {
 	Roles     []db.ChannelRoleOverride `json:"roles"`
 	Users     []db.ChannelUserOverride `json:"users"`
 	// PermissionsSynced: the channel's overrides follow its category's
-	// template (WP 6.5d). Admin-only; not on the websocket channel payload.
+	// template. Admin-only; not on the websocket channel payload.
 	PermissionsSynced bool `json:"permissions_synced"`
 }
 
@@ -59,12 +59,12 @@ func handleGetChannelPermissions(channels *service.ChannelService) http.HandlerF
 		}
 		overrides, userOverrides, err := channels.ChannelPermissions(r.Context(), ch.ID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channel permissions")
 			return
 		}
 		synced, err := channels.ChannelPermissionsSynced(r.Context(), ch.ID)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channel permissions")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channel permissions")
 			return
 		}
 		writeJSON(w, http.StatusOK, channelPermissionsResponse{
@@ -94,7 +94,7 @@ func overrideMutationSetup(channels *service.ChannelService, w http.ResponseWrit
 	}
 	targetID, err := pathInt64(r, param)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", invalidMsg)
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, invalidMsg)
 		return nil, 0, nil, false
 	}
 	if req != nil {
@@ -104,7 +104,7 @@ func overrideMutationSetup(channels *service.ChannelService, w http.ResponseWrit
 	}
 	actorRole = actorRoleFromContext(r)
 	if actorRole == nil {
-		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 		return nil, 0, nil, false
 	}
 	return ch, targetID, actorRole, true
@@ -150,7 +150,6 @@ func handleDeleteChannelPermission(channels *service.ChannelService) http.Handle
 	}
 }
 
-// ─── Per-user channel overrides ──────────────────────────────────────────────
 //
 // channel_user_overrides is the last layer of the resolution order (base role
 // perms -> role override -> user override), so these two endpoints can grant a

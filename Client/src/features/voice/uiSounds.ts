@@ -1,15 +1,15 @@
 /**
- * Voice UI sounds (DP-40): a short chime on join/leave — yours and another
+ * Voice UI sounds: a short chime on join/leave — yours and another
  * member's in your channel — and on mute/unmute and deafen/undeafen.
  *
  * The sounds themselves and their shared output device live in
- * `lib/notificationSound.ts`; this module only decides *when* they play. It
+ * `lib/media/notificationSound.ts`; this module only decides *when* they play. It
  * subscribes to voiceStore directly (a page-local UI reader, like the ringing
  * handler in MainPage), which is allowed as long as it never writes a store.
  *
  * Two edges are deliberately excluded:
  *  - push-to-talk: `pttGated` is never read, so a PTT press/release makes no
- *    sound (D5);
+ *    sound;
  *  - the wholesale roster replacement (`setVoiceStates`) that the initial
  *    `ready` and a full reconnect resync use: instead of watching the roster
  *    maps, this reads `getVoiceRosterRevision`, which only the incremental
@@ -21,7 +21,7 @@
  * after a join did. A moderator move plays its own tone in place of the join.
  *
  * DM calls are `call-ring.ts`'s; the incoming ringtone is exempt from the
- * deafen gate per D2, so it does not route through here.
+ * deafen gate, so it does not route through here.
  */
 
 import {
@@ -32,10 +32,10 @@ import {
   type VoiceStatus,
 } from "@stores/voice.store";
 import { authStore } from "@stores/auth.store";
-import { loadPref } from "@lib/preferences";
-import { loadUserStatus } from "@lib/userStatus";
-import { playVoiceSound, type VoiceSound } from "@lib/notificationSound";
-import { soundSwitchOn, type SoundSwitch } from "@lib/soundPrefs";
+import { loadPref } from "@lib/prefs/preferences";
+import { loadUserStatus } from "@lib/presence/userStatus";
+import { playVoiceSound, type VoiceSound } from "@lib/media/notificationSound";
+import { soundSwitchOn, type SoundSwitch } from "@lib/prefs/soundPrefs";
 import { takeVoiceMoved, isVoiceMovePending } from "./moveHint";
 
 /** Snapshot of the fields an edge is measured on. */
@@ -95,7 +95,7 @@ function canPlay(): boolean {
   return loadPref<boolean>("voiceSounds", true);
 }
 
-/** The per-sound switch (WP M-8) each voice sound answers to. */
+/** The per-sound switch each voice sound answers to. */
 const SOUND_SWITCH: Readonly<Record<VoiceSound, SoundSwitch>> = {
   join: "joinLeave",
   leave: "joinLeave",
@@ -194,7 +194,7 @@ export function startVoiceUiSounds(): () => void {
       finish();
       return;
     }
-    // While deafened, nothing else plays (D2 exempts only the ringtone).
+    // While deafened, nothing else plays (only the ringtone is exempt).
     if (next.localDeafened) {
       finish();
       return;

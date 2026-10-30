@@ -21,8 +21,8 @@ const { mockOnOpenUrl } = vi.hoisted(() => ({
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
-vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
@@ -33,24 +33,26 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn().mockResolvedValue(undefined),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@lib/prefs/windowState", () => ({
+  initWindowState: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
-vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
 const mockProfileManager = vi.hoisted(() => ({
   loadProfiles: vi.fn().mockResolvedValue(undefined),
   saveProfiles: vi.fn().mockResolvedValue(undefined),
@@ -63,12 +65,13 @@ const mockProfileManager = vi.hoisted(() => ({
   setLastConnected: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", async (importOriginal) => ({
-  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
+vi.mock("@lib/presence/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/presence/profiles")>())
+    .deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => mockProfileManager),
 }));
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: vi.fn(),
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {

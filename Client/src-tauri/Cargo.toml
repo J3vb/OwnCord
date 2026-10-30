@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.5.0"
+version = "2.6.0"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -117,12 +117,11 @@ base64 = "0.22"
 # where the Tauri app never built and tauri-plugin-dialog has no AppHandle to
 # run through (Linux shows that dialog with gtk instead, see below). Already
 # in the tree via that same plugin, so this costs no extra build -- but only
-# while the versions match: the plugin pins ^0.16, and Cargo unifies features
-# only within a semver-compatible group. Moving this to 0.17 forks rfd into two
-# crates, and the copy without the plugin's backend features fails rfd 0.17's
-# build.rs on Linux. Pinned to the plugin in .github/dependabot.yml; bump both
-# together or neither.
-rfd = { version = "0.16", default-features = false }
+# while the versions match: Cargo unifies features only within a
+# semver-compatible group. The plugin needs ^0.17 since 2.8.4; a different
+# minor here forks rfd into two crates, and the copy without the plugin's
+# backend features fails rfd's build.rs on Linux. Bump both together or neither.
+rfd = { version = "0.17", default-features = false }
 
 # Desktop-only plugins (no mobile bundle target). single-instance carries the
 # "deep-link" feature so an owncord:// link fired at a running app is forwarded
@@ -235,8 +234,10 @@ md-5 = "=0.10.6"
 # docs/architecture/voice-e2ee.md and Client/src-tauri/src/native_voice.rs.
 #
 # Exact-pinned on purpose: the SDK is 0.x, its API churns, and webrtc-sys
-# downloads a prebuilt libwebrtc (webrtc-89d790b) whose C++ ABI is tied to the
+# downloads a prebuilt libwebrtc (webrtc-a545de4) whose C++ ABI is tied to the
 # crate version, so a patch bump must be a deliberate, re-verified change.
+# 0.9.5 -> 0.10.0: libwebrtc moves to webrtc-a545de4 (refreshed TLS roots), and
+# webrtc-sys-build 0.3.21 unpacks it with zip 9, so zip 0.6.6 leaves the tree.
 # 0.9.3 -> 0.9.5 (WP LP-7d: dynacast re-applies paused layers after every
 # publisher renegotiation, via LocalVideoTrack::refresh_publishing_layers).
 # History: 0.9.1 -> 0.9.3, NOT the 0.9.2 Dependabot proposed: 0.9.2 pairs an older
@@ -245,14 +246,14 @@ md-5 = "=0.10.6"
 # build ("no method named encoded_len" — rust-sdks #1447). 0.9.3 resolves the
 # whole family on prost 0.14 uniformly, which is why it compiles.
 # WP LP-8d: the crate itself comes from vendor/livekit through the
-# [patch.crates-io] table at the end of this file (upstream 0.9.5 plus a
-# `stereo` flag on TrackPublishOptions); the pin stays `=0.9.5` so the patch
+# [patch.crates-io] table at the end of this file (upstream 0.10.0 plus a
+# `stereo` flag on TrackPublishOptions); the pin stays `=0.10.0` so the patch
 # only applies while the version matches, and webrtc-sys/libwebrtc do not move.
 # Default features only — no TLS backend, because the native room dials the
 # plain ws:// loopback that livekit_proxy already exposes.
-livekit = "=0.9.5"
+livekit = "=0.10.0"
 # Names the SDK's permission/track-source protobuf types (its `proto` module
-# does not re-export them). Same version livekit 0.9.5 resolves, so no
+# does not re-export them). Same version livekit 0.10.0 resolves, so no
 # new crate enters the tree.
 livekit-protocol = "=0.8.2"
 # Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
@@ -313,7 +314,7 @@ tokio = { version = "1", features = ["test-util"] }
 # in update_commands tests without a window.
 tauri = { version = "2.12", features = ["test"] }
 
-# WP LP-8d: livekit 0.9.5 has no way to ask the SFU for a stereo publisher, so
+# WP LP-8d: livekit 0.10.0 has no way to ask the SFU for a stereo publisher, so
 # the Linux share-audio track was encoded mono. vendor/livekit is the crates.io
 # package verbatim plus a ~15-line `stereo` option; see
 # vendor/livekit/OWNCORD-PATCH.md. Drop this table (and the directory) on the

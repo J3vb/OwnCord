@@ -27,6 +27,7 @@ import {
   emitWsEvent,
   navigateToMainPage,
   waitForWsReady,
+  openDmRow,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -496,7 +497,7 @@ test.describe("Composer gating — DM blocks", () => {
 
     // Open the DM: the composer is gated by the block, and the reason says who
     // the blocker is.
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
     await expect(textarea(page)).toBeDisabled({ timeout: 5_000 });
     await expect(textarea(page)).toHaveAttribute(
@@ -516,7 +517,7 @@ test.describe("Composer gating — DM blocks", () => {
       wsHandlers: [chatSendErrorHandler("FORBIDDEN")],
     });
 
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
     await expect(textarea(page)).toBeEnabled();
 
@@ -554,14 +555,14 @@ test.describe("Composer gating — DM blocks", () => {
       .toBe(true);
 
     // Control: the 1:1 DM with that user IS gated.
-    await page.locator("[data-testid='dm-entry']").first().click();
+    await openDmRow(page);
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("otheruser");
     await expect(textarea(page)).toBeDisabled({ timeout: 5_000 });
 
     // Back to the channel list, then into the group: a block is a 1:1 rule, so
     // the shared room must remain postable.
     await page.locator("[data-testid='dm-back-header']").click();
-    await page.locator("[data-testid='dm-entry']").nth(1).click();
+    await openDmRow(page, 1);
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText(
       "otheruser, thirduser",
     );

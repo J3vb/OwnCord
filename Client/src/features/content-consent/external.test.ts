@@ -13,7 +13,7 @@ const { previewMock, imageMock, searchGifsMock, trendingMock } = vi.hoisted(() =
 vi.mock("../../platform/desktop/externalContent", () => ({
   externalContent: { preview: previewMock, image: imageMock },
 }));
-vi.mock("@lib/gifProvider", () => ({
+vi.mock("@lib/media/gifProvider", () => ({
   searchGifs: searchGifsMock,
   getTrendingGifs: trendingMock,
   isAllowedGifUrl: () => true,
@@ -22,7 +22,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import {
   clearExternalImageCache,
   fetchImageAsObjectUrl,
@@ -35,10 +35,14 @@ import { createGifPicker } from "../../components/GifPicker";
 import { nsfwConsentRequired } from "./nsfw";
 import {
   EXTERNAL_CONSENT_PREF,
+  admitDerived,
   externalAllowed,
   externalConsentChoice,
   forgetAdmittedItems,
+  requestExternalItem,
+  resetExternalConsent,
   setExternalConsentChoice,
+  setExternalConsentScope,
 } from "./external";
 
 const LINK = "https://news.example/story";
@@ -317,4 +321,85 @@ describe("revocation", () => {
       savePref(key, true);
     },
   );
+});
+
+describe("the grant's bookkeeping", () => {
+  it("keeps the choice under the stored key, one entry per server host", () => {
+    expect(EXTERNAL_CONSENT_PREF).toBe("externalContentConsent");
+    setExternalConsentChoice("ask");
+    expect(
+      JSON.parse(localStorage.getItem("owncord:settings:externalContentConsent") ?? "null"),
+    ).toEqual({
+      "chat.example": "ask",
+    });
+  });
+
+  it("keeps items admitted one by one when the same server is named again", () => {
+    setExternalConsentChoice("ask");
+    admitDerived("parent", "child");
+    expect(externalAllowed("child")).toBe(false);
+    return requestExternalItem("url:a").then(() => {
+      setExternalConsentScope("chat.example");
+      expect(externalAllowed("url:a")).toBe(true);
+      setExternalConsentScope("other.example");
+      expect(externalAllowed("url:a")).toBe(false);
+    });
+  });
+
+  it("admits a derived fetch only under a parent that is itself allowed", async () => {
+    setExternalConsentChoice("ask");
+    admitDerived("url:page", "url:thumb");
+    expect(externalAllowed("url:thumb")).toBe(false);
+    await requestExternalItem("url:page");
+    admitDerived("url:page", "url:thumb");
+    expect(externalAllowed("url:thumb")).toBe(true);
+    expect(externalAllowed("url:other")).toBe(false);
+  });
+
+  it("resetting forgets every server's choice and every admitted item", async () => {
+    setServerHost("other.example");
+    setExternalConsentChoice("auto");
+    setServerHost("chat.example");
+    setExternalConsentChoice("ask");
+    await requestExternalItem("url:a");
+    expect(externalAllowed("url:a")).toBe(true);
+
+    resetExternalConsent();
+    expect(externalAllowed("url:a")).toBe(false);
+    expect(externalConsentChoice()).toBeNull();
+    setServerHost("other.example");
+    expect(externalConsentChoice()).toBeNull();
+    expect(
+      JSON.parse(localStorage.getItem("owncord:settings:externalContentConsent") ?? "null"),
+    ).toEqual({});
+  });
+});
+
+describe("activating an item", () => {
+  it("resolves false when the dialog is cancelled and true when a choice is made", async () => {
+    const cancelled = requestExternalItem("url:a");
+    await answerDialog("Cancel");
+    expect(await cancelled).toBe(false);
+    expect(externalAllowed("url:a")).toBe(false);
+
+    const asked = requestExternalItem("url:a");
+    await answerDialog("Ask each time");
+    expect(await asked).toBe(true);
+    expect(externalAllowed("url:a")).toBe(true);
+    // With a choice on record no dialog is needed.
+    expect(await requestExternalItem("url:b")).toBe(true);
+    expect(externalAllowed("url:b")).toBe(true);
+  });
+
+  it("resolves false when the session was torn down while the dialog was open", async () => {
+    const pending = requestExternalItem("url:a");
+    await vi.waitFor(() => {
+      if (document.querySelector('[data-testid="external-consent-dialog"]') === null)
+        throw new Error("no dialog yet");
+    });
+    forgetAdmittedItems();
+    await answerDialog("Ask each time");
+    expect(await pending).toBe(false);
+    expect(externalConsentChoice()).toBeNull();
+  });
 });

@@ -74,7 +74,13 @@ const PROTOCOL_VERIFY = [
   step("go", ["run", "./cmd/genprotocol"], "Server"),
   step(
     "git",
-    ["diff", "--exit-code", "ws/message_types.go", "../Client/src/lib/protocolTypes.ts"],
+    [
+      "diff",
+      "--exit-code",
+      "ws/message_types.go",
+      "httperr/codes.go",
+      "../Client/src/lib/protocolTypes.ts",
+    ],
     "Server",
   ),
 ];
@@ -148,8 +154,8 @@ const CHECK_SERVER = [
 ];
 
 const CHECK_CLIENT = [
-  step("node", ["--test", "scripts/check-tauri-versions.test.mjs"]),
-  step("node", ["scripts/check-tauri-versions.mjs"]),
+  step("node", ["--test", "scripts/checks/check-tauri-versions.test.mjs"]),
+  step("node", ["scripts/checks/check-tauri-versions.mjs"]),
   step("npm", ["run", "typecheck"], "Client"),
   // ARCH-10 stage 1: the admin panel is Server-owned, so no tsconfig under
   // Client/ covers it. This is a shrink-only checkJs ratchet over
@@ -196,22 +202,26 @@ const LEDGER_VERIFY = [step("node", [".superpowers/render-ledger.mjs"], ".")];
 // Fast and dependency-free, so it goes first: a contradicted count should not
 // wait behind ten minutes of -race.
 const CHECK_DOCS = [
-  step("node", ["scripts/check-doc-counts.mjs"], "."),
+  step("node", ["scripts/checks/check-doc-counts.mjs"], "."),
   // A reference document that cites a path which no longer exists reads fine
   // and proves nothing. This ran inside Server/migrations' doc gate until the
   // change selector landed: the paths cited are mostly under Client/ and docs/,
   // and a diff confined to those selects no server job, so the gate was skipped
   // by exactly the pull requests most likely to break it. Self-tested first,
   // for the same reason the count and migration matchers are.
-  step("node", ["--test", "scripts/check-doc-citations.test.mjs"], "."),
-  step("node", ["scripts/check-doc-citations.mjs"], "."),
+  step("node", ["--test", "scripts/checks/check-doc-citations.test.mjs"], "."),
+  step("node", ["scripts/checks/check-doc-citations.mjs"], "."),
   // OC-0395. A shipped migration is immutable: migrate.go tracks one by
   // filename and keeps no content hash, so editing it changes nothing for any
   // installation that already applied it. Nothing else can see that — a fresh
   // database applies the new text and every test passes. `step`, not
   // `optional`: it is Node, and this file is Node.
-  step("node", ["--test", "scripts/check-migrations.test.mjs"], "."),
-  step("node", ["scripts/check-migrations.mjs"], "."),
+  step("node", ["--test", "scripts/checks/check-migrations.test.mjs"], "."),
+  step("node", ["scripts/checks/check-migrations.mjs"], "."),
+  // Plan and ticket ids in code comments only go down: see docs/code-style.md,
+  // "Comments". Node with no dependencies, so it sits with the other matchers.
+  step("node", ["--test", "scripts/checks/check-comment-ids.test.mjs"], "."),
+  step("node", ["scripts/checks/check-comment-ids.mjs"], "."),
   ...LEDGER_VERIFY,
 ];
 
@@ -266,7 +276,7 @@ const PRETTIER_TRACKED = (() => {
 const CHECK_HYGIENE = [
   ...PRETTIER_TRACKED,
   step("node", ["--test", "scripts/run.test.mjs"], "."),
-  step("node", ["--test", "scripts/protocol-n1-compat.test.mjs"], "."),
+  step("node", ["--test", "scripts/ci/protocol-n1-compat.test.mjs"], "."),
   optional(
     "shellcheck",
     "shellcheck",
@@ -286,18 +296,18 @@ const CHECK_HYGIENE = [
   // the guards on workflows that spend. `step`, not `optional`: it is Node, and
   // this file is Node. It lives in check:hygiene so it runs inside the pinned
   // Repository Hygiene job rather than needing a new required check.
-  step("node", ["--test", "scripts/check-workflow-guards.test.mjs"], "."),
-  step("node", ["scripts/check-workflow-guards.mjs"], "."),
+  step("node", ["--test", "scripts/checks/check-workflow-guards.test.mjs"], "."),
+  step("node", ["scripts/checks/check-workflow-guards.mjs"], "."),
   // OC-0397 / R-09. A job in release.yml that pushes an image or cuts a
   // GitHub Release must carry `environment: release`, or it publishes with
   // no required-reviewer approval. Same rationale as the guard check above:
   // Node checking Node, run here so it rides the pinned Repository Hygiene
   // job instead of a new required check.
-  step("node", ["--test", "scripts/check-release-environment.test.mjs"], "."),
-  step("node", ["scripts/check-release-environment.mjs"], "."),
+  step("node", ["--test", "scripts/release/check-release-environment.test.mjs"], "."),
+  step("node", ["scripts/release/check-release-environment.mjs"], "."),
   // OC-0448. Execute the release verification/promotion shell with a fake
   // registry and assert that no release tag moves before verification passes.
-  step("node", ["--test", "scripts/check-release-docker.test.mjs"], "."),
+  step("node", ["--test", "scripts/release/check-release-docker.test.mjs"], "."),
   step("node", ["--test", "tools/mcp-introspect/transport.test.mjs"], "."),
   // Claude Code Bash hook: `cd` in compounds and `.env` reads.
   step("node", ["--test", "scripts/claude-hook.test.mjs"], "."),
@@ -307,8 +317,8 @@ const CHECK_HYGIENE = [
   // every other statement of the version agrees with it. Same rationale as the
   // two checks above: Node checking Node, run here so it rides the pinned
   // Repository Hygiene job instead of a new required check.
-  step("node", ["--test", "scripts/check-node-policy.test.mjs"], "."),
-  step("node", ["scripts/check-node-policy.mjs"], "."),
+  step("node", ["--test", "scripts/checks/check-node-policy.test.mjs"], "."),
+  step("node", ["scripts/checks/check-node-policy.mjs"], "."),
   // The change selector decides which of the OTHER jobs run at all, so a wrong
   // rule here is a test that silently did not execute — the same shape of
   // failure as the two guards above, and for the same reason it is self-tested
@@ -317,7 +327,7 @@ const CHECK_HYGIENE = [
   step("node", ["--test", "scripts/ci-select.test.mjs"], "."),
   // WP 0-5. weekly-supply-chain.yml repeats ci.yml's supply-chain steps; this
   // fails when their pins or lockfile list drift apart.
-  step("node", ["--test", "scripts/check-supply-chain-sync.test.mjs"], "."),
+  step("node", ["--test", "scripts/checks/check-supply-chain-sync.test.mjs"], "."),
 ];
 
 // Every check, in the order `check` has always run them. release:preflight

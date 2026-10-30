@@ -9,10 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Track } from "livekit-client";
 import type { RemoteParticipant, RemoteTrack, RemoteTrackPublication, Room } from "livekit-client";
 
-import { createRoomEventHandlers, type RoomEventDeps } from "@lib/roomEventHandlers";
-import { savePref } from "@lib/preferences";
+import { createRoomEventHandlers, type RoomEventDeps } from "@lib/voice/roomEventHandlers";
+import { savePref } from "@lib/prefs/preferences";
 import { voiceStore } from "@stores/voice.store";
-import type { AudioElements } from "@lib/audioElements";
+import type { AudioElements } from "@lib/voice/audioElements";
 import { RemoteTracks } from "../../src/features/voice/remoteTracks";
 import { AUTO_PLAY_CAMERAS_PREF } from "../../src/features/voice/autoPlayCameras";
 
@@ -79,7 +79,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("cameras auto-play (WP 1B-3)", () => {
+describe("cameras auto-play", () => {
   it("subscribes a published camera and hands the grid a real stream, no Watch card", () => {
     const h = build([Track.Source.Camera]);
 

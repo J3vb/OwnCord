@@ -11,8 +11,8 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/message-actions";
-import { shouldGroup } from "@lib/formatting";
+import { messageActionGates } from "@components/message-list/messageActions";
+import { shouldGroup } from "@lib/text/formatting";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { voiceStore } from "@stores/voice.store";
 import {
@@ -45,7 +45,7 @@ function render(msg: Message, over = {}): HTMLElement {
 }
 const textOf = (el: HTMLElement): string => el.textContent?.replace(/\s+/g, " ").trim() ?? "";
 
-describe("call log row renderer (WP 3B-9c)", () => {
+describe("call log row renderer", () => {
   beforeEach(() => {
     resetGateStores();
     signInAs("member");
@@ -124,7 +124,7 @@ describe("call log row renderer (WP 3B-9c)", () => {
   });
 });
 
-describe("call log row actions (WP 3B-9c)", () => {
+describe("call log row actions", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList>;
 
@@ -195,7 +195,7 @@ describe("call log row actions (WP 3B-9c)", () => {
     row.dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
     );
-    await import("@components/message-list/message-menu");
+    await import("@components/message-list/messageMenu");
     await new Promise((r) => setTimeout(r, 0));
     expect(document.querySelector(".message-context-menu")).toBeNull();
   });

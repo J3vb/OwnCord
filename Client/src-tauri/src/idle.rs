@@ -1,4 +1,4 @@
-//! System-wide input idle time, for the client's auto-idle (DP-33).
+//! System-wide input idle time, for the client's auto-idle.
 //!
 //! The webview only sees input aimed at its own window, so on its own it
 //! turns someone Idle while they work in another app. This asks the OS how
@@ -111,7 +111,7 @@ fn wayland_idle_ms() -> Option<u64> {
 
     static MONITOR: Mutex<Option<IdleMonitor>> = Mutex::new(None);
     std::env::var_os("WAYLAND_DISPLAY")?;
-    let mut monitor = MONITOR.lock().unwrap_or_else(|e| e.into_inner());
+    let mut monitor = crate::sync::lock(&MONITOR);
     if monitor.as_ref().is_some_and(|m| !m.is_alive()) {
         *monitor = None;
     }

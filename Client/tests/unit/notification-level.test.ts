@@ -3,12 +3,12 @@
  * per-server override, defaulting to Mentions only.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 
 const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
 
-vi.mock("../../src/lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
+vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
@@ -28,7 +28,7 @@ import {
   setChannelNotificationLevel,
   settleNotificationLevelDefault,
   shouldNotifyForLevel,
-} from "../../src/lib/notificationLevel";
+} from "../../src/lib/prefs/notificationLevel";
 
 describe("notification level storage", () => {
   beforeEach(() => {
@@ -195,5 +195,65 @@ describe("per-channel notification level", () => {
     expect(listChannelNotificationOverrides().size).toBe(0);
     testPrefs.set("channelNotificationLevels:a.example", "nothing");
     expect(listChannelNotificationOverrides().size).toBe(0);
+  });
+});
+
+describe("notification level storage keys", () => {
+  beforeEach(() => {
+    testPrefs.clear();
+    localStorage.clear();
+    setChannelMutesHost(null);
+  });
+
+  it("keeps a server override under the host's own key, and uses the plain key without a host", () => {
+    setChannelMutesHost("a.example");
+    setServerNotificationLevel("nothing");
+    expect(testPrefs.get("notificationLevel:a.example")).toBe("nothing");
+
+    testPrefs.clear();
+    setChannelMutesHost(null);
+    setServerNotificationLevel("all");
+    expect(testPrefs.get("notificationLevel")).toBe("all");
+    expect(testPrefs.has("notificationLevel:null")).toBe(false);
+  });
+
+  it("treats only OwnCord's own stored keys as a sign of an earlier install", () => {
+    localStorage.setItem("unrelated:thing", "1");
+    localStorage.setItem("theme", "dark");
+    settleNotificationLevelDefault();
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+  });
+});
+
+describe("shouldNotifyForLevel with an unknown level", () => {
+  it("notifies nothing", () => {
+    expect(shouldNotifyForLevel("bogus" as never, { mentioned: true, isDm: false })).toBe(false);
+    expect(shouldNotifyForLevel("bogus" as never, { mentioned: false, isDm: false })).toBe(false);
+  });
+});
+
+describe("per-channel overrides: ids", () => {
+  beforeEach(() => {
+    testPrefs.clear();
+    setChannelMutesHost("a.example");
+  });
+
+  it("skips a stored entry for channel 0 or a negative or fractional id", () => {
+    testPrefs.set("channelNotificationLevels:a.example", {
+      "0": "all",
+      "-2": "all",
+      "1.5": "all",
+      "7": "nothing",
+    });
+    expect([...listChannelNotificationOverrides()]).toEqual([[7, "nothing"]]);
+  });
+
+  it("does not store an override for channel 0, a negative id or a fractional id", () => {
+    setChannelNotificationLevel(0, "all");
+    setChannelNotificationLevel(-3, "all");
+    setChannelNotificationLevel(2.5, "all");
+    expect(testPrefs.has("channelNotificationLevels:a.example")).toBe(false);
+    setChannelNotificationLevel(4, "all");
+    expect(testPrefs.get("channelNotificationLevels:a.example")).toEqual({ "4": "all" });
   });
 });

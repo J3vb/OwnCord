@@ -8,7 +8,7 @@ import { addMessage, resetMessagesStore } from "../../src/stores/messages.store"
 import { createMockWsClient, type MockWsClient } from "../helpers/mock-ws";
 
 const toast = vi.hoisted(() => vi.fn());
-vi.mock("@lib/toast", () => ({ showToast: toast }));
+vi.mock("@lib/ui/toast", () => ({ showToast: toast }));
 
 function channel(id: number, over: Partial<Channel> = {}): Channel {
   return {

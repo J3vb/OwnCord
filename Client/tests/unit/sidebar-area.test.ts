@@ -8,7 +8,7 @@ import { cascadedDeclaration, keyword } from "../helpers/app-css";
 // inside factories. Instead, use vi.fn() inline and retrieve mock later.
 // ---------------------------------------------------------------------------
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
@@ -38,11 +38,11 @@ vi.mock("@lib/logger", () => ({
   setLogLevel: vi.fn(),
 }));
 
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createProfileManager: vi.fn().mockReturnValue({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockReturnValue([]),
@@ -186,7 +186,7 @@ import "../../src/pages/main-page/MemberPickerModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
-import { createProfileManager } from "@lib/profiles";
+import { createProfileManager } from "@lib/presence/profiles";
 
 // ---------------------------------------------------------------------------
 // Helpers to access mock internals
@@ -1040,7 +1040,7 @@ describe("SidebarArea", () => {
       });
     });
 
-    it("sizes the member section to a definite height once one is saved (P1-01)", () => {
+    it("sizes the member section to a definite height once one is saved", () => {
       // The channel slot shrink-wraps its rows instead of collapsing to the
       // floor, and the member section fills the rest (P1-01).
       expect(cascadedDeclaration(".sidebar-content-inner", "flex")?.value).toMatchObject({
@@ -1209,7 +1209,7 @@ describe("SidebarArea", () => {
   // identity) and neither the filter text nor focus is ever dropped.
   // -------------------------------------------------------------------------
 
-  describe("DM search preservation across refresh (OC-0280)", () => {
+  describe("DM search preservation across refresh", () => {
     function mockDmSidebarWithSearchInput(): void {
       (createDmSidebar as MockedFn).mockImplementation(() => {
         let root: HTMLDivElement | null = null;
@@ -1868,7 +1868,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onBack falls back to an announcement channel when no text channel remains (OC-0174)", () => {
+    it("onBack falls back to an announcement channel when no text channel remains", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(5, {
@@ -1907,7 +1907,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onBack keeps the current channel when DM mode was entered without recording channelBeforeDm (OC-0094: 'View all messages' bypass)", () => {
+    it("onBack keeps the current channel when DM mode was entered without recording channelBeforeDm ('View all messages' bypass)", () => {
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
         next.set(1, {
@@ -2247,7 +2247,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onCloseDm falls back to an announcement channel when the last DM closes with no text channel (OC-0174)", () => {
+    it("onCloseDm falls back to an announcement channel when the last DM closes with no text channel", () => {
       addDmChannel(
         makeDm({
           channelId: 100,
@@ -3575,7 +3575,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("starts a call in the existing 1:1 DM (BUG-05)", () => {
+    it("starts a call in the existing 1:1 DM", () => {
       addDmChannel(
         makeDm({
           channelId: 100,
@@ -3599,7 +3599,7 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("creates the 1:1 DM first, then starts the call in it (BUG-05)", async () => {
+    it("creates the 1:1 DM first, then starts the call in it", async () => {
       const onStartCall = vi.fn();
       const opts = defaultOpts();
       const result = createSidebarArea({ ...opts, onStartCall });
@@ -3619,7 +3619,7 @@ describe("SidebarArea", () => {
   });
 
   describe("buildMemberPanel", () => {
-    it("Call opens an existing DM and starts the call (BUG-05)", () => {
+    it("Call opens an existing DM and starts the call", () => {
       addDmChannel(
         makeDm({
           channelId: 100,
@@ -3923,7 +3923,7 @@ describe("SidebarArea", () => {
   // Each destination's entry appears only once its feature ships (an entry in
   // `destinations`), and the Moderation entry only with MODERATE_MEMBERS.
 
-  describe("B9-4 navigation entries", () => {
+  describe("navigation entries", () => {
     let host: HTMLDivElement;
     let pending: number;
     let pendingListeners: Array<() => void>;

@@ -31,8 +31,8 @@ import {
   resetReadPointerState,
   setLiveTailInView,
   setMarkReadSender,
-} from "@lib/read-state";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+} from "@lib/readState";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 
 const CHANNEL_ID = 1;
@@ -85,7 +85,7 @@ function block(...ids: number[]): void {
   blocksStore.flush();
 }
 
-describe("MessageList: blocked users' messages (WP 3B-6)", () => {
+describe("MessageList: blocked users' messages", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;

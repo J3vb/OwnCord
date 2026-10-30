@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   loadPref,
   loadStoredJson,
+  readMigratedStringPref,
   readStored,
   removeStored,
   savePref,
@@ -9,11 +10,11 @@ import {
   storedKeys,
   STORAGE_PREFIX,
   writeStored,
-} from "../../src/lib/preferences";
+} from "../../src/lib/prefs/preferences";
 import { expectConsole } from "../helpers/console";
 
 /**
- * Tests for src/lib/preferences.ts — localStorage preference helpers.
+ * Tests for src/lib/prefs/preferences.ts — localStorage preference helpers.
  * Covers loadPref (cache miss, hit, type mismatch, corrupted JSON, null value),
  * savePref (write, custom event dispatch, quota exceeded), and the STORAGE_PREFIX constant.
  */
@@ -221,5 +222,98 @@ describe("preferences", () => {
         for (const spy of spies) spy.mockRestore();
       }
     });
+  });
+});
+
+describe("loadPref with an object fallback", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("returns the fallback when the stored value is JSON null", () => {
+    localStorage.setItem(STORAGE_PREFIX + "obj", "null");
+    const fallback = { a: 1 };
+    expect(loadPref("obj", fallback)).toBe(fallback);
+  });
+
+  it("returns a stored object", () => {
+    localStorage.setItem(STORAGE_PREFIX + "obj", JSON.stringify({ b: 2 }));
+    expect(loadPref("obj", { a: 1 })).toEqual({ b: 2 });
+  });
+});
+
+describe("savePref failure report", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("names the key that could not be saved", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    savePref("bigKey", "data");
+    expectConsole("warn", /"key":"bigKey"/);
+  });
+});
+
+describe("readMigratedStringPref", () => {
+  const ALLOWED = ["small", "large"] as const;
+  beforeEach(() => localStorage.clear());
+
+  it("returns the current value when it is allowed", () => {
+    localStorage.setItem(STORAGE_PREFIX + "size", JSON.stringify("large"));
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("large");
+  });
+
+  it("ignores a current value that is not allowed", () => {
+    localStorage.setItem(STORAGE_PREFIX + "size", JSON.stringify("huge"));
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("small");
+  });
+
+  it("ignores a current value that is not a string, and unreadable current text", () => {
+    localStorage.setItem(STORAGE_PREFIX + "size", JSON.stringify(3));
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("small");
+    localStorage.setItem(STORAGE_PREFIX + "size", "{broken");
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("small");
+  });
+
+  it("moves a JSON-encoded legacy value under the prefixed key", () => {
+    localStorage.setItem("size", JSON.stringify("large"));
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("large");
+    expect(localStorage.getItem(STORAGE_PREFIX + "size")).toBe('"large"');
+  });
+
+  it("moves a raw legacy value under the prefixed key", () => {
+    localStorage.setItem("size", "large");
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("large");
+    expect(localStorage.getItem(STORAGE_PREFIX + "size")).toBe('"large"');
+  });
+
+  it("does not move a legacy value that is not allowed", () => {
+    localStorage.setItem("size", "huge");
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("small");
+    expect(localStorage.getItem(STORAGE_PREFIX + "size")).toBeNull();
+    localStorage.setItem("size", JSON.stringify(7));
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("small");
+    expect(localStorage.getItem(STORAGE_PREFIX + "size")).toBeNull();
+  });
+
+  it("returns the fallback when nothing is stored", () => {
+    expect(readMigratedStringPref("size", "small", ALLOWED)).toBe("small");
+  });
+});
+
+describe("storedKeys with unusable storage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("lists nothing instead of throwing", () => {
+    vi.stubGlobal(
+      "localStorage",
+      new Proxy(
+        {},
+        {
+          ownKeys() {
+            throw new DOMException("storage blocked", "SecurityError");
+          },
+        },
+      ),
+    );
+    expect(storedKeys()).toEqual([]);
   });
 });

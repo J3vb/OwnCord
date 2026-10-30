@@ -27,11 +27,11 @@ import {
   EMOJI_TOKEN_REGEX,
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
-} from "../../src/components/message-list/custom-emoji";
+} from "../../src/components/message-list/customEmoji";
 import {
   renderMessageContent,
   renderMentionSegment,
-} from "../../src/components/message-list/content-parser";
+} from "../../src/components/message-list/contentParser";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";

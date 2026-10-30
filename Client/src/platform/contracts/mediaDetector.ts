@@ -1,5 +1,5 @@
 /**
- * The song playing on this machine (WP 8.10), for the "Listening to <player>"
+ * The song playing on this machine, for the "Listening to <player>"
  * status. The host asks the OS media session (Windows GSMTC, Linux MPRIS) and
  * hands back only the one song (`src-tauri/src/media_activity.rs`).
  */

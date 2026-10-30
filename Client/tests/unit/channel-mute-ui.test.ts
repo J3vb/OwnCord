@@ -1,17 +1,17 @@
-import { pruneExpiredMutes } from "@lib/channel-mute-expiry";
+import { pruneExpiredMutes } from "@lib/prefs/channelMuteExpiry";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   attachChannelContextMenu,
   CHANNEL_MUTE_CHANGED,
-} from "@components/channel-sidebar/context-menu";
+} from "@components/channel-sidebar/contextMenu";
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
 import {
   isChannelMuted,
   muteChannel,
   invalidateMuteCache,
   getChannelMute,
-} from "@lib/channel-mutes";
-import { saveTimeFormat } from "@lib/timeFormat";
+} from "@lib/prefs/channelMutes";
+import { saveTimeFormat } from "@lib/text/timeFormat";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import type { Channel } from "@stores/channels.store";

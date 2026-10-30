@@ -1,5 +1,5 @@
 /**
- * The "Forwarded" frame around a forwarded message's body (WP 6.9a). The
+ * The "Forwarded" frame around a forwarded message's body. The
  * renderer fills `startForwardBlock`'s box with the text, files and embeds the
  * way it does for any message, then seals it with `endForwardBlock`, which adds
  * the source line. The block carries no author and no channel name, so the
@@ -12,11 +12,11 @@
  * modules, so it cannot close a cycle through attachments.ts.
  */
 
-import { findChannelById } from "@lib/channel-navigation";
+import { findChannelById } from "@lib/nav/channelNavigation";
 import { createElement, setText } from "@lib/dom";
-import { formatFullDate, formatMessageTimestamp } from "@lib/formatting";
+import { formatFullDate, formatMessageTimestamp } from "@lib/text/formatting";
 import { createIcon } from "@lib/icons";
-import { jumpToMessage } from "@lib/message-navigation";
+import { jumpToMessage } from "@lib/nav/messageNavigation";
 import type { ForwardInfo } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 

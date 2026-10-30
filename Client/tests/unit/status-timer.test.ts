@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { addMember, membersStore, setMembers, updatePresence } from "@stores/members.store";
-import { startStatusTimerWatcher } from "@lib/statusTimer";
-import { clampExpiresIn, clearAfterSeconds, type ClearAfterId } from "@lib/statusChoices";
+import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
+import { clampExpiresIn, clearAfterSeconds, type ClearAfterId } from "@lib/text/statusChoices";
 import {
   clearStatusTimer,
   loadStatusTimer,
@@ -11,8 +11,8 @@ import {
   loadUserStatusOrigin,
   saveStatusTimer,
   saveUserStatus,
-} from "@lib/userStatus";
-import { savePref } from "@lib/preferences";
+} from "@lib/presence/userStatus";
+import { savePref } from "@lib/prefs/preferences";
 
 const HOUR = 60 * 60_000;
 const START = new Date(2026, 9, 17, 10, 0, 0).getTime();

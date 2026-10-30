@@ -55,6 +55,9 @@ type protocolSchema struct {
 	ProtocolEpoch  int                   `json:"protocol_epoch"`
 	ClientToServer []protocolSchemaEntry `json:"client_to_server"`
 	ServerToClient []protocolSchemaEntry `json:"server_to_client"`
+	ErrorCodes     struct {
+		WS []protocolSchemaEntry `json:"ws"`
+	} `json:"error_codes"`
 }
 
 // loadProtocolSchema locates and parses protocol/schema.json relative to
@@ -85,6 +88,12 @@ func loadProtocolSchema(t *testing.T) protocolSchema {
 // package directory and returns a map of MsgType* constant name -> its wire
 // string value, for top-level `const ( Name = "value" )` declarations.
 func loadGoMsgTypeConstants(t *testing.T) map[string]string {
+	t.Helper()
+	return loadGoConstants(t, "MsgType")
+}
+
+// loadGoConstants is loadGoMsgTypeConstants for any name prefix.
+func loadGoConstants(t *testing.T, prefix string) map[string]string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -121,7 +130,7 @@ func loadGoMsgTypeConstants(t *testing.T) map[string]string {
 					continue
 				}
 				for i, ident := range vspec.Names {
-					if !strings.HasPrefix(ident.Name, "MsgType") {
+					if !strings.HasPrefix(ident.Name, prefix) {
 						continue
 					}
 					if i >= len(vspec.Values) {
@@ -223,6 +232,36 @@ func TestProtocolSchema_NoUndocumentedGoConstants(t *testing.T) {
 		}
 		if _, nowDocumented := documented[name]; nowDocumented {
 			t.Errorf("knownUndocumentedConstants lists %q but it is now in protocol/schema.json — remove it from the exception list", name)
+		}
+	}
+}
+
+// TestProtocolSchema_ErrorCodesMatchGoConstants holds the WebSocket error
+// codes to error_codes.ws in both directions, as the two tests above do for
+// message types: every schema code has its ErrCode* constant with the same
+// wire value, and no ErrCode* constant in the ws package is missing from the
+// schema, so a handler cannot mint a code the client's union does not know.
+func TestProtocolSchema_ErrorCodesMatchGoConstants(t *testing.T) {
+	schema := loadProtocolSchema(t)
+	goConsts := loadGoConstants(t, "ErrCode")
+	if len(schema.ErrorCodes.WS) == 0 {
+		t.Fatal("protocol/schema.json error_codes.ws is empty — schema failed to load")
+	}
+	documented := make(map[string]bool, len(schema.ErrorCodes.WS))
+	for _, e := range schema.ErrorCodes.WS {
+		documented[e.Go] = true
+		got, ok := goConsts[e.Go]
+		if !ok {
+			t.Errorf("error_codes.ws %q (go=%q) has no matching Go constant in ws package", e.Wire, e.Go)
+			continue
+		}
+		if got != e.Wire {
+			t.Errorf("ws.%s = %q, want %q per protocol/schema.json", e.Go, got, e.Wire)
+		}
+	}
+	for name, wire := range goConsts {
+		if !documented[name] {
+			t.Errorf("ws.%s = %q is not in error_codes.ws of protocol/schema.json — add it there and regenerate", name, wire)
 		}
 	}
 }

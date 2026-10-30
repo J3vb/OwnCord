@@ -7,32 +7,21 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// coalesceAudience narrows userIDs (the users who hold a push subscription,
-// already past prefilterAudience's in-memory filters) to the users a push is
-// actually sent to: not the author, currently eligible (offline and permitted
-// -- see eligibleFor) and trusting the author if this is a one-to-one DM (see
-// below).
-//
-// Eligibility is checked BEFORE coalescing, not after: an online or
-// unauthorized candidate must not reserve the 60s window for a channel they
-// were never going to be pushed about, or a later, genuinely eligible
-// mention (the recipient came back online, or a mention five seconds after
-// an ineligible one) would silently receive nothing. Eligibility is
-// re-checked again immediately before every delivery attempt in
-// stillEligible, because a bounded but potentially slow dispatch (retries,
-// a worker pool) can take long enough for it to change again in the other
-// direction.
-//
-// For a DM, permission IS participation (permissions.CanViewChannel checks
-// only DMParticipant for a "dm" channel). Notify already refused a group DM
-// before this is ever called (ch.Type == "dm" here always means one-to-one),
-// so a DM push additionally requires that the candidate trusts the author --
-// the same trusted_senders row Message Requests gates on and DMAudience /
-// MessageRequestService.DMDeliveryAudience apply to chat_message delivery
-// (service/message_crud.go, service/message_request.go) -- so a first-contact
-// message from an unknown sender cannot ring a stranger's phone before they
-// have decided to accept it. Fail closed: a lookup error is treated as
-// untrusted, same as every other fail-closed check in this file.
+// coalesceAudience narrows userIDs (push subscribers already past
+// prefilterAudience) to the users a push is actually sent to: not the author,
+// currently eligible (offline and permitted, see eligibleFor) and, for a
+// one-to-one DM, trusting the author.
+// Eligibility is checked BEFORE coalescing: an online or unauthorized candidate
+// must not reserve the 60s window for a channel they were never pushed about, or a
+// later genuinely eligible mention would silently get nothing. It is re-checked
+// before every delivery attempt in stillEligible, since a slow dispatch (retries,
+// worker pool) can outlast it.
+// For a DM, permission IS participation (permissions.CanViewChannel checks only
+// DMParticipant). Notify already refused a group DM, so "dm" here is one-to-one and
+// a push additionally requires the candidate trusts the author (the trusted_senders
+// row Message Requests gates on, as DMAudience applies to chat_message delivery),
+// so a first-contact message cannot ring a stranger's phone before they accept it.
+// Fail closed: a lookup error counts as untrusted.
 func (d *PushDispatcher) coalesceAudience(ctx context.Context, ch *db.Channel, userIDs []int64, authorID int64) []int64 {
 	out := make([]int64, 0, len(userIDs))
 	for _, uid := range userIDs {

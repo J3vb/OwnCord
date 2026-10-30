@@ -1,5 +1,5 @@
 /**
- * The profile card for a song (WP 8.10): title, "by <artist>", and a progress
+ * The profile card for a song: title, "by <artist>", and a progress
  * bar when the length is known. For a song with a length it ticks the elapsed
  * time once a second until the owner stops it.
  */

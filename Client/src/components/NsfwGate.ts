@@ -1,9 +1,9 @@
 /**
  * NsfwGate — the consent gate shown INSTEAD of a channel labelled NSFW, and
- * the bar that lets the reader withdraw that consent (B9-7).
+ * the bar that lets the reader withdraw that consent.
  *
  * The server withholds a labelled channel's content until the account has
- * acknowledged it (B5-7), so nothing is mounted or fetched under the gate:
+ * acknowledged it, so nothing is mounted or fetched under the gate:
  * accepting records the acknowledgement with the server first, and only the
  * confirmed store change makes ChannelController mount the channel.
  *
@@ -12,11 +12,11 @@
  * leaves the sidebar and header usable, so declining is ordinary navigation.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { nsfwConsentText } from "../i18n/nsfwConsent";
 
 // Re-exported so the lazy caller reads the catalog from this chunk, not its own.

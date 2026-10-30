@@ -8,7 +8,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import {
+  acceptReadState,
   forgetPendingMarkUnread,
+  isHeldUnread,
+  setKnownThreadCheck,
+  setThreadReadPointer,
   leaveChannel,
   markActiveChannelReadOnUnload,
   markChannelRead,
@@ -23,15 +27,20 @@ import {
   noteAwayUnread,
   setMarkReadSender,
   writeReadPointer,
-} from "@lib/read-state";
+} from "@lib/readState";
 import {
   markMessageUnread,
   setMarkUnreadSender,
-} from "../../src/components/message-list/mark-unread";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+} from "../../src/components/message-list/markUnread";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { markReadyActiveChannelRead } from "../../src/features/channels/wsHandlers";
-import { channelsStore, setActiveChannel, setChannels } from "@stores/channels.store";
-import { dmStore, setDmChannels } from "@stores/dm.store";
+import {
+  channelsStore,
+  incrementUnread,
+  setActiveChannel,
+  setChannels,
+} from "@stores/channels.store";
+import { dmStore, setDmChannels, setDmReadPointer } from "@stores/dm.store";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import type { ReadyChannel } from "@lib/types";
@@ -434,6 +443,203 @@ describe("Mark Unread", () => {
   it("forgets a request a new ready has replaced", () => {
     markMessageUnread(1, 10);
     forgetPendingMarkUnread();
+    expect(failMarkUnread("u-1", "failed")).toBe(false);
+    expect(pointer(1)).toBe(9);
+  });
+});
+
+function dmWith(channelId: number, readUpTo: number, unread = 0): DmChannel {
+  return {
+    channelId,
+    recipient: { id: channelId * 10, username: `u${channelId}`, avatar: "", status: "online" },
+    participants: [],
+    name: "",
+    isGroup: false,
+    lastMessageId: 99,
+    lastReadMessageId: readUpTo,
+    lastMessage: "",
+    lastMessageAt: "",
+    unreadCount: unread,
+    mentionCount: 0,
+  };
+}
+
+describe("seen state across connections and capability changes", () => {
+  it("drops what was seen when a new connection registers its sender", () => {
+    setChannels([channel(1, 0, 5)]);
+    noteMessageSeen(1, 12);
+    const next: Array<[number, number | undefined]> = [];
+    setMarkReadSender((id, messageId) => next.push([id, messageId]));
+    leaveChannel(1);
+    expect(next).toEqual([]);
+    expect(reads).toEqual([]);
+  });
+
+  it("ignores a message seen while the capability was off", () => {
+    resetServerCapabilities();
+    setChannels([channel(1, 0, 5)]);
+    noteMessageSeen(1, 12);
+    noteVisibleMessageSeen(1, 12);
+    applyReadyCapabilities({ read_pointer: true });
+    leaveChannel(1);
+    expect(reads).toEqual([]);
+  });
+
+  it("forgets a seen id after leaving, even if the server later restates a lower pointer", () => {
+    setChannels([channel(1, 0, 5)]);
+    noteMessageSeen(1, 12);
+    leaveChannel(1);
+    expect(reads).toEqual([[1, 12]]);
+    writeReadPointer(1, 3);
+    leaveChannel(1);
+    expect(reads).toEqual([[1, 12]]);
+  });
+
+  it("does not mark a channel this client no longer knows", () => {
+    noteMessageSeen(99, 12);
+    leaveChannel(99);
+    expect(reads).toEqual([]);
+  });
+
+  it("clears a DM's badge when the reader reaches the bottom", () => {
+    setDmChannels([dmWith(50, 10, 3)]);
+    noteMessageSeen(50, 30);
+    markChannelReadSeen(50);
+    expect(reads).toEqual([[50, 30]]);
+    expect(dmStore.getState().channels[0]?.unreadCount).toBe(0);
+  });
+});
+
+describe("pointers of DMs and threads", () => {
+  afterEach(() => setKnownThreadCheck(null));
+
+  it("compares what was seen with the pointer of that DM, not of the first one", () => {
+    setDmChannels([dmWith(7, 100), dmWith(8, 5)]);
+    noteMessageSeen(8, 50);
+    leaveChannel(8);
+    expect(reads).toEqual([[8, 50]]);
+  });
+
+  it("sends nothing for a DM whose own pointer is already past what was seen", () => {
+    setDmChannels([dmWith(8, 5), dmWith(7, 100)]);
+    noteMessageSeen(7, 50);
+    leaveChannel(7);
+    expect(reads).toEqual([]);
+  });
+
+  it("follows a DM pointer the server restated lower", () => {
+    setDmChannels([dmWith(50, 10)]);
+    writeReadPointer(50, 30);
+    setDmReadPointer(50, 5);
+    noteMessageSeen(50, 20);
+    leaveChannel(50);
+    expect(reads).toEqual([[50, 20]]);
+  });
+
+  it("marks a thread only above the pointer last restated for it", () => {
+    setKnownThreadCheck((id) => id === 500);
+    setThreadReadPointer(500, 40);
+    noteMessageSeen(500, 30);
+    leaveChannel(500);
+    expect(reads).toEqual([]);
+    noteMessageSeen(500, 45);
+    leaveChannel(500);
+    expect(reads).toEqual([[500, 45]]);
+  });
+
+  it("forgets thread pointers when the read state is reset", () => {
+    setKnownThreadCheck((id) => id === 500);
+    setThreadReadPointer(500, 40);
+    resetReadPointerState();
+    noteMessageSeen(500, 30);
+    leaveChannel(500);
+    expect(reads).toEqual([[500, 30]]);
+  });
+
+  it("does not know a thread until a check says so", () => {
+    setThreadReadPointer(500, 1);
+    noteMessageSeen(500, 30);
+    leaveChannel(500);
+    expect(reads).toEqual([]);
+  });
+});
+
+describe("closing the window with a live-seen send pending", () => {
+  it("cancels the pending send so a later arrival keeps its badge", () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    try {
+      setChannels([channel(1, 0, 5), channel(2, 0, 5)]);
+      setActiveChannel(1);
+      noteMessageSeen(1, 10);
+      noteLiveMessageSeen(2, controller.signal);
+      markActiveChannelReadOnUnload();
+      expect(reads).toEqual([[1, 10]]);
+      incrementUnread(2);
+      vi.advanceTimersByTime(2000);
+      expect(reads).toEqual([[1, 10]]);
+      expect(channelsStore.getState().channels.get(2)?.unreadCount).toBe(1);
+    } finally {
+      controller.abort();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Mark Unread hold and acknowledgements", () => {
+  beforeEach(() => {
+    setChannels([channel(1, 0, 10), channel(2, 0, 20)]);
+    setActiveChannel(1);
+    setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
+    setMessages(2, [msg(18), msg(19), msg(20)], false);
+  });
+
+  it("is no longer held once a live arrival released it", () => {
+    markMessageUnread(1, 10);
+    expect(isHeldUnread(1)).toBe(true);
+    noteMessageSeen(1, 12, true);
+    expect(isHeldUnread(1)).toBe(true);
+    noteAwayUnread(1);
+    noteMessageSeen(1, 12, true);
+    expect(isHeldUnread(1)).toBe(false);
+  });
+
+  it("is not released by a live arrival that names no real message", () => {
+    markMessageUnread(1, 10);
+    noteAwayUnread(1);
+    noteMessageSeen(1, 0, true);
+    noteMessageSeen(1, -4, true);
+    expect(isHeldUnread(1)).toBe(true);
+  });
+
+  it("drops an older read state for the message just marked unread, and takes the answer", () => {
+    markMessageUnread(1, 10);
+    expect(acceptReadState(1, 10)).toBe(false);
+    expect(acceptReadState(1, 12)).toBe(false);
+    expect(acceptReadState(1, 9)).toBe(true);
+    // The wait is over, so any pointer is accepted now.
+    expect(acceptReadState(1, 12)).toBe(true);
+  });
+
+  it("waits per channel: another channel's pending mark does not hold this one's read state", () => {
+    markMessageUnread(1, 10);
+    markMessageUnread(2, 20);
+    expect(acceptReadState(2, 15)).toBe(true);
+    expect(acceptReadState(1, 15)).toBe(false);
+  });
+
+  it("accepts any read state when nothing is pending", () => {
+    expect(acceptReadState(1, 1_000)).toBe(true);
+  });
+
+  it("answers a refusal once two read acks raced on one channel", () => {
+    markMessageUnread(1, 10);
+    // An earlier mark_read's answer overtakes the Mark Unread's own.
+    expect(acceptReadState(1, 11)).toBe(false);
+    expect(pointer(1)).toBe(9);
+    // The Mark Unread's own answer arrives next and ends the wait.
+    expect(acceptReadState(1, 9)).toBe(true);
     expect(failMarkUnread("u-1", "failed")).toBe(false);
     expect(pointer(1)).toBe(9);
   });

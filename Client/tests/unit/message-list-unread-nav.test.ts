@@ -35,11 +35,11 @@ import {
   setActiveChannel,
   incrementUnread,
 } from "@stores/channels.store";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import { closeSettings, openSettings } from "@stores/ui.store";
 import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
 import { createReconnectClock } from "../../src/features/connection/dispatchContext";
-import { formatMessageTimestamp } from "@lib/formatting";
+import { formatMessageTimestamp } from "@lib/text/formatting";
 
 const CHANNEL_ID = 1;
 const ME = 1;
@@ -152,7 +152,7 @@ function toResponse(m: Message): MessageResponse {
 
 const unreadCount = () => channelsStore.getState().channels.get(CHANNEL_ID)!.unreadCount;
 
-describe("MessageList — unread navigation (P4-03)", () => {
+describe("MessageList — unread navigation", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;
@@ -728,7 +728,7 @@ describe("MessageList — unread navigation (P4-03)", () => {
 
   // WP 2B-7: a jump into another channel mounts the list while the channel is
   // loading (ChannelController order), then installs the around-window.
-  describe("jump into another channel (WP 2B-7)", () => {
+  describe("jump into another channel", () => {
     const bar = () => container.querySelector<HTMLElement>('[data-testid="unread-bar"]');
     const barShown = () => bar() !== null && !bar()!.hidden;
 

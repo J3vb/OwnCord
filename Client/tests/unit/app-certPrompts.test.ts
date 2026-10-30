@@ -55,7 +55,7 @@ vi.mock("@stores/auth.store", () => ({
   clearAuth: hoisted.clearAuth,
 }));
 vi.mock("@stores/ui.store", () => ({ setTransientError: hoisted.setTransientError }));
-vi.mock("@lib/cert-reconnect", () => ({
+vi.mock("@lib/net/certReconnect", () => ({
   reconnectAfterCertAccept: hoisted.reconnectAfterCertAccept,
 }));
 vi.mock("../../src/app/session", () => ({
@@ -243,6 +243,7 @@ describe("first-use prompt", () => {
     await settle();
     expect(ws.acceptCertFingerprint).toHaveBeenCalledWith("a.example:8443", "new-fp");
     expect(rerunHealth).toHaveBeenCalledTimes(1);
+    expect(rerunHealth).toHaveBeenCalledWith("a.example:8443");
     expect(ws.connect).toHaveBeenCalledWith({ host: "A.Example:8443", token: "tok" });
   });
 

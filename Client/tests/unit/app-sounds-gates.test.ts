@@ -11,8 +11,8 @@ const { playNotificationSound, playVoiceSound } = vi.hoisted(() => ({
   playVoiceSound: vi.fn(),
 }));
 
-vi.mock("../../src/lib/notificationSound", () => ({ playNotificationSound, playVoiceSound }));
-vi.mock("../../src/lib/livekitSession", () => ({
+vi.mock("../../src/lib/media/notificationSound", () => ({ playNotificationSound, playVoiceSound }));
+vi.mock("../../src/lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
@@ -33,8 +33,8 @@ import {
   notifyMention,
   resetNotificationCoalescing,
 } from "../../src/lib/notifications";
-import { setGlobalNotificationLevel } from "../../src/lib/notificationLevel";
-import { savePref } from "../../src/lib/preferences";
+import { setGlobalNotificationLevel } from "../../src/lib/prefs/notificationLevel";
+import { savePref } from "../../src/lib/prefs/preferences";
 import type {
   ChannelActivityEntry,
   ChatMessagePayload,

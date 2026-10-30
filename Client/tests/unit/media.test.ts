@@ -31,7 +31,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/media-visibility", () => ({
+vi.mock("@lib/prefs/mediaVisibility", () => ({
   observeMedia: observeMediaMock,
 }));
 
@@ -44,8 +44,8 @@ vi.mock("@lib/icons", () => ({
   },
 }));
 
-vi.mock("@lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
+vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
   loadPref: loadPrefMock,
   savePref: vi.fn(),
 }));
@@ -93,7 +93,7 @@ import {
   clearExternalImageCache,
   fetchExternalImage,
 } from "../../src/components/message-list/attachments";
-import { blobImageSize } from "../../src/components/message-list/image-sizes";
+import { blobImageSize } from "../../src/components/message-list/imageSizes";
 
 // ---------------------------------------------------------------------------
 // Helpers

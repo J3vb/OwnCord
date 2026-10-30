@@ -89,6 +89,7 @@ func TestLiveKitWebhook_JoinedFailuresRemainRetryable(t *testing.T) {
 			if w.Code != http.StatusServiceUnavailable {
 				t.Fatalf("failed reconciliation HTTP = %d, want 503 for retry", w.Code)
 			}
+			assertJSONError(t, w.Header(), w.Body.Bytes(), "SERVICE_UNAVAILABLE")
 			if failure == "state_read" {
 				if calls.Load() != 0 {
 					t.Fatal("a DB read error alone must not trigger participant removal")

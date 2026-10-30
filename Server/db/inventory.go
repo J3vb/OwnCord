@@ -16,10 +16,10 @@ func inventoryByUname(_ int64, uname string) []any { return []any{uname} }
 func inventoryBothIDs(uid int64, _ string) []any   { return []any{uid, uid} }
 
 // SubjectInventory is the data-class inventory of data-lifecycle.md as
-// queries, keyed by class number. It is the generated lineage checklist B4-9
-// walks after an erasure (every count must be zero; class 21 counts audit
-// rows that still carry the id, which B4-10's unlinking takes to zero while
-// the rows themselves stay) and the before/after table the HP-4 drills
+// queries, keyed by class number. It is the generated lineage checklist
+// account erasure walks after an erasure (every count must be zero; class 21 counts audit
+// rows that still carry the id, which the audit unlinking takes to zero while
+// the rows themselves stay) and the before/after table the erasure drills
 // paste. uname is the username before erasure, for the lockout keys.
 var SubjectInventory = []InventoryClass{
 	{"1 identity row", `SELECT COUNT(*) FROM users WHERE id = ?`, inventoryByUID},
@@ -33,9 +33,8 @@ var SubjectInventory = []InventoryClass{
 		+ (SELECT COUNT(*) FROM totp_recovery_codes WHERE user_id = ?1)`, inventoryByUID},
 	{"5 recovery secrets", `SELECT (SELECT COUNT(*) FROM recovery_kits WHERE user_id = ?1)
 		+ (SELECT COUNT(*) FROM recovery_assists WHERE user_id = ?1 OR issued_by = ?1)`, inventoryByUID},
-	// Exact-suffix match, not LIKE: matches erasureDeleteLockouts (db/erasure.go)
-	// so a username holding a LIKE metacharacter (`_` or `%`, both valid per
-	// auth.ValidateUsername) cannot widen the match onto another account's key.
+	// Exact-suffix match, not LIKE (as in erasureDeleteLockouts), so a username
+	// holding `_` or `%` cannot widen the match onto another account's key.
 	{"6 rate-limit keys", `SELECT COUNT(*) FROM rate_lockouts
 		WHERE lower(substr(key, -(length(?1) + 1))) = ':' || lower(?1)
 		   OR substr(key, -(length(?2) + 1)) = ':' || ?2`,
@@ -59,9 +58,8 @@ var SubjectInventory = []InventoryClass{
 	{"14c message requests", `SELECT COUNT(*) FROM message_requests WHERE sender_id = ? OR recipient_id = ?`, inventoryBothIDs},
 	{"14d trusted senders", `SELECT COUNT(*) FROM trusted_senders WHERE recipient_id = ? OR sender_id = ?`, inventoryBothIDs},
 	{"15 invites", `SELECT COUNT(*) FROM invites WHERE created_by = ? OR redeemed_by = ?`, inventoryBothIDs},
-	// 15b (migration 055): a redemption the subject spent. The row survives the
-	// erasure with its user_id NULLed; this class goes to zero on the link, not
-	// the row, the same bare-id-plus-token shape as every actor class above.
+	// 15b: a redemption the subject spent. The row survives with its user_id
+	// NULLed; the class goes to zero on the link, not the row.
 	{"15b invite redemptions", `SELECT COUNT(*) FROM invite_redemptions WHERE user_id = ?`, inventoryByUID},
 	{"16 emoji", `SELECT COUNT(*) FROM emoji WHERE uploaded_by = ?`, inventoryByUID},
 	{"16c stickers", `SELECT COUNT(*) FROM stickers WHERE uploaded_by = ?`, inventoryByUID},
@@ -73,42 +71,37 @@ var SubjectInventory = []InventoryClass{
 	{"18b gif favorites", `SELECT COUNT(*) FROM gif_favorites WHERE user_id = ?`, inventoryByUID},
 	{"18c category user overrides", `SELECT COUNT(*) FROM category_user_overrides WHERE user_id = ?`, inventoryByUID},
 	{"18d thread follows", `SELECT COUNT(*) FROM thread_members WHERE user_id = ?`, inventoryByUID},
+	{"18e channel password grants", `SELECT COUNT(*) FROM channel_password_grants WHERE user_id = ?`, inventoryByUID},
 	{"19 voice state", `SELECT COUNT(*) FROM voice_states WHERE user_id = ?`, inventoryByUID},
 	{"20 replay events", `SELECT COUNT(*) FROM events WHERE ` + EventNamesUserPredicate, inventoryByUID},
 	{"20a channel retention updated_by", `SELECT COUNT(*) FROM channel_retention WHERE updated_by = ?`, inventoryByUID},
 	{"21 audit rows", `SELECT COUNT(*) FROM audit_log WHERE actor_id = ? OR (target_type = 'user' AND target_id = ?)`, inventoryBothIDs},
-	// B5-8 report classes: 22a and 22b count the principal COLUMNS, not the
-	// rows — the rows survive erasure by design (decision 7), so the class
-	// goes to zero when subject_id/reporter_id are rewritten to 0, exactly
-	// like every other bare-id-plus-token class in this file.
+	// Report classes: 22a and 22b count the principal columns, not the rows, which
+	// survive erasure by design; they go to zero when subject_id/reporter_id are
+	// rewritten to 0.
 	{"22a reports about the subject", `SELECT COUNT(*) FROM reports WHERE subject_id = ?`, inventoryByUID},
 	{"22b reports by the subject", `SELECT COUNT(*) FROM reports WHERE reporter_id = ?`, inventoryByUID},
 	{"22c evidence authored", `SELECT COUNT(*) FROM report_evidence WHERE author_id = ?`, inventoryByUID},
 	{"22d report notes authored", `SELECT COUNT(*) FROM report_notes WHERE author_id = ?`, inventoryByUID},
 	{"22e report assignments", `SELECT COUNT(*) FROM reports WHERE assignee_id = ?`, inventoryByUID},
-	// 22f (second Codex review): report_events is metadata, not content —
-	// unlinking the actor is the whole job, the audit_log shape.
+	// 22f: report_events is metadata; unlinking the actor is the whole job.
 	{"22f report events by the subject", `SELECT COUNT(*) FROM report_events WHERE actor_id = ?`, inventoryByUID},
-	// B5-9 moderation-action classes: 23a counts ROWS (they cascade-delete
-	// with the users row, unlike a report's outcome — S6 says a warning or
-	// timeout is deleted, not kept), 23b counts the principal COLUMN, the
-	// same bare-id-plus-token shape as every actor class above.
+	// Moderation-action classes: 23a counts rows (they cascade-delete with the
+	// users row), 23b the principal column.
 	{"23a moderation actions on the subject", `SELECT COUNT(*) FROM moderation_actions WHERE target_id = ?`, inventoryByUID},
 	{"23b moderation actions by the subject", `SELECT COUNT(*) FROM moderation_actions WHERE actor_id = ? OR lifted_by = ?`, inventoryBothIDs},
-	// B5-10 appeal classes: 24a counts ROWS (appellant_id cascades with the
-	// users row — S6-d says an appeal is deleted for the appellant, not
-	// kept), 24b counts the principal COLUMN, the same bare-id-plus-token
-	// shape as every actor class above.
+	// Appeal classes: 24a counts rows (appellant_id cascades with the users row),
+	// 24b the principal column.
 	{"24a appeals by the subject", `SELECT COUNT(*) FROM appeals WHERE appellant_id = ?`, inventoryByUID},
 	{"24b appeals decided by the subject", `SELECT COUNT(*) FROM appeals WHERE decided_by = ?`, inventoryByUID},
-	// 24c: assignee_id has no token column of its own (mirrors reports'
-	// 22e and moderation_actions.lifted_by) — a bare id, its own class so a
-	// row assigned to but not yet decided by the subject is still caught.
+	// 24c: assignee_id has no token column (like 22e and
+	// moderation_actions.lifted_by), so it is its own class; a row assigned to but
+	// not yet decided by the subject is still caught.
 	{"24c appeals assigned to the subject", `SELECT COUNT(*) FROM appeals WHERE assignee_id = ?`, inventoryByUID},
 }
 
 // InventoryKeptByErasure names the classes an erasure leaves on purpose.
-// Empty since B4-10: the audit history stays, but unlinked, so no class
+// Empty now: the audit history stays, but unlinked, so no class
 // still counts the subject.
 var InventoryKeptByErasure = map[string]bool{}
 

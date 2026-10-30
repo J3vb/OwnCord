@@ -19,7 +19,7 @@ const lockRankID = "lock-rank"
 // written order and the one the deadlock build checks are the same order.
 //
 // lock-inventory proves every lock has a row. It cannot tell whether the rank
-// a row gives is the rank the lock carries: since WP 5.6c a ranked lock is a
+// a row gives is the rank the lock carries: a ranked lock is a
 // syncutil.Ranked[R] or RankedRW[R], R is a rank type declared in
 // lock_order.go with a Rank method, and the deadlock build panics on an
 // acquire out of that order (syncutil/ranked_deadlock.go). This rule fails:

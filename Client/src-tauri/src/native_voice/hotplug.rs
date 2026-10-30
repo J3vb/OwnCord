@@ -1,4 +1,4 @@
-//! App-level audio device hot-plug watcher (Linux, WP LP-6a).
+//! App-level audio device hot-plug watcher (Linux).
 //!
 //! The session watchers in `capture.rs`/`playout.rs` follow a moved default
 //! only inside a call and never tell the webview. This watcher polls the
@@ -18,8 +18,9 @@ use std::time::Duration;
 use cpal::traits::HostTrait as _;
 
 use super::capture::input_devices;
-use super::playout::{lock, output_devices, Role, WatchedHost};
+use super::playout::{output_devices, Role, WatchedHost};
 use super::session::Devices;
+use crate::sync::lock;
 
 /// The Tauri event a changed device list is delivered on.
 pub const DEVICES_EVENT: &str = "native-voice-devices";

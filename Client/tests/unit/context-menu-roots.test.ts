@@ -1,5 +1,5 @@
 /**
- * Every right-click menu opens through `openMenuShell` in `lib/context-menu.ts`
+ * Every right-click menu opens through `openMenuShell` in `lib/ui/contextMenu.ts`
  * (MX-6), which is what closes the menu already open, keeps the new one inside
  * the window and wires its dismissal. A component that builds its own
  * `.context-menu` root skips all three. Shrink-only: an entry may only go down,
@@ -10,7 +10,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
 const SRC = resolve(__dirname, "../../src");
-const SHELL = "lib/context-menu.ts";
+const SHELL = "lib/ui/contextMenu.ts";
 
 /** A `.context-menu` root built by hand: the bare class, alone or first. */
 const ROOT = /(?:class:\s*|className\s*=\s*|classList\.add\(\s*)["'`]context-menu["'` ]/g;

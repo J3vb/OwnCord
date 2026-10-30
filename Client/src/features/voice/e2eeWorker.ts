@@ -5,7 +5,7 @@
 // generation stay owned by E2EEManager; this module reads them through
 // E2EEWorkerHost.
 import { ExternalE2EEKeyProvider } from "livekit-client";
-import { roomKeyToBase64 } from "../../lib/e2eeCrypto";
+import { roomKeyToBase64 } from "../../lib/net/e2eeCrypto";
 import { createLogger } from "../../lib/logger";
 import { desktop } from "../../platform/desktop";
 import { isLinuxDesktop } from "./native/platform";

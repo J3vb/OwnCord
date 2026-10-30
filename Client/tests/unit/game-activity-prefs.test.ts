@@ -6,6 +6,7 @@ import {
   MAX_SEEN,
   cleanGameName,
   displayName,
+  gameKey,
   isHidden,
   loadGamePrefs,
   loadSeen,
@@ -18,8 +19,9 @@ import {
   withManual,
   withRename,
   withoutManual,
-} from "@lib/gameActivityPrefs";
-import { STORAGE_PREFIX, savePref } from "@lib/preferences";
+} from "@lib/prefs/gameActivityPrefs";
+import { isGameActivityShared } from "@lib/presence/gameActivityBridge";
+import { STORAGE_PREFIX, savePref } from "@lib/prefs/preferences";
 
 /** Device-local game choices: valid parts are kept field by field, nothing throws. */
 
@@ -224,5 +226,169 @@ describe("removing an added game", () => {
     let prefs = withManual(EMPTY_GAME_PREFS, "C:\\g\\a.exe", "Mine")!;
     prefs = withHidden(withRename(prefs, "Mine", "M"), "mine", true);
     expect(withoutManual(prefs, "c:/G/A.exe", [])).toEqual(EMPTY_GAME_PREFS);
+  });
+});
+
+describe("stored under fixed keys", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("keeps choices and history under their own names", () => {
+    saveGamePrefs(withHidden(EMPTY_GAME_PREFS, "Hades", true));
+    recordSeen("Hades");
+    expect(JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}gameActivityGames`)!)).toEqual({
+      manual: [],
+      hidden: ["Hades"],
+      renames: {},
+    });
+    expect(JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}gameActivitySeen`)!)).toEqual([
+      "Hades",
+    ]);
+  });
+});
+
+describe("recordSeen history on disk", () => {
+  beforeEach(() => localStorage.clear());
+
+  const stored = (): string[] =>
+    JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}${GAME_SEEN_KEY}`)!) as string[];
+
+  it("writes at most 50 names", () => {
+    for (let i = 0; i < MAX_SEEN + 5; i++) recordSeen(`Game ${i}`);
+    expect(stored()).toHaveLength(MAX_SEEN);
+    expect(stored()[0]).toBe(`Game ${MAX_SEEN + 4}`);
+  });
+
+  it("writes a repeated name once, moved to the front", () => {
+    recordSeen("A");
+    recordSeen("B");
+    recordSeen("C");
+    recordSeen("a");
+    expect(stored()).toEqual(["a", "C", "B"]);
+  });
+});
+
+describe("gameKey", () => {
+  it("trims and ignores case", () => {
+    expect(gameKey("  Hades II ")).toBe("hades ii");
+  });
+});
+
+describe("pathKey quotes", () => {
+  it("trims any number of quotes from both ends only", () => {
+    expect(pathKey('""/Games/A.exe""')).toBe("/games/a.exe");
+    expect(pathKey('"""/Games/A.exe"')).toBe("/games/a.exe");
+    expect(pathKey('"/Games/A.exe"""')).toBe("/games/a.exe");
+    expect(pathKey('/Games/"A".exe')).toBe('/games/"a".exe');
+  });
+});
+
+describe("parseGamePrefs limits", () => {
+  it("keeps a path of exactly 4096 characters and drops one longer", () => {
+    const exact = "/" + "p".repeat(4095);
+    const parsed = parseGamePrefs({
+      manual: [
+        { path: exact, name: "Exact" },
+        { path: exact + "x", name: "Long" },
+      ],
+    });
+    expect(parsed.manual).toEqual([{ path: exact, name: "Exact" }]);
+  });
+
+  it("keeps exactly 500 renames out of more", () => {
+    const renames: Record<string, string> = {};
+    for (let i = 0; i < 600; i++) renames[`From ${i}`] = `To ${i}`;
+    const kept = parseGamePrefs({ renames }).renames;
+    expect(Object.keys(kept)).toHaveLength(500);
+    expect(kept["From 499"]).toBe("To 499");
+    expect(kept["From 500"]).toBeUndefined();
+  });
+});
+
+describe("changes keep what they do not touch", () => {
+  it("hiding a second game keeps the first hidden, and trims the stored name", () => {
+    let prefs = withHidden(EMPTY_GAME_PREFS, "Hades", true);
+    prefs = withHidden(prefs, "  Celeste ", true);
+    expect(prefs.hidden).toEqual(["Hades", "Celeste"]);
+    expect(withHidden(prefs, "hades", false).hidden).toEqual(["Celeste"]);
+  });
+
+  it("renaming one game keeps the other renames", () => {
+    let prefs = withRename(EMPTY_GAME_PREFS, "Factorio", "Factory");
+    prefs = withRename(prefs, "Hades", "Hades Two");
+    expect(prefs.renames).toEqual({ Factorio: "Factory", Hades: "Hades Two" });
+  });
+
+  it("a name padded with spaces is stored trimmed, and is unchanged when it matches", () => {
+    expect(withRename(EMPTY_GAME_PREFS, " Factorio ", "Factory").renames).toEqual({
+      Factorio: "Factory",
+    });
+    expect(withRename(EMPTY_GAME_PREFS, " Factorio ", "Factorio").renames).toEqual({});
+  });
+
+  it("adding a program keeps the other programs and replaces only the same path", () => {
+    let prefs = withManual(EMPTY_GAME_PREFS, "/a", "A")!;
+    prefs = withManual(prefs, "/b", "B")!;
+    prefs = withManual(prefs, "/c", "C")!;
+    expect(prefs.manual.map((m) => m.name)).toEqual(["A", "B", "C"]);
+    prefs = withManual(prefs, "/B", "B2")!;
+    expect(prefs.manual.map((m) => m.name)).toEqual(["A", "C", "B2"]);
+  });
+
+  it("accepts a program path of 4096 characters and refuses a longer one", () => {
+    expect(withManual(EMPTY_GAME_PREFS, "/" + "p".repeat(4095), "N")).not.toBeNull();
+    expect(withManual(EMPTY_GAME_PREFS, "/" + "p".repeat(4096), "N")).toBeNull();
+  });
+
+  it("holds 100 programs: a new path is refused at the limit, a replacement is not", () => {
+    let prefs = EMPTY_GAME_PREFS;
+    for (let i = 0; i < 100; i++) prefs = withManual(prefs, `/p${i}`, `G${i}`)!;
+    expect(prefs.manual).toHaveLength(100);
+    expect(withManual(prefs, "/another", "Another")).toBeNull();
+    const replaced = withManual(prefs, "/p5", "Renamed")!;
+    expect(replaced.manual).toHaveLength(100);
+    expect(replaced.manual.find((m) => m.path === "/p5")?.name).toBe("Renamed");
+  });
+});
+
+describe("removing a program among others", () => {
+  it("keeps the other programs", () => {
+    let prefs = withManual(EMPTY_GAME_PREFS, "/a", "A")!;
+    prefs = withManual(prefs, "/b", "B")!;
+    expect(withoutManual(prefs, "/a", []).manual).toEqual([{ path: "/b", name: "B" }]);
+  });
+
+  it("keeps the rename and hide while another program has the same name", () => {
+    let prefs = withManual(EMPTY_GAME_PREFS, "/a", "Mine")!;
+    prefs = withManual(prefs, "/b", "mine")!;
+    prefs = withHidden(withRename(prefs, "Mine", "Mine!"), "Mine", true);
+    const next = withoutManual(prefs, "/a", []);
+    expect(next.hidden).toEqual(["Mine"]);
+    expect(next.renames).toEqual({ Mine: "Mine!" });
+  });
+
+  it("drops the rename and hide when the other programs have other names", () => {
+    let prefs = withManual(EMPTY_GAME_PREFS, "/a", "Mine")!;
+    prefs = withManual(prefs, "/b", "Another")!;
+    prefs = withHidden(withRename(prefs, "Mine", "Mine!"), "Mine", true);
+    const next = withoutManual(prefs, "/a", []);
+    expect(next.hidden).toEqual([]);
+    expect(next.renames).toEqual({});
+    expect(next.manual).toEqual([{ path: "/b", name: "Another" }]);
+  });
+
+  it("drops the rename and hide when the detected history has only other names", () => {
+    let prefs = withManual(EMPTY_GAME_PREFS, "/a", "Mine")!;
+    prefs = withHidden(withRename(prefs, "Mine", "Mine!"), "Mine", true);
+    expect(withoutManual(prefs, "/a", ["Other game"])).toEqual(EMPTY_GAME_PREFS);
+  });
+});
+
+describe("sharing switch", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is on until turned off, under its stored name", () => {
+    expect(isGameActivityShared()).toBe(true);
+    localStorage.setItem(`${STORAGE_PREFIX}shareGameActivity`, "false");
+    expect(isGameActivityShared()).toBe(false);
   });
 });

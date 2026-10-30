@@ -1,6 +1,5 @@
-// Native-backend resource counts for the facade's debug surface (B7-11 rule
-// 3: the long-session soak cannot see Rust memory, so it reads these). The
-// TS-side counts are exact; the Rust snapshot is whatever the backend last
+// Native-backend resource counts for the facade's debug surface (the long-session soak cannot see Rust memory, so it reads
+// these). The TS-side counts are exact; the Rust snapshot is whatever the backend last
 // reported: the return of NativeRoom.disconnect(), or the refresh each
 // LiveKitSession.getSessionDebugInfo() read requests — so a read shows the
 // snapshot from the previous read or disconnect, whichever landed last. A

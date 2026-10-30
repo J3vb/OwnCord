@@ -12,8 +12,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "@lib/api";
-import type { ProfileManager } from "@lib/profiles";
-import type { RenderRecovery } from "@lib/safe-render";
+import type { ProfileManager } from "@lib/presence/profiles";
+import type { RenderRecovery } from "@lib/text/safeRender";
 
 const hoisted = vi.hoisted(() => ({
   callbacks: null as Record<string, (...args: never[]) => unknown> | null,
@@ -35,8 +35,8 @@ vi.mock("@lib/logger", () => ({
     error: hoisted.logError,
   }),
 }));
-vi.mock("@lib/safe-render", () => ({ safeMount: vi.fn() }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
+vi.mock("@lib/net/credentials", () => ({
   deleteCredential: vi.fn(),
   loginWithSavedPassword: vi.fn(),
   parseRelayedLogin: vi.fn(),
@@ -89,6 +89,7 @@ const PAGE_METHODS = [
   "getRememberPassword",
   "getAutoConnect",
   "getPassword",
+  "resubmitAfterCertAccept",
   "destroy",
 ];
 
@@ -258,6 +259,14 @@ describe("renderConnect", () => {
         [{ id: "listed" }],
         expect.anything(),
       );
+      expect(hoisted.page["resubmitAfterCertAccept"]).not.toHaveBeenCalled();
+    });
+
+    it("rerunHealth with a trusted host also resubmits the sign-in it refused", () => {
+      const [, rerunHealth] = mount();
+      rerunHealth("chat.example:8443");
+      expect(hoisted.runHealthChecks).toHaveBeenCalledTimes(1);
+      expect(hoisted.page["resubmitAfterCertAccept"]).toHaveBeenCalledWith("chat.example:8443");
     });
   });
 

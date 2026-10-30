@@ -12,7 +12,7 @@ import {
   upsertThread,
 } from "../../src/stores/threads.store";
 import { adoptStarterThreads, withThreadsStore } from "../../src/stores/threadsLoader";
-import { runSessionResets } from "../../src/lib/sessionRegistry";
+import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 import { makeThread } from "../helpers/thread-fixtures";
 
 afterEach(() => {

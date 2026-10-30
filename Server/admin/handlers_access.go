@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Access explanation and override preview (RI-06) ─────────────────────────
 //
 // Read-only adapters over service.ChannelService: the decision comes from the
 // canonical predicates on the server, never from the panel, and no request
@@ -21,12 +21,12 @@ func handleExplainAccess(channels *service.ChannelService) http.HandlerFunc {
 		}
 		userID, err := strconv.ParseInt(r.URL.Query().Get("user_id"), 10, 64)
 		if err != nil || userID <= 0 {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		actorRole := actorRoleFromContext(r)
 		if actorRole == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		res, err := channels.ExplainAccess(r.Context(), actorFromContext(r), actorRole, userID, ch, r.URL.Query().Get("action"))
@@ -58,12 +58,12 @@ func handlePreviewAccess(channels *service.ChannelService) http.HandlerFunc {
 			return
 		}
 		if req.RoleID < 0 || req.UserID < 0 {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid request body")
 			return
 		}
 		actorRole := actorRoleFromContext(r)
 		if actorRole == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		res, err := channels.PreviewOverride(r.Context(), actorFromContext(r), actorRole, ch, req.RoleID, req.UserID, req.Allow, req.Deny)

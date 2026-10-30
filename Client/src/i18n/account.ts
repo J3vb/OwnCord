@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Account settings and session copy (B9-20): the Account tab (profile, avatar,
+ * Account settings and session copy: the Account tab (profile, avatar,
  * password, two-factor, status, devices, retention and account deletion), the
  * recovery-kit and recovery-code sections, the unseen-sign-in notice and the
  * main page's account toasts. Loads with the lazily loaded settings overlay

@@ -1,6 +1,6 @@
 // N-1 COMPATIBILITY, TOLERANT HALF (ARCH-027). Not part of the normal client
 // suite: the `.compat.ts` suffix is outside vitest.config.ts's include globs
-// (`tests/**/*.test.ts`, `src/**/*.test.ts`) on purpose. scripts/protocol-n1-compat.mjs
+// (`tests/**/*.test.ts`, `src/**/*.test.ts`) on purpose. scripts/ci/protocol-n1-compat.mjs
 // copies this file into the PREVIOUS release's checkout as
 // Client/tests/contract/n1-new-frames.test.ts and runs it there, so every import
 // below resolves against the OLD client's dispatcher and stores.
@@ -24,7 +24,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),
@@ -39,9 +39,9 @@ vi.mock("@lib/livekitSession", () => ({
   disableCamera: vi.fn(async () => {}),
   disableScreenshare: vi.fn(async () => {}),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
-vi.mock("@lib/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
+vi.mock("@lib/voice/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -58,7 +58,9 @@ interface WireTranscript {
 
 const DIR = process.env["N1_NEW_FIXTURE_DIR"];
 if (DIR === undefined || DIR === "") {
-  throw new Error("N1_NEW_FIXTURE_DIR is not set; run this through scripts/protocol-n1-compat.mjs");
+  throw new Error(
+    "N1_NEW_FIXTURE_DIR is not set; run this through scripts/ci/protocol-n1-compat.mjs",
+  );
 }
 const FIXTURE_DIR: string = DIR;
 const FILES = readdirSync(FIXTURE_DIR)

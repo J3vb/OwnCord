@@ -1,5 +1,5 @@
 /**
- * Forward picker (WP 6.9a): a dialog to choose up to five channels or DMs for
+ * Forward picker: a dialog to choose up to five channels or DMs for
  * one message, optionally with a message of the sender's own, then send and
  * show each target's result. Loaded on the first Forward, through
  * ChannelController, so it stays out of the startup and MainPage chunks.
@@ -12,8 +12,8 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
-import { showToast } from "@lib/toast";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import { showToast } from "@lib/ui/toast";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
 import { dmStore } from "@stores/dm.store";
@@ -35,6 +35,7 @@ import {
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
 import { forwardText } from "../i18n/forward";
 import { shellText } from "../i18n/shell";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 export interface ForwardPickerOptions {
   readonly ws: ForwardWs;
@@ -56,19 +57,19 @@ const labelOf = (t: ForwardTarget): string => `${t.kind === "dm" ? "@" : "#"}${t
 
 function reasonText(code: string | null): string {
   switch (code) {
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return forwardText("reason.FORBIDDEN");
-    case "NOT_FOUND":
+    case WsErrorCode.NOT_FOUND:
       return forwardText("reason.NOT_FOUND");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return forwardText("reason.RATE_LIMITED");
-    case "SLOW_MODE":
+    case WsErrorCode.SLOW_MODE:
       return forwardText("reason.SLOW_MODE");
-    case "TIMED_OUT":
+    case WsErrorCode.TIMED_OUT:
       return forwardText("reason.TIMED_OUT");
-    case "ATTACHMENTS_UNAVAILABLE":
+    case WsErrorCode.ATTACHMENTS_UNAVAILABLE:
       return forwardText("reason.ATTACHMENTS_UNAVAILABLE");
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return forwardText("reason.REQUEST_TIMEOUT");
     case "OFFLINE":
       return forwardText("reason.OFFLINE");

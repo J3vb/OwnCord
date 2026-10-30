@@ -13,7 +13,7 @@ vi.mock("../../src/features/messaging/emojiStill", async (importOriginal) => {
 });
 
 import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/message-actions";
+import { messageActionGates } from "@components/message-list/messageActions";
 import { stickerReplyPreview } from "@components/message-list/sticker";
 import type { Message } from "@stores/messages.store";
 import {

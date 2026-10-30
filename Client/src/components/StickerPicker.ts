@@ -1,12 +1,12 @@
-// StickerPicker — the Stickers tab of the expression popup (WP 8.8): a search
+// StickerPicker — the Stickers tab of the expression popup: a search
 // box, a Recent row and a grid of the server's custom stickers. Clicking one
 // picks it; the owner sends it at once. Uses @lib/dom helpers exclusively and
 // never sets innerHTML.
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, clearChildren } from "@lib/dom";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { stickersStore, type Sticker } from "@stores/stickers.store";
 import { loadStickerImage } from "@components/message-list/sticker";
 import { stickersText } from "../i18n/stickers";

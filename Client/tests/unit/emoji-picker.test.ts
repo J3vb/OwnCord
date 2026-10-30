@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, onTestFinished } from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
-import { quickReactionEmoji } from "@components/message-list/quick-reactions";
+import { quickReactionEmoji } from "@components/message-list/quickReactions";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "@stores/emoji.store";
 import { expectConsole } from "../helpers/console";
@@ -478,7 +478,7 @@ describe("EmojiPicker", () => {
 
     const foodBtn = Array.from(
       picker.element.querySelectorAll<HTMLButtonElement>(".ep-category-btn"),
-    ).find((b) => b.textContent === "Food");
+    ).find((b) => b.getAttribute("aria-label") === "Food");
     expect(foodBtn).toBeDefined();
 
     const foodLabel = Array.from(picker.element.querySelectorAll(".ep-category-label")).find(
@@ -509,7 +509,7 @@ describe("EmojiPicker", () => {
     picker.destroy();
   });
 
-  it("ArrowRight steps the category bar and Enter jumps to that category", () => {
+  it("ArrowDown steps the category rail and Enter jumps to that category", () => {
     const original = Element.prototype.scrollIntoView;
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;
@@ -523,7 +523,7 @@ describe("EmojiPicker", () => {
 
     buttons[0]!.focus();
     buttons[0]!.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }),
     );
     expect(document.activeElement).toBe(buttons[1]);
     expect(buttons[0]!.getAttribute("tabindex")).toBe("-1");

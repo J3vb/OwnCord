@@ -7,7 +7,7 @@ import {
   findSticker,
   stickersLoaded,
 } from "../../src/stores/stickers.store";
-import { runSessionResets } from "../../src/lib/sessionRegistry";
+import { runSessionResets } from "../../src/lib/net/sessionRegistry";
 
 const wave = { id: 1, name: "Wave", emoji: "👋", url: "/api/v1/stickers/1/image" };
 const party = { id: 2, name: "Party", emoji: null, url: "/api/v1/stickers/2/image" };
@@ -39,6 +39,26 @@ describe("stickers store", () => {
     setStickers([wave, { ...wave, name: "Dup" }, { id: "x" } as never, null as never]);
     stickersStore.flush();
     expect(listStickers().map((s) => s.name)).toEqual(["Wave"]);
+  });
+
+  it("skips an entry whose id is not a number or whose url is missing", () => {
+    setStickers([
+      { ...wave, id: "1" as never },
+      { ...wave, id: 3, name: "NoUrl", url: undefined as never },
+      { ...wave, id: 4, name: 7 as never },
+      party,
+    ]);
+    stickersStore.flush();
+    expect(listStickers().map((s) => s.name)).toEqual(["Party"]);
+  });
+
+  it("keeps a stated emoji and turns a missing one into null", () => {
+    setStickers([
+      { ...wave, emoji: "\u{1F44B}" },
+      { ...party, emoji: undefined as never },
+    ]);
+    stickersStore.flush();
+    expect(listStickers().map((s) => s.emoji)).toEqual(["\u{1F44B}", null]);
   });
 
   it("normalises an empty emoji to null", () => {

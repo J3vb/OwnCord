@@ -7,26 +7,23 @@ import (
 	"net/http"
 	"regexp"
 	"time"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// WP 4.1c: a deadline on the non-streaming REST routes.
-//
-// A request that waits on a stalled database writer holds its goroutine, its
-// connection and (once the 30 s WriteTimeout passes) loses its response. The
-// middleware gives every non-exempt request a context deadline of
-// restRequestDeadline, short enough to leave room to write an answer inside
-// the server's 30 s WriteTimeout. Handlers that pass r.Context() to the
-// database see the deadline as a cancelled query. When such a handler then
-// fails with a 5xx AFTER the deadline, the failure is the deadline's, and
-// the writer wrapper turns a 500 or 503 into 503 SERVICE_UNAVAILABLE with Retry-After
-// (the client already maps both: Client/src/lib/api.ts). A status below 500 is
-// never rewritten, so a request that committed and answered 2xx stays a
-// success, and a 4xx stays the handler's own verdict.
-//
-// The deadline is a context deadline, not a handler kill: the handler goroutine
-// runs to completion, and a route that ignores its context is not interrupted.
-// It can only fail a request before its commit, because post-commit steps are
-// detached from the request context.
+// A deadline on the non-streaming REST routes. A request waiting on a stalled
+// database writer holds its goroutine and connection and, past the 30 s
+// WriteTimeout, loses its response. The middleware gives every non-exempt
+// request a context deadline of restRequestDeadline, short enough to leave room
+// to answer inside that timeout; handlers passing r.Context() to the database
+// see a cancelled query. A 500 or 503 written AFTER the deadline is the
+// deadline's doing, so the writer wrapper turns it into 503 SERVICE_UNAVAILABLE
+// with Retry-After (the client maps both: Client/src/lib/api.ts). A status below
+// 500 is never rewritten, so a request that committed stays a success.
+// It is a context deadline, not a handler kill: the goroutine runs to completion
+// and a route ignoring its context is not interrupted. It can only fail a
+// request before its commit, because post-commit steps are detached from the
+// request context.
 
 // requestDeadlineRewritable reports the statuses the deadline turns into 503:
 // the generic 500 and 503 a handler answers when its work is cancelled. A
@@ -36,19 +33,17 @@ func requestDeadlineRewritable(code int) bool {
 }
 
 // restRequestDeadline bounds one non-exempt REST request. A package var, not a
-// config key, so tests can shrink it (WP 4.1c); the 30 s WriteTimeout in
+// config key, so tests can shrink it; the 30 s WriteTimeout in
 // internal/app/lifecycle.go leaves room to answer after it fires.
 var restRequestDeadline = 15 * time.Second
 
-// requestDeadlineRetryAfter is the Retry-After value (seconds) of the 503.
 const requestDeadlineRetryAfter = "2"
 
-// requestDeadlineBody is the fixed 503 body.
-const requestDeadlineBody = `{"error":"SERVICE_UNAVAILABLE","message":"the server is busy; try again"}` + "\n"
+const requestDeadlineBody = `{"error":"` + string(httperr.CodeServiceUnavailable) + `","message":"the server is busy; try again"}` + "\n"
 
-// requestDeadlineExemption is one route (or family) the deadline must not
-// touch. method is "" for any method. path is matched against the request's
-// escaped path, like bodyCapExemptPattern.
+// requestDeadlineExemption is one route (or family) the deadline must not touch.
+// method is "" for any method; path matches the escaped path, like
+// bodyCapExemptPattern.
 type requestDeadlineExemption struct {
 	method string
 	path   *regexp.Regexp
@@ -56,11 +51,10 @@ type requestDeadlineExemption struct {
 }
 
 // requestDeadlineExempt is the exempt table: every route that streams, holds a
-// connection open or is deliberately long-running. Each entry carries its
-// reason. TestRequestDeadline_EveryRouteClassified fails on a mounted route
-// that is neither exempt here nor listed as bound, and on an entry here that
-// matches no mounted route — add a route there, with a reason, rather than
-// widening a pattern.
+// connection open or is deliberately long-running, each with its reason.
+// TestRequestDeadline_EveryRouteClassified fails on a mounted route neither
+// exempt here nor listed as bound, and on an entry matching no route; add a
+// route with a reason rather than widening a pattern.
 var requestDeadlineExempt = []requestDeadlineExemption{
 	{http.MethodGet, regexp.MustCompile(`^/api/v1/ws$`),
 		"the WebSocket upgrade: r.Context() is the socket's lifetime, so a deadline would close every connection at 15 s"},
@@ -94,6 +88,8 @@ var requestDeadlineExempt = []requestDeadlineExemption{
 		"backup file download: streamed"},
 	{http.MethodPost, regexp.MustCompile(`^/admin/api/backups/[^/]+/restore$`),
 		"restore: drains connections and replaces the database; a half-cancelled restore would corrupt"},
+	{http.MethodPost, regexp.MustCompile(`^/admin/api/discord-imports/upload$`),
+		"Discord export upload: up to upload.import_max_mb under the transfer deadline, and the request starts the import"},
 	{http.MethodPost, regexp.MustCompile(`^/admin/api/updates/apply$`),
 		"update apply: downloads and verifies a release binary (5 min budget of its own)"},
 	{http.MethodPost, regexp.MustCompile(`^/admin/api/restart$`),
@@ -108,7 +104,6 @@ var requestDeadlineExempt = []requestDeadlineExemption{
 		"admin-initiated account erasure: same as DELETE /api/v1/auth/account"},
 }
 
-// requestDeadlineExemptRequest reports whether the deadline skips a request.
 func requestDeadlineExemptRequest(method, escapedPath string) bool {
 	for _, e := range requestDeadlineExempt {
 		if (e.method == "" || e.method == method) && e.path.MatchString(escapedPath) {
@@ -137,8 +132,6 @@ func RequestDeadlineUnless(d func() time.Duration, exempt func(method, escapedPa
 	}
 }
 
-// requestDeadlineMiddleware is the production wiring: the restRequestDeadline
-// var and the exempt table.
 func requestDeadlineMiddleware() func(http.Handler) http.Handler {
 	return RequestDeadlineUnless(func() time.Duration { return restRequestDeadline }, requestDeadlineExemptRequest)
 }
@@ -156,7 +149,6 @@ type deadlineWriter struct {
 	rewritten   bool
 }
 
-// Unwrap returns the underlying writer for http.ResponseController.
 func (w *deadlineWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // WriteHeader passes a status through unless it is a 5xx written after the
@@ -191,8 +183,8 @@ func (w *deadlineWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// Write commits an implicit 200 like net/http does, and drops the handler's
-// body once the status was rewritten.
+// Write commits an implicit 200 like net/http and drops the handler's body once
+// the status was rewritten.
 func (w *deadlineWriter) Write(p []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)

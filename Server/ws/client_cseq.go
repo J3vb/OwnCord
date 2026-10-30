@@ -14,7 +14,7 @@ const cseqBufKeep = 64 << 10
 var seqFramePrefix = []byte(`{"seq":`)
 
 // cseqState is a connection's count of sequenced frames written to its
-// socket (WP 2A-5). out and buf belong to whichever goroutine writes the
+// socket. out and buf belong to whichever goroutine writes the
 // socket: the handshake while it replays, then writePump, which starts after
 // it. lossPending is set by markLoss (hub_loss.go) on the dispatch goroutine
 // and consumed by the writer, so it is atomic.

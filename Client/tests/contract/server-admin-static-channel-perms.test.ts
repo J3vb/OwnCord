@@ -77,7 +77,7 @@ function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
   });
 }
 
-describe("Server/admin/static — channel permissions save (OC-0154)", () => {
+describe("Server/admin/static — channel permissions save", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {
@@ -146,7 +146,7 @@ describe("Server/admin/static — channel permissions save (OC-0154)", () => {
     expect((last.body as { deny: number }).deny & 0x2).toBe(0x2);
   });
 
-  it("keeps the override matrix's write for an already-hidden role the quick toggle left unchanged (OC-0421)", async () => {
+  it("keeps the override matrix's write for an already-hidden role the quick toggle left unchanged", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
     const { window } = dom;

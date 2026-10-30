@@ -19,10 +19,11 @@ import {
 import type { DmChannel, DmUser } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { voiceStore } from "@stores/voice.store";
-import { getChannelMute, isChannelMuted } from "@lib/channel-mutes";
-import { markdownToPlainText } from "@lib/markdown";
+import { getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
+import { markdownToPlainText } from "@lib/text/markdown";
 import { connectText } from "../../i18n/connect";
 import { rowActivity } from "../../features/members/listeningLine";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,7 +82,7 @@ export function findDirectDm(userId: number): DmChannel | undefined {
 /**
  * Create a DM with a user via the API and switch to it. `onReady` runs after
  * the new conversation is selected, so a caller that needs to act on it (e.g.
- * start a call, BUG-05) sees it as the active channel.
+ * start a call) sees it as the active channel.
  */
 export async function handleCreateDm(
   recipientId: number,
@@ -120,7 +121,7 @@ export async function handleCreateDm(
     // A FORBIDDEN 403 is a block or the other member's DM setting; both read the same,
     // in the app's own words, so the toast never says which.
     const msg =
-      err instanceof ApiClientError && err.status === 403 && err.code === "FORBIDDEN"
+      err instanceof ApiClientError && err.status === 403 && err.code === RestErrorCode.FORBIDDEN
         ? connectText("blocks.blockedByThem")
         : errorText(err, connectText("app.dmCreateFailed"));
     deps.getToast()?.show(msg, "error");
@@ -186,7 +187,7 @@ function timedMute(channelId: number): { mutedUntil?: number } {
   return until === null ? {} : { mutedUntil: until };
 }
 
-/** A 1:1 partner's second line: their game, else their music (WP 8.3, 8.10). */
+/** A 1:1 partner's second line: their game, else their music. */
 function dmActivityFields(dm: DmChannel): Pick<DmConversation, "activity" | "activityIcon"> {
   const shown = dm.isGroup ? null : rowActivity(dm.recipient.activity, dm.recipient.listening);
   return shown === null ? {} : { activity: shown.text, activityIcon: shown.icon };

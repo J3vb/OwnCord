@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { migrateLegacyValue } from "../../src/lib/legacyKeyMigration";
+import { migrateLegacyValue } from "../../src/lib/net/legacyKeyMigration";
 
 const LEGACY = "owncord:test-pref:7";
 const HOST_A = "owncord:test-pref:a.example.com:7";

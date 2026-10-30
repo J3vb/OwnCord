@@ -4,7 +4,7 @@
  * can share it without a lower layer importing a component.
  */
 
-import { parseTimestamp } from "@lib/formatting";
+import { parseTimestamp } from "@lib/text/formatting";
 import { messagingText } from "../../i18n/messaging";
 
 const MINUTE_MS = 60_000;

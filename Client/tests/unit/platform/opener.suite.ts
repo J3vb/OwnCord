@@ -1,6 +1,6 @@
 // Behaviour suite for the `UrlOpener` contract
 // (`src/platform/contracts/opener.ts`). Written in B7-5 against the in-place
-// seam in `lib/admin-panel.ts` before the move, so it pins today's behaviour
+// seam in `lib/adminPanel.ts` before the move, so it pins today's behaviour
 // rather than the moved code's.
 import { beforeEach, describe, expect, test } from "vitest";
 import type { UrlOpener } from "../../../src/platform/contracts/opener";

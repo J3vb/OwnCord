@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import fc from "fast-check";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),

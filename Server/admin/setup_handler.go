@@ -15,6 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/updater"
 	"github.com/J3vb/OwnCord/Server/ws"
@@ -57,15 +58,14 @@ type setupResponse struct {
 	// The account exists whenever this response is returned.
 	Warnings []string `json:"warnings,omitempty"`
 	// CertificateFingerprint is the served TLS leaf certificate's SHA-256 in
-	// the client's pin format, shown on the finish step so the operator can
-	// publish it for users to compare out of band. Omitted when no served
-	// certificate is known (TLS off, or ACME before its first handshake),
-	// and when the wizard changed tls.mode: the restart will serve
-	// a different certificate, which the dashboard shows once it is back.
+	// the client's pin format, so the operator can publish it for users to
+	// compare out of band. Omitted when no served certificate is known (TLS
+	// off, or ACME before its first handshake) and when the wizard changed
+	// tls.mode: the restart will serve a different certificate.
 	CertificateFingerprint string `json:"certificate_fingerprint,omitempty"`
 	// RecoveryKitSecret is the owner's recovery kit, present unless the
 	// wizard turned it off or it could not be issued. Shown once, on the finish step;
-	// the server stores only its verifier (B11-8).
+	// the server stores only its verifier.
 	RecoveryKitSecret string `json:"recovery_kit_secret,omitempty"`
 }
 
@@ -74,7 +74,7 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 	return func(w http.ResponseWriter, r *http.Request) {
 		needsSetup, err := setup.NeedsSetup(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check user count")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to check user count")
 			return
 		}
 		resp := setupStatusResponse{NeedsSetup: needsSetup}
@@ -94,14 +94,12 @@ func handleSetupStatus(setup *service.SetupService, settings *service.SettingsSe
 				VoiceAutoDownload: cfg.Voice.AutoDownloadLiveKit,
 				PortLocked:        updater.RunningInContainer(),
 			}
-			// The settings table is authoritative for the values the app
-			// reads live; fall back to the config/seed values on error.
-			//
-			// A nil settings service is one of those fallbacks rather than a
-			// panic: SettingsService is the fail-closed-at-the-handler kind
-			// (adminRequiredServices deliberately does not build it, so the
-			// rows pinning its refusals keep exercising them), and every read
-			// below is already best-effort with the config value standing in.
+			// The settings table is authoritative for the values the app reads
+			// live; fall back to the config/seed values on error. A nil
+			// settings service is one of those fallbacks, not a panic:
+			// SettingsService is the fail-closed-at-the-handler kind
+			// (adminRequiredServices deliberately does not build it), and every
+			// read below is best-effort with the config value standing in.
 			if settings != nil {
 				setupStatusSettingDefaults(r, settings, d)
 			}
@@ -134,11 +132,9 @@ func setupStatusSettingDefaults(r *http.Request, settings *service.SettingsServi
 // restarts the server if startup-only values changed. It only works when no
 // users exist in the database, preventing abuse after initial setup.
 func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowedOrigins []string, hub HubBroadcaster, opts SetupOptions) http.HandlerFunc {
-	// Resolve the trusted-proxy CIDRs once at construction (W3-3a), never per
-	// request. opts.RunningCfg is nil in the legacy/test construction path
-	// (no SetupOptions passed to NewAdminAPI), which yields an empty list —
-	// clientip.Resolve then always falls back to raw RemoteAddr, preserving
-	// prior behaviour exactly.
+	// Resolve the trusted-proxy CIDRs once at construction, never per request.
+	// opts.RunningCfg is nil in the legacy/test path, which yields an empty
+	// list, so clientip.Resolve falls back to the raw RemoteAddr.
 	var trustedProxies []string
 	if opts.RunningCfg != nil {
 		trustedProxies = opts.RunningCfg.Server.TrustedProxies
@@ -160,7 +156,7 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 		})
 		switch {
 		case errors.Is(err, service.ErrSetupAlreadyDone):
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "setup has already been completed")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "setup has already been completed")
 			return
 		case errors.Is(err, service.ErrAuthBusy):
 			var hinted interface{ RetryAfter() time.Duration }
@@ -168,10 +164,10 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 				secs := int((hinted.RetryAfter() + time.Second - 1) / time.Second)
 				w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
 			}
-			writeErr(w, http.StatusTooManyRequests, "AUTH_BUSY", service.ErrAuthBusy.Error())
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeAuthBusy, service.ErrAuthBusy.Error())
 			return
 		case err != nil:
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create user")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to create user")
 			return
 		}
 		uid, token, inviteCode := boot.OwnerID, boot.Token, boot.InviteCode
@@ -210,36 +206,35 @@ func handleSetup(setup *service.SetupService, limiter *auth.RateLimiter, allowed
 	}
 }
 
-// setupPrecheck runs every gate in front of the first-run setup endpoint —
-// origin check, rate limit, body decode, credential and wizard validation —
+// setupPrecheck runs every gate in front of the first-run setup endpoint
+// (origin check, rate limit, body decode, credential and wizard validation)
 // before any state is created. It writes the error response itself; ok=false
-// means the caller must return immediately. The returned host is the
-// resolved client address, reused as the session IP and (through
-// clientip.RateKey) as the rate-limit bucket; proxyNets (parsed once by
-// the caller from config.Server.TrustedProxies) makes both honour
-// trusted_proxies the same way every other session-creating path does
-// (OC-0274) instead of trusting the raw, possibly-a-proxy RemoteAddr.
+// means the caller must return immediately. The returned host is the resolved
+// client address, reused as the session IP and (through clientip.RateKey) as
+// the rate-limit bucket; proxyNets (parsed once from
+// config.Server.TrustedProxies) makes both honour trusted_proxies like every
+// other session-creating path instead of trusting the raw, possibly-a-proxy
+// RemoteAddr.
 func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter, allowedOrigins []string, proxyNets []*net.IPNet, setupToken string, running *config.Config) (setupRequest, string, bool) {
 	var req setupRequest
 
-	// CSRF protection: reject cross-origin requests (BUG-097).
+	// CSRF protection: reject cross-origin requests.
 	// A request is accepted when it is same-origin, or when its Origin is
 	// explicitly allowlisted. Absent Origin = non-browser client (allow).
 	if origin := r.Header.Get("Origin"); origin != "" {
 		if !isSameOrigin(origin, r.Host) && !isSetupOriginAllowed(origin, allowedOrigins) {
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "cross-origin setup request blocked")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "cross-origin setup request blocked")
 			return req, "", false
 		}
 	}
 
 	// Rate limit: 5 attempts per minute per IP. Resolved through proxyNets so
-	// different source ports/hops from the same real client are correctly
-	// grouped under a single rate-limit bucket, and so distinct clients
+	// source ports/hops of one real client share a bucket and distinct clients
 	// behind the same trusted proxy are NOT collapsed into one.
 	host := clientip.Resolve(r, proxyNets)
 	setupKey := "setup:" + clientip.RateKey(host)
 	if !limiter.Allow(setupKey, 5, time.Minute) {
-		writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many setup attempts, try again later")
+		writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many setup attempts, try again later")
 		return req, "", false
 	}
 
@@ -250,54 +245,51 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// Checked after the rate limit, so guesses are bounded like any other
 	// setup attempt, and before any other field is looked at.
 	if setupToken != "" && subtle.ConstantTimeCompare([]byte(req.SetupToken), []byte(setupToken)) != 1 {
-		writeErr(w, http.StatusForbidden, "FORBIDDEN",
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden,
 			"setup token missing or incorrect — copy it from the server's start-up output")
 		return req, "", false
 	}
 
 	// Use the fixpoint sanitizer (service.SanitizeText), not a bare
-	// bluemonday.StrictPolicy().Sanitize call: bluemonday's bare Sanitize HTML-escapes
-	// survivors (' -> &#39;, & -> &amp;, " -> &#34;), so a name like "O'Brien"
-	// would be stored as "O&#39;Brien" — different from what handleLogin
-	// looks up later (which only trims), permanently locking the Owner out
-	// of their own account. Mirrors the registration path (auth_handler.go)
-	// and the profile-rename path (profile_handler.go), which canonicalize
-	// usernames the same way. See service.SanitizeText's doc comment.
+	// bluemonday.StrictPolicy().Sanitize: that HTML-escapes survivors
+	// (' -> &#39;), so "O'Brien" would be stored as "O&#39;Brien", differ from
+	// what handleLogin looks up (which only trims), and permanently lock the
+	// Owner out. Registration and profile rename canonicalize usernames the
+	// same way.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" || req.Password == "" {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "username and password are required")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "username and password are required")
 		return req, "", false
 	}
 
 	// Validate username format (strict rules for a name being chosen).
 	if err := auth.ValidateNewUsername(req.Username); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 		return req, "", false
 	}
 
 	if err := auth.ValidatePasswordStrength(req.Password); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 		return req, "", false
 	}
 
-	// Validate the whole wizard payload BEFORE creating the account so a
-	// bad value rejects the request instead of leaving a half-configured
-	// server behind an already-created owner.
+	// Validate the whole wizard payload BEFORE creating the account so a bad
+	// value cannot leave a half-configured server behind a created owner.
 	if req.Wizard != nil {
 		if err := validateWizard(req.Wizard); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
 		}
 		// A container's published port mapping fixes the port, so a different
 		// one would leave the server unreachable. Refused here, with the
 		// other wizard validation, so no account is created for it.
 		if err := wizardPortRefusal(req.Wizard, running); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
 		}
 		// A TLS choice the next boot cannot serve is refused the same way.
 		if err := wizardTLSRefusal(req.Wizard, running); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return req, "", false
 		}
 	}
@@ -305,14 +297,11 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	return req, host, true
 }
 
-// setupApplyWizard applies the wizard payload. wr == nil is the legacy
-// request shape (create the owner account only) and applies nothing. reqHost
-// is the request's Host header, from which the post-restart admin-panel URL
-// is derived.
-//
-// The account exists from here on, so any
-// failure downgrades to a warning — never a 5xx that would orphan the
-// owner behind an opaque error.
+// setupApplyWizard applies the wizard payload. wr == nil is the legacy request
+// shape (create the owner account only) and applies nothing. reqHost is the
+// request's Host header, from which the post-restart admin-panel URL is
+// derived. The account exists from here on, so any failure downgrades to a
+// warning, never a 5xx that would orphan the owner behind an opaque error.
 func setupApplyWizard(ctx context.Context, setup *service.SetupService, wr *setupWizardRequest, uid int64, reqHost string, opts SetupOptions) ([]string, bool, string) {
 	var warnings []string
 	restartRequired := false
@@ -392,14 +381,12 @@ func setupSaveContainerOverrides(ctx context.Context, setup *service.SetupServic
 
 // setupRestartAfterResponse hands the setup-wizard restart off to main.go.
 //
-// Called by handleSetup only after it has written its response, so the
-// browser receives the token and the reconnect URL before the process
-// goes away. Mirrors handleRestoreBackup / handleApplyUpdate: broadcast,
-// then request the restart in a goroutine — main.go drains the server and
-// performs the handoff. tryDirectRestartPending loses only to an already
-// in-flight update or restore, which will itself restart the process;
-// skipping is correct then, since the caller's response is written either
-// way.
+// Called by handleSetup only after it has written its response, so the browser
+// receives the token and reconnect URL before the process goes away. Like
+// handleRestoreBackup / handleApplyUpdate: broadcast, then request the restart
+// in a goroutine; main.go drains the server and performs the handoff.
+// tryDirectRestartPending loses only to an in-flight update or restore, which
+// will itself restart the process, so skipping is correct then.
 func setupRestartAfterResponse(hub HubBroadcaster, opts SetupOptions) {
 	if !tryDirectRestartPending() {
 		slog.Warn("setup restart skipped: another restart-sensitive operation is already in progress")
@@ -424,18 +411,16 @@ const restartBroadcastDelaySeconds = 3
 // server, by comparing its host:port against the request's Host header.
 //
 // Browsers send Origin on same-origin POSTs too (Chrome and Edge always,
-// Firefox since 70), so the admin panel's own first-run setup call arrives
-// carrying one. Without this check it is measured against allowed_origins,
-// which is empty in a freshly generated config — so setup failed with
-// "cross-origin setup request blocked" on every new install.
+// Firefox since 70), so the panel's own first-run setup call carries one.
+// Measured against allowed_origins, which is empty in a fresh config, setup
+// would fail with "cross-origin setup request blocked" on every new install.
 //
-// Scheme is deliberately not compared. Nothing in this server derives the
-// external scheme (there is no r.TLS or X-Forwarded-Proto handling anywhere),
-// so a TLS-terminating proxy in front would make a scheme check reject
-// legitimate requests. Matching host:port is enough: forging it requires
-// already serving content on this exact host and port, at which point the
-// origin is not the attacker's to borrow. Cross-site attackers cannot set
-// Origin at all — the browser does.
+// Scheme is deliberately not compared: nothing in this server derives the
+// external scheme (no r.TLS or X-Forwarded-Proto handling), so a
+// TLS-terminating proxy would make a scheme check reject legitimate requests.
+// Matching host:port is enough: forging it requires already serving content
+// on this exact host and port, and cross-site attackers cannot set Origin at
+// all, since the browser does.
 func isSameOrigin(origin, host string) bool {
 	if host == "" {
 		return false

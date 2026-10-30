@@ -156,7 +156,9 @@ test.describe("Authentication Flow", () => {
       timeout: 20_000,
     });
     // ...and the WS ready payload populated channels from the real server.
-    await expect(nativePage.locator(".channel-item").first()).toBeVisible({ timeout: 15_000 });
+    await expect(nativePage.locator(".channel-item").filter({ visible: true }).first()).toBeVisible(
+      { timeout: 15_000 },
+    );
   });
 
   test("saved server profile renders with name and host", async ({ nativePage }) => {

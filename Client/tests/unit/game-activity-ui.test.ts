@@ -16,9 +16,9 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
   serverSupportsGameActivity,
-} from "@lib/serverCapabilities";
-import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
-import { loadPref } from "@lib/preferences";
+} from "@lib/net/serverCapabilities";
+import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/presence/gameActivityBridge";
+import { loadPref } from "@lib/prefs/preferences";
 import {
   EMPTY_GAME_PREFS,
   loadGamePrefs,
@@ -27,7 +27,7 @@ import {
   withHidden,
   withManual,
   withRename,
-} from "@lib/gameActivityPrefs";
+} from "@lib/prefs/gameActivityPrefs";
 import { desktop } from "../../src/platform/desktop";
 import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
 import { dmStore } from "../../src/stores/dm.store";
@@ -52,6 +52,25 @@ describe("Playing lines", () => {
     expect(playingForLine({ ...game, startedAt: NOW - 135 * 60_000 }, NOW)).toBe(
       "Playing VALORANT · for 2 h 15 min",
     );
+  });
+});
+
+describe("Playing line duration boundaries", () => {
+  const game = { name: "VALORANT", startedAt: 0 };
+
+  it("switches from just started to minutes at exactly one minute", () => {
+    expect(playingForLine(game, 59_999)).toBe("Playing VALORANT · just started");
+    expect(playingForLine(game, 60_000)).toBe("Playing VALORANT · for 1 min");
+  });
+
+  it("switches from minutes to hours at exactly sixty minutes", () => {
+    expect(playingForLine(game, 59 * 60_000)).toBe("Playing VALORANT · for 59 min");
+    expect(playingForLine(game, 60 * 60_000)).toBe("Playing VALORANT · for 1 h");
+    expect(playingForLine(game, 61 * 60_000)).toBe("Playing VALORANT · for 1 h 1 min");
+  });
+
+  it("falls back to just started for a clock that is not a number", () => {
+    expect(playingForLine(game, Number.NaN)).toBe("Playing VALORANT · just started");
   });
 });
 

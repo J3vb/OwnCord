@@ -15,7 +15,7 @@
 
 import { createElement, appendChildren, setText } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
-import { registerSessionReset } from "../../lib/sessionRegistry";
+import { registerSessionReset } from "../../lib/net/sessionRegistry";
 import type { Attachment } from "../../lib/types";
 import { isSpoilerFilename } from "./spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";

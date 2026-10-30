@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messageActionGates } from "../../src/components/message-list/message-actions";
+import { messageActionGates } from "../../src/components/message-list/messageActions";
 import { createMessageInput } from "../../src/components/MessageInput";
 import type { PollView } from "../../src/lib/types";
 import {
   applyReadyCapabilities,
   pollsEnabled,
   resetServerCapabilities,
-} from "@lib/serverCapabilities";
+} from "@lib/net/serverCapabilities";
 import {
   ME,
   OTHER,
@@ -31,7 +31,7 @@ const poll: PollView = {
   selfVersion: 0,
 };
 
-describe("a poll message's gates (WP 6.9b)", () => {
+describe("a poll message's gates", () => {
   beforeEach(() => {
     resetGateStores();
     signInAs("member");
@@ -68,7 +68,7 @@ describe("a poll message's gates (WP 6.9b)", () => {
   });
 });
 
-describe("the composer's Poll button (WP 6.9b)", () => {
+describe("the composer's Poll button", () => {
   let container: HTMLDivElement;
   beforeEach(() => {
     container = document.createElement("div");

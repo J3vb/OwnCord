@@ -7,7 +7,7 @@ import (
 )
 
 // WelcomeRow delivers the welcome row a new member's arrival wrote (kind
-// member_join, WP 8.6) as a sequenced chat_message to the readers of its
+// member_join) as a sequenced chat_message to the readers of its
 // channel, with a channel_activity note so readers elsewhere get an unread
 // hint. WelcomeService calls it after the row committed. The author is the new
 // member; the row replies to nothing.

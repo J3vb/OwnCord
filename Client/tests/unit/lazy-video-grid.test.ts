@@ -13,7 +13,7 @@ const h = vi.hoisted(() => ({
   errors: [] as unknown[],
 }));
 
-vi.mock("@lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 // The real logger registers a window listener at load; each test reloads the
 // graph, so keep it out of the way.
@@ -26,7 +26,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   muteScreenshareAudio: vi.fn(),
   setScreenshareAudioVolume: vi.fn(),
   setUserVolume: vi.fn(),
@@ -116,7 +116,7 @@ async function gatedFactory(): Promise<object> {
 
 describe("createLazyVideoGrid", () => {
   let lazy: LazyModule;
-  let toast: typeof import("@lib/toast");
+  let toast: typeof import("@lib/ui/toast");
   let grid: LazyVideoGrid;
   let slot: HTMLDivElement;
 
@@ -130,7 +130,7 @@ describe("createLazyVideoGrid", () => {
     h.throwOnce = false;
     vi.doMock("@components/VideoGrid", gatedFactory);
     lazy = await import("../../src/pages/main-page/lazyVideoGrid");
-    toast = await import("@lib/toast");
+    toast = await import("@lib/ui/toast");
     vi.mocked(toast.showToast).mockClear();
     grid = lazy.createLazyVideoGrid();
     slot = document.createElement("div");

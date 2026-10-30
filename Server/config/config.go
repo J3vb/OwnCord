@@ -34,37 +34,30 @@ type Config struct {
 	Attention        AttentionConfig        `yaml:"attention"`
 }
 
-// ModerationConfig holds the report queue's retention window (B5-8, plan
-// decision 7/scorecard Question 3 decision 2).
+// ModerationConfig holds the report queue's retention window.
 type ModerationConfig struct {
-	// ReportRetentionDays bounds report CONTENT — evidence, notes and the
-	// free-text detail — deleted this many days after a report closes; the
-	// row itself is kept indefinitely (S5-d: the outcome is durable, the
-	// content is bounded). 0 means never prune content. Open reports
-	// (closed_at IS NULL) are never touched by this window.
+	// ReportRetentionDays bounds report content (evidence, notes, free-text
+	// detail): it is deleted this many days after a report closes while the row
+	// is kept. 0 means never prune content. Open reports are never touched.
 	ReportRetentionDays int `yaml:"report_retention_days"`
 	// ActionRetentionDays retires warning rows this many days after
-	// acknowledged_at and timeout rows the same number of days after
-	// expires_at/lifted_at (B5-9, scorecard decision 5), unless an appeal
-	// references them or one still owns a voice mute. Ban, kick and removal rows stay with the account —
-	// they are not on this clock. 0 means never retire.
+	// acknowledged_at and timeout rows after expires_at/lifted_at, unless an
+	// appeal references them or one still owns a voice mute. Ban, kick and
+	// removal rows stay with the account. 0 means never retire.
 	ActionRetentionDays int `yaml:"action_retention_days"`
 }
 
-// LoggingConfig controls server log verbosity. Level gates both stdout and
-// the in-memory ring buffer that backs the admin panel's live log view, so
-// suppressed levels cost nothing anywhere on the hot path.
+// LoggingConfig controls server log verbosity. Level gates both stdout and the
+// in-memory ring buffer behind the admin panel's live log view.
 type LoggingConfig struct {
-	// Level is the minimum level logged: "debug" | "info" | "warn" |
-	// "error". Override at runtime without editing config.yaml via the
-	// OWNCORD_LOGGING_LEVEL environment variable.
+	// Level is the minimum level logged: "debug" | "info" | "warn" | "error".
+	// Override with OWNCORD_LOGGING_LEVEL.
 	Level string `yaml:"level"`
 }
 
-// ParseLevel maps a config log-level string to a slog.Level. It is
-// case-insensitive and treats "" as info. The bool is false for an
-// unrecognised value (in which case slog.LevelInfo is returned and the caller
-// should warn) so a typo doesn't silently disable logging.
+// ParseLevel maps a log-level string to a slog.Level, case-insensitively, with
+// "" as info. The bool is false for an unrecognised value (slog.LevelInfo is
+// returned) so the caller can warn instead of silently disabling logging.
 func ParseLevel(s string) (slog.Level, bool) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":
@@ -81,53 +74,44 @@ func ParseLevel(s string) (slog.Level, bool) {
 }
 
 // GIFConfig holds the credentials for the server-side GIF (Klipy) proxy.
-//
-// The API key is deliberately server-only: the client never receives it and
-// never talks to api.klipy.com directly, it calls /api/v1/gif/* on its own
-// server instead. An empty APIKey means the feature is OFF — the proxy
-// endpoints answer 503 GIF_DISABLED and the client hides the picker.
+// The API key is server-only: clients call /api/v1/gif/* and never
+// api.klipy.com. An empty APIKey turns the feature OFF: the proxy answers 503
+// GIF_DISABLED and the client hides the picker.
 type GIFConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
-// PushConfig is the owner gate for Web Push subscription storage (B5-4,
-// plan decision 9) and dispatch (B5-11, HP-5 scorecard Question 6). Enabled
-// is false by default — with it false, every route under /api/v1/push
-// answers 503 PUSH_DISABLED after authentication, and nothing is written.
-// Turning it off again later keeps existing subscription rows (nothing
-// dispatches to them regardless of DispatchEnabled while Enabled is false);
-// the staleness sweep still runs.
+// PushConfig is the owner gate for Web Push subscription storage and dispatch.
+// While Enabled is false (the default), every /api/v1/push route answers 503
+// PUSH_DISABLED after authentication and nothing is written. Turning it off
+// later keeps existing rows (nothing dispatches to them) and the staleness sweep
+// still runs.
 type PushConfig struct {
-	// Enabled is the owner opt-in for subscription storage. Routes are
-	// always mounted; this only gates whether they do anything.
+	// Enabled is the owner opt-in for subscription storage; routes are always
+	// mounted.
 	Enabled bool `yaml:"enabled"`
-	// SubscriptionTTLDays is the staleness window: a subscription whose
-	// last_seen_at is older than this many days is removed by the
-	// maintenance sweep. Clients keep a row alive by re-POSTing the same
-	// endpoint (an upsert that bumps last_seen_at). Default 90, bounded to
-	// [1, 3650] in boundedKeys.
+	// SubscriptionTTLDays: a subscription whose last_seen_at is older than this
+	// is removed by the maintenance sweep. Clients keep a row alive by
+	// re-POSTing the same endpoint. Default 90, bounded to [1, 3650] in
+	// boundedKeys.
 	SubscriptionTTLDays int `yaml:"subscription_ttl_days"`
-	// DispatchEnabled is the SECOND, separate owner opt-in dispatch needs on
-	// top of Enabled (plan decision 9): storage on with dispatch off is the
-	// B5-4 state, and an operator who enabled storage before dispatch
-	// existed does not acquire it on upgrade. Turning this on makes the
-	// server open outbound HTTPS connections to the push service named in
-	// each stored subscription's endpoint — see
-	// docs/architecture/diagnostics.md's egress table. False by default;
-	// dispatch runs only when Enabled and DispatchEnabled are both true.
+	// DispatchEnabled is a SECOND owner opt-in on top of Enabled, so an operator
+	// who enabled storage before dispatch existed does not acquire dispatch on
+	// upgrade. It makes the server open outbound HTTPS connections to the push
+	// service named in each subscription's endpoint (see
+	// docs/architecture/diagnostics.md's egress table). Dispatch runs only when
+	// both are true.
 	DispatchEnabled bool `yaml:"dispatch_enabled"`
-	// Contact is the operator contact a VAPID JWT's "sub" claim names
-	// (RFC 8292), sent as "mailto:"+Contact. Empty (the default) omits the
-	// claim entirely — some push services require a contact and will refuse
-	// a request without one, which is the operator's decision to make.
+	// Contact is the operator contact a VAPID JWT's "sub" claim names (RFC
+	// 8292), sent as "mailto:"+Contact. Empty omits the claim; some push
+	// services refuse a request without one, which is the operator's call.
 	Contact string `yaml:"contact"`
 }
 
-// EventPersistenceConfig (Phase B Step 7) controls the tiered event log used
-// for WebSocket reconnection replay.
+// EventPersistenceConfig controls the tiered event log used for WebSocket
+// reconnection replay.
 type EventPersistenceConfig struct {
-	// Enabled toggles cold-storage persistence. When false the server falls
-	// back to ring-buffer-only behaviour (Phase A semantics).
+	// Enabled toggles cold-storage persistence; false means ring-buffer-only.
 	Enabled bool `yaml:"enabled"`
 	// RetentionHours is how long persisted events are kept before pruning.
 	RetentionHours int `yaml:"retention_hours"`
@@ -137,35 +121,34 @@ type EventPersistenceConfig struct {
 	BatchFlushMs int `yaml:"batch_flush_ms"`
 	// PrunerIntervalMinutes is how often the pruner goroutine wakes up.
 	PrunerIntervalMinutes int `yaml:"pruner_interval_minutes"`
-	// ReplayRingSize is the capacity of the in-memory reconnect replay ring.
-	// Reconnects whose gap exceeds it fall to the persisted event log.
+	// ReplayRingSize is the in-memory replay ring capacity; reconnects with a
+	// larger gap fall to the persisted log.
 	ReplayRingSize int `yaml:"replay_ring_size"`
-	// ReplayColdLimit caps how many persisted events a single reconnect may
-	// replay; beyond it the client gets a full resync. This is the budget
-	// that decides how long a disconnect can be bridged by replay.
+	// ReplayColdLimit caps persisted events replayed per reconnect; beyond it
+	// the client gets a full resync. It decides how long a disconnect replay can
+	// bridge.
 	ReplayColdLimit int `yaml:"replay_cold_limit"`
 }
 
-// TelemetryConfig (Phase B Step 8) controls the OpenTelemetry exporter.
+// TelemetryConfig controls the OpenTelemetry exporter.
 type TelemetryConfig struct {
-	// Enabled toggles the OTel SDK. When false the server uses no-op
-	// tracer/meter providers. The built-in metrics surfaces, GET
-	// /api/v1/metrics (JSON) and GET /api/v1/metrics/prometheus (Prometheus
-	// text), exist in every build and do not depend on this switch.
+	// Enabled toggles the OTel SDK; false uses no-op providers. The built-in GET
+	// /api/v1/metrics (JSON) and /api/v1/metrics/prometheus exist in every build
+	// regardless.
 	Enabled bool `yaml:"enabled"`
 	// Exporter is "none" | "prometheus" | "otlp".
 	Exporter string `yaml:"exporter"`
 	// OTLPEndpoint is the gRPC endpoint when Exporter == "otlp".
 	OTLPEndpoint string `yaml:"otlp_endpoint"`
-	// OTLPInsecure disables TLS for the OTLP gRPC connection. Only set
-	// true in development / private-network deployments. Defaults to false
-	// (TLS required) to avoid transmitting trace/metric data in plaintext.
+	// OTLPInsecure disables TLS for the OTLP gRPC connection; development /
+	// private networks only, since the default (TLS) avoids sending telemetry in
+	// plaintext.
 	OTLPInsecure bool `yaml:"otlp_insecure"`
 	// ServiceName is the resource service.name attribute.
 	ServiceName string `yaml:"service_name"`
 }
 
-// PluginsConfig (Phase C Step 9) controls the Wazero plugin runtime.
+// PluginsConfig controls the Wazero plugin runtime.
 type PluginsConfig struct {
 	// Enabled toggles plugin loading at startup.
 	Enabled bool `yaml:"enabled"`
@@ -179,11 +162,9 @@ type PluginsConfig struct {
 	HTTPAllowlist []string `yaml:"http_allowlist"`
 }
 
-// GitHubConfig holds GitHub API settings for update checking.
-//
-// Owner/Repo point at the public releases repository. Server and client
-// update checks fetch release assets from this repo, so it must stay
-// publicly readable even when the source repository is private.
+// GitHubConfig holds GitHub API settings for update checking. Owner/Repo name
+// the public releases repository, which must stay publicly readable even when
+// the source repository is private.
 type GitHubConfig struct {
 	Token string `yaml:"token"`
 	Owner string `yaml:"owner"`
@@ -197,27 +178,23 @@ type VoiceConfig struct {
 	LiveKitURL        string `yaml:"livekit_url"`        // LiveKit server WebSocket URL (e.g. ws://localhost:7880)
 	LiveKitBinaryPath string `yaml:"livekit_binary"`     // path to livekit-server binary; empty = don't auto-start
 	// AutoDownloadLiveKit downloads a pinned, checksum-verified livekit-server
-	// release from the official LiveKit GitHub releases into
-	// <data_dir>/livekit/ and runs it as the companion process, when no
-	// livekit_binary is configured. Fresh installs enable this in the
-	// generated config.yaml so voice works out of the box; the compiled-in
-	// default stays false so existing configs keep their behaviour.
+	// release into <data_dir>/livekit/ and runs it as the companion process when
+	// no livekit_binary is configured. Fresh installs enable it in the generated
+	// config.yaml; the compiled-in default stays false so existing configs keep
+	// their behaviour.
 	AutoDownloadLiveKit bool `yaml:"auto_download_livekit"`
 	// LiveKitVersion overrides the pinned livekit-server release version used
-	// by auto-download (e.g. "1.13.10"). Empty = the built-in pin.
+	// by auto-download (e.g. "1.13.11"). Empty = the built-in pin.
 	LiveKitVersion string `yaml:"livekit_version"`
 	NodeIP         string `yaml:"node_ip"` // public IP for WebRTC ICE candidates; empty = auto-detect
-	// AdvertiseInternalIP makes LiveKit advertise internal (LAN) host candidates
-	// in addition to the detected public address, so clients on the local
-	// network can connect while remote clients use the public IP. It keeps
+	// AdvertiseInternalIP also advertises internal (LAN) host candidates so
+	// local clients can connect while remote ones use the public IP. It keeps
 	// use_external_ip on in the generated livekit.yaml, so NodeIP is ignored.
 	AdvertiseInternalIP bool `yaml:"advertise_internal_ip"`
-	// UDPPort carries all WebRTC media on a single UDP port (LiveKit's
-	// udp_port) instead of the port_range_start/end range below. It exists so
-	// an owner forwards one UDP port rather than the 50000-60000 range.
-	// 0 (the default) keeps the range, so an existing install is unaffected.
-	// It must not collide with the TCP media port (7881) or LiveKit's own API
-	// port (7880).
+	// UDPPort carries all WebRTC media on one UDP port (LiveKit's udp_port)
+	// instead of the port range below, so an owner forwards one port. 0 keeps
+	// the range. It must not collide with the TCP media port (7881) or LiveKit's
+	// API port (7880).
 	UDPPort int    `yaml:"udp_port"`
 	Quality string `yaml:"quality"` // low | medium | high
 }
@@ -231,77 +208,57 @@ type ServerConfig struct {
 	TrustedProxies    []string `yaml:"trusted_proxies"`
 	AdminAllowedCIDRs []string `yaml:"admin_allowed_cidrs"`
 	WAFEnabled        bool     `yaml:"waf_enabled"` // Enable Coraza WAF (default: false)
-	// BrowserClientEnabled is the owner opt-in for hosting the browser
-	// client from this server (BG-01, 6.13). It is false by default, and off
-	// nothing is mounted at / or /assets/*. On, the server serves the bundle
-	// embedded in its binary (Server/webclient) with its own CSP. Release
-	// builds carry the bundle; a plain `go build` without it carries only the
-	// placeholder and answers GET / with a 404 note.
-	// Server/api/browser_hosting_posture_test.go proves both states.
+	// BrowserClientEnabled is the owner opt-in for hosting the browser client.
+	// Off mounts nothing at / or /assets/*; on serves the bundle embedded in the
+	// binary (Server/webclient) with its own CSP. A plain `go build` carries
+	// only the placeholder and answers GET / with a 404 note.
 	BrowserClientEnabled bool `yaml:"browser_client_enabled"`
-	// ReachabilityReportEnabled is the owner opt-in for the `reachability`
-	// block on GET /api/v1/diagnostics/connectivity (B6-6): the classified
-	// list of every address on every interface, the required forwarding
-	// rules, and the explicit list of what this server cannot determine
-	// about its own reachability.
-	//
-	// False by default. H-8 already restricted that endpoint to admins
-	// because it reveals network topology, and the interface enumeration is
-	// the most revealing part of it; an owner who wants the detail asks for
-	// it. Nothing else is gated by this key — the startup banner's address
-	// qualifier and the configuration warnings always print, so a limit is
-	// still reported to every owner whether or not they ever set this.
+	// ReachabilityReportEnabled is the owner opt-in for the `reachability` block
+	// on GET /api/v1/diagnostics/connectivity: every interface address, the
+	// required forwarding rules, and what the server cannot determine about its
+	// own reachability.
+	// False by default: the endpoint is admin-only because it reveals network
+	// topology, and the interface list is the most revealing part. Nothing else
+	// is gated by this key; the startup banner qualifier and configuration
+	// warnings always print.
 	ReachabilityReportEnabled bool `yaml:"reachability_report_enabled"`
-	// MinFreeDiskMB is the one definition of "low disk" (B5-2, plan decision
-	// 11): the reserved headroom, in MiB, below which the start-up banner
-	// logs an error, /health reports degraded and the upload path refuses
-	// with 507. Default 256. 0 disables the floor. Three call sites, one
-	// number, so they can never disagree about what "low" means.
+	// MinFreeDiskMB is the one definition of "low disk": the headroom in MiB
+	// below which the startup banner logs an error, /health reports degraded and
+	// uploads are refused with 507. Default 256; 0 disables the floor.
 	MinFreeDiskMB    int `yaml:"min_free_disk_mb"`
 	WAFParanoiaLevel int `yaml:"waf_paranoia_level"` // OWASP CRS paranoia level 1-4 (default: 2)
-	// WAFCRSMode selects the OWASP Core Rule Set layer mode when the WAF is
-	// enabled: "off" (inline rules only), "detect" (CRS evaluated, matches
-	// logged, never blocks) or "block" (CRS anomaly-scoring blocking).
-	// Defaults to "detect": chat traffic routinely contains SQL-ish/HTML-ish
-	// text the CRS false-positives on, so blocking needs tuning against real
-	// traffic first. Unknown values fall back to "detect".
+	// WAFCRSMode selects the OWASP Core Rule Set mode when the WAF is enabled:
+	// "off" (inline rules only), "detect" (matches logged, never blocks) or
+	// "block". Defaults to "detect" because chat text routinely false-positives
+	// the CRS, so blocking needs tuning on real traffic. Unknown values fall
+	// back to "detect".
 	WAFCRSMode string `yaml:"waf_crs_mode"`
-	// MaxWSConnections caps concurrently connected WebSocket clients,
-	// counting sockets still authenticating or waiting for a ready-build
-	// permit; new upgrade requests beyond the cap are refused with 503 before
-	// the upgrade. 0 (the default) means unlimited — every connection costs
-	// goroutines and buffered send queues, so set a ceiling that matches the
-	// host's memory before pointing a large community at it.
+	// MaxWSConnections caps concurrent WebSocket clients, including sockets
+	// still authenticating or awaiting a ready-build permit; excess upgrades get
+	// 503 before the upgrade. 0 (default) is unlimited, but every connection
+	// costs goroutines and send queues, so set a ceiling that fits host memory.
 	MaxWSConnections int `yaml:"max_ws_connections"`
-	// MetricsAllowedCIDRs gates /api/v1/metrics, /api/v1/metrics/prometheus
-	// and the otel build's Prometheus /metrics exporter separately from the human admin surface, so a central
-	// Prometheus scraper can be allowlisted without widening /admin to its
-	// network. Empty (default) falls back to AdminAllowedCIDRs.
+	// MetricsAllowedCIDRs gates the metrics endpoints and the otel build's
+	// Prometheus /metrics exporter separately from the admin surface, so a
+	// central scraper can be allowlisted without widening /admin. Empty falls
+	// back to AdminAllowedCIDRs.
 	MetricsAllowedCIDRs []string `yaml:"metrics_allowed_cidrs"`
-	// PprofEnabled exposes Go's pprof HTTP endpoints on a SEPARATE listener
-	// for operator-directed profiling (SRE-M1). Off by default, and
-	// deliberately never mounted on the main router: a profiling endpoint
-	// exposes heap contents and can burn CPU, so it is its own socket bound
-	// to the fixed loopback address 127.0.0.1:6060 and nothing else; reach
-	// it remotely through an SSH port-forward. See
+	// PprofEnabled exposes pprof on a SEPARATE listener bound to 127.0.0.1:6060,
+	// never on the main router: profiling exposes heap contents and can burn
+	// CPU. Reach it remotely through an SSH port-forward. See
 	// docs/server-configuration.md.
 	PprofEnabled bool `yaml:"pprof_enabled"`
-	// PprofBlockProfileRate is the average interval, in nanoseconds, between
-	// block samples while the pprof listener is enabled (Go's
-	// runtime.SetBlockProfileRate unit). 100000 samples roughly every 100 µs
-	// of blocked time, enough to see the single SQLite writer's contention
-	// that a CPU profile cannot. 0 disables block sampling.
+	// PprofBlockProfileRate is the average interval in nanoseconds between block
+	// samples (runtime.SetBlockProfileRate). 100000 (about 100 µs) shows the
+	// single SQLite writer's contention that a CPU profile cannot. 0 disables.
 	PprofBlockProfileRate int `yaml:"pprof_block_profile_rate"`
-	// PprofMutexProfileFraction samples one in N contended mutex events while
-	// the pprof listener is enabled (Go's runtime.SetMutexProfileFraction).
-	// 0 disables mutex sampling.
+	// PprofMutexProfileFraction samples one in N contended mutex events
+	// (runtime.SetMutexProfileFraction); 0 disables.
 	PprofMutexProfileFraction int `yaml:"pprof_mutex_profile_fraction"`
-	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health
-	// endpoints. The webhook already authenticates cryptographically (LiveKit
-	// JWT signature over the body hash) — this perimeter is defence-in-depth,
-	// and giving it its own key means an externally-hosted LiveKit's IP no
-	// longer has to be added to the ADMIN allowlist. Empty (default) falls
-	// back to AdminAllowedCIDRs.
+	// LiveKitWebhookAllowedCIDRs gates the LiveKit webhook and health endpoints.
+	// The webhook already verifies LiveKit's JWT signature; this is defence in
+	// depth, with its own key so an external LiveKit's IP need not join the
+	// admin allowlist. Empty falls back to AdminAllowedCIDRs.
 	LiveKitWebhookAllowedCIDRs []string `yaml:"livekit_webhook_allowed_cidrs"`
 	// RestartMode selects how a self-restart (update apply, backup restore,
 	// setup wizard) hands the process over to its replacement once the server
@@ -335,25 +292,18 @@ func (s *ServerConfig) LiveKitWebhookCIDRs() []string {
 	return s.AdminAllowedCIDRs
 }
 
-// DatabaseConfig holds database settings.
-//
-// SQLite is the only supported backend. The PostgreSQL scaffolding that once
-// motivated the Type field has been removed (the check that rejects any other
-// value lives in Server/internal/app/database.go); the field
-// survives so an explicit "sqlite" keeps working and anything else fails
-// startup with a clear error instead of being silently ignored.
+// DatabaseConfig holds database settings. SQLite is the only supported backend;
+// Type survives so an explicit "sqlite" keeps working and anything else fails
+// startup (check in Server/internal/app/database.go) rather than being ignored.
 type DatabaseConfig struct {
-	// Type selects the database backend. "sqlite" (or empty, which defaults
-	// to it) is the only supported value.
+	// Type selects the backend; "sqlite" (or empty) is the only supported value.
 	Type string `yaml:"type"`
 
-	// Path is the SQLite database file path.
 	Path string `yaml:"path"`
 
-	// MaxReaders bounds the read-only connection pool. 0 (default) keeps the
-	// automatic sizing of max(8, 2×NumCPU). Values are clamped to [1, 64] —
-	// readers beyond roughly twice the CPU count mostly buy queueing, not
-	// throughput.
+	// MaxReaders bounds the read-only pool. 0 keeps the automatic max(8,
+	// 2×NumCPU); values are clamped to [1, 64] because more readers mostly buy
+	// queueing.
 	MaxReaders int `yaml:"max_readers"`
 }
 
@@ -365,10 +315,9 @@ type TLSConfig struct {
 	Domain       string `yaml:"domain"`
 	AcmeCacheDir string `yaml:"acme_cache_dir"`
 
-	// HTTPSPort is the port the HTTPS listener actually binds (cfg.Server.Port),
-	// set by the caller before LoadOrGenerate — not a config file key. ACME
-	// mode's HTTP->HTTPS redirect needs it because the HTTPS port is not
-	// necessarily 443.
+	// HTTPSPort is the port the HTTPS listener binds (cfg.Server.Port), set by
+	// the caller before LoadOrGenerate; not a config key. ACME's HTTP->HTTPS
+	// redirect needs it because the port may not be 443.
 	HTTPSPort int `yaml:"-"`
 }
 
@@ -376,13 +325,15 @@ type TLSConfig struct {
 type UploadConfig struct {
 	MaxSizeMB  int    `yaml:"max_size_mb"`
 	StorageDir string `yaml:"storage_dir"`
-	// UserQuotaMB caps the total bytes one user may hold in upload storage —
-	// attachments and avatars, counted where the bytes are written (B5-2,
-	// plan decision 11). Custom emoji are excluded on purpose: they are
-	// bounded (MaxEmojiCount files of maxEmojiFileBytes each) and still pass
-	// the disk-headroom floor, see migration 044. 0, the default, is
-	// unlimited, so no existing install changes behaviour on upgrade.
+	// UserQuotaMB caps the total bytes one user may hold in upload storage
+	// (attachments and avatars). Custom emoji are excluded: they are bounded
+	// (MaxEmojiCount files of maxEmojiFileBytes) and still pass the
+	// disk-headroom floor, see migration 044. 0 (default) is unlimited.
 	UserQuotaMB int `yaml:"user_quota_mb"`
+	// ImportMaxMB caps one Discord export upload (the .json or .zip) in the
+	// admin panel. It is separate from MaxSizeMB, which bounds a single
+	// attachment; an export bundles many files, so it is larger.
+	ImportMaxMB int `yaml:"import_max_mb"`
 	// The storage.FileTypePolicy lists; an admin-panel value replaces each.
 	BlockedExtensions []string `yaml:"blocked_extensions"`
 	AllowedExtensions []string `yaml:"allowed_extensions"`
@@ -390,6 +341,10 @@ type UploadConfig struct {
 
 // UserQuotaBytes is the per-user quota in bytes; 0 means unlimited.
 func (u UploadConfig) UserQuotaBytes() int64 { return int64(u.UserQuotaMB) << 20 }
+
+// ImportMaxBytes is the Discord export upload cap in bytes. applyBounds keeps
+// the MiB value in [1, MaxInt64>>20], so the shift fits.
+func (u UploadConfig) ImportMaxBytes() int64 { return int64(u.ImportMaxMB) << 20 }
 
 // MinFreeDiskBytes is the reserved-headroom floor in bytes; 0 means no floor.
 // applyBounds keeps the MiB value in [0, MaxInt64>>20], so the shift fits.
@@ -400,10 +355,9 @@ func (s ServerConfig) MinFreeDiskBytes() uint64 {
 	return uint64(s.MinFreeDiskMB) << 20
 }
 
-// BackupConfig controls where database backups are written. Pointing Dir at
-// another disk (or a mount that is shipped off-host) is the recommended way
-// to keep backups from sharing a single point of failure with the live
-// database and uploads.
+// BackupConfig controls where database backups are written. Point Dir at another
+// disk or an off-host mount so backups don't share a failure point with the live
+// database.
 type BackupConfig struct {
 	Dir string `yaml:"dir"`
 }
@@ -412,14 +366,12 @@ type BackupConfig struct {
 // defaults.
 type SecurityConfig struct {
 	// AuthRateLimitMultiplier scales the per-IP auth rate limits and failure
-	// thresholds (registration, login, TOTP, sensitive endpoints, WebSocket
-	// upgrades). The defaults assume roughly one person per IP address; a
-	// community behind a shared NAT (office, school) hits them collectively.
-	// 0 or unset = 1.0; clamped to [0.1, 100].
+	// thresholds. Defaults assume about one person per IP; a shared NAT hits
+	// them collectively. 0 or unset = 1.0; clamped to [0.1, 100].
 	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
 	// ExpensiveAuthConcurrency bounds how many bcrypt computations — password
 	// checks and hashes on every auth route, recovery-code matching at the
-	// second-factor step — run at once: the B4-4 admission budget. Login,
+	// second-factor step — run at once: the admission budget. Login,
 	// registration and recovery-code checks over the budget queue for up to
 	// 10 s; an attempt refused (queue full, wait over, or a password
 	// confirmation over budget) gets 429 AUTH_BUSY, runs no bcrypt and
@@ -428,7 +380,6 @@ type SecurityConfig struct {
 	ExpensiveAuthConcurrency int `yaml:"expensive_auth_concurrency"`
 }
 
-// defaults returns the default configuration.
 func defaults() Config {
 	return Config{
 		Server: ServerConfig{
@@ -468,6 +419,7 @@ func defaults() Config {
 		},
 		Upload: UploadConfig{
 			MaxSizeMB:         100,
+			ImportMaxMB:       500,
 			StorageDir:        "data/uploads",
 			BlockedExtensions: slices.Clone(storage.DefaultBlockedExtensions),
 			AllowedExtensions: []string{},
@@ -523,7 +475,6 @@ func defaults() Config {
 	}
 }
 
-// defaultYAML is the content written when no config file is present.
 const defaultYAML = `# OwnCord Server Configuration
 server:
   port: 8443
@@ -597,6 +548,8 @@ upload:
   storage_dir: "data/uploads"
   # user_quota_mb: 0          # total bytes one user may hold in upload storage
   #                           # (attachments and avatars); 0 = unlimited
+  # import_max_mb: 500        # largest Discord export (.json or .zip) the admin
+  #                           # panel accepts for "Import from Discord"
   # blocked_extensions: [bat, cmd, ps1]  # refused by name; a list replaces the
   #                           # default (Windows scripts, installers, disk images)
   # allowed_extensions: []    # non-empty = only these extensions may be uploaded
@@ -624,7 +577,7 @@ voice:
   auto_download_livekit: true # download and run livekit-server automatically when
                               # no livekit_binary is set (verified against the
                               # official LiveKit release checksums; stored in data/livekit/)
-  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.10")
+  # livekit_version: ""            # override the pinned livekit-server version (e.g. "1.13.11")
   # livekit_binary: ""             # path to an existing livekit-server binary; set this to
   #                                # skip auto-download and run your own build
   # node_ip: ""                    # public IP for WebRTC media; empty = auto-detect (pin only if detection fails)
@@ -700,15 +653,12 @@ voice:
 #                               # clients off (typing/presence drops not counted)
 `
 
-// Load reads configuration from the given YAML file path, merging with
-// defaults and environment variable overrides. If the file does not exist,
-// a default config.yaml is written and defaults are returned.
+// Load reads the YAML file, merging defaults and environment overrides. A
+// missing file is written as the default config.yaml and defaults are returned.
 func Load(cfgPath string) (*Config, error) {
-	// The freshly written default file is loaded like any other so the first
-	// boot runs with exactly the configuration the file documents (the
-	// generated template enables options — e.g. voice.auto_download_livekit —
-	// that the compiled-in defaults deliberately leave off for pre-existing
-	// configs).
+	// Load the freshly written file like any other so first boot runs the
+	// configuration the file documents (the template enables options such as
+	// voice.auto_download_livekit that compiled-in defaults leave off).
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		if writeErr := os.WriteFile(cfgPath, []byte(defaultYAML), 0o600); writeErr != nil {
 			return nil, fmt.Errorf("writing default config: %w", writeErr)
@@ -724,10 +674,9 @@ func Load(cfgPath string) (*Config, error) {
 		return nil, err
 	}
 
-	// Warn (never fail — a newer server must tolerate an older config, and a
-	// warning must not brick a working install) about file keys the config
-	// struct cannot absorb. Without this, a typo like `admin_alowed_cidrs`
-	// silently keeps the default and the operator believes they changed it.
+	// Warn, never fail (a newer server must tolerate an older config), about
+	// file keys the struct cannot absorb. Otherwise a typo like
+	// `admin_alowed_cidrs` silently keeps the default.
 	var tree map[string]any
 	if err := goyaml.Unmarshal(raw, &tree); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
@@ -755,12 +704,10 @@ func Load(cfgPath string) (*Config, error) {
 	warnInvalidCIDRs("server.metrics_allowed_cidrs", cfg.Server.MetricsAllowedCIDRs)
 	warnInvalidCIDRs("server.livekit_webhook_allowed_cidrs", cfg.Server.LiveKitWebhookAllowedCIDRs)
 
-	// An EMPTY admin_allowed_cidrs is legal but silently switches the /admin
-	// IP perimeter off: api.AdminIPRestrict allows every address when the list
-	// is empty, so the panel answers anyone who can reach the port (its own
-	// session auth still applies). The compiled default is private networks,
-	// so only an operator who set the key to an empty sequence gets here.
-	// Warn, don't fail: a panel deliberately left open behind a VPN or an
+	// An EMPTY admin_allowed_cidrs silently switches the /admin IP perimeter
+	// off: api.AdminIPRestrict allows every address when the list is empty
+	// (session auth still applies). Only an operator who set an empty sequence
+	// gets here. Warn, don't fail: a panel left open behind a VPN or
 	// authenticating proxy is a real deployment.
 	if len(cfg.Server.AdminAllowedCIDRs) == 0 {
 		slog.Warn("config: admin_allowed_cidrs is empty — the /admin IP perimeter is disabled, " +
@@ -771,19 +718,15 @@ func Load(cfgPath string) (*Config, error) {
 	return cfg, nil
 }
 
-// loadBytes builds a Config from raw YAML: compiled defaults, then the file,
-// then the admin-panel overrides file, then the OWNCORD_* environment.
-// Unmarshal overwrites only the keys a document actually names, so a section
-// that is present but empty — a bare `voice:`, or one whose children are all
-// commented out — leaves its defaults in place and needs no refill pass.
-//
-// The environment layer is marshalled to YAML and unmarshalled through the
-// same path as the file, never spliced into text, so a value containing YAML
-// syntax stays exactly one scalar.
-//
-// Save's verifyLoadable gate runs this whole function, environment included:
-// the file it is about to write must survive the load path the server boots
-// with, and that path now has an environment layer in it.
+// loadBytes builds a Config from raw YAML: defaults, then the file, then the
+// admin-panel overrides file, then the OWNCORD_* environment. Unmarshal
+// overwrites only keys a document names, so a present-but-empty section keeps
+// its defaults.
+// The environment layer is marshalled to YAML and unmarshalled through the same
+// path as the file, never spliced into text, so a value containing YAML syntax
+// stays one scalar.
+// Save's verifyLoadable gate runs this whole function, environment included: the
+// file it writes must survive the path the server boots with.
 func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 	cfg, err := loadBytesWith(raw, cfgPath, nil)
 	if err != nil {
@@ -798,8 +741,7 @@ func loadBytes(raw []byte, cfgPath string) (*Config, error) {
 // loadBytesWith builds a Config with the overrides layer injected and no
 // generation side effects. A nil overrides map reads the overrides file (Load
 // and Save's verifyLoadable gate); Preview passes the current file merged with
-// the pending changes instead. loadBytes calls this and then generates the
-// runtime LiveKit credentials.
+// the pending changes.
 func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Config, error) {
 	cfg := defaults()
 	if err := goyaml.Unmarshal(raw, &cfg); err != nil {
@@ -815,9 +757,8 @@ func loadBytesWith(raw []byte, cfgPath string, overrides map[string]any) (*Confi
 	}
 	env, err := envOverrides()
 	if err != nil {
-		// The failing layer is known at this call, so attribute the error
-		// here: Load's single wrap over the whole function blamed the YAML
-		// file for a bad OWNCORD_* value and sent operators to the wrong place.
+		// Attribute the error to the failing layer here; a single wrap in Load
+		// blamed the YAML file for a bad OWNCORD_* value.
 		return nil, fmt.Errorf("loading env vars: %w", err)
 	}
 	if len(env) > 0 {
@@ -848,8 +789,6 @@ func normalizeUploadExtensions(u *UploadConfig) (err error) {
 	return nil
 }
 
-// warnInvalidCIDRs logs a startup warning for each list entry that is not
-// valid CIDR notation.
 func warnInvalidCIDRs(key string, cidrs []string) {
 	for _, c := range cidrs {
 		if _, _, err := net.ParseCIDR(c); err != nil {

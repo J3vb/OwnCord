@@ -95,7 +95,7 @@ async function mountSettings(bridge: Bridge, doc: Document): Promise<void> {
   content.innerHTML = await bridge.renderSettings();
 }
 
-describe("Server/admin/static — AFK card (WP 6.10d)", () => {
+describe("Server/admin/static — AFK card", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

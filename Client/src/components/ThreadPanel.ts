@@ -1,5 +1,5 @@
 /**
- * ThreadPanel (WP 6.9c) — a thread beside the channel: its starter message on
+ * ThreadPanel — a thread beside the channel: its starter message on
  * top, the thread's own message list below it, and a composer.
  *
  * The list is an ordinary `createMessageList` keyed by the thread's id (the
@@ -16,15 +16,15 @@
  * closure.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
-import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/formatting";
-import { resolveDisplayName } from "@lib/avatar";
-import { readableRoleColor } from "@lib/themes";
-import type { MountableComponent } from "@lib/safe-render";
+import { createConfirmModal } from "../features/dialogs/confirmModal";
+import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
+import { resolveDisplayName } from "@lib/ui/avatar";
+import { readableRoleColor } from "@lib/prefs/themes";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
 import type { MessageUser } from "@lib/types";
@@ -46,7 +46,7 @@ import {
   type Message,
 } from "@stores/messages.store";
 import { getThread, isFollowed, threadsStore } from "@stores/threads.store";
-import { threadFollowsEnabled } from "@lib/serverCapabilities";
+import { threadFollowsEnabled } from "@lib/net/serverCapabilities";
 import { safetyStore } from "../features/safety/store";
 import { formatUntil, safetyText } from "../i18n/safety";
 import { messageResponseToMessage } from "../features/messaging/messageModel";
@@ -63,8 +63,14 @@ import {
 import { createMessageList, type MessageListComponent } from "./MessageList";
 import { createMessageInput, type MessageInputComponent } from "./MessageInput";
 import { createArchiveIcon } from "./message-list/threadChip";
-import { renderMessageContent } from "./message-list/content-parser";
+import { renderMessageContent } from "./message-list/contentParser";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import {
+  createImportedAvatar,
+  createImportedName,
+  createImportedTag,
+} from "./message-list/importedAuthor";
+import { importedName } from "../features/messaging/importedAuthor";
 import type { MessageController } from "../pages/main-page/MessageController";
 import { messagingText } from "../i18n/messaging";
 import { shellText } from "../i18n/shell";
@@ -95,7 +101,7 @@ interface SendDraft {
   readonly replyTo: number | null;
   readonly replyPing: boolean;
   readonly clientMessageId: string | undefined;
-  /** A sticker send (WP 8.8), kept so a retry posts the same sticker. */
+  /** A sticker send, kept so a retry posts the same sticker. */
   readonly sticker?: { readonly id: number; readonly name: string };
 }
 
@@ -126,7 +132,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     class: "thread-panel-status",
     "data-testid": "thread-panel-status",
   });
-  /** A forum post's tags (WP 6.9d); empty and hidden on any other thread. */
+  /** A forum post's tags; empty and hidden on any other thread. */
   const tagsEl = createElement("span", {
     class: "forum-tags thread-panel-tags",
     "data-testid": "thread-panel-tags",
@@ -160,7 +166,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     const t = thread();
     if (t !== undefined) update({ locked: !t.locked });
   });
-  // Follow / Following (WP 6.9c): the state comes back as thread_follow_update.
+  // Follow / Following: the state comes back as thread_follow_update.
   const followBtn = createElement("button", {
     type: "button",
     class: "thread-panel-btn thread-panel-follow",
@@ -244,46 +250,22 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   function confirmDelete(): void {
     const t = thread();
     if (t === undefined) return;
-    const content = createElement("div");
-    const titleId = `thread-delete-title-${threadId}`;
-    const header = createElement("div", { class: "modal-header" });
-    header.appendChild(createElement("h3", { id: titleId }, threadsText("delete.title")));
-    const body = createElement("div", { class: "modal-body" });
-    body.appendChild(
-      createElement(
-        "p",
-        { class: "modal-danger-text" },
-        threadsText("delete.body", { name: t.name }),
-      ),
-    );
-    const footer = createElement("div", { class: "modal-footer" });
-    const cancel = createElement(
-      "button",
-      { class: "btn-modal-cancel", type: "button", "data-testid": "thread-delete-cancel" },
-      shellText("common.cancel"),
-    );
-    const confirm = createElement(
-      "button",
-      { class: "btn-danger", type: "button", "data-testid": "thread-delete-confirm" },
-      threadsText("delete.confirm"),
-    );
-    footer.append(cancel, confirm);
-    content.append(header, body, footer);
-    const modal = createModal({
-      content,
-      ariaLabelledBy: titleId,
-      overlayAttrs: { "data-testid": "thread-delete-modal" },
+    createConfirmModal({
+      title: threadsText("delete.title"),
+      titleId: `thread-delete-title-${threadId}`,
+      body: threadsText("delete.body", { name: t.name }),
+      confirmLabel: threadsText("delete.confirm"),
+      testId: "thread-delete-modal",
+      confirmTestId: "thread-delete-confirm",
+      cancelTestId: "thread-delete-cancel",
       signal,
       fallbackFocus: () => deleteBtn,
+      onConfirm: () => {
+        if (!sendThreadDelete(ws, threadId)) {
+          showToast(threadsText("toast.notConnected"), "error");
+        }
+      },
     });
-    cancel.addEventListener("click", () => modal.close());
-    confirm.addEventListener("click", () => {
-      modal.close();
-      if (!sendThreadDelete(ws, threadId)) {
-        showToast(threadsText("toast.notConnected"), "error");
-      }
-    });
-    cancel.focus();
   }
 
   /** The name, status and the actions this viewer may use, from the thread's current state. */
@@ -378,7 +360,7 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     const t = thread();
     starterEl.replaceChildren();
     // A forum post has no starter message: its opening message is the first
-    // one in the list below, so there is nothing to state here (WP 6.9d).
+    // one in the list below, so there is nothing to state here.
     starterEl.hidden = t?.post !== undefined;
     if (t === undefined || t.post !== undefined) return;
     const msg = findStarter();
@@ -396,21 +378,27 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
     }
     const author = resolveAuthor(msg.user);
     const color = userRoleColorVar(msg.user.id);
+    const imported = msg.importedAuthor;
     starterEl.appendChild(
-      createAvatarElement(author, {
-        className: "msg-avatar thread-starter-avatar",
-        background: pickAvatarColor(author.username),
-      }),
+      imported !== undefined
+        ? createImportedAvatar(imported, "msg-avatar thread-starter-avatar")
+        : createAvatarElement(author, {
+            className: "msg-avatar thread-starter-avatar",
+            background: pickAvatarColor(author.username),
+          }),
     );
     const main = createElement("div", { class: "thread-starter-main" });
     const head = createElement("div", { class: "thread-starter-head" });
     head.appendChild(
-      createElement(
-        "span",
-        { class: "msg-author", style: `color: ${readableRoleColor(color)}` },
-        resolveDisplayName(author),
-      ),
+      imported !== undefined
+        ? createImportedName(imported, "msg-author msg-author--imported")
+        : createElement(
+            "span",
+            { class: "msg-author", style: `color: ${readableRoleColor(color)}` },
+            resolveDisplayName(author),
+          ),
     );
+    if (imported !== undefined) head.appendChild(createImportedTag());
     head.appendChild(
       createElement("span", { class: "msg-time" }, formatMessageTimestamp(msg.timestamp)),
     );
@@ -548,34 +536,15 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
   }
 
   function confirmDeleteMessage(messageId: number): void {
-    const content = createElement("div");
-    const titleId = `thread-msg-delete-title-${messageId}`;
-    const header = createElement("div", { class: "modal-header" });
-    header.appendChild(createElement("h3", { id: titleId }, messagingText("delete.title")));
-    const body = createElement("div", { class: "modal-body" });
-    body.appendChild(
-      createElement("p", { class: "modal-danger-text" }, messagingText("delete.body")),
-    );
-    const footer = createElement("div", { class: "modal-footer" });
-    const cancel = createElement(
-      "button",
-      { class: "btn-modal-cancel", type: "button" },
-      shellText("common.cancel"),
-    );
-    const confirm = createElement(
-      "button",
-      { class: "btn-danger", type: "button", "data-testid": "thread-msg-delete-confirm" },
-      messagingText("delete.confirm"),
-    );
-    footer.append(cancel, confirm);
-    content.append(header, body, footer);
-    const modal = createModal({ content, ariaLabelledBy: titleId, signal });
-    cancel.addEventListener("click", () => modal.close());
-    confirm.addEventListener("click", () => {
-      modal.close();
-      sendDelete(messageId);
+    createConfirmModal({
+      title: messagingText("delete.title"),
+      titleId: `thread-msg-delete-title-${messageId}`,
+      body: messagingText("delete.body"),
+      confirmLabel: messagingText("delete.confirm"),
+      confirmTestId: "thread-msg-delete-confirm",
+      signal,
+      onConfirm: () => sendDelete(messageId),
     });
-    cancel.focus();
   }
 
   // ── Mount ─────────────────────────────────────────────────────────────────
@@ -610,9 +579,15 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       onReplyClick: (messageId) => {
         const msg = getChannelMessages(threadId).find((m) => m.id === messageId);
         if (msg === undefined) return;
-        messageInput?.setReplyTo(msg.id, msg.user.display_name || msg.user.username, {
-          self: msg.user.id === userId(),
-        });
+        messageInput?.setReplyTo(
+          msg.id,
+          msg.importedAuthor !== undefined
+            ? importedName(msg.importedAuthor)
+            : msg.user.display_name || msg.user.username,
+          {
+            self: msg.importedAuthor !== undefined || msg.user.id === userId(),
+          },
+        );
       },
       onEditClick: (messageId) => void messageList?.startEdit(messageId),
       onEditSave: (messageId, content) => {

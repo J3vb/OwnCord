@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Attachment } from "@lib/types";
-import { runSessionResets } from "@lib/sessionRegistry";
+import { runSessionResets } from "@lib/net/sessionRegistry";
 import { encodeWaveform } from "./waveform";
 import { isVoiceAttachment, renderVoicePlayer, type VoiceAttachment } from "./player";
 

@@ -5,8 +5,8 @@ const mockUpdatePttKey = vi.fn();
 const mockPttSupported = vi.fn(async () => true);
 const mockVkName = vi.fn((vk: number) => `Key-${vk}`);
 
-vi.mock("@lib/ptt", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/ptt")>()),
+vi.mock("@lib/voice/ptt", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/voice/ptt")>()),
   vkName: (vk: number) => mockVkName(vk),
 }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
@@ -49,7 +49,7 @@ vi.mock("../../src/platform/desktop/globalShortcuts", () => ({
 }));
 
 import { buildKeybindsTab } from "../../src/components/settings/KeybindsTab";
-import { KEYBIND_GROUPS } from "../../src/lib/keybindCatalog";
+import { KEYBIND_GROUPS } from "../../src/lib/prefs/keybindCatalog";
 import { settingsText as t } from "../../src/i18n/settings";
 
 describe("KeybindsTab", () => {
@@ -673,7 +673,7 @@ describe("KeybindsTab", () => {
     expect(clear.disabled).toBe(false);
   });
 
-  describe("Wayland portal backend (LP-9b)", () => {
+  describe("Wayland portal backend", () => {
     const bound = { ptt: null, mute: "Ctrl+Alt+M", deafen: "Ctrl+Alt+D" };
     const portal = (
       triggers: { ptt: string | null; mute: string | null; deafen: string | null },

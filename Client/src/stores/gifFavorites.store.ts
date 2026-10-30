@@ -9,11 +9,12 @@
 
 import { ApiClientError } from "@lib/api";
 import { createStore } from "@lib/store";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { gifFavoritesText } from "../i18n/gifFavorites";
-import { registerSessionReset } from "@lib/sessionRegistry";
-import type { GifFavoritesApi } from "@lib/gifProvider";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
+import type { GifFavoritesApi } from "@lib/media/gifProvider";
 import type { GifFavorite } from "@lib/types";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 export interface GifFavoritesState {
   readonly favorites: readonly GifFavorite[];
@@ -109,7 +110,7 @@ export async function toggleGifFavorite(fav: GifFavorite): Promise<boolean> {
   } catch (err) {
     if (gen === generation) {
       apply(was);
-      const full = err instanceof ApiClientError && err.code === "GIF_FAVORITES_FULL";
+      const full = err instanceof ApiClientError && err.code === RestErrorCode.GIF_FAVORITES_FULL;
       showToast(gifFavoritesText(full ? "favoritesFull" : "favoriteFailed"), "error");
     }
     return false;

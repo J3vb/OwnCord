@@ -10,8 +10,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// memberTimeoutEntry is one active timeout in the member_timeouts view (WP
-// 3C-7c): who, and until when. The reason and the actor never travel here.
+// memberTimeoutEntry is one active timeout in the member_timeouts view: who, and
+// until when. The reason and the actor never travel here.
 type memberTimeoutEntry struct {
 	UserID    int64  `json:"user_id"`
 	ExpiresAt string `json:"expires_at"`
@@ -50,24 +50,23 @@ func memberTimeoutsFor(viewerID int64, isMod bool, active map[int64]time.Time, n
 	return out
 }
 
-// publishMemberTimeouts re-sends the member_timeouts view after targetID's
-// timeout was issued, lifted or expired: to every connected moderator (the
-// full list) and to targetID (their own entry). It reads the timeout mirror,
-// never a parameter, so a stale timer or a superseded issue is harmless.
+// publishMemberTimeouts re-sends the member_timeouts view after targetID's timeout
+// was issued, lifted or expired: to every connected moderator (the full list) and to
+// targetID (their own entry). It reads the timeout mirror, never a parameter, so a
+// stale timer or a superseded issue is harmless.
 //
 // The frames are unsequenced, so the fan-out is bracketed by
-// begin/endTargetedFanout: a user offline or mid-reconnect resumes onto a full
-// ready (which carries member_timeouts) instead of replaying past the change,
-// including a reconnect that registers after the audience was resolved.
+// begin/endTargetedFanout: a user offline or mid-reconnect resumes onto a full ready
+// (which carries member_timeouts) instead of replaying past the change, including a
+// reconnect that registers after the audience was resolved.
 //
-// deliverTimeoutViews resolves the audience outside every lock and resolves
-// it again if a role refresh started meanwhile; snapshot and sends then run
-// under timeoutView.mu, so a concurrent issue and lift cannot leave a viewer
-// holding the older mirror. A role change whose refresh has not started yet
-// can still make a verdict stale; that refresh corrects it, because the flag
-// records which list each client holds. An unloaded mirror is reloaded once;
-// only if that reload fails is the publish skipped and logged, and the next
-// ready repairs it.
+// deliverTimeoutViews resolves the audience outside every lock and again if a role
+// refresh started meanwhile; snapshot and sends run under timeoutView.mu, so a
+// concurrent issue and lift cannot leave a viewer holding the older mirror. A role
+// change whose refresh has not started can still make a verdict stale; that refresh
+// corrects it, because the flag records which list each client holds. An unloaded
+// mirror is reloaded once; only if that fails is the publish skipped and logged, and
+// the next ready repairs it.
 func (h *Hub) publishMemberTimeouts(targetID int64) {
 	h.beginTargetedFanout()
 	defer h.endTargetedFanout()

@@ -79,7 +79,7 @@ Not touched: `scripts/run.mjs`, `scripts/ci-select.mjs`, `scripts/ci-select.test
 
 ### Checks
 
-- **Focused:** `node --test scripts/run.test.mjs`; `node --test scripts/ci-select.test.mjs`; `npx prettier --check docs/contributing.md docs/architecture/server.md docs/plans`; `node scripts/check-doc-citations.mjs`; `node scripts/check-doc-counts.mjs`.
+- **Focused:** `node --test scripts/run.test.mjs`; `node --test scripts/ci-select.test.mjs`; `npx prettier --check docs/contributing.md docs/architecture/server.md docs/plans`; `node scripts/checks/check-doc-citations.mjs`; `node scripts/checks/check-doc-counts.mjs`.
 - **Complete, required before the PR leaves draft:** `node scripts/run.mjs check:docs` and `node scripts/run.mjs check:hygiene`. Say which optional tools were missing. If row 3 or 4 touched anything the selector maps to the server, also run `go test -count=1 ./cmd/dbinventory/` in `Server/`.
 - **CI** is the authority; local runs shorten feedback only.
 
@@ -187,3 +187,23 @@ Implement R-1 exactly as above (rows 1, 2, 3, 9 and, if the code settles it, 4),
 **Recorded but not proposed.** Hand-built switches outside `createToggle` (2: `ScreenSharePicker`, `DmPrivacy`; the helper lacks `aria-labelledby`, a description and a disabled state); three `m:ss` duration formatters with two styles (`voiceStatusText.formatElapsed` pads to `00:05`, the voice-message and listening cards show `0:05`); `PinnedMessages` formats dates with the system locale while the rest uses `TEXT_LOCALE`; the image lightbox and `UserProfilePopup` set `role="dialog"`/`aria-modal` by hand instead of `applyDialogSemantics` (2 sites). Looked at and clean: user-visible strings outside the i18n catalogs (0 found), `window.confirm`/`alert` (0), raw error messages in toasts (0), app-lifetime `window`/`document` listeners without a signal (16, all module-level and meant to live as long as the app).
 
 **Limits.** One session, read-only, no app run and no tests run. The D1, D2, D4 and D8 behaviour notes are read from code. Counts are from `dev` `d1b24c6c` and will drift; each task's step 1 re-counts with the same scan before it changes anything. No saving is claimed.
+
+## Scout round 3 (2026-10-29): closing Phase MX
+
+**Source.** Phase MX step MX-S, run once more after MX-1 to MX-18 to close the phase. Read-only scouting of `Client/src`, `Client/src-tauri/src` and `Server/` on `dev` `3c17a59a`, with MX-18 (#2912) merged after it. It skips everything rounds 1 and 2 listed and everything a lint rule, door test or invariant now enforces (new since round 2: `ime-escape-guard`, `confirmDialogDoor`, `prefChangeDoor`, `clipboardDoor`, `error-code-literals` on both sides, `db_time_layouts`, `ws_payload_ids`, `plain_text_replies`, and the clippy ban on `std::sync::Mutex::lock`).
+
+**Result.** No candidate is big enough for its own row. The ones found are small fill-ins, each one PR or less:
+
+| #   | Candidate                             | Count on `dev`                                                                                                                                                                      | Shared helper it bypasses                                                                                       |
+| --- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| E1  | Elapsed-time formatters               | 3 copies, 2 styles: `voiceStatusText.formatElapsed` shows `00:05`, `voice-messages/waveform.ts` and `members/listeningCard.ts` show `0:05`                                          | none yet; one `formatDuration` would do                                                                         |
+| E2  | Hand-built switches                   | 3 (`ScreenSharePicker`, `DmPrivacy`, `PollComposer`; round 2 found 2)                                                                                                               | `createToggle` (`components/settings/helpers.ts`), which first needs a label id, description and disabled state |
+| E3  | Dialog semantics by hand              | 2 (`UserProfilePopup`, the image lightbox in `message-list/attachments.ts`)                                                                                                         | `applyDialogSemantics` (`lib/a11y.ts`)                                                                          |
+| E4  | Date formats with a hard-coded locale | 5 `Intl.DateTimeFormat("en-US", …)` in `lib/formatting.ts`, while `discordTimestamp.ts` and `i18n/format.ts` use `TEXT_LOCALE` (also `"en-US"` today, so no visible difference yet) | `TEXT_LOCALE`                                                                                                   |
+| E5  | Megabytes formatted by hand           | 1 (`UpdateNotifier.ts`)                                                                                                                                                             | `formatByteSize`                                                                                                |
+
+**Looked at and clean.** Server query-number parsing (two helpers, `queryInt` and `parseLimitParam`, plus one GIF-specific parser; 1 raw `strconv` on a query); user-text length checks (11 sites, each with its own limit and cleaning, user-facing ones already in `service`); Rust child processes (5 `Command::new`, no copied Windows flags); debounce or throttle copies (0).
+
+**Recommendation.** Phase MX closes here. E1 to E5 go to the "later" list as one small client fill-in for Phase Q or a quiet day; E2 needs `createToggle` extended first. Nothing is built from the scout alone.
+
+**Limits.** One session, read-only, line greps checked by hand (no syntax-tree scan this round, because every count is under 12). No app run. No saving is claimed.

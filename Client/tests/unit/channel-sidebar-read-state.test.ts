@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
+vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
 }));
@@ -18,7 +18,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [

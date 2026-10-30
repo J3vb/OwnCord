@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 
-import { isValidHost } from "../../src/lib/hostValidation";
+import { isValidHost } from "../../src/lib/net/hostValidation";
 
 describe("isValidHost", () => {
-  it("rejects a host containing '@' (identity.ts's OC-0118 scope-key premise)", () => {
+  it("rejects a host containing '@' (identity.ts's scope-key premise)", () => {
     // identity.ts's identityScopeKey builds `${userId}@${host}` and relies on
     // isValidHost forbidding '@' in any accepted host so a scoped key can
     // never collide with a legacy host-only account. If '@' were ever
@@ -27,7 +27,7 @@ describe("isValidHost", () => {
     expect(isValidHost("chat.example.com:8443")).toBe(true);
   });
 
-  it("rejects a host containing an underscore (OC-0322: Rust proxies reject it)", () => {
+  it("rejects a host containing an underscore (Rust proxies reject it)", () => {
     // http_proxy::validate_remote_host and livekit_proxy::validate_remote_host
     // only allow is_ascii_alphanumeric() || '.' | '-' | ':' | '[' | ']' -- JS
     // `\w` wrongly includes '_', which would let the client save/accept a

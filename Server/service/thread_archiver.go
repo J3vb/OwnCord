@@ -25,11 +25,10 @@ type ThreadNotifier interface {
 	ThreadChanged(threadID int64)
 }
 
-// ThreadArchiver archives idle threads (WP 6.9c): one goroutine (Run) sleeps
-// until the earliest open thread falls due, capped at expirerMaxSleep, then
-// archives every due thread and tells the notifier. Correctness does not
-// depend on it: a flag that is late only keeps a thread showing as active a
-// little longer, and a post reopens an archived thread.
+// ThreadArchiver archives idle threads: one goroutine (Run) sleeps until the
+// earliest open thread falls due (capped at expirerMaxSleep), archives every due
+// thread and tells the notifier. Correctness does not depend on it: a late flag
+// only keeps a thread showing active longer, and a post reopens an archived thread.
 type ThreadArchiver struct {
 	st threadArchiveStore
 

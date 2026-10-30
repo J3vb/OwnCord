@@ -1,6 +1,6 @@
 package admin
 
-// The custom sticker log messages (WP 8.8a). They live beside
+// The custom sticker log messages. They live beside
 // support_event_codes.go because that table is at the file-size ceiling; init
 // folds them in.
 func init() {

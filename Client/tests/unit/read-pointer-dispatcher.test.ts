@@ -3,7 +3,7 @@
  * `ready`, the `read_state` frame, a refused `mark_unread`, and the focus
  * frame's `read` flag. Server events reach the stores only here.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -21,14 +21,14 @@ import {
   noteMessageSeen,
   setLiveTailInView,
   setMarkReadSender,
-} from "../../src/lib/read-state";
+} from "../../src/lib/readState";
 import type { WsClient } from "../../src/lib/ws";
 import {
   markMessageUnread,
   setMarkUnreadSender,
-} from "../../src/components/message-list/mark-unread";
-import { viewChannel } from "../../src/lib/last-channel";
-import { readPointerEnabled } from "../../src/lib/serverCapabilities";
+} from "../../src/components/message-list/markUnread";
+import { viewChannel } from "../../src/lib/prefs/lastChannel";
+import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
 import { expectConsole } from "../helpers/console";
@@ -39,7 +39,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),
@@ -56,11 +56,18 @@ vi.mock("@lib/livekitSession", () => ({
   reconcileVideoFlags: vi.fn(),
   resendWatching: vi.fn(),
 }));
+// voice/wsHandlers loads screenShare lazily on an error frame that carries an
+// id. afterEach waits for that import: one still pending when the file ends
+// resolves after the mocks are gone and loads the real module into a torn-down
+// environment.
+vi.mock("@lib/voice/screenShare", () => ({
+  rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
+}));
 const mockShowToast = vi.fn();
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 
@@ -136,6 +143,14 @@ const dmRow = (over: Partial<DmChannel> = {}): DmChannel => ({
 
 const chan = (id: number) => channelsStore.getState().channels.get(id);
 
+// A refused frame makes the voice handlers load screenShare lazily and
+// fire-and-forget. If that load is still in flight when the file's environment
+// is torn down, vitest throws an unhandled EnvironmentTeardownError even though
+// every test passed. Loading it once up front makes the later import a cache hit.
+beforeAll(async () => {
+  await import("../../src/lib/voice/screenShare");
+});
+
 describe("read pointer through the dispatcher", () => {
   let mock: ReturnType<typeof createMockWsClient>;
   /** The mock as the dispatcher's WsClient (it lacks only the debug socket accessor). */
@@ -175,7 +190,8 @@ describe("read pointer through the dispatcher", () => {
     cleanup = wireDispatcher(ws());
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await vi.dynamicImportSettled();
     cleanup();
     setMarkReadSender(null);
     setMarkUnreadSender(null);

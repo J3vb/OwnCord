@@ -64,7 +64,7 @@ function setMessages(channelId: number, messages: Message[]): void {
   });
 }
 
-describe("MessageList focus retention across a virtualized rebuild (B9-22)", () => {
+describe("MessageList focus retention across a virtualized rebuild", () => {
   let container: HTMLDivElement;
   let options: MessageListOptions;
 

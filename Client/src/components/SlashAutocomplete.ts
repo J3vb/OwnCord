@@ -11,7 +11,7 @@ import { createElement, setText } from "@lib/dom";
 import {
   createInlineAutocomplete,
   type InlineAutocompleteComponent,
-} from "@components/inline-autocomplete";
+} from "@components/inlineAutocomplete";
 import { messagingText } from "../i18n/messaging";
 import { filterSlashCommands, type SlashCommand } from "../features/messaging/slashCommands";
 

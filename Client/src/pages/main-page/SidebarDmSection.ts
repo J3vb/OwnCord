@@ -6,21 +6,22 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
-import { reconcileChildren } from "@lib/reconcile";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
+import { reconcileChildren } from "@lib/net/reconcile";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { totalDmUnread } from "@lib/dmUnread";
 import type { DmChannel } from "@stores/dm.store";
 import { setSidebarMode } from "@stores/ui.store";
-import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
 import { trackCurrentView } from "../../features/navigation/contentView";
 import type { CountSource } from "../../features/navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
 import { voiceStore } from "@stores/voice.store";
 import { createIcon } from "@lib/icons";
-import { openMenuOnKeyboard } from "@lib/context-menu";
-import type { ModalInstance } from "@lib/modalFactory";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import {
   openDmContextMenu,
   openLeaveConfirm,
@@ -30,7 +31,7 @@ import {
 import { voiceText } from "../../i18n/voice";
 import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
 import { rowActivity } from "../../features/members/listeningLine";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,7 +42,7 @@ export interface SidebarDmSectionOptions {
   readonly onSelectDm: (dmChannel: DmChannel) => void;
   /** Called when the user clicks the "+" button to create a new DM. */
   readonly onNewDm: () => void;
-  /** Pending Message Requests (B9-4, Q2). Badged apart from unread, never added to it. */
+  /** Pending Message Requests. Badged apart from unread, never added to it. */
   readonly pendingRequests?: CountSource;
   /**
    * Open the Message Requests inbox. With it, pending requests also get their
@@ -110,7 +111,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // The header contains its own buttons (the "+" and the requests badge), so it
   // stays a plain div with a mouse click handler; the arrow is the keyboard
   // collapse control, a real <button> named by the heading, as on the channel
-  // categories (B9-21).
+  // categories.
   const dmHeader = createElement("div", { class: "category" });
   const dmLabelEl = createElement(
     "span",
@@ -222,7 +223,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     const dmItem = createElement("div", {
       class: muted ? "channel-item muted" : "channel-item",
       "data-testid": "dm-entry",
-      // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+      // Roving list item: reachable by Tab once, then arrow-stepped.
       role: "button",
       tabindex: "-1",
     });
@@ -248,7 +249,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     const preview = createElement("span", { class: "dm-preview" }, dmPreviewText(dm));
     const body = createElement("div", { class: "dm-item-body" });
     // A 1:1 partner's game, else their music, between the name and the last
-    // line (WP 8.3, 8.10).
+    // line.
     const shown = dm.isGroup ? null : rowActivity(dm.recipient.activity, dm.recipient.listening);
     if (shown !== null) {
       const activity = createElement("span", {
@@ -285,7 +286,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
     }
     // A mention badge outranks the plain unread badge, and a mute never
     // dims or suppresses it: a mute silences chatter, never something
-    // addressed to the reader directly (see lib/channel-mutes.ts).
+    // addressed to the reader directly (see lib/prefs/channelMutes.ts).
     if (dm.mentionCount > 0) {
       const mentionBadge = createElement(
         "span",
@@ -373,15 +374,10 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       viewAllBtn.style.display = "none";
     }
 
-    // Update total unread badge on the DM header. Muted conversations are
-    // excluded: the header badge is an interrupt, and a muted DM asked not to
-    // be one. Its own row still shows its dimmed count. A mention is the one
-    // thing a mute must never swallow, so a muted channel still contributes
-    // its mentionCount (never its raw unreadCount) to the total.
-    const totalUnread = dmChannels.reduce(
-      (sum, c) => sum + (isChannelMuted(c.channelId) ? c.mentionCount : c.unreadCount),
-      0,
-    );
+    // Update total unread badge on the DM header. A muted conversation is
+    // not an interrupt, so it adds only its mentions; its own row still shows
+    // its dimmed count.
+    const totalUnread = totalDmUnread(dmChannels);
     if (totalUnread > 0) {
       // Each row's count is already capped at 100; cap the sum the same way so
       // the header reads "99+" instead of a four-digit total.
@@ -397,7 +393,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   dmSection.appendChild(viewAllBtn);
 
   // One Tab stop for the preview list; ArrowUp/Down step through the rows and
-  // Enter/Space open one (B9-21: nothing is hover-only). The listener lives on
+  // Enter/Space open one (nothing is hover-only). The listener lives on
   // the list, which survives every keyed re-render.
   enableRovingNavigation(dmList, "[data-testid='dm-entry']", listLifecycle.signal, "vertical");
   // A row's time is "3:04 PM" today and "Sep 29" after midnight.

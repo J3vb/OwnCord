@@ -5,8 +5,11 @@ import {
   noteMessageSeen,
   resetReadPointerState,
   setMarkReadSender,
-} from "../../src/lib/read-state";
-import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
+} from "../../src/lib/readState";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../src/lib/net/serverCapabilities";
 import { resetChannelsStore } from "../../src/stores/channels.store";
 import {
   adoptReadyThreads,
@@ -16,7 +19,7 @@ import {
 } from "../../src/stores/threads.store";
 import { makeThread } from "../helpers/thread-fixtures";
 
-describe("mark_read with a thread id (WP 6.9c-c2)", () => {
+describe("mark_read with a thread id", () => {
   const sender = vi.fn();
   beforeEach(() => {
     resetChannelsStore();

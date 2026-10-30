@@ -11,11 +11,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { mockFetch } = vi.hoisted(() => ({ mockFetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
-vi.mock("../../src/lib/httpProxy", () => ({
+vi.mock("../../src/lib/net/httpProxy", () => ({
   ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
   stopHttpProxy: () => Promise.resolve(),
 }));
-vi.mock("../../src/lib/credentials", () => ({
+vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@stores/ui.store", () => ({
@@ -29,7 +29,7 @@ vi.mock("@stores/ui.store", () => ({
   setTransientError: vi.fn(),
   setTheme: vi.fn(),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
   setVoiceSensitivity: vi.fn(),

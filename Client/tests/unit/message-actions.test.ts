@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   isActionableMessage,
   messageActionGates,
-} from "../../src/components/message-list/message-actions";
+} from "../../src/components/message-list/messageActions";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {

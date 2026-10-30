@@ -1,5 +1,5 @@
 /**
- * The Moderation Center (B9-11, Q2): the report queue and the selected
+ * The Moderation Center: the report queue and the selected
  * report's evidence, for MODERATE_MEMBERS holders. view.ts loads this module
  * on first open.
  *
@@ -15,7 +15,7 @@
  * at once; closing the view, losing the permission, signing out or switching
  * profile removes it all, from the DOM and from memory.
  *
- * Review (B9-12): taking, noting and closing a report are single writes. One
+ * Review: taking, noting and closing a report are single writes. One
  * write runs at a time; whatever the answer, the queue and the report are read
  * again, so a conflict with another moderator (409) shows the server's current
  * state rather than this view's guess. The next write waits for that read, so
@@ -25,7 +25,7 @@
  * note and chosen outcome live only while the report can still take them and
  * the view is live.
  *
- * Actions (B9-13): a warning or timeout is sent through the report, and lifting
+ * Actions: a warning or timeout is sent through the report, and lifting
  * a timeout through the member's own route; each is one write under the same
  * guard. Success is said only once the server answers, and a timeout says
  * whether its voice half was applied or skipped, as the server reported it. A
@@ -34,17 +34,17 @@
  * permission, that read's own 403 clears the view. An action that gets no
  * answer may still have been recorded, so the history is read, not guessed.
  *
- * Removal, kick and ban (B9-14) go through the report the same way. A change
+ * Removal, kick and ban go through the report the same way. A change
  * to the reader's role rebuilds the open report, so an action their role no
  * longer holds stops being offered before the server has to refuse it.
  *
- * Appeals (B9-17): the view is two tabs, Reports and Appeals (AppealQueue.ts,
+ * Appeals: the view is two tabs, Reports and Appeals (AppealQueue.ts,
  * rendered the first time its tab is chosen). A 403 in either tab clears
  * both. An appeal's linked report opens here by id, outside the filter, and
  * its read is authorized again like any other.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import {
   ApiClientError,
   errorText,
@@ -55,7 +55,7 @@ import {
 } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setNsfwAcknowledged } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -90,6 +90,7 @@ import {
 import { buildHistory } from "./History";
 import { modQueueStore } from "./store";
 import { buildWorkflow, type WorkflowWrite } from "./Workflow";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 const FILTERS = [
   { value: "", labelKey: "filter.active", countKey: "count.active" },
@@ -207,7 +208,7 @@ export function renderModerationCenter(root: HTMLElement, ctx: FeatureViewContex
 }
 
 function actionErrorText(w: ActionWrite, err: unknown): string {
-  if (isStatus(err, 403, "SELF_REVIEW")) return t("write.selfReview");
+  if (isStatus(err, 403, RestErrorCode.SELF_REVIEW)) return t("write.selfReview");
   if (isStatus(err, 403)) {
     // Kick and ban each have their own bit, which a role change can take
     // while MODERATE_MEMBERS stays, so a refusal is not only about rank.
@@ -216,9 +217,9 @@ function actionErrorText(w: ActionWrite, err: unknown): string {
     return t(w.kind === "kick" || w.kind === "ban" ? "act.refusedEnforce" : "act.refused");
   }
   if (isStatus(err, 404) && w.kind === "lift") return t("act.liftNone");
-  // 409 ALREADY_DELETED (B9-14's removal of an already-removed message): a
+  // 409 ALREADY_DELETED (removing an already-removed message): a
   // known end state, not the uncertain "may still have been recorded" answer.
-  if (isStatus(err, 409, "ALREADY_DELETED")) return t("act.alreadyDeleted");
+  if (isStatus(err, 409, RestErrorCode.ALREADY_DELETED)) return t("act.alreadyDeleted");
   if (isStatus(err, 400)) {
     const message = err instanceof ApiClientError ? serverErrorText(err.code, err.message, "") : "";
     if (message !== "") return t("act.invalid", { message });
@@ -680,7 +681,7 @@ function renderReports(
           offList = null;
           setText(detailStatus, "");
         }
-        if (isStatus(err, 403) && !isStatus(err, 403, "SELF_REVIEW") && !isAction(w)) {
+        if (isStatus(err, 403) && !isStatus(err, 403, RestErrorCode.SELF_REVIEW) && !isAction(w)) {
           deny();
           return;
         }

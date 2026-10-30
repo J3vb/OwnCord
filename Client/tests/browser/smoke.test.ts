@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Track } from "livekit-client";
-import { createMicProcessor } from "../../src/lib/micProcessor";
+import { createMicProcessor } from "../../src/lib/voice/micProcessor";
 
 // Real-browser sanity checks: a real DOM is available (jsdom can fake this,
 // but this suite runs in an actual Chromium instance via the vitest
@@ -25,7 +25,7 @@ describe("browser environment", () => {
   });
 });
 
-// src/lib/micProcessor.ts and src/lib/noise-suppression.ts need a real
+// src/lib/voice/micProcessor.ts and src/lib/voice/noiseSuppression.ts need a real
 // AudioContext/AudioWorklet/WASM runtime that jsdom cannot provide
 // (vitest.config.ts excludes noise-suppression from coverage on that basis) —
 // so they have to be exercised here, not in tests/unit.

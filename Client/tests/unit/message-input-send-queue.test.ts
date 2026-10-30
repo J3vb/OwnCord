@@ -16,7 +16,7 @@ import {
   type MessageInputOptions,
   type QueuedAttachment,
 } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 type UploadResult = { id: string; url: string; filename: string };
 

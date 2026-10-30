@@ -15,7 +15,7 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
   mockSavePref: vi.fn(),
 }));
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -39,7 +39,7 @@ vi.mock("../../src/features/voice/native/devices", () => ({
   onNativeDevicesChanged: () => null,
 }));
 
-import { DeviceManager } from "../../src/lib/deviceManager";
+import { DeviceManager } from "../../src/lib/voice/deviceManager";
 
 /** Chromium's device list after the USB mic is plugged back in: the OS
  *  default is the USB mic again (the `default` entry shares its groupId). */

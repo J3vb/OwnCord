@@ -25,22 +25,19 @@ const (
 	defaultBaseURL = "https://api.github.com"
 	cacheTTL       = 1 * time.Hour
 
-	// maxFetchBytes caps the response body read for checksum/signature files.
-	// Prevents a malicious or corrupted release asset from exhausting memory.
+	// maxFetchBytes caps the body read for checksum/signature files so a
+	// malicious or corrupted asset cannot exhaust memory.
 	maxFetchBytes = config.MaxMessageBytes
 	errorCacheTTL = 5 * time.Minute
-	// fetchTimeout bounds an outbound metadata fetch once it has been detached
-	// from the caller's context (see detachFetch). It matches the http.Client
-	// timeout NewUpdater sets, so a caller that stays connected sees the same
-	// effective deadline as before.
+	// fetchTimeout bounds an outbound metadata fetch once detached from the
+	// caller's context (see detachFetch); it matches NewUpdater's http.Client
+	// timeout.
 	fetchTimeout = 30 * time.Second
 	// metadataClientTimeout bounds a whole metadata exchange (release lookup,
-	// checksum and manifest files). The release asset download does not use it:
-	// see downloadHTTPClient.
+	// checksum and manifest files), not the asset download (downloadHTTPClient).
 	metadataClientTimeout = 30 * time.Second
-	// responseHeaderTimeout bounds the wait for response headers on any
-	// outbound request, so a server that accepts the connection and then says
-	// nothing is abandoned.
+	// responseHeaderTimeout bounds the wait for response headers, so a server
+	// that accepts the connection and says nothing is abandoned.
 	responseHeaderTimeout = 30 * time.Second
 	// defaultDownloadStallTimeout abandons an asset download that has received
 	// no body bytes for this long.
@@ -139,12 +136,11 @@ func NewUpdater(currentVersion, githubToken, repoOwner, repoName string) *Update
 		repoName:       repoName,
 		signingKeyText: defaultServerSignaturePublicKey,
 	}
-	// Each redirect hop passes the same host check as the first request.
-	// One transport is shared by every Updater so its idle connections can be
-	// released together (CloseIdleConnections). Clone the default transport,
-	// or build an equivalent one if the global default was replaced with
-	// another RoundTripper. Built here, in the inventoried egress site
-	// (invariants.EgressAllow), not in a helper.
+	// Each redirect hop passes the same host check as the first request. One
+	// transport is shared by every Updater so its idle connections can be
+	// released together (CloseIdleConnections): clone the default transport, or
+	// build an equivalent one if the global default was replaced. Built here, in
+	// the inventoried egress site (invariants.EgressAllow), not in a helper.
 	sharedTransportOnce.Do(func() {
 		var transport *http.Transport
 		if base, ok := http.DefaultTransport.(*http.Transport); ok {
@@ -208,15 +204,12 @@ func (u *Updater) apiBaseURL() string {
 //
 // The release and text-asset caches are process-wide and shared by the
 // unauthenticated client-update endpoint and the owner-only admin update
-// handlers, so the outcome of one caller's fetch is replayed to every other
-// caller. Driving the fetch from the caller's own context let an
-// unauthenticated client abort its request and have the resulting
-// context.Canceled stored as a cached failure for errorCacheTTL, blocking
-// update checks for everyone. Detaching the fetch means only upstream-derived
-// errors (dial failure, non-200 status, decode failure, or this timeout) can
-// ever reach the cache — those stay cached exactly as before — and a fetch
-// already in flight completes and fills the success cache even if the caller
-// that started it walks away.
+// handlers, so one caller's fetch outcome is replayed to every other caller.
+// Driving the fetch from the caller's own context would let an unauthenticated
+// client abort its request and have the resulting context.Canceled cached as a
+// failure for errorCacheTTL, blocking update checks for everyone. Detached,
+// only upstream-derived errors can reach the cache, and a fetch in flight
+// still fills the success cache if its caller walks away.
 func detachFetch(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), fetchTimeout)
 }
@@ -232,14 +225,11 @@ func (u *Updater) CheckForUpdate(ctx context.Context) (UpdateInfo, error) {
 	}
 
 	// Coalesce concurrent misses: when the cache TTL expires under load, every
-	// caller would otherwise issue its own outbound GitHub fetch (OC-0146).
-	// One flight runs and the rest wait on its result, exactly like
-	// FetchTextAssetCached's textAssetSF.
-	//
-	// The flight is detached from the leader's ctx (see detachFetch): callers
-	// include the unauthenticated client-update endpoint, so a leader that
-	// aborts its request must not fail its followers or write its own
-	// context.Canceled into the shared cache.
+	// caller would otherwise issue its own GitHub fetch. One flight runs and
+	// the rest wait on its result, like FetchTextAssetCached's textAssetSF. The
+	// flight is detached from the leader's ctx (see detachFetch) so a leader
+	// that aborts its request cannot fail its followers or cache its own
+	// context.Canceled.
 	v, err, _ := u.releaseSF.Do("latest-release", func() (any, error) {
 		now := time.Now()
 		// Re-check: another flight may have filled the cache while we queued.
@@ -369,9 +359,9 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 
 // hasRequiredServerAssetsFor reports whether every asset the goos-specific
 // verify path consumes is present. The detached binary signature
-// (chatserver.exe.sig) is Windows-only: the Linux tarball path verifies via
-// the signed manifest + checksum and never receives it, so requiring it there
-// would block Linux updates on any release missing a Windows-only asset.
+// (chatserver.exe.sig) is Windows-only: the Linux tarball path verifies via the
+// signed manifest + checksum, so requiring it there would block Linux updates
+// on a release missing a Windows-only asset.
 func hasRequiredServerAssetsFor(goos, downloadURL, checksumURL, signatureURL, manifestURL, manifestSignatureURL string) bool {
 	if goos == "windows" && signatureURL == "" {
 		return false

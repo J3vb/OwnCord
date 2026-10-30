@@ -20,11 +20,17 @@
 #   8. compose — the shipped Server/docker-compose.yml, run by
 #      compose-smoke.sh with this image: exactly three published ports, the
 #      one LiveKit secret in .env works (and a wrong one fails), and an old
-#      livekit.yaml cannot bring the port range back (WP 4.8b).
+#      livekit.yaml cannot bring the port range back (WP 4.8b);
+#   9. browser client — only with --browser-client: a container with the
+#      browser client switched on serves the bundle's index at / and the
+#      script it references, the check cmd/smoke -browser-client makes for
+#      the standalone assets.
 #
 # Used by ci.yml, release.yml (before anything is signed or pushed) and
 # nightly-docker-smoke.yml, so a regression is caught pre-merge instead of at
-# tag time. Usage: docker-smoke.sh <image>
+# tag time. Only release.yml passes --browser-client: the other two build the
+# image without the web bundle, and GET / then answers 404 by design.
+# Usage: docker-smoke.sh [--browser-client] <image>
 #
 # Phases 1-7: no config mount and no env, that is the contract being tested
 # (phase 8 boots the compose stack, which mounts its config). The image
@@ -46,7 +52,12 @@ set -euo pipefail
 # Exported here so callers do not have to remember it (ENV-03).
 export MSYS_NO_PATHCONV=1
 
-image="${1:?usage: docker-smoke.sh <image>}"
+browser_client=false
+if [ "${1:-}" = "--browser-client" ]; then
+  browser_client=true
+  shift
+fi
+image="${1:?usage: docker-smoke.sh [--browser-client] <image>}"
 vol="owncord-smoke-vol-$$"
 wiz_vol="owncord-smoke-wiz-vol-$$"
 work="$(mktemp -d)"
@@ -99,17 +110,20 @@ show_logs() {
     sed -E 's/(Setup token[[:space:]]+)[^[:space:]]+/\1[redacted]/'
 }
 
-# start <container> [<volume> [<publish>]] — the flags are the minimal-privilege
-# posture docs/deployment.md tells owners to use, so the smoke tests what is
-# documented. The volume defaults to the one phases 1-5 share; <publish>, when
-# given, is a docker -p mapping.
+# start <container> [<volume> [<publish> [<env>]]] — the flags are the
+# minimal-privilege posture docs/deployment.md tells owners to use, so the smoke
+# tests what is documented. The volume defaults to the one phases 1-5 share;
+# <publish>, when given, is a docker -p mapping, and <env> one docker -e pair.
 start() {
-  local c=$1 v=${2:-$vol} publish=${3:-}
+  local c=$1 v=${2:-$vol} publish=${3:-} env=${4:-}
   # Never empty, so no empty-array expansion is needed under `set -u`.
   local -a args=(-v "$v:/app/data" --cap-drop=ALL --security-opt=no-new-privileges:true)
   containers+=("$c")
   if [ -n "$publish" ]; then
     args+=(-p "$publish")
+  fi
+  if [ -n "$env" ]; then
+    args+=(-e "$env")
   fi
   local out
   if ! out=$(docker run -d --name "$c" "${args[@]}" "$image" 2>&1); then
@@ -419,10 +433,49 @@ echo "recovery restart: the admin settings API answers"
 show_logs "$wiz"
 drain "recovery final drain" "$wiz"
 
+# --- Phase 9: the image serves the browser client (--browser-client only) ---
+# The setting is off by default, so the env override switches it on, the way
+# an owner's compose file would. The wizard volume is reused: it already has
+# an owner, so the server boots straight into normal mode on the same port.
+if [ "$browser_client" = "true" ]; then
+  web="${name}-web"
+  start "$web" "$wiz_vol" "127.0.0.1:${smoke_port}:8443" \
+    "OWNCORD_SERVER_BROWSER_CLIENT_ENABLED=true"
+  wait_healthy "browser client" "$web"
+  status=""
+  for ((i = 0; i < 10; i++)); do
+    rc=0
+    status=$(cd "$work" && curl -ksS --max-time 30 -o index.html \
+      -w '%{http_code} %{content_type}' "$smoke_url/" 2>/dev/null) || rc=$?
+    [ "$rc" = "7" ] || break
+    sleep 1
+  done
+  [ "$rc" = "0" ] ||
+    fail "$web" "browser client: GET / did not complete (curl exit $rc)"
+  case "$status" in
+    "200 text/html"*) ;;
+    *) fail "$web" "browser client: GET / answered '$status', want 200 text/html (is the web bundle in this image?)" ;;
+  esac
+  grep -q '<script type="module"' "$work/index.html" ||
+    fail "$web" "browser client: GET / has no <script type=\"module\">"
+  script=$(grep -o '/assets/[A-Za-z0-9._/-]*\.js' "$work/index.html" | head -n 1) || true
+  [ -n "$script" ] ||
+    fail "$web" "browser client: GET / references no /assets/*.js script"
+  status=$(cd "$work" && curl -ksS --max-time 30 -o /dev/null -w '%{http_code}' \
+    "$smoke_url$script") ||
+    fail "$web" "browser client: GET $script did not complete"
+  [ "$status" = "200" ] ||
+    fail "$web" "browser client: GET $script answered $status, want 200"
+  echo "browser client: / serves the bundle index and $script"
+  drain "browser client drain" "$web"
+fi
+
 # --- Phase 8: the compose stack (WP 4.8b) -----------------------------------
 # Last, because it is the slowest and needs the host ports and images the
 # phases above do not. It tears its own project down; its own failure output
 # names the phase. Run as a child so its trap and `set -e` stay its own.
 bash "$(dirname "${BASH_SOURCE[0]}")/compose-smoke.sh" "$image"
 
-echo "docker smoke passed: boot, migrate, healthy, minimal privilege, drain, replace, wizard persists across a recreate, reset-overrides recovers, compose stack"
+suffix=""
+[ "$browser_client" = "true" ] && suffix=", browser client"
+echo "docker smoke passed: boot, migrate, healthy, minimal privilege, drain, replace, wizard persists across a recreate, reset-overrides recovers${suffix}, compose stack"

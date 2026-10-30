@@ -1,5 +1,5 @@
 /**
- * The poll card (WP 6.9b): a poll message's question, answers and footer,
+ * The poll card: a poll message's question, answers and footer,
  * drawn in place of its text. Open and not yet voted it is a form (radios for a
  * single-choice poll, checkboxes for a multiple-choice one) with Vote and Show
  * results; after a vote, or once the poll is over, every answer shows its
@@ -25,15 +25,14 @@
 
 import { createElement, setText, clearChildren, setOwnedTimeout, focusIsOurs } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { createConfirmModal } from "../../features/dialogs/confirmModal";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { PollAnswer, PollView } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { Message } from "@stores/messages.store";
 import type { MessageRenderOptions } from "./renderers";
 import { pollCardText } from "../../i18n/pollCard";
-import { shellText } from "../../i18n/shell";
 import {
   answerPercent,
   canEndPoll,
@@ -42,9 +41,10 @@ import {
   timeLeft,
   winningAnswers,
 } from "../../features/messaging/pollModel";
-import { buildCustomEmojiNode } from "./custom-emoji";
-import { connectionLockReason } from "./message-actions";
+import { buildCustomEmojiNode } from "./customEmoji";
+import { connectionLockReason } from "./messageActions";
 import { channelCanReact, reactionLockReason } from "./reactions";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** What one poll's card remembers across row rebuilds. */
 export interface CardState {
@@ -89,15 +89,15 @@ export function pollCardState(messageId: number): CardState {
 
 function errorText(code: string): string {
   switch (code) {
-    case "NOT_FOUND":
+    case WsErrorCode.NOT_FOUND:
       return pollCardText("error.NOT_FOUND");
-    case "POLL_ENDED":
+    case WsErrorCode.POLL_ENDED:
       return pollCardText("error.POLL_ENDED");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return pollCardText("error.RATE_LIMITED");
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return pollCardText("error.FORBIDDEN");
-    case "TIMED_OUT":
+    case WsErrorCode.TIMED_OUT:
       return pollCardText("error.TIMED_OUT");
     case "OFFLINE":
       return pollCardText("error.OFFLINE");
@@ -105,7 +105,7 @@ function errorText(code: string): string {
       return pollCardText("error.NETWORK");
     case "UNCONFIRMED":
       return pollCardText("error.UNCONFIRMED");
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return pollCardText("error.REQUEST_TIMEOUT");
     default:
       return pollCardText("error.other");
@@ -133,35 +133,17 @@ function timeLeftText(poll: PollView, now: number): string {
 
 /** Ask for confirmation before ending a poll. */
 function confirmEnd(messageId: number, signal: AbortSignal, onConfirm: () => void): void {
-  const titleId = `poll-end-title-${messageId}`;
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, pollCardText("endConfirm.title")));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(createElement("p", {}, pollCardText("endConfirm.body")));
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "poll-end-cancel" },
-    shellText("common.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "poll-end-confirm" },
-    pollCardText("endConfirm.confirm"),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "poll-end-modal" },
+  createConfirmModal({
+    title: pollCardText("endConfirm.title"),
+    titleId: `poll-end-title-${messageId}`,
+    // A plain paragraph: ending a poll is final but not an alarm.
+    body: createElement("p", {}, pollCardText("endConfirm.body")),
+    confirmLabel: pollCardText("endConfirm.confirm"),
+    testId: "poll-end-modal",
+    confirmTestId: "poll-end-confirm",
+    cancelTestId: "poll-end-cancel",
     signal,
-  });
-  cancel.addEventListener("click", () => modal.close());
-  confirm.addEventListener("click", () => {
-    modal.close();
-    onConfirm();
+    onConfirm,
   });
 }
 

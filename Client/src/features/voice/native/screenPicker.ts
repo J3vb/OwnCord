@@ -7,9 +7,9 @@
 // shows only the quality step and hands "portal" to the host.
 //
 // The dialog itself lives in the UI layer (`components/ScreenSharePicker.ts`).
-// This module is a lower layer and must not import a component (ARCH-06), so
+// This module is a lower layer and must not import a component, so
 // the UI registers the dialog through `screenPickerSlot.ts` — the same
-// injection shape as `lib/read-state.ts`'s `setMarkReadSender` — and this
+// injection shape as `lib/readState.ts`'s `setMarkReadSender` — and this
 // module adapts the dialog's result to the host capture and the shared publish
 // settings, so the per-share quality the user picked drives both. With no
 // picker registered (a headless run) a share resolves to null, i.e. cancelled.
@@ -21,9 +21,9 @@ import {
   getScreenShareMaxBitrate,
   getScreenShareQuality,
   isScreenShareSimulcast,
-} from "@lib/screenShare";
+} from "@lib/voice/screenShare";
 import type { NativeVoiceScreenCapture } from "../../../platform/contracts/nativeVoice";
-import type { StreamQuality } from "@lib/screenShare";
+import type { StreamQuality } from "@lib/voice/screenShare";
 import { getScreenSourcePicker } from "./screenPickerSlot";
 import { captureOptions } from "./screenTrack";
 

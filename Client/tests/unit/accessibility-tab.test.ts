@@ -9,7 +9,7 @@ const { mockSyncOsMotionListener } = vi.hoisted(() => ({
   mockSyncOsMotionListener: vi.fn(),
 }));
 
-vi.mock("@lib/os-motion", () => ({
+vi.mock("@lib/ui/osMotion", () => ({
   SYNC_OS_MOTION_DEFAULT: true,
   syncOsMotionListener: mockSyncOsMotionListener,
 }));
@@ -220,7 +220,7 @@ describe("AccessibilityTab", () => {
       expect(getToggle(container, 2).classList.contains("on")).toBe(true);
     });
 
-    it("syncOsMotion defaults to on, so the OS setting is honoured (B9-2, Q1)", () => {
+    it("syncOsMotion defaults to on, so the OS setting is honoured", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 
@@ -351,7 +351,7 @@ describe("AccessibilityTab", () => {
   // -----------------------------------------------------------------------
 
   describe("side effects", () => {
-    it("routes reducedMotion through syncOsMotionListener rather than writing the class directly (OC-0232)", () => {
+    it("routes reducedMotion through syncOsMotionListener rather than writing the class directly", () => {
       // os-motion.ts is the single writer of `.reduced-motion`; the Reduce
       // Motion toggle must delegate to it (passing the current syncOsMotion
       // pref) instead of touching documentElement itself, so a manual toggle
@@ -436,7 +436,7 @@ describe("AccessibilityTab", () => {
       }
     });
 
-    it("each toggle is named by the visible label beside it (B9-2)", () => {
+    it("each toggle is named by the visible label beside it", () => {
       const section = buildAccessibilityTab(ac.signal);
       container.appendChild(section);
 

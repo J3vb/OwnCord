@@ -22,10 +22,10 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
   serverSupportsListeningActivity,
-} from "@lib/serverCapabilities";
-import { MUSIC_ACTIVITY_PREF_KEY, isMusicActivityShared } from "@lib/musicActivityPrefs";
-import { loadPref } from "@lib/preferences";
-import { loadMusicPrefs, recordSeenPlayer, saveMusicPrefs } from "@lib/musicActivityPrefs";
+} from "@lib/net/serverCapabilities";
+import { MUSIC_ACTIVITY_PREF_KEY, isMusicActivityShared } from "@lib/prefs/musicActivityPrefs";
+import { loadPref } from "@lib/prefs/preferences";
+import { loadMusicPrefs, recordSeenPlayer, saveMusicPrefs } from "@lib/prefs/musicActivityPrefs";
 import { desktop } from "../../src/platform/desktop";
 import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
 import { dmStore } from "../../src/stores/dm.store";

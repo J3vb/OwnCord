@@ -5,16 +5,16 @@ import { ApiClientError } from "../../src/lib/api";
 // listener at load. The re-import below reuses these instances, so the
 // vi.resetModules() does not install a second copy of each listener.
 import * as attachments from "@components/message-list/attachments";
-import * as formatting from "@lib/formatting";
+import * as formatting from "@lib/text/formatting";
 import * as media from "@components/message-list/media";
-import * as channelMutes from "@lib/channel-mutes";
+import * as channelMutes from "@lib/prefs/channelMutes";
 import { setAvailableUpdate } from "../../src/features/updates/availableUpdate";
 
 const APP_LIFETIME_MODULES = [
   ["@components/message-list/attachments", attachments],
-  ["@lib/formatting", formatting],
+  ["@lib/text/formatting", formatting],
   ["@components/message-list/media", media],
-  ["@lib/channel-mutes", channelMutes],
+  ["@lib/prefs/channelMutes", channelMutes],
 ] as const;
 
 const mockAppVersion = vi.hoisted(() => vi.fn());
@@ -60,7 +60,7 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
   setVoiceSensitivity: vi.fn(),
@@ -229,6 +229,130 @@ describe("SettingsOverlay", () => {
     expect(prevActive.classList.contains("active")).toBe(false);
 
     overlay.destroy?.();
+  });
+
+  describe("on a phone, where the section list and a section take turns", () => {
+    function stubPhone(matches: boolean): void {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((query: string) => ({ matches, media: query }) as unknown as MediaQueryList),
+      );
+    }
+    const panelOf = (c: HTMLElement): HTMLElement => c.querySelector(".settings-panel")!;
+    const escape = (): boolean =>
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("opens on the list, and a tapped tab opens its section", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      getTab(container, 1).click();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Appearance");
+
+      overlay.destroy?.();
+    });
+
+    it("Back returns to the list with focus on the section it left, without closing", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      const appearance = getTab(container, 1);
+      appearance.click();
+
+      clickEl(container.querySelector("[data-testid='settings-back']"));
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+      expect(document.activeElement).toBe(appearance);
+      expect(defaultOptions.onClose).not.toHaveBeenCalled();
+
+      overlay.destroy?.();
+    });
+
+    it("Escape leaves the open section first, then closes Settings", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+
+      escape();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+      expect(defaultOptions.onClose).not.toHaveBeenCalled();
+      escape();
+      expect(defaultOptions.onClose).toHaveBeenCalledTimes(1);
+
+      overlay.destroy?.();
+    });
+
+    it("Enter in search opens the picked section with focus on Back, and nothing on no match", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      const box = container.querySelector<HTMLInputElement>("[data-testid='settings-search']")!;
+      const enter = (): boolean =>
+        box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+
+      box.value = "zzzz";
+      box.dispatchEvent(new Event("input"));
+      enter();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      box.value = "appearance";
+      box.dispatchEvent(new Event("input"));
+      enter();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Appearance");
+      expect(document.activeElement).toBe(container.querySelector("[data-testid='settings-back']"));
+
+      overlay.destroy?.();
+    });
+
+    it("reopening starts on the list again", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+      overlay.close();
+      overlay.open();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      overlay.destroy?.();
+    });
+
+    it("a tab another surface asks for opens straight on its section", () => {
+      stubPhone(true);
+      mockUiState.settingsTab = "Notifications";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("Notifications");
+
+      overlay.destroy?.();
+    });
+
+    it("on a wide window Escape still closes Settings with a section picked", () => {
+      stubPhone(false);
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+
+      escape();
+      expect(defaultOptions.onClose).toHaveBeenCalledTimes(1);
+
+      overlay.destroy?.();
+    });
   });
 
   describe("while a one-time recovery secret request is in flight", () => {
@@ -735,7 +859,7 @@ describe("SettingsOverlay", () => {
     overlay.destroy?.();
   });
 
-  it("keeps a partial-success warning in the form instead of the green success (OC-0314)", async () => {
+  it("keeps a partial-success warning in the form instead of the green success", async () => {
     // The server answers 200 + warning when the password changed but the
     // other sessions could not be revoked; the form must carry that
     // instruction, not clear the fields under an unqualified green

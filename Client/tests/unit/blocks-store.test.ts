@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { listSessionResets } from "../../src/lib/net/sessionRegistry";
 import {
   blocksStore,
   setBlockedByMe,
@@ -86,7 +87,7 @@ describe("blocksStore", () => {
   // race. The GET is issued before the user's own action but its reply can
   // land after — a stale full-set reply must not clobber a fresher per-user
   // delta.
-  describe("setBlockedByMe staleness guard (OC-0218)", () => {
+  describe("setBlockedByMe staleness guard", () => {
     it("applies when no revision is given (direct/legacy caller)", () => {
       setBlockedByMe([5]);
       expect(dmComposerBlockReason(blocksStore.getState(), 5)).toBe(BLOCKED_BY_ME_REASON);
@@ -146,6 +147,34 @@ describe("blocksStore", () => {
       // Server B's own reply, carrying the post-reset revision, still applies.
       setBlockedByMe([9], revAfterReset);
       expect(dmComposerBlockReason(blocksStore.getState(), 9)).toBe(BLOCKED_BY_ME_REASON);
+    });
+  });
+
+  describe("revision bookkeeping", () => {
+    it("a repeated block or unblock changes nothing and keeps the revision", () => {
+      setUserBlockedByMe(5, true);
+      const afterBlock = blocksStore.getState();
+      expect(afterBlock.blockedByMeRev).toBe(1);
+      setUserBlockedByMe(5, true);
+      expect(blocksStore.getState()).toBe(afterBlock);
+      setUserBlockedByMe(5, false);
+      expect(blocksStore.getState().blockedByMeRev).toBe(2);
+      const afterUnblock = blocksStore.getState();
+      setUserBlockedByMe(5, false);
+      expect(blocksStore.getState()).toBe(afterUnblock);
+    });
+
+    it("each reset moves the revision up by exactly one", () => {
+      setUserBlockedByMe(5, true);
+      resetBlocksStore();
+      expect(blocksStore.getState().blockedByMeRev).toBe(2);
+      resetBlocksStore();
+      expect(blocksStore.getState().blockedByMeRev).toBe(3);
+      expect(blocksStore.getState().blockedByMe.size).toBe(0);
+    });
+
+    it("is registered to reset with the session under its own name", () => {
+      expect(listSessionResets()).toContain("blocks:store");
     });
   });
 });

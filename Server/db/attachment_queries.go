@@ -24,27 +24,29 @@ type Attachment struct {
 	UploaderID *int64
 }
 
-// AttachmentAccess holds attachment metadata plus the channel context needed
-// for access control. ChannelID and ChannelType are empty when the attachment
-// is unlinked (message_id IS NULL or the message/channel was deleted).
-// ChannelNSFW is meaningless in that case too (always false).
+// AttachmentAccess holds attachment metadata plus the channel context for
+// access control. ChannelID and ChannelType are empty (and ChannelNSFW false)
+// when the attachment is unlinked or its message/channel was deleted.
 type AttachmentAccess struct {
 	Attachment
 	ChannelID   *int64
 	ChannelType string
 	ChannelNSFW bool
+	// ChannelPending is true while a Discord import is still building the
+	// channel the attachment's message sits in.
+	ChannelPending bool
 }
 
-// CreateAttachment inserts a new attachment record (initially unlinked to any message).
-// uploaderID records who uploaded the file for ownership checks on unlinked files.
-// width and height are optional image dimensions (pass nil for non-image files).
+// CreateAttachment inserts an unlinked attachment record. uploaderID is kept
+// for ownership checks on unlinked files; width and height are nil for
+// non-images.
 func (d *DB) CreateAttachment(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height *int) error {
 	return d.CreateAttachmentVoice(ctx, id, uploaderID, filename, storedAs, mimeType, size, width, height, nil, nil)
 }
 
-// CreateAttachmentVoice is CreateAttachment plus the voice message fields
-// (WP 8.9): durationMs is the clip length and waveform its canonical
-// base64url (unpadded) amplitude bytes. Both are nil for any other file.
+// CreateAttachmentVoice is CreateAttachment plus the voice message fields:
+// durationMs is the clip length and waveform its base64url (unpadded)
+// amplitude bytes; both are nil for any other file.
 func (d *DB) CreateAttachmentVoice(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height, durationMs *int, waveform *string) error {
 	if err := d.q.CreateAttachment(ctx, dbgen.CreateAttachmentParams{
 		ID:         id,
@@ -109,9 +111,9 @@ func (d *DB) GetAttachmentByID(ctx context.Context, id string) (*Attachment, err
 }
 
 // GetAttachmentWithChannel returns the attachment plus the channel context
-// (channel ID and type) for access-control checks. Returns nil if the
-// attachment does not exist. ChannelID/ChannelType are nil/empty when the
-// attachment is unlinked or its message/channel was deleted.
+// (ID and type) for access control, or nil if it does not exist. The channel
+// fields are empty when the attachment is unlinked or its message/channel was
+// deleted.
 func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*AttachmentAccess, error) {
 	r, err := d.q.GetAttachmentWithChannel(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -121,42 +123,39 @@ func (d *DB) GetAttachmentWithChannel(ctx context.Context, id string) (*Attachme
 		return nil, fmt.Errorf("GetAttachmentWithChannel: %w", err)
 	}
 	return &AttachmentAccess{
-		ID:          r.ID,
-		MessageID:   r.MessageID,
-		Filename:    r.Filename,
-		StoredAs:    r.StoredAs,
-		MimeType:    r.MimeType,
-		Size:        r.Size,
-		UploadedAt:  r.UploadedAt,
-		UploaderID:  r.UploaderID,
-		ChannelID:   r.ChannelID,
-		ChannelType: derefString(r.Type),
-		ChannelNSFW: (r.Nsfw != nil && *r.Nsfw != 0) || (r.ParentNsfw != nil && *r.ParentNsfw != 0),
+		ID:             r.ID,
+		MessageID:      r.MessageID,
+		Filename:       r.Filename,
+		StoredAs:       r.StoredAs,
+		MimeType:       r.MimeType,
+		Size:           r.Size,
+		UploadedAt:     r.UploadedAt,
+		UploaderID:     r.UploaderID,
+		ChannelID:      r.ChannelID,
+		ChannelType:    derefString(r.Type),
+		ChannelPending: r.ImportPending != nil && *r.ImportPending != 0,
+		ChannelNSFW:    (r.Nsfw != nil && *r.Nsfw != 0) || (r.ParentNsfw != nil && *r.ParentNsfw != 0),
 	}, nil
 }
 
-// LinkAttachmentsToMessage sets message_id on attachments that are currently
-// unlinked (message_id IS NULL) and owned by uploaderID. Legacy rows with
-// uploader_id IS NULL are treated as unowned and may be claimed by any
-// sender. Rows that are already linked, owned by another user, currently
-// serving as a live avatar (users.avatar points at them), or nonexistent are
-// skipped rather than errors, so a client retry of a partially-completed send
-// cannot fail the whole message. Excluding live avatars keeps
-// handleServeFile's avatar branch (gated on ChannelID == nil) reachable: once
-// message_id is set that branch is dead and the file falls under the
-// message's channel ACL / soft-delete state instead, permanently splitting
-// from what users.avatar still names. This single UPDATE is the
-// atomic attachment-IDOR guard for message sends: ownership is enforced in
-// the same statement that links, so there is no check-then-link race.
-// Returns the ids it linked (UPDATE ... RETURNING id, so the answer is atomic
-// with the link), in no guaranteed order; callers diff against the request to
-// learn which ids were skipped.
+// LinkAttachmentsToMessage sets message_id on attachments that are unlinked
+// and owned by uploaderID; legacy rows with uploader_id NULL are unowned and
+// any sender may claim them. Rows already linked, owned by another user,
+// serving as a live avatar (users.avatar), or nonexistent are skipped, not
+// errors, so a client retry of a partly completed send cannot fail the whole
+// message. Excluding live avatars keeps handleServeFile's avatar branch
+// (ChannelID == nil) reachable; once message_id is set that branch is dead and
+// the file falls under the message's ACL, diverging from users.avatar. This
+// single UPDATE is the atomic attachment-IDOR guard: ownership is enforced in
+// the statement that links, so there is no check-then-link race. It returns
+// the linked ids (UPDATE ... RETURNING id, atomic with the link) in no
+// guaranteed order; callers diff against the request to find skipped ids.
 func (d *DB) LinkAttachmentsToMessage(ctx context.Context, messageID, uploaderID int64, attachmentIDs []string) ([]string, error) {
 	return linkAttachmentsToMessage(ctx, d.writer, messageID, uploaderID, attachmentIDs)
 }
 
 // linkAttachmentsToMessage is shared by legacy sends and retry-safe sends'
-// writer transaction, so both enforce the same atomic ownership predicate.
+// writer transaction, so both enforce the same ownership predicate.
 func linkAttachmentsToMessage(ctx context.Context, exec attachmentLinker, messageID, uploaderID int64, attachmentIDs []string) ([]string, error) {
 	if len(attachmentIDs) == 0 {
 		return nil, nil
@@ -248,27 +247,21 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 	return result, nil
 }
 
-// DeleteOrphanedAttachments atomically removes attachment records that are
-// either unlinked (message_id IS NULL) or linked to a message that has since
-// been soft-deleted (messages.deleted = 1), and whose uploaded_at is older
-// than the given cutoff. Live avatars are excluded by the query itself.
-// Returns the stored_as filenames of deleted records so the caller can
-// remove files.
+// DeleteOrphanedAttachments removes attachment records that are unlinked, or
+// linked to a soft-deleted message, and whose uploaded_at is older than the
+// cutoff; live avatars are excluded by the query. It returns the stored_as
+// filenames for the caller to remove.
 //
-// OC-0279: a message delete is a soft delete -- the messages row survives
-// with deleted=1 -- so its attachments never go through message_id IS NULL
-// on their own. The second half of the query's WHERE clause is what lets
-// this sweep reclaim those files too, since serveFileResolve already treats
-// them as unservable once the owning message is deleted.
+// A message delete is soft (the row survives with deleted=1), so its
+// attachments never match message_id IS NULL; the query's second WHERE half
+// reclaims those files, which serveFileResolve already treats as unservable.
 //
-// The cutoff is a time.Time, not a string, because uploaded_at is stored in
-// SQLite's own 'YYYY-MM-DD HH:MM:SS' shape and the comparison is bytewise:
-// a caller formatting RFC3339 instead silently collapses the grace period to
-// "same date". Formatting it here is what keeps that unrepresentable.
+// cutoff is a time.Time, not a string, because uploaded_at is SQLite's
+// 'YYYY-MM-DD HH:MM:SS' compared bytewise; a caller formatting RFC3339 would
+// collapse the grace period to "same date". Formatting here prevents that.
 //
-// BUG-132: Uses DELETE ... RETURNING to make select+delete atomic,
-// preventing a race where an attachment linked between SELECT and DELETE
-// would have its file deleted while the DB row survives.
+// DELETE ... RETURNING makes select+delete atomic, so an attachment linked
+// between a SELECT and DELETE cannot lose its file while the row survives.
 func (d *DB) DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error) {
 	files, err := d.q.DeleteOrphanedAttachments(ctx, cutoff.UTC().Format(dbtime.SQLiteLayout))
 	if err != nil {

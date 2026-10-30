@@ -22,11 +22,13 @@
 @import "./app/animations.css";
 @import "./app/compact-mode.css";
 @import "./app/pinned-messages.css";
+@import "./app/media-gallery.css";
 @import "./app/responsive.css";
 @import "./app/video.css";
 @import "./app/invite-manager.css";
 @import "./app/accessibility.css";
 @import "./app/quick-switch.css";
+@import "./app/server-rail.css";
 @import "./app/channel-flags.css";
 @import "./app/nsfw-gate.css";
 @import "./app/profiles-status.css";

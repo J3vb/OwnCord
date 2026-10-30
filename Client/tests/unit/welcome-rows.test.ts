@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/message-actions";
+import { messageActionGates } from "@components/message-list/messageActions";
 import {
   WAVE_CONTENT,
   canWaveIn,
@@ -13,9 +13,9 @@ import {
   markWaved,
   welcomeGreeting,
 } from "@components/message-list/welcomeRows";
-import { shouldGroup } from "@lib/formatting";
-import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
-import { runSessionResets } from "@lib/sessionRegistry";
+import { shouldGroup } from "@lib/text/formatting";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
+import { runSessionResets } from "@lib/net/sessionRegistry";
 import type { Message } from "@stores/messages.store";
 import {
   ME,

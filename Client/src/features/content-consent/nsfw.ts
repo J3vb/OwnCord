@@ -1,5 +1,5 @@
 /**
- * NSFW consent (B9-7): the client half of B5-7's server-enforced label.
+ * NSFW consent: the client half of the server-enforced label.
  *
  * The authority is the server's per-account acknowledgement row, never local
  * state: `ready` carries it per channel, a 204 from the acknowledgement route
@@ -11,9 +11,10 @@
 
 import { channelsStore } from "../../stores/channels.store";
 import type { Channel } from "../../stores/channels.store";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 /** Error code the server answers a pre-consent content request with (docs/api.md). */
-export const NSFW_ACKNOWLEDGEMENT_REQUIRED = "NSFW_ACKNOWLEDGEMENT_REQUIRED";
+export const NSFW_ACKNOWLEDGEMENT_REQUIRED = RestErrorCode.NSFW_ACKNOWLEDGEMENT_REQUIRED;
 
 /** Whether `channel` is labelled and its content not yet consented to. */
 export function nsfwConsentRequired(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HEADER_SNIFF_BYTES, sniffImageBlob, sniffImageSize } from "../../src/lib/imageHeader";
+import { HEADER_SNIFF_BYTES, sniffImageBlob, sniffImageSize } from "../../src/lib/ui/imageHeader";
 
 const ascii = (text: string): number[] => [...text].map((c) => c.charCodeAt(0));
 const be32 = (n: number): number[] => [

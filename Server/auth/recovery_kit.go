@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/argon2"
 )
 
-// The recovery kit (B4-5, BPR-044): a secret the account holder keeps
+// The recovery kit: a secret the account holder keeps
 // offline, of which the server stores only an argon2id verifier. A kit
 // secret is 20 random bytes shown as 32 base32 characters in groups of four,
 // "XXXX-XXXX-…", which is what the client formats as a phrase or a file.
@@ -23,14 +23,14 @@ const (
 	recoveryKitSecretBytes = 20
 	recoveryKitSecretLen   = 32
 	recoveryKitGroup       = 4
-	// An owner-issued credential (B4-6) is shorter: 15 bytes, 24 characters.
+	// An owner-issued credential is shorter: 15 bytes, 24 characters.
 	recoveryAssistSecretBytes = 15
 	recoveryAssistSecretLen   = 24
 
-	// argon2id parameters: OWASP's minimum for the memory-constrained
-	// profile, chosen because verification takes an admission slot (B4-4)
-	// and a burst of recoveries must not exhaust memory. The verifier
-	// records them, so they can change without invalidating stored kits.
+	// argon2id parameters: OWASP's minimum for the memory-constrained profile,
+	// since verification takes an admission slot and a burst of recoveries must
+	// not exhaust memory. The verifier records them, so they can change without
+	// invalidating stored kits.
 	recoveryKitArgonTime    = 2
 	recoveryKitArgonMemory  = 19 * 1024 // KiB
 	recoveryKitArgonThreads = 1
@@ -42,7 +42,7 @@ var recoveryKitEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 // RecoverySecretKind is what a presented secret's shape says it is: a kit
 // secret (32 characters) or an owner-issued recovery credential (24
-// characters, B4-6). The shape selects which verifier the one compare of a
+// characters). The shape selects which verifier the one compare of a
 // recovery attempt runs against, so the two paths never interfere.
 type RecoverySecretKind int
 
@@ -77,7 +77,7 @@ func GenerateRecoveryKitSecret() (shown, canonical string, err error) {
 }
 
 // GenerateRecoveryAssistSecret returns a fresh owner-issued recovery
-// credential (B4-6): 15 random bytes, shown as six groups of four.
+// credential: 15 random bytes, shown as six groups of four.
 func GenerateRecoveryAssistSecret() (shown, canonical string, err error) {
 	return generateRecoverySecret(recoveryAssistSecretBytes)
 }

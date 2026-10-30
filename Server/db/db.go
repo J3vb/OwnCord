@@ -19,42 +19,33 @@ import (
 	_ "modernc.org/sqlite" // register the sqlite3 driver
 )
 
-// DB wraps the underlying SQLite pools and exposes the subset of methods
-// needed by the server.
-//
-// q is the sqlc-generated query layer (db/dbgen). Query method bodies delegate
-// to it — sqlc is the source of truth for the SQL text and parameter binding
-// (verified in CI by `make sqlc-verify`), while this package keeps the stable
-// public API and the domain model types the rest of the server consumes.
-// Migration is incremental (decision D2); methods not yet delegated still run
-// their raw SQL directly against writer/reader.
+// DB wraps the SQLite reader and writer pools. Query methods delegate to the
+// sqlc layer (db/dbgen), the source of truth for SQL text and parameter
+// binding; methods not yet delegated run raw SQL against writer/reader.
 type DB struct {
 	// writer is a single-connection pool that owns every statement that can
-	// mutate the database: INSERT/UPDATE/DELETE (including RETURNING forms),
-	// transactions, migrations, ANALYZE/VACUUM and PRAGMA writes. Pinning
-	// writes to one connection makes concurrent writers queue on the Go side
-	// instead of colliding on SQLite's single write lock.
+	// mutate the database (writes, RETURNING forms, transactions, migrations,
+	// ANALYZE/VACUUM, PRAGMA writes), so concurrent writers queue in Go instead
+	// of colliding on SQLite's write lock.
 	writer *sql.DB
 
-	// reader is a multi-connection pool serving read-only statements
-	// (SELECT / PRAGMA reads). Under WAL, readers run concurrently with each
-	// other and with the writer, which is the point of the split. For
-	// in-memory databases reader and writer are the same handle.
+	// reader is a multi-connection pool for read-only statements; under WAL it
+	// runs concurrently with the writer. For in-memory databases it is the same
+	// handle as writer.
 	reader *sql.DB
 
 	q *dbgen.Queries
 
-	// auditWriter, when installed via SetAuditWriter (main.go server
-	// startup only), turns WriteAudit calls backed by this DB into
-	// non-blocking enqueues. Nil (the default) keeps audit writes
-	// synchronous — the token CLI and tests rely on that.
+	// auditWriter, when installed via SetAuditWriter (server startup only), makes
+	// WriteAudit non-blocking. Nil keeps audit writes synchronous, which the token
+	// CLI and tests rely on.
 	auditWriter atomic.Pointer[AuditWriter]
 
 	// Loaded from the durable sidecar before serving a restored database.
 	messageDeliveryFloor atomic.Int64
 
 	// attachmentBytesCache and activeMessagesCache hold the two whole-table
-	// aggregates the metrics scrape and admin stats read (SV-07).
+	// aggregates the metrics scrape and admin stats read.
 	attachmentBytesCache syncutil.TTLCache[int64]
 	activeMessagesCache  syncutil.TTLCache[int64]
 
@@ -74,33 +65,22 @@ type DB struct {
 	// Nil for in-memory databases and when the lock mechanism is unavailable.
 	lockRelease func()
 
-	// acceptGuardHook is a test seam (Codex P2-8): called inside
-	// AcceptMessageRequest's transaction right after it confirms the row is
-	// still pending and before it writes anything. The transaction holds the
-	// sole writer connection (writer above) for as long as this hook blocks,
-	// so a test can force a competing TransitionMessageRequest call to be
-	// dispatched while this transaction is provably still open — the single
-	// writer connection then guarantees that call cannot execute until this
-	// one commits, proving the guard resolves a genuine race instead of
-	// relying on goroutine-scheduling luck for the two calls to ever
-	// overlap. Nil in production. No exported setter (Codex review round 2,
-	// P2-8): only reachable from db package tests, which is where the test
-	// that uses it lives.
+	// acceptGuardHook is a test seam called inside AcceptMessageRequest's
+	// transaction after it confirms the row is still pending and before it
+	// writes. The sole writer connection stays held while it blocks, so a test can
+	// provably race a competing TransitionMessageRequest. Nil in production.
 	acceptGuardHook func()
 
-	// afterDMParticipantsInsertHook is a test seam (Codex review round 2,
-	// P1): called inside getOrCreateDMChannel's create branch, after the
-	// participants insert but before the recipient's visibility is decided
-	// and written, so a test can simulate a failure/cancellation in that
-	// exact window and confirm the whole transaction rolls back rather than
-	// landing the recipient open. Nil in production, no exported setter.
+	// afterDMParticipantsInsertHook is a test seam called in
+	// getOrCreateDMChannel's create branch after the participants insert and
+	// before the recipient's visibility is written, to prove the whole
+	// transaction rolls back on failure. Nil in production.
 	afterDMParticipantsInsertHook func() error
 
-	// checkpointOwed records that an erasure's wal_checkpoint(TRUNCATE) came
-	// back blocked or partial, so frames holding erased bytes are still in the
-	// -wal and a retry is needed. Process-local on purpose: a crash loses it,
-	// which is why the start-up pass (CheckpointErasureWAL) runs
-	// unconditionally rather than on this flag.
+	// checkpointOwed records that an erasure's wal_checkpoint(TRUNCATE) came back
+	// blocked or partial, so frames holding erased bytes are still in the -wal.
+	// Process-local on purpose: a crash loses it, which is why the start-up pass
+	// (CheckpointErasureWAL) runs unconditionally.
 	//
 	// ponytail: process-local flag; persist in erasure_jobs if a tick ever
 	// needs to survive a crash before the startup pass runs
@@ -110,26 +90,20 @@ type DB struct {
 	// line an operator reads when a checkpoint stays blocked.
 	checkpointAttempts atomic.Int64
 
-	// testEraseCommitHook is a test seam (B6-11 drill 9): called by
-	// eraseAccount once eraseAccountTx has committed and before the
-	// wal_checkpoint(TRUNCATE) that follows it. It is the window the drill is
-	// about — the erasure is durable, its frames are still in the WAL, and
-	// nothing has checkpointed them — so a test can copy the three files and
-	// read them exactly as a crash in that window leaves them on disk.
-	// eraseAccount still holds the sole writer connection while the hook runs,
-	// so the hook must not touch this DB's pools. Nil in production, no
-	// exported setter.
+	// testEraseCommitHook is a test seam called by eraseAccount after
+	// eraseAccountTx commits and before the wal_checkpoint(TRUNCATE): the window
+	// where the erasure is durable but its frames are still in the WAL. The
+	// writer connection is held, so the hook must not touch this DB's pools. Nil
+	// in production.
 	testEraseCommitHook func()
-	// testErasureChunkHook is a test seam (WP 4.1a), see erasure_chunks.go.
+	// testErasureChunkHook is a test seam, see erasure_chunks.go.
 	testErasureChunkHook func(stage string, n int) error
 }
 
-// filePragmas are the per-connection PRAGMAs applied to every file-backed
-// connection via `_pragma=` DSN parameters (modernc.org/sqlite executes each
-// one in newConn, busy_timeout first). They MUST be in the DSN rather than
-// Exec'd after Open: with a pool larger than one connection an Exec'd PRAGMA
-// lands on one arbitrary connection and every other connection would silently
-// run with foreign_keys=OFF.
+// filePragmas are the per-connection PRAGMAs applied via `_pragma=` DSN
+// parameters (busy_timeout first). They must be in the DSN, not Exec'd after
+// Open: with several connections an Exec'd PRAGMA lands on one arbitrary
+// connection and the others would run with foreign_keys=OFF.
 const filePragmas = "_pragma=busy_timeout(5000)" + // wait up to 5s for the write lock instead of failing instantly
 	"&_pragma=journal_mode(WAL)" + // WAL: readers don't block the writer and vice versa
 	"&_pragma=foreign_keys(1)" + // enforce foreign key constraints
@@ -147,33 +121,23 @@ func isMemoryPath(path string) bool {
 // Open opens (or creates) a SQLite database at path, enables WAL mode and
 // foreign key enforcement, and returns a ready-to-use DB.
 //
-// Two modes:
+// In-memory databases use one *sql.DB pinned to a single connection with the
+// PRAGMAs Exec'd once, so callers share state and connection-scoped PRAGMA
+// toggles in tests are deterministic; reader and writer are the same handle.
 //
-//   - In-memory databases keep the historical single-handle behavior: one
-//     *sql.DB pinned to a single connection with the PRAGMAs Exec'd once.
-//     A one-connection pool makes DSN PRAGMAs unnecessary, all callers share
-//     the same in-memory state, and connection-scoped PRAGMA toggles in tests
-//     (e.g. temporarily disabling foreign_keys) behave deterministically.
-//     In this mode reader and writer are the same handle.
-//
-//   - File-backed databases get a reader/writer pool split. Both pools carry
-//     the PRAGMAs in the DSN so every physical connection is configured
-//     identically. The writer is additionally opened with _txlock=immediate
-//     so explicit transactions take the write lock up front instead of
-//     failing with SQLITE_BUSY on upgrade.
-//
-// Path assumptions (file mode): path is either a plain filesystem path or an
-// existing file: URI. It must not contain '?', '#' or '%' characters — the
-// path is embedded in a file: URI without escaping. cfg.Database.Path is a
-// plain path (default "data/chatserver.db"), which satisfies this.
+// File-backed databases get a reader/writer pool split with the PRAGMAs in
+// the DSN of both. The writer is opened with _txlock=immediate so explicit
+// transactions take the write lock up front instead of failing with
+// SQLITE_BUSY on upgrade. path must be a plain filesystem path or an existing
+// file: URI and must not contain '?', '#' or '%', because it is embedded in a
+// file: URI without escaping.
 func Open(path string) (*DB, error) {
 	return OpenWithMaxReaders(path, 0)
 }
 
 // OpenWithMaxReaders is Open with an explicit reader-pool bound
-// (database.max_readers). maxReaders <= 0 keeps the automatic
-// max(8, 2×NumCPU) sizing; values are clamped to [1, 64]. Ignored for
-// in-memory databases, which use a single shared connection.
+// (database.max_readers). maxReaders <= 0 keeps the automatic sizing; values
+// are clamped to [1, 64]. Ignored for in-memory databases.
 func OpenWithMaxReaders(path string, maxReaders int) (*DB, error) {
 	if isMemoryPath(path) {
 		return openMemory(path)
@@ -182,20 +146,17 @@ func OpenWithMaxReaders(path string, maxReaders int) (*DB, error) {
 }
 
 // defaultReaderConns is the automatic reader-pool size: twice the CPU count
-// with a floor of 8, clamped to the same [1, 64] bound an explicit value
-// gets. The floor matters on a small host, where the old max(4, NumCPU) left
-// a 2-core box with 4 connections and reader waits grew under a connect herd
-// (P5-S08).
+// with a floor of 8, clamped to [1, 64]. The floor matters on small hosts,
+// where reader waits grew under a connect herd.
 func defaultReaderConns(cpus int) int {
 	return min(max(8, 2*cpus), 64)
 }
 
-// OpenShared opens the database WITHOUT taking the single-process lock. It
-// exists for short-lived tooling — the `server token` CLI — that must work
-// while the server is running. SQLite's own WAL locking makes the concurrent
-// access safe at the file level; the process lock only protects the SERVER's
-// process-local state (presence, replay ring, rate-limit windows), which a
-// CLI does not touch. Long-lived processes must use Open.
+// OpenShared opens the database without taking the single-process lock, for
+// short-lived tooling (the `server token` CLI) that must work while the server
+// runs. SQLite's WAL locking makes that safe at the file level; the process
+// lock only protects the server's process-local state. Long-lived processes
+// must use Open.
 func OpenShared(path string) (*DB, error) {
 	if isMemoryPath(path) {
 		return openMemory(path)
@@ -203,22 +164,21 @@ func OpenShared(path string) (*DB, error) {
 	return openFile(path, 0, false)
 }
 
-// openMemory preserves the pre-split behavior exactly: a single connection
-// with PRAGMAs applied by Exec. reader == writer.
+// openMemory opens the single-connection in-memory database; reader == writer.
 func openMemory(path string) (*DB, error) {
 	sqlDB, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite db: %w", err)
 	}
 
-	// Verify the connection is actually usable.
+	// Verify the connection is usable.
 	if err := sqlDB.Ping(); err != nil {
 		_ = sqlDB.Close()
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)
 	}
 
-	// A single connection ensures all callers share the same in-memory state
-	// and makes the Exec'd PRAGMAs below apply to every future statement.
+	// A single connection makes all callers share the in-memory state and the
+	// Exec'd PRAGMAs apply to every future statement.
 	sqlDB.SetMaxOpenConns(1)
 
 	if err := applyMemoryPragmas(sqlDB); err != nil {
@@ -234,13 +194,9 @@ func openMemory(path string) (*DB, error) {
 // openFile opens the writer and reader pools for a file-backed database.
 // takeLock is false only for OpenShared (short-lived CLI tooling).
 func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
-	// Single-process guard: SQLite's own locking prevents file corruption,
-	// but everything built above it — presence derived from hub membership,
-	// the replay ring, rate-limit windows, the boot-time status reset — is
-	// process-local and assumes exactly one server owns this database file.
-	// A second process starting is almost always an accident (double systemd
-	// unit, container + binary); fail fast with a clear message rather than
-	// letting two instances silently fight over shared state.
+	// Single-process guard: presence, the replay ring, rate-limit windows and the
+	// boot-time status reset are process-local and assume one server owns this
+	// file, so a second process (double unit, container plus binary) fails fast.
 	var release func()
 	if takeLock {
 		var lockErr error
@@ -251,10 +207,8 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 					"database %s is in use by another running OwnCord process — stop that process first (the lock is released automatically when it exits)",
 					path)
 			}
-			// The lock mechanism itself failed (e.g. a network filesystem that
-			// rejects advisory locks). Warn and continue — refusing to start on
-			// an NFS data dir would be a regression, and SQLite still protects
-			// the file itself.
+			// The lock mechanism itself failed (e.g. an NFS data dir rejecting advisory
+			// locks). Warn and continue; SQLite still protects the file.
 			slog.Warn("db: could not take the single-process lock; continuing unprotected",
 				"path", lockFilePath(path), "error", lockErr)
 			release = nil
@@ -281,24 +235,22 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 	}
 	dsn := base + sep + filePragmas
 
-	// Writer: one connection so concurrent writes queue on the Go side, with
-	// BEGIN IMMEDIATE transactions (see Open doc).
+	// Writer: one connection, BEGIN IMMEDIATE transactions (see Open).
 	writer, err := sql.Open("sqlite", dsn+"&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite db: %w", err)
 	}
 	writer.SetMaxOpenConns(1)
 
-	// Verify the connection is actually usable (this also creates the file,
-	// so the reader below never races file creation).
+	// Verify the connection is usable; this also creates the file so the reader
+	// never races its creation.
 	if err := writer.Ping(); err != nil {
 		_ = writer.Close()
 		return nil, fmt.Errorf("pinging sqlite db: %w", err)
 	}
 
-	// Reader: sized for concurrent request handling, defaulting to
-	// defaultReaderConns and bounded by database.max_readers. Idle == open so
-	// warm connections (and their page caches) are kept rather than churned.
+	// Reader: defaultReaderConns, bounded by database.max_readers. Idle == open so
+	// warm connections and their page caches are kept.
 	reader, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		_ = writer.Close()
@@ -333,28 +285,13 @@ func newDB(writer, reader *sql.DB) *DB {
 	}
 }
 
-// dbtx routes statements between the reader and writer pools. It satisfies
-// sqlc's DBTX interface (db/dbgen/db.go) so the generated query layer picks
-// the correct pool per statement without touching generated code, and it
-// backs the DB.QueryContext/QueryRowContext wrappers for the same reason.
-//
-// Routing table:
-//
-//   - ExecContext → writer.
-//   - PrepareContext → writer. sqlc's generated code in this repo prepares
-//     nothing through DBTX (only *sql.Tx.PrepareContext inside the batch
-//     persisters, which already run on writer transactions); this method
-//     exists for interface completeness. Tradeoff: if a future caller
-//     prepared a hot SELECT here it would run serialized on the writer.
-//   - QueryContext / QueryRowContext → reader, but only when the statement
-//     is provably read-only (isReadOnlySQL). sqlc routes
-//     INSERT/UPDATE/DELETE ... RETURNING statements through
-//     QueryRowContext/QueryContext (messages, attachments), and those writes
-//     must stay on the single writer connection; anything not provably
-//     read-only conservatively falls back to the writer.
-//
-// For in-memory databases writer == reader, so routing degenerates to the
-// historical single-handle behavior.
+// dbtx routes statements between the reader and writer pools and satisfies
+// sqlc's DBTX interface. ExecContext and PrepareContext go to the writer
+// (nothing prepares a hot SELECT through DBTX today; one would serialize on
+// the writer). QueryContext/QueryRowContext go to the reader only when
+// isReadOnlySQL proves the statement read-only, because sqlc routes
+// INSERT/UPDATE/DELETE ... RETURNING through them and those must stay on the
+// writer. In-memory databases have writer == reader.
 type dbtx struct {
 	writer *sql.DB
 	reader *sql.DB
@@ -384,11 +321,10 @@ func (t *dbtx) pool(query string) *sql.DB {
 	return t.writer
 }
 
-// isReadOnlySQL reports whether the statement's leading keyword — after
-// skipping whitespace and `--` line comments — is SELECT or PRAGMA. Comment
-// skipping matters because sqlc-generated SQL starts with a `-- name: ...`
-// line. Anything unrecognized (including `/* */` block comments, which this
-// package does not use) is conservatively treated as a write.
+// isReadOnlySQL reports whether the statement's leading keyword, after
+// whitespace and `--` line comments, is SELECT or PRAGMA. Skipping comments
+// matters because sqlc SQL starts with `-- name: ...`. Anything unrecognized
+// (including `/* */`) is treated as a write.
 func isReadOnlySQL(query string) bool {
 	s := query
 	for {
@@ -418,13 +354,9 @@ func hasKeywordPrefix(s, keyword string) bool {
 	return c != '_' && (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z')
 }
 
-// Migrate runs all SQL migration files from the embedded migrations FS in
-// lexicographic order, applying each file exactly once.  It delegates to
-// MigrateFS (defined in migrate.go) which maintains the schema_versions
-// tracking table.
-//
-// An empty in-memory database gets a copy of an already-migrated image
-// instead (migrate_memory.go); the result is the same database.
+// Migrate runs all embedded SQL migrations in lexicographic order, each once,
+// via MigrateFS. An empty in-memory database gets a copy of an already
+// migrated image instead (migrate_memory.go) with the same result.
 func Migrate(database *DB) error {
 	if restoreFreshMemory(database) {
 		return nil
@@ -437,12 +369,10 @@ func migrateEmbedded(database *DB) error {
 	if err != nil {
 		return err
 	}
-	// Refresh the query planner's statistics when the schema changed, so newly
-	// created indexes (e.g. migration 019) are actually chosen. A full ANALYZE
-	// grows with row count and blocks startup, so unchanged schemas get the
-	// cheap PRAGMA optimize instead — which also covers crash-restarts that
-	// never reached Close()'s optimize. Both write sqlite_stat rows, so they
-	// run on the writer.
+	// Refresh the planner's statistics when the schema changed so new indexes are
+	// chosen. A full ANALYZE grows with row count and blocks startup, so unchanged
+	// schemas get the cheap PRAGMA optimize, which also covers crash-restarts that
+	// skipped Close()'s. Both write sqlite_stat rows, so they run on the writer.
 	if applied > 0 {
 		started := time.Now()
 		if _, err := database.writer.Exec("ANALYZE;"); err != nil {
@@ -462,16 +392,15 @@ func migrateEmbedded(database *DB) error {
 // Close releases the underlying database connections (both pools).
 func (d *DB) Close() error {
 	d.closed.Store(true)
-	// Run PRAGMA optimize to analyze and update query planner statistics.
-	// It may write statistics, so it runs on the writer.
+	// PRAGMA optimize may write statistics, so it runs on the writer.
 	_, _ = d.writer.Exec("PRAGMA optimize;")
 	var readerErr error
 	if d.reader != d.writer {
 		readerErr = d.reader.Close()
 	}
 	err := errors.Join(d.writer.Close(), readerErr)
-	// Release the single-process lock only after the pools are closed, so a
-	// successor process acquiring it can rely on this one being done writing.
+	// Release the process lock only after the pools close, so a successor can
+	// rely on this process being done writing.
 	if d.lockRelease != nil {
 		d.lockRelease()
 		d.lockRelease = nil
@@ -523,21 +452,16 @@ func (d *DB) SQLDb() *sql.DB {
 	return d.writer
 }
 
-// SQLReaderDB returns the underlying reader *sql.DB. It exists so
-// /api/v1/metrics can report reader-pool wait stats beside the writer pair —
-// for in-memory databases reader == writer, so the two reports then cover
-// the same pool.
+// SQLReaderDB returns the underlying reader *sql.DB, so metrics can report
+// reader-pool wait stats; for in-memory databases it is the writer.
 func (d *DB) SQLReaderDB() *sql.DB {
 	return d.reader
 }
 
 // PingRead answers whether the database can serve reads, via a bounded
-// SELECT 1 on the READER pool. The health endpoint uses it deliberately:
-// pinging the single-connection writer would queue behind any long write and
-// report a healthy, read-serving server as degraded for that write's whole
-// duration. Writer saturation is reported separately (SQLDb().Stats() in
-// /api/v1/metrics), where it is a capacity signal rather than a liveness
-// verdict.
+// SELECT 1 on the reader pool. Pinging the single-connection writer would
+// queue behind any long write and report a read-serving server as degraded;
+// writer saturation is reported separately as a capacity signal.
 func (d *DB) PingRead(ctx context.Context) error {
 	var one int
 	return d.reader.QueryRowContext(ctx, "SELECT 1").Scan(&one)

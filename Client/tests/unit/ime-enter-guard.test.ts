@@ -124,7 +124,7 @@ function unguardedEnterHandlers(): string[] {
   return out.toSorted();
 }
 
-describe("Enter handlers respect IME composition (MX-5)", () => {
+describe("Enter handlers respect IME composition", () => {
   const found = unguardedEnterHandlers();
   const exempt = new Set(EXEMPT.map((e) => `${e.file} :: ${e.fn}`));
 
@@ -136,10 +136,10 @@ describe("Enter handlers respect IME composition (MX-5)", () => {
     expect([...exempt].filter((key) => !found.includes(key))).toEqual([]);
   });
 
-  it("the guard is not copied inline outside lib/ime.ts", () => {
+  it("the guard is not copied inline outside lib/text/ime.ts", () => {
     const copies = sourceFiles.filter(
       (file) =>
-        file !== "lib/ime.ts" &&
+        file !== "lib/text/ime.ts" &&
         /isComposing\s*\|\|\s*\w+\.keyCode\s*===\s*229/.test(
           readFileSync(path.join(srcDir, file), "utf8"),
         ),

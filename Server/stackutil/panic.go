@@ -39,7 +39,7 @@ func hardwareFaultOn(goos string, rec any) bool {
 
 // HardwareFault reports whether rec is a panic the process must exit on
 // rather than recover from on THIS host — the classifier the recovery sites
-// hand the panic value to (SRE-08). Remove the Windows rule once a Go release
+// hand the panic value to. Remove the Windows rule once a Go release
 // carries the golang/go#81238 fix.
 func HardwareFault(rec any) bool {
 	return hardwareFaultOn(runtime.GOOS, rec)

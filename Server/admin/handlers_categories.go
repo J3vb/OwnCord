@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Channel category handlers (WP 6.5a) ─────────────────────────────────────
 //
 // Thin adapters over service.ChannelService's category operations, mounted by
 // mountChannelActionRoutes behind MANAGE_CHANNELS on both channel mounts. A
@@ -18,16 +18,16 @@ import (
 
 // writeCategoryErr maps ChannelService category errors onto API responses.
 // A duplicate name and a stale reorder are both 409 with distinct codes.
-func writeCategoryErr(w http.ResponseWriter, err error, staleCode string) {
+func writeCategoryErr(w http.ResponseWriter, err error, staleCode httperr.Code) {
 	if errors.Is(err, service.ErrConflict) {
-		code := "CATEGORY_NAME_TAKEN"
+		code := httperr.CodeCategoryNameTaken
 		if staleCode != "" {
 			code = staleCode
 		}
 		writeErr(w, http.StatusConflict, code, err.Error())
 		return
 	}
-	writeSvcErr(w, err, "category not found", "INVALID_INPUT", "category action failed")
+	writeSvcErr(w, err, "category not found", httperr.CodeInvalidInput, "category action failed")
 }
 
 // announceCategoryChange fans a committed category change out: first the
@@ -46,12 +46,12 @@ func announceCategoryChange(hub HubBroadcaster, change service.CategoryChange) {
 func handleListCategories(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		cats, err := channels.ListCategories(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list categories")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list categories")
 			return
 		}
 		writeJSON(w, http.StatusOK, cats)
@@ -65,7 +65,7 @@ type categoryNameRequest struct {
 func handleCreateCategory(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		var req categoryNameRequest
@@ -85,12 +85,12 @@ func handleCreateCategory(channels *service.ChannelService, hub HubBroadcaster) 
 func handleRenameCategory(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid category id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid category id")
 			return
 		}
 		var req categoryNameRequest
@@ -114,7 +114,7 @@ type categoryOrderRequest struct {
 func handleReorderCategories(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		var req categoryOrderRequest
@@ -122,12 +122,12 @@ func handleReorderCategories(channels *service.ChannelService, hub HubBroadcaste
 			return
 		}
 		if req.IDs == nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid request body")
 			return
 		}
 		change, err := channels.ReorderCategories(r.Context(), actorFromContext(r), req.IDs)
 		if err != nil {
-			writeCategoryErr(w, err, "CATEGORY_LIST_STALE")
+			writeCategoryErr(w, err, httperr.CodeCategoryListStale)
 			return
 		}
 		announceCategoryChange(hub, change)
@@ -138,12 +138,12 @@ func handleReorderCategories(channels *service.ChannelService, hub HubBroadcaste
 func handleDeleteCategory(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid category id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid category id")
 			return
 		}
 		change, err := channels.DeleteCategory(r.Context(), actorFromContext(r), id)

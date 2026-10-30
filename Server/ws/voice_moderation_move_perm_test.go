@@ -12,7 +12,8 @@ import (
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// WP 8.4a: voice_mod_move is gated on MOVE_MEMBERS and has no rank rule;
+// WP 8.4a: voice_mod_move is gated on MOVE_MEMBERS alone (neither
+// MUTE_MEMBERS nor ADMINISTRATOR opens it) and has no rank rule;
 // mute, deafen and disconnect keep MUTE_MEMBERS and the rank rule. Roles come
 // from the test schema: 1 Owner (100), 2 Admin (80), 3 Moderator (60),
 // 4 Member (40). Admin and Moderator carry bit 13 there; only Admin and
@@ -197,48 +198,76 @@ func insertMuteOnlyRole(t *testing.T, database *db.DB) {
 	}
 }
 
-// A MUTE_MEMBERS holder keeps moving members they outrank, exactly as before
-// MOVE_MEMBERS existed: no owner switch and no per-target limit on this path.
-func TestVoiceMod_Move_MuteMembersOnly_MovesLowerRank(t *testing.T) {
-	limiter := auth.NewRateLimiter()
-	hub, database := newVoiceModHubWithLimiter(t, limiter)
-	fromID := seedVoiceChan(t, database, "vc-mv-muteonly-from")
-	toID := seedVoiceChan(t, database, "vc-mv-muteonly-to")
-	insertMuteOnlyRole(t, database)
-	actor := seedVoiceUserWithRole(t, database, "mute-only", 9)
-	target := seedVoiceUserWithRole(t, database, "member-mute-only", 4)
-	// The per-target limit is not part of this path.
-	for range 3 {
-		limiter.Allow(auth.Key("voice_mod_move_target", target.ID), 3, 30*time.Second)
-	}
-
-	_, targetSend := joinVoice(t, hub, target, fromID)
-	c, _ := moveActor(t, hub, actor, fromID)
-	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
-
-	assertMoved(t, database, targetSend, toID)
-}
-
-func TestVoiceMod_Move_MuteMembersOnly_CannotMoveHigherRank(t *testing.T) {
-	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-mv-muteonly-hi-from")
-	toID := seedVoiceChan(t, database, "vc-mv-muteonly-hi-to")
-	insertMuteOnlyRole(t, database)
-	actor := seedVoiceUserWithRole(t, database, "mute-only-hi", 9)
-	target := seedVoiceUserWithRole(t, database, "admin-mute-only-hi", 2)
-
-	_, targetSend := joinVoice(t, hub, target, fromID)
-	c, send := moveActor(t, hub, actor, fromID)
-	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
-
+// assertMoveRefused checks the actor got the missing-bit refusal and the
+// target was neither told to move nor moved.
+func assertMoveRefused(t *testing.T, database *db.DB, send, targetSend chan []byte, target *db.User, fromID int64) {
+	t.Helper()
 	frame, ok := receiveErrorFrame(send, waitTimeout)
-	if !ok || frame.Code != "FORBIDDEN" || frame.Message != "cannot moderate a user of equal or higher rank" {
-		t.Fatalf("error frame = %+v (ok=%v), want FORBIDDEN rank refusal", frame, ok)
+	if !ok || frame.Code != "FORBIDDEN" || frame.Message != "missing MOVE_MEMBERS permission" {
+		t.Fatalf("error frame = %+v (ok=%v), want FORBIDDEN missing MOVE_MEMBERS", frame, ok)
 	}
 	if payload := receiveMsgOfType(targetSend, "voice_moved", 100*time.Millisecond); payload != nil {
 		t.Errorf("target must not receive voice_moved, got %v", payload)
 	}
 	assertStillIn(t, database, target, fromID)
+}
+
+// MUTE_MEMBERS no longer opens a move, not even of a member the actor
+// outranks: only MOVE_MEMBERS does.
+func TestVoiceMod_Move_MuteMembersOnly_CannotMoveLowerRank(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-mv-muteonly-from")
+	toID := seedVoiceChan(t, database, "vc-mv-muteonly-to")
+	insertMuteOnlyRole(t, database)
+	actor := seedVoiceUserWithRole(t, database, "mute-only", 9)
+	target := seedVoiceUserWithRole(t, database, "member-mute-only", 4)
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, send := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	assertMoveRefused(t, database, send, targetSend, target, fromID)
+}
+
+// The reported case: the owner takes MOVE_MEMBERS off the Admin role, which
+// keeps MUTE_MEMBERS, and an admin can no longer move a member.
+func TestVoiceMod_Move_AdminRoleWithoutMoveMembers_Refused(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-mv-admin-off-from")
+	toID := seedVoiceChan(t, database, "vc-mv-admin-off-to")
+	adminRole, err := database.GetRoleByID(context.Background(), 2)
+	if err != nil || adminRole == nil {
+		t.Fatalf("GetRoleByID(2) = %v, %v", adminRole, err)
+	}
+	setRolePerms(t, database, 2, adminRole.Permissions&^permissions.MoveMembers|permissions.MuteMembers)
+	actor := seedVoiceUserWithRole(t, database, "admin-move-off", 2)
+	target := seedVoiceUserWithRole(t, database, "member-admin-move-off", 4)
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, send := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+
+	assertMoveRefused(t, database, send, targetSend, target, fromID)
+}
+
+// ADMINISTRATOR does not stand in for MOVE_MEMBERS: a role carrying it but
+// not the move bit cannot move anyone, while it still mutes.
+func TestVoiceMod_Move_AdministratorWithoutMoveMembers_Refused(t *testing.T) {
+	hub, database := newVoiceModHub(t)
+	fromID := seedVoiceChan(t, database, "vc-mv-administrator-from")
+	toID := seedVoiceChan(t, database, "vc-mv-administrator-to")
+	setRolePerms(t, database, 2, permissions.Administrator|permissions.ReadMessages|permissions.ConnectVoice)
+	actor := seedVoiceUserWithRole(t, database, "administrator-no-move", 2)
+	target := seedVoiceUserWithRole(t, database, "member-administrator-no-move", 4)
+
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, send := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+	assertMoveRefused(t, database, send, targetSend, target, fromID)
+
+	setRolePerms(t, database, 2, permissions.Administrator|permissions.MoveMembers|permissions.ReadMessages|permissions.ConnectVoice)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
+	assertMoved(t, database, targetSend, toID)
 }
 
 // MOVE_MEMBERS granted only by a secondary role still moves a higher-ranked
@@ -276,32 +305,65 @@ func TestVoiceMod_Move_MoveMembersFromSecondaryRole_MovesHigherRank(t *testing.T
 }
 
 // Without MOVE_MEMBERS a target who is not in voice must be indistinguishable
-// from one who is: the same refusal either way.
-func TestVoiceMod_Move_WithNeitherBit_CannotProbeVoicePresence(t *testing.T) {
+// from one who is: the same refusal either way, for a role with no bit, one
+// with only MUTE_MEMBERS and one with only ADMINISTRATOR.
+func TestVoiceMod_Move_WithoutMoveMembers_CannotProbeVoicePresence(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		perms int64
+	}{
+		{"neither bit", permissions.ReadMessages | permissions.ConnectVoice},
+		{"mute only", permissions.ReadMessages | permissions.ConnectVoice | permissions.MuteMembers},
+		{"administrator only", permissions.Administrator},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub, database := newVoiceModHub(t)
+			fromID := seedVoiceChan(t, database, "vc-mv-probe-from")
+			toID := seedVoiceChan(t, database, "vc-mv-probe-to")
+			// Outranks the targets: the refusal must not depend on whether
+			// the target is in voice.
+			if _, err := database.ExecContext(context.Background(),
+				`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (14, 'plain', ?, 50, 0)`,
+				tc.perms); err != nil {
+				t.Fatalf("insert role: %v", err)
+			}
+			actor := seedVoiceUserWithRole(t, database, "no-move-probe", 14)
+			inVoice := seedVoiceUserWithRole(t, database, "probe-in", 4)
+			absent := seedVoiceUserWithRole(t, database, "probe-out", 4)
+
+			joinVoice(t, hub, inVoice, fromID)
+			c, send := moveActor(t, hub, actor, fromID)
+
+			hub.HandleMessageForTest(c, voiceModMoveMsg(inVoice.ID, toID))
+			gotIn, ok1 := receiveErrorFrame(send, waitTimeout)
+			hub.HandleMessageForTest(c, voiceModMoveMsg(absent.ID, toID))
+			gotOut, ok2 := receiveErrorFrame(send, waitTimeout)
+			if !ok1 || !ok2 || gotIn != gotOut || gotIn.Code != "FORBIDDEN" || gotIn.Message != "missing MOVE_MEMBERS permission" {
+				t.Fatalf("in-voice = %+v, absent = %+v; want identical FORBIDDEN refusals", gotIn, gotOut)
+			}
+		})
+	}
+}
+
+// The owner keeps moving members, even out of a channel whose user override
+// denies them MOVE_MEMBERS: the owner's Administrator bit ignores overrides.
+func TestVoiceMod_Move_OwnerMovesDespiteChannelDeny(t *testing.T) {
 	hub, database := newVoiceModHub(t)
-	fromID := seedVoiceChan(t, database, "vc-mv-probe-from")
-	toID := seedVoiceChan(t, database, "vc-mv-probe-to")
-	// Outranks the targets and holds neither bit: the refusal must not depend
-	// on whether the target is in voice.
+	fromID := seedVoiceChan(t, database, "vc-mv-owner-from")
+	toID := seedVoiceChan(t, database, "vc-mv-owner-to")
+	actor := seedVoiceUserWithRole(t, database, "owner-mover", 1)
+	target := seedVoiceUserWithRole(t, database, "member-owner-moved", 4)
 	if _, err := database.ExecContext(context.Background(),
-		`INSERT INTO roles (id, name, permissions, position, is_default) VALUES (14, 'plain', ?, 50, 0)`,
-		permissions.ReadMessages|permissions.ConnectVoice); err != nil {
-		t.Fatalf("insert role: %v", err)
+		`INSERT INTO channel_user_overrides (channel_id, user_id, allow, deny) VALUES (?, ?, 0, ?)`,
+		fromID, actor.ID, permissions.MoveMembers); err != nil {
+		t.Fatalf("insert user override: %v", err)
 	}
-	actor := seedVoiceUserWithRole(t, database, "no-move-probe", 14)
-	inVoice := seedVoiceUserWithRole(t, database, "probe-in", 4)
-	absent := seedVoiceUserWithRole(t, database, "probe-out", 4)
 
-	joinVoice(t, hub, inVoice, fromID)
-	c, send := moveActor(t, hub, actor, fromID)
+	_, targetSend := joinVoice(t, hub, target, fromID)
+	c, _ := moveActor(t, hub, actor, fromID)
+	hub.HandleMessageForTest(c, voiceModMoveMsg(target.ID, toID))
 
-	hub.HandleMessageForTest(c, voiceModMoveMsg(inVoice.ID, toID))
-	gotIn, ok1 := receiveErrorFrame(send, waitTimeout)
-	hub.HandleMessageForTest(c, voiceModMoveMsg(absent.ID, toID))
-	gotOut, ok2 := receiveErrorFrame(send, waitTimeout)
-	if !ok1 || !ok2 || gotIn != gotOut || gotIn.Code != "FORBIDDEN" || gotIn.Message != "missing MOVE_MEMBERS permission" {
-		t.Fatalf("in-voice = %+v, absent = %+v; want identical FORBIDDEN refusals", gotIn, gotOut)
-	}
+	assertMoved(t, database, targetSend, toID)
 }
 
 func TestVoiceMod_Move_MoverCannotSeeDestination_NotFound(t *testing.T) {

@@ -6,7 +6,9 @@
 //! directly on a sink input" request (`direct_on_input_index`), skips
 //! OwnCord's own streams, mixes the rest to 10 ms of 48 kHz stereo and hands
 //! that to the screen-share audio track's source. The protocol is the same on
-//! PulseAudio and on pipewire-pulse.
+//! PulseAudio and on pipewire-pulse. A share of one X11 window records only
+//! that window's application (its process and every descendant), as Windows
+//! does; anything else records every other application.
 //!
 //! The `pulseaudio` crate's high-level `Client` cannot list sink inputs and
 //! its reactor thread is never joined, so one thread here drives one socket
@@ -20,7 +22,7 @@ use std::ffi::{CStr, CString};
 use std::io::{self, Cursor, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -138,14 +140,24 @@ pub(super) fn is_own(input: &SinkInputInfo, clients: &[ClientInfo], own: &Own) -
         .any(|pid| own.tree.contains(pid))
 }
 
+/// Whether a pid the stream or its client claims is in `app`, the shared
+/// window's process and its descendants (a browser plays from a child).
+fn is_app(input: &SinkInputInfo, clients: &[ClientInfo], app: &BTreeSet<u32>) -> bool {
+    claimed_pids(input, client_of(input, clients))
+        .iter()
+        .any(|pid| app.contains(pid))
+}
+
 /// The sink inputs to record: on the default sink (filter outputs such as
 /// echo-cancel and combine sinks sit on the hardware sink and already hold
-/// every application, OwnCord included), not muted, not ours.
+/// every application, OwnCord included), not muted, not ours, and, when
+/// `app` is given, only that application's.
 pub(super) fn wanted(
     inputs: &[SinkInputInfo],
     default_sink: Option<u32>,
     clients: &[ClientInfo],
     own: &Own,
+    app: Option<&BTreeSet<u32>>,
 ) -> BTreeSet<u32> {
     let Some(default_sink) = default_sink else {
         return BTreeSet::new();
@@ -153,6 +165,7 @@ pub(super) fn wanted(
     inputs
         .iter()
         .filter(|i| i.sink_index == default_sink && !i.muted && !is_own(i, clients, own))
+        .filter(|i| app.is_none_or(|app| is_app(i, clients, app)))
         .map(|i| i.index)
         .collect()
 }
@@ -190,10 +203,15 @@ fn proc_parent(pid: u32) -> Option<u32> {
 
 fn resolve_own(inputs: &[SinkInputInfo], clients: &[ClientInfo]) -> Own {
     let pid = std::process::id();
+    Own::new(pid, resolve_tree(pid, inputs, clients))
+}
+
+/// `pid` and every pid the streams claim that descends from it.
+fn resolve_tree(pid: u32, inputs: &[SinkInputInfo], clients: &[ClientInfo]) -> BTreeSet<u32> {
     let candidates = inputs
         .iter()
         .flat_map(|i| claimed_pids(i, client_of(i, clients)));
-    Own::new(pid, descendants(pid, candidates, proc_parent))
+    descendants(pid, candidates, proc_parent)
 }
 
 // ---- the socket ----------------------------------------------------------
@@ -392,8 +410,9 @@ pub fn available() -> bool {
     let attempt = || -> Result<(), Fail> {
         let sock = connect_server()?;
         let stop = AtomicBool::new(false);
+        let app = AtomicU32::new(0);
         let mut deliver = |_: &[i16]| {};
-        let mut out = Out::new(&mut deliver, &stop);
+        let mut out = Out::new(&mut deliver, &stop, &app);
         Link::open(sock, &mut out).map(drop)
     };
     attempt().is_ok()
@@ -425,12 +444,14 @@ struct Out<'a> {
     ticker: Ticker,
     deliver: &'a mut dyn FnMut(&[i16]),
     stop: &'a AtomicBool,
+    /// The shared window's process, 0 for every application.
+    app: &'a AtomicU32,
     mixed: Vec<f32>,
     pcm: Vec<i16>,
 }
 
 impl<'a> Out<'a> {
-    fn new(deliver: &'a mut dyn FnMut(&[i16]), stop: &'a AtomicBool) -> Self {
+    fn new(deliver: &'a mut dyn FnMut(&[i16]), stop: &'a AtomicBool, app: &'a AtomicU32) -> Self {
         Self {
             mixer: Mixer::default(),
             ticker: Ticker {
@@ -438,6 +459,7 @@ impl<'a> Out<'a> {
             },
             deliver,
             stop,
+            app,
             mixed: vec![0.0; FRAME * 2],
             pcm: Vec::with_capacity(FRAME * 2),
         }
@@ -657,11 +679,16 @@ impl Link {
             .map(|s| s.index);
         let inputs: SinkInputInfoList = self.request(out, &Command::GetSinkInputInfoList)?;
         let clients: ClientInfoList = self.request(out, &Command::GetClientInfoList)?;
+        let app = match out.app.load(Ordering::Acquire) {
+            0 => None,
+            pid => Some(resolve_tree(pid, &inputs, &clients)),
+        };
         let want = wanted(
             &inputs,
             default_sink,
             &clients,
             &resolve_own(&inputs, &clients),
+            app.as_ref(),
         );
         self.reconcile(out, &want)
     }
@@ -784,8 +811,9 @@ fn run(
     deliver: impl FnMut(&[i16]),
     stop: Arc<AtomicBool>,
     inputs: Arc<AtomicUsize>,
+    app: Arc<AtomicU32>,
 ) {
-    run_with(Timing::default(), connect, deliver, stop, inputs);
+    run_with(Timing::default(), connect, deliver, stop, inputs, app);
 }
 
 fn run_with(
@@ -794,8 +822,9 @@ fn run_with(
     mut deliver: impl FnMut(&[i16]),
     stop: Arc<AtomicBool>,
     inputs: Arc<AtomicUsize>,
+    app: Arc<AtomicU32>,
 ) {
-    let mut out = Out::new(&mut deliver, &stop);
+    let mut out = Out::new(&mut deliver, &stop, &app);
     // At most one warning a minute: a server that stays down or keeps sending
     // what we cannot parse must not fill the log every reconnect.
     let mut last_warn: Option<Instant> = None;
@@ -835,17 +864,20 @@ fn run_with(
 pub struct ShareAudio {
     stop: Arc<AtomicBool>,
     inputs: Arc<AtomicUsize>,
+    app: Arc<AtomicU32>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl ShareAudio {
-    /// Start capturing into `source`. Returns at once; a missing or restarting
-    /// sound server is retried on the thread, and the source gets silence
-    /// meanwhile.
-    pub fn start(source: NativeAudioSource) -> Self {
+    /// Start capturing into `source`: only application `app`'s sound (its
+    /// process tree) when given, else every other application's. Returns at
+    /// once; a missing or restarting sound server is retried on the thread,
+    /// and the source gets silence meanwhile.
+    pub fn start(source: NativeAudioSource, app: Option<u32>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let inputs = Arc::new(AtomicUsize::new(0));
-        let (s, i) = (Arc::clone(&stop), Arc::clone(&inputs));
+        let app = Arc::new(AtomicU32::new(app.unwrap_or(0)));
+        let (s, i, a) = (Arc::clone(&stop), Arc::clone(&inputs), Arc::clone(&app));
         let mut failed = false;
         let deliver = move |pcm: &[i16]| {
             // The source is unbuffered (queue 0), so this completes at once.
@@ -866,14 +898,21 @@ impl ShareAudio {
         };
         let thread = thread::Builder::new()
             .name("share-audio".into())
-            .spawn(move || run(connect_server, deliver, s, i))
+            .spawn(move || run(connect_server, deliver, s, i, a))
             .map_err(|e| log::warn!("[native_voice] share audio thread: {e}"))
             .ok();
         Self {
             stop,
             inputs,
+            app,
             thread,
         }
+    }
+
+    /// Follow a source change: record only application `app` from the next
+    /// listing on (within a second), or every application when `None`.
+    pub fn set_app(&self, app: Option<u32>) {
+        self.app.store(app.unwrap_or(0), Ordering::Release);
     }
 
     /// How many applications' streams are being recorded right now.

@@ -9,7 +9,7 @@
 # Its own file rather than a schedule on ci.yml, for the reason
 # nightly-docker-smoke.yml's header gives: a scheduled run lands its checks on
 # the default branch's tip, and the jobs a scoped schedule would skip carry
-# required-context names that scripts/verify-gate-evidence.mjs does not count
+# required-context names that scripts/release/verify-gate-evidence.mjs does not count
 # as success when skipped. The job name below matches no required context.
 #
 # The steps are the same as ci.yml's supply-chain job; scripts/
@@ -89,4 +89,8 @@ jobs:
         run: osv-scanner --version && cargo-deny --version
 
       - name: Check the Rust dependency policy (cargo-deny)
-        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check bans licenses sources
+
+      # Fatal here: this scan is where a new advisory on dev is reported.
+      - name: Check Rust advisories (cargo-deny)
+        run: cargo deny --manifest-path Client/src-tauri/Cargo.toml check advisories

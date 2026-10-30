@@ -1,5 +1,5 @@
 /**
- * The voice widget's stream card while you share your screen (WP 1C-1): what
+ * The voice widget's stream card while you share your screen: what
  * is going out, Change source, Quality and Stop. Loaded on the first share.
  * Change source is offered wherever the share can change without stopping;
  * Quality only on the web path (the Linux native capture picks its quality in
@@ -14,7 +14,7 @@ import {
   getScreenshareQuality,
   setScreenshareQuality,
   type StreamQuality,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
 
 const QUALITIES: readonly StreamQuality[] = ["low", "medium", "high", "source"];

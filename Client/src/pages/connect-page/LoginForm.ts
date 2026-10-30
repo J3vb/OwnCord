@@ -2,10 +2,11 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOurs } from "@lib/dom";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
-import { ApiClientError, TransportError, errorText } from "@lib/api";
-import { normaliseInviteCode } from "@lib/deep-link";
+import { ApiClientError, TLS_CERT_CODE, TransportError, errorText } from "@lib/api";
+import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
+import { normaliseInviteCode } from "@lib/nav/deepLink";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
 import { connectText } from "../../i18n/connect";
@@ -18,7 +19,8 @@ import {
   usernameProblemText,
   MAX_USERNAME_LEN,
   type LimitHint,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,7 +32,7 @@ export type FormState = "idle" | "loading" | "totp" | "connecting" | "error" | "
 /** Form mode: login or register. */
 export type FormMode = "login" | "register";
 
-/** A connect-form field a validation error can be tied to (B9-23). */
+/** A connect-form field a validation error can be tied to. */
 type FieldId = "host" | "username" | "password" | "invite";
 
 // ---------------------------------------------------------------------------
@@ -106,7 +108,7 @@ export interface LoginFormOptions {
    */
   readonly getRegistrationMode?: (host: string) => RegistrationMode | null;
   /** The server-default retention sentence for a host, shown at sign-up;
-   *  null when unknown, and then nothing is shown (B7-15c). */
+   *  null when unknown, and then nothing is shown. */
   readonly getRetentionNotice?: (host: string) => string | null;
   /** The host box settled (debounced) in register mode, or register mode was
    *  entered with a host typed; lets the owner fetch that host's mode. */
@@ -114,7 +116,7 @@ export interface LoginFormOptions {
   /** The host box was edited; the owner may apply a matching saved profile's settings. */
   readonly onHostInput?: (host: string) => void;
   /**
-   * The one host this page signs in to (the web portal, WP 6.13e). Read only
+   * The one host this page signs in to (the web portal). Read only
    * in `__OWNCORD_WEB__` builds: the host box is filled and hidden, a host
    * given later is ignored, and the form offers "Stay signed in" only.
    */
@@ -171,6 +173,9 @@ export interface LoginFormApi {
   getHost(): string;
   /** Focus the host input. */
   focusHost(): void;
+  /** Resubmit a sign-in the desktop proxy refused because `host`'s certificate
+   *  was not confirmed yet. `host` is the accepted certificate's normalized host. */
+  resubmitAfterCertAccept(host: string): void;
   destroy(): void;
 }
 
@@ -192,7 +197,7 @@ const AUTH_BUSY_JITTER_MS = 1_000;
 /** The server's password-check queue was full: a refusal worth retrying. A
  *  per-IP RATE_LIMITED is not — retrying only spends the window again. */
 function isAuthBusy(err: unknown): err is ApiClientError {
-  return err instanceof ApiClientError && err.code === "AUTH_BUSY";
+  return err instanceof ApiClientError && err.code === RestErrorCode.AUTH_BUSY;
 }
 
 function isBusy(state: FormState): boolean {
@@ -246,7 +251,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // or an error replaces it.
   let noticeMessage = "";
   /**
-   * The field the current banner error belongs to (B9-23), so the error is
+   * The field the current banner error belongs to, so the error is
    * linked to its input with aria-describedby/aria-invalid and focus moves
    * there. Null for a server error that names no field.
    */
@@ -256,6 +261,9 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // the banner/shake, but the overlay must stay up so the code can be
   // re-entered — see updateTotpOverlay().
   let totpPending = false;
+  // The last submit the desktop proxy refused because its host's certificate
+  // was not confirmed yet. Accepting that certificate resubmits it once.
+  let certRefusedSubmit: { host: string; mode: FormMode } | null = null;
   // What had focus when a request disabled the form, restored when it settles.
   let focusBeforeBusy: Element | null = null;
 
@@ -384,7 +392,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       id: "connect-error-banner",
     });
 
-    // Informational notice (P4-18): a green/neutral status line for a fact the
+    // Informational notice: a green/neutral status line for a fact the
     // user needs (pending approval), never the red error banner.
     infoNotice = createElement("div", { class: "info-notice", role: "status" });
 
@@ -566,6 +574,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Wire form events
     form.addEventListener("submit", handleFormSubmit, { signal });
+    // An edit after a certificate refusal is a new sign-in the user has not
+    // sent yet, so accepting the certificate must not send it for them.
+    form.addEventListener(
+      "input",
+      () => {
+        certRefusedSubmit = null;
+      },
+      { signal },
+    );
     // Typing means the user is taking over from the automatic retry.
     for (const input of [hostInput, usernameInput, passwordInput]) {
       input.addEventListener("input", cancelServerWait, { signal });
@@ -664,7 +681,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     // announcement, so a screen reader got nothing. The message is the
     // input's description and focus returns to the input, so it is read once
     // with the field; it is a live alert only when the input already has
-    // focus and so is not re-read (B9-23).
+    // focus and so is not re-read.
     totpError = createElement("div", {
       class: "form-error",
       id: "totp-error",
@@ -886,7 +903,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function updateErrorBanner(): void {
     // A field error is linked to its input and focus moves there, so a
     // keyboard/screen-reader user lands on the control to fix rather than on
-    // an unassociated sentence (B9-23). The banner is only a live alert when
+    // an unassociated sentence. The banner is only a live alert when
     // focus does not move — a server error naming no field, or a field that
     // already has focus — so each error is announced once.
     const field = formState === "error" ? errorField : null;
@@ -986,7 +1003,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   }
 
   // ---------------------------------------------------------------------------
-  // Registration mode (B7-15a)
+  // Registration mode
   // ---------------------------------------------------------------------------
 
   /**
@@ -1250,11 +1267,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     const host = hostInput.value.trim();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
+    // The mode toggle stays live while a request is in flight.
+    const mode = formMode;
 
+    certRefusedSubmit = null;
     transitionTo("loading");
 
     try {
-      if (formMode === "login") {
+      if (mode === "login") {
         const savedPassword = usingSavedPassword;
         await loginRetryingWhileBusy(() =>
           savedPassword
@@ -1293,12 +1313,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       if (
         formMode === "register" &&
         err instanceof ApiClientError &&
-        err.code === "INVALID_INPUT" &&
+        err.code === RestErrorCode.INVALID_INPUT &&
         /^username\b/i.test(err.message)
       ) {
         usernameHint.showError(message);
         transitionTo("error", connectText("limits.checkField"), "username");
         return;
+      }
+      if (err instanceof ApiClientError && err.code === TLS_CERT_CODE) {
+        certRefusedSubmit = { host, mode };
       }
       transitionTo("error", message);
     }
@@ -1344,7 +1367,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     } catch (err) {
       const message =
         err instanceof ApiClientError &&
-        err.code === "RATE_LIMITED" &&
+        err.code === RestErrorCode.RATE_LIMITED &&
         err.message === "too many failed attempts, try again later"
           ? connectText("error.totpTooManyAttempts")
           : errorText(err, connectText("totp.failed"));
@@ -1473,6 +1496,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     setHost(host: string): void {
       if (__OWNCORD_WEB__ && fixedHost !== undefined) return;
+      certRefusedSubmit = null;
       writeHost(host);
       // The host's registration mode may differ from the previous one.
       updateRegistrationUi();
@@ -1483,6 +1507,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     setCredentials(username: string, hasSavedPassword?: boolean): void {
+      certRefusedSubmit = null;
       usernameInput.value = username;
       // The placeholder only ever belongs to LOGGING IN to an existing
       // account. Registration reads the password field as typed text, so a
@@ -1532,6 +1557,17 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     focusHost(): void {
       if (__OWNCORD_WEB__ && fixedHost !== undefined) usernameInput.focus();
       else hostInput.focus();
+    },
+
+    resubmitAfterCertAccept(host: string): void {
+      const refused = certRefusedSubmit;
+      if (refused === null || normalizeHostForCertCompare(refused.host) !== host) return;
+      certRefusedSubmit = null;
+      // The user may have moved on since: another server, the other mode, or
+      // a submit of their own already under way.
+      if (formState !== "error" || formMode !== refused.mode) return;
+      if (hostInput.value.trim() !== refused.host) return;
+      void handleFormSubmit(new Event("submit"));
     },
 
     destroy(): void {

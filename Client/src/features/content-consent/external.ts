@@ -1,5 +1,5 @@
 /**
- * External-content consent (B9-8, Q3): nothing a message author links to is
+ * External-content consent: nothing a message author links to is
  * fetched from this machine until the viewer has agreed to it on this server.
  *
  * One choice per server profile, kept with the client preferences: "auto"
@@ -14,8 +14,8 @@
  * reads it, and it satisfies neither.
  */
 
-import { loadPref, savePref } from "@lib/preferences";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { loadPref, savePref } from "@lib/prefs/preferences";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 export type ExternalConsentChoice = "auto" | "ask";
 

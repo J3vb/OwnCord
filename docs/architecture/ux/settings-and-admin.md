@@ -23,6 +23,13 @@ repository's `CHANGELOG.md`, built into a lazy chunk, never fetched) and a
 GitHub link. The first start on a new version shows that version's notes once
 in a "What's new" dialog (`features/whats-new/`); a fresh install does not.
 
+On a phone (600 px wide or less) the overlay fills the screen and opens on the
+section list; tapping a section shows only that section, with a back arrow
+(and Escape) to return to the list before a second Escape closes Settings.
+Another surface that asks for a tab opens straight on that section. The
+Connect page folds its saved servers down to the selected one there, with an
+arrow that opens the full list and Add Server.
+
 The Safety tab (labelled "Privacy & Safety") lists, top to bottom: Direct messages (two
 switches stored on the server: "Allow direct messages from server members" and
 "Message requests", the second disabled while the first is off; shown only when
@@ -121,7 +128,7 @@ none reaches a log entry, the console or browser storage.
 | List sessions            | `GET /users/me/sessions`; show device/IP/last-used; current session marked. Both desktop User-Agents read "OwnCord desktop"                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Revoke a session         | `DELETE /users/me/sessions/{id}`; optimistic removal + toast ("can no longer connect"); a refused revoke puts the row back. No per-row revoke on the current device. Its REST requests fail at once; when a device showing "Signed in elsewhere" revokes the device holding the live socket, the server closes that socket in the same request                                                                                                                                                                                |
 | Sign out everywhere      | Inline confirm stating this device is included → `DELETE /users/me/sessions`; when `current_session_revoked`, `clearAuth()` → connect page                                                                                                                                                                                                                                                                                                                                                                                    |
-| Sign-in not yet reviewed | On connect and on window focus the main page lists sessions, at most once per 30 s after a successful listing; a non-current row with `unseen` raises a toast naming its device, IP and time and pointing to Settings > Account. The listing is the acknowledgement — no WebSocket frame, no timer (`lib/session-notice.ts`)                                                                                                                                                                                                  |
+| Sign-in not yet reviewed | On connect and on window focus the main page lists sessions, at most once per 30 s after a successful listing; a non-current row with `unseen` raises a toast naming its device, IP and time and pointing to Settings > Account. The listing is the acknowledgement — no WebSocket frame, no timer (`lib/net/sessionNotice.ts`)                                                                                                                                                                                               |
 | Signed in elsewhere      | The server sends `SESSION_REPLACED` first when this device's own session reconnects elsewhere (a reload) or the account is over its 10-connection cap; a different device no longer displaces this socket. An older server also refused a wake reconnect with `ANOTHER_DEVICE_ACTIVE` while another device held the session. Either way the client does not reconnect and keeps the credential; the connection banner shows "Signed in elsewhere" with "Use here", which reconnects without a wake marker (last connect wins) |
 | Message retention        | Shown only when `server-info` reports a server-default window (`retentionNotice()` in `lib/types.ts`)                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Delete account           | **Modal with password confirm** (irreversible — stronger than a two-click). The warning says erasure is immediate, earlier backups keep a copy until they rotate (a restore re-applies it), and other devices may keep cached images; no retention window. `DELETE /auth/account` → `clearAuth()` → the account's image-cache scope is pruned → connect page                                                                                                                                                                  |
@@ -167,7 +174,7 @@ permissions, plugin management, backups, updates, first-run setup — is the
 **server-rendered web panel** under `/admin`, gated by IP restriction + admin
 auth. The Tauri client has **no** REST methods for these (confirmed: no plugin/
 audit/settings/permissions/setup calls in `api.ts`). The one bridge the client
-does have is a deep-link: `lib/admin-panel.ts` opens
+does have is a deep-link: `lib/adminPanel.ts` opens
 `https://{host}/admin#{section}` in the OS browser (wired from
 the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarArea.ts`, gated by
 `lib/permissions.ts::canViewAuditLog`).
@@ -187,6 +194,19 @@ Themes are CSS custom properties (`styles/tokens.css`), 4 built-ins
 changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-skin
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
+
+**Custom themes** (Appearance > Custom Themes, `features/custom-themes/`): a saved
+list of the user's own CSS, per device (`owncord:theme:custom:list` and
+`owncord:theme:custom:active` in localStorage), at most one active, painted as
+one `<style id="owncord-custom-theme">` after the built-in theme. Custom
+properties are marked `!important` and a `:root`/`html` rule also targets
+`body`, so a theme's tokens beat the built-in theme's inline and `body.theme-*`
+ones. A theme may never load a file: after decoding CSS escapes, `url(`,
+`image(`, `image-set(`, `cross-fade(`, `element(`, `src(`, `@import`,
+`@font-face` and `@namespace` are refused on save, on import and again on every
+paint; the CSP (`img-src`/`font-src 'self'`) stays behind it. Ctrl+Shift+Backspace
+turns the active theme off (Backspace is not a bindable key, so no keybind can
+claim it).
 
 ---
 
@@ -248,7 +268,7 @@ The tray icon (`src-tauri/src/tray.rs`) is a parallel presence/window surface:
 **Show/Hide** toggles the main window, a **Status** submenu
 (Online / Idle / Do Not Disturb / Offline) emits a `status-change` event that
 the TS side applies through the same presence path as the user-bar picker
-(`lib/userStatus.ts` / `components/StatusPicker.ts`), **Mute / Unmute** and
+(`lib/presence/userStatus.ts` / `components/StatusPicker.ts`), **Mute / Unmute** and
 **Deafen / Undeafen** emit the `voice-shortcut` event that the global
 Ctrl+Shift+<key> poller (`src-tauri/src/shortcuts.rs`, rebindable from the
 Keybinds tab) also emits,
@@ -277,8 +297,8 @@ the only indicator. Both clear at 0 and on logout.
 
 `src/components/SettingsOverlay.ts` (+ `settings/*`), `src/components/AdminActions.ts`,
 `src/components/InviteManager.ts`, `CreateChannelModal.ts`, `EditChannelModal.ts`,
-`DeleteChannelModal.ts`, `src/components/UpdateNotifier.ts`, `src/lib/updater.ts`,
-`src/lib/api.ts`, `src/lib/themes.ts`, `src/lib/preferences.ts`,
+`DeleteChannelModal.ts`, `src/components/UpdateNotifier.ts`, `src/lib/net/updater.ts`,
+`src/lib/api.ts`, `src/lib/prefs/themes.ts`, `src/lib/prefs/preferences.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `OverlayManagers.ts`, `src-tauri/src/commands.rs`, `src-tauri/src/update_commands.rs`;
 server `Server/admin/api.go`, `Server/api/profile_handler.go`, `totp_handler.go`.

@@ -94,8 +94,8 @@ const SERVER_READS_OUTSIDE = new Set([
   "Client/src-tauri/tauri.conf.json",
   ".superpowers/findings-ledger.json",
   // GENERATED from protocol/schema.json, but asserted from the Server side:
-  // `make protocol-verify` regenerates BOTH Server/ws/message_types.go and this
-  // file and fails on drift, so editing, deleting or renaming this path has to
+  // `make protocol-verify` regenerates Server/ws/message_types.go,
+  // Server/httperr/codes.go and this file and fails on drift, so editing, deleting or renaming this path has to
   // run the server job. The Go half needs no entry — it lives under Server/,
   // which already selects the job.
   "Client/src/lib/protocolTypes.ts",
@@ -155,7 +155,8 @@ const RUST_READS_OUTSIDE = new Set([
  */
 const RUST_HARNESS_PREFIXES = [
   "Client/tests/e2e/native-voice/",
-  "Client/playwright.config.native-voice.ts",
+  "Client/tests/e2e/config/playwright.config.native-voice.ts",
+  "Client/tests/e2e/config/clientRoot.ts",
 ];
 
 /**
@@ -174,7 +175,8 @@ const WEBCLIENT_PREFIXES = [
   "Client/package-lock.json",
   "Client/vite.config",
   "Client/tsconfig",
-  "Client/playwright.config.web.ts",
+  "Client/tests/e2e/config/playwright.config.web.ts",
+  "Client/tests/e2e/config/clientRoot.ts",
   "Client/tests/e2e/web/",
   "Client/tests/e2e/support/",
   "Client/tests/e2e/scripts/build-server.mjs",
@@ -204,7 +206,7 @@ const DEPS_FILES = new Set([
   "tools/mcp-introspect/package-lock.json",
   "osv-scanner.toml", // the scan's ignore baseline
   "Client/src-tauri/deny.toml", // cargo-deny's policy
-  "scripts/osv-pr-diff.mjs", // the PR verdict of the osv-scanner step
+  "scripts/checks/osv-pr-diff.mjs", // the PR verdict of the osv-scanner step
 ]);
 
 /**
@@ -222,7 +224,7 @@ const K6_HARNESS_PATHS = new Set([
 export { K6_HARNESS_PATHS };
 
 /**
- * The permissions mutation hotspot (Client/stryker.ci.config.mjs mutates only
+ * The permissions mutation hotspot (Client/tests/mutation/stryker.ci.config.mjs mutates only
  * permissions.ts). A path-gated step, not a job: it needs the file, its
  * direct unit test and the inputs of Stryker's dry run.
  */
@@ -230,7 +232,7 @@ const PERMISSIONS_MUTATION_PATHS = new Set([
   "Client/src/lib/permissions.ts",
   "Client/tests/unit/permissions.test.ts",
   "Client/stryker.config.mjs",
-  "Client/stryker.ci.config.mjs",
+  "Client/tests/mutation/stryker.ci.config.mjs",
   // What the dry run executes and compiles: the Vitest config and setup, the
   // TypeScript checker's project, and the pinned Stryker/Vitest versions.
   "Client/vitest.config.ts",

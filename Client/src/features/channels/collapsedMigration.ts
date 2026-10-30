@@ -1,6 +1,6 @@
 /**
  * One-time move of the saved collapsed-category set from category NAMES to
- * category id keys (WP 6.5b, D7). Before 6.5b the sidebar saved the collapsed
+ * category id keys. Before categories had ids the sidebar saved the collapsed
  * set as category names; a rename then dropped the state. Once the channel list
  * is here, each saved name that belongs to a real category is rewritten to its
  * `cat:<id>` key and the list is saved again, so the state follows the category

@@ -2,10 +2,10 @@
 // Uses custom Tauri commands that build the updater with a dynamic server URL
 // at runtime (required because OwnCord is self-hosted).
 //
-// Lifted verbatim from `lib/updater.ts` (B7-5), install guard and all:
+// Lifted verbatim from `lib/net/updater.ts`, install guard and all:
 // `installation` stays non-null once native installation succeeds, because
 // reinstalling cannot repair a failed app restart. One change of form, none of
-// behaviour: `plugin-process` is now a dynamic `import()`. `lib/updater.ts` was
+// behaviour: `plugin-process` is now a dynamic `import()`. `lib/net/updater.ts` was
 // only reachable from a lazy chunk, and this registry is statically reachable
 // from the entry, so a static import here would land the plugin in startup.
 

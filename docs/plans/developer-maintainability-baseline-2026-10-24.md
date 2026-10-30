@@ -32,9 +32,9 @@ The filename keeps the `2026-10-24` date of the assignment that named it. Every 
 | Command                                                                                                               | Status           | Result                                                |
 | --------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------- |
 | `node scripts/run.mjs --list`                                                                                         | executed         | Prints every task with commands and directories.      |
-| `node scripts/check-doc-counts.mjs`                                                                                   | executed         | 0 claims across 5 documents agree with the ledger.    |
-| `node scripts/check-doc-citations.mjs`                                                                                | executed         | 140 cited paths all exist.                            |
-| `node scripts/check-migrations.mjs`                                                                                   | executed         | No shipped migration changed.                         |
+| `node scripts/checks/check-doc-counts.mjs`                                                                            | executed         | 0 claims across 5 documents agree with the ledger.    |
+| `node scripts/checks/check-doc-citations.mjs`                                                                         | executed         | 140 cited paths all exist.                            |
+| `node scripts/checks/check-migrations.mjs`                                                                            | executed         | No shipped migration changed.                         |
 | `node .superpowers/render-ledger.mjs --check`                                                                         | executed         | Ledger valid, 518 findings.                           |
 | `node --test scripts/run.test.mjs`                                                                                    | executed         | 16 of 16 pass.                                        |
 | `node --test scripts/ci-select.test.mjs`                                                                              | executed         | 64 of 64 pass.                                        |
@@ -654,3 +654,165 @@ Left as they were: an optional id (`mark_read` `message_id`, `thread_focus` `thr
 ### Verdict
 
 Kept. One id parser and one error text, five ids no longer reach a handler as 0 or a negative number, and a rule stops a new hand-written read. No saving in time or tokens is claimed.
+
+## MX-7 part 3: plain-text error replies (2026-10-28)
+
+Measured on a branch from `origin/dev` `e98934fe`, then merged with `02a8dd8b`. Evidence level: **executed** (unit tests; the admin panel was not opened). The owner chose to convert all 31, not only the 24 in `api` and `admin`. This closes MX-7; MX-16 (REST error codes as constants) can start.
+
+### Counts
+
+Counted with `grep -rn "http\.Error(" Server --include=*.go` over non-test files, and with the new `plain-text-replies` invariant, which flags `http.Error` anywhere in the server (31 on `dev`, checked by putting the old files back).
+
+| Measure (non-test files)                                        | Before                                                                   | After                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------ |
+| `http.Error` plain-text replies, `api` and `admin`              | 24: plugin admin API 17, client update 3, admin log stream 4             | 0, held by the invariant |
+| `http.Error` plain-text replies, rest of the server             | 7: plugin asset server 3, LiveKit webhook 3, WebSocket upgrade refusal 1 | 0, held by the invariant |
+| Log-stream refusals sent as JSON text under `text/plain`        | 3                                                                        | 0                        |
+| Plugin upload that trips the size cap mid-parse                 | `400` "invalid multipart upload"                                         | `413 PAYLOAD_TOO_LARGE`  |
+| Routes documented as an exception to the JSON envelope (api.md) | 1 (plugin admin)                                                         | 0                        |
+
+### What changed
+
+- `api/plugins_handler.go`: every error goes through `writeErr`. Codes: `503 PLUGINS_DISABLED` (runtime off, the `PUSH_DISABLED`/`GIF_DISABLED` pattern), `400 INVALID_INPUT` for body problems (as batch 1), `415 UNSUPPORTED_MEDIA_TYPE`, `413 PAYLOAD_TOO_LARGE`, `400 BAD_REQUEST` for a bad path id (as `parseIDParam`), `404 NOT_FOUND`, `500 INTERNAL_ERROR`. Messages are unchanged.
+- `api/client_update.go`: `400 INVALID_INPUT` and `502 UPDATE_CHECK_FAILED` (the admin update check's code). The Tauri updater reads only the status.
+- `admin/logstream.go`: the three refusals already built the envelope by hand and sent it as `text/plain`; they now use `writeErr`. "streaming not supported" is `500 INTERNAL_ERROR`.
+- New leaf package `Server/httperr` (`Write(w, status, code, msg)`) for handlers outside `api` and `admin`, which cannot import their `writeErr`. It keeps `http.Error`'s `X-Content-Type-Options: nosniff`.
+- `plugin/host_ui.go`: `403 FORBIDDEN` (symlink or non-regular asset), `500 INTERNAL_ERROR`. `ws/livekit_webhook.go`: `401 UNAUTHORIZED`, `503 SERVICE_UNAVAILABLE` (LiveKit still retries on the status). `ws/serve.go`: the over-capacity refusal is `503 SERVER_BUSY`, the WebSocket code a connect that waits too long already gets, with `Retry-After: 30` as before.
+- `invariants/plain_text_replies.go`: rule `plain-text-replies`, whole tree, also flags a dot-import of `net/http`. `reply-helpers` is unchanged.
+- The admin panel's `pluginApi` already read `message` from a JSON body, so it shows the same text; only its comment changed.
+- `docs/api.md` drops the plugin plain-text exception and lists `PLUGINS_DISABLED`, `UNSUPPORTED_MEDIA_TYPE` and `UPDATE_CHECK_FAILED`; the webhook and `max_ws_connections` docs name their codes.
+
+Not counted: the plain `http.NotFound` on file, emoji and sticker image routes (bytes for an `<img>`, a 404 with no body to read).
+
+### Checks
+
+| Check                                                                                                        | Before (`dev` handlers + the new tests) | After   |
+| ------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------- |
+| `TestPluginsHandler_ErrorsUseTheJSONEnvelope` (10 error paths), list-failure and mid-parse 413               | 12 of 12 fail                           | 12 pass |
+| `TestHandleLogStream_RefusalsAreJSON` (no ticket, unknown ticket, no session, no permission)                 | 4 of 4 fail (`text/plain`)              | 4 pass  |
+| `TestClientUpdate_ErrorIsJSONEnvelope`                                                                       | fails                                   | passes  |
+| `TestAssetHandler_RefusalsAreJSON` (directory, symlink)                                                      | 2 of 2 fail                             | 2 pass  |
+| `TestWebhookHandler_RefusalIsJSON` (no header, bad token) and the envelope check added to the retry test (2) | 4 of 4 fail                             | 4 pass  |
+| Envelope check added to `TestServeWS_PendingHandshakesCountTowardCap`                                        | fails                                   | passes  |
+| `plain-text-replies` invariant on the tree                                                                   | 31 violations                           | 0       |
+
+No existing assertion was changed; two existing tests gained an envelope check.
+
+### Verdict
+
+Kept. Every error the server answers is now one shape, the last documented exception is gone, and the guard stops a new plain-text reply anywhere. No saving in time or tokens is claimed.
+
+## MX-16 part 1: server error codes as generated constants (2026-10-29)
+
+Plan approved by the owner with the wire codes unchanged: no code is renamed or merged, so every reply sends the same bytes as before.
+
+### Counts
+
+Counted on `dev` `47e00ecb` with a `go/ast` scan of non-test files in `api`, `admin`, `plugin`, `httperr` and `ws`.
+
+| Measure                                                                                           | Before | After |
+| ------------------------------------------------------------------------------------------------- | ------ | ----- |
+| `writeErr` / `httperr.Write` calls with a literal code                                            | 462    | 0     |
+| Other literal codes (`writeSvcErr` and `writeCategoryErr` arguments, auth helpers, `authFailure`) | 20     | 0     |
+| Hand-written codes outside the schema (the request-deadline body, `ErrCodeProtocolEpoch`)         | 2      | 0     |
+| REST codes with a constant                                                                        | 0      | 61    |
+| WebSocket codes in the schema (hand list in `ws/errors.go` before)                                | 0      | 33    |
+
+### What changed
+
+- `protocol/schema.json` gains `error_codes.rest` and `error_codes.ws`. `cmd/genprotocol` writes the REST list to `Server/httperr/codes.go` as the typed `httperr.Code`, the WebSocket list into `ws/message_types.go` under the existing `ErrCode*` names (so no WS call site changed), and both into `protocolTypes.ts` as `RestErrorCode` / `WsErrorCode` with their value unions. `ws/errors.go` is gone.
+- `writeErr` (api, admin), `httperr.Write`, `writeSvcErr`'s 400 override, `writeCategoryErr`'s stale code and `authFailure.code` take an `httperr.Code`, so a code held in a plain `string` no longer compiles.
+- Invariant `error-code-literals` (tree rule): any string literal in those packages equal to a known code is a violation, wherever it sits. It reads the code set from the two generated files, so a new code is covered without editing the rule.
+- `ws/protocol_contract_test.go` checks `ErrCode*` against `error_codes.ws` both ways, as it does for message types. That is what found `protocol_epoch_unsupported` declared by hand in `ws/messages.go`.
+- `make protocol-verify`, `scripts/run.mjs` and the pre-commit hook diff `httperr/codes.go` too.
+
+Near-duplicate codes stay as they are (`SHUTTING_DOWN`/`SERVER_SHUTTING_DOWN`, `BUSY`/`AUTH_BUSY`, `UNAVAILABLE`/`SERVICE_UNAVAILABLE`); each now carries a note in the schema saying which route sends it. `INTERNAL` (WS) and `INTERNAL_ERROR` (REST) are separate lists by design.
+
+### Checks
+
+| Check                                                                                       | Before                 | After |
+| ------------------------------------------------------------------------------------------- | ---------------------- | ----- |
+| `error-code-literals` on the tree                                                           | 484 violations         | 0     |
+| `TestProtocolSchema_ErrorCodesMatchGoConstants`                                             | 1 failure (epoch code) | pass  |
+| Rule fixtures (`error_code_literals_test.go`: literal, code variable, WS code, clean cases) | new                    | pass  |
+| `go test -tags wazero ./...`, four build-tag variants, `golangci-lint` v2.14.0              | pass                   | pass  |
+
+No existing assertion was changed.
+
+### Verdict
+
+Kept so far. A misspelt or unlisted code is now a compile error or an invariant failure instead of a reply the client silently ignores. Part 2 (the client comparing codes through the generated union) follows in its own PR. No saving in time or tokens is claimed.
+
+## MX-16 part 2: the client compares generated error codes (2026-10-29)
+
+### Counts
+
+Counted on `dev` `8adfc19a` with a TypeScript compiler API scan of non-test files in `Client/src` (the i18n catalogs and the generated `protocolTypes.ts` left out).
+
+| Measure                                                                 | Before | After |
+| ----------------------------------------------------------------------- | ------ | ----- |
+| String literals equal to a server error code (comparisons, cases, sets) | 120    | 0     |
+| Files holding them                                                      | 33     | 0     |
+| Hand-kept code unions in `lib/types.ts` (`WsErrorCode`, `ApiErrorCode`) | 2      | 0     |
+
+The scout counted 34 because it only looked at `=== "CODE"` comparisons; `case` labels and code sets (`OLD_SERVER_JOIN_CODES`, `AMBIGUOUS`) are the same thing spelt differently.
+
+### What changed
+
+- Every server code in `Client/src` is `RestErrorCode.X` or `WsErrorCode.X` from `@lib/protocolTypes`. A code both lists share (`FORBIDDEN`, `RATE_LIMITED`) takes the list of the reply it reads: REST for `ApiClientError`, WS for an error frame.
+- `ErrorPayload.code` is `WsErrorCodeValue`, `ApiError.error` is `RestErrorCodeValue` (plus the client's own `UNKNOWN` fallback), and `AuthErrorPayload.code` is the generated epoch code. The two hand unions had drifted: `WsErrorCode` lacked `POLL_ENDED`, `ALREADY_DELETED`, `SERVER_MUTED`, `SERVER_DEAFENED` and still listed `INVALID_INPUT` and `SERVER_ERROR`, which the socket never sends.
+- Client-local outcome codes (`OFFLINE`, `NETWORK`, `UNCONFIRMED`, `NOT_JSON`, `UNKNOWN`) are not server codes and stay as they are.
+- New structural test `tests/unit/error-code-literals.test.ts` holds the count at 0.
+- Startup closure budget raised one 500 B step, 103300 B to 103800 B: the two generated code tables (94 codes) are now in the startup bundle, 103762 B measured.
+
+### Checks
+
+| Check                                                       | Before       | After |
+| ----------------------------------------------------------- | ------------ | ----- |
+| `error-code-literals.test.ts` on the tree                   | 120 literals | 0     |
+| Its fixture (comparison, case, set flagged; i18n key clean) | new          | pass  |
+| `npm run check:client`                                      | pass         | pass  |
+
+No existing assertion was changed.
+
+### Verdict
+
+Kept. A server code the client checks for can no longer be misspelt or fall out of the server's list unnoticed, and the two drifted hand unions are gone. No saving in time or tokens is claimed.
+
+## MX-18: one lock policy for the desktop app's Rust mutexes (2026-10-29)
+
+### Counts
+
+Counted on `dev` `cb021e48` with a regex scan of `Client/src-tauri/src` that cuts off `#[cfg(test)]` modules and `tests.rs` files (multi-line calls included). Async (`tokio`) mutexes are not counted: they cannot be poisoned.
+
+| Measure                                                                                    | Before | After              |
+| ------------------------------------------------------------------------------------------ | ------ | ------------------ |
+| `lock().unwrap()` outside tests (all in `native_voice/session.rs`)                         | 20     | 0                  |
+| Inline `lock().unwrap_or_else(… into_inner)` copies outside tests                          | 60     | 0                  |
+| Files holding those copies                                                                 | 21     | 0                  |
+| Private free `lock` helpers (`playout`, `capture`, `notification_bus`, `portal_shortcuts`) | 4      | 0                  |
+| `lock().unwrap()` in tests                                                                 | 17     | 0                  |
+| Places a std `Mutex::lock` may be called (clippy `disallowed-methods`)                     | any    | 1 file (`sync.rs`) |
+
+The scout counted 46 inline copies in 20 files; the multi-line scan finds 60 in 21. Four struct accessors (`JsonStore::lock`, `ActiveSession::lock`, `HttpPool::lock`, `Apm::lock`) stay: each names its one field and now calls the shared helper.
+
+### What changed
+
+- New `Client/src-tauri/src/sync.rs` holds `lock` (takes the data back from a lock a panic poisoned, the policy most of the crate already used) and `lock_checked` (returns the poison error, for the three TLS fingerprint reads in `http_proxy.rs`, `ws_proxy.rs` and `tofu.rs`, which keep failing closed as before).
+- `clippy.toml` bans `std::sync::Mutex::lock` everywhere else, the same mechanism as the truncating-write ban. Lock scope is unchanged at every site: each call became `lock(&x)` in the same expression position.
+- Behaviour change, on Linux only: the 20 `unwrap()` calls in the native voice session (camera, screen-share and share-audio slots) recover a poisoned slot instead of panicking again. Read from code, not reproduced in the app.
+- New tests: `sync.rs` (a poisoned lock hands its data back; the checked lock reports it) and `native_voice/session.rs` (a slot poisoned by a panicking thread still takes a republish and releases).
+
+### Checks
+
+| Check                                            | Before | After                  |
+| ------------------------------------------------ | ------ | ---------------------- |
+| `cargo clippy --all-targets -- -D warnings` (CI) | pass   | see the PR's Rust jobs |
+| `cargo test` (CI, Linux)                         | pass   | see the PR's Rust jobs |
+| `cargo fmt --check`                              | pass   | pass                   |
+
+No existing assertion was changed; test code only swapped `lock().unwrap()` for the helper.
+
+### Verdict
+
+Kept if CI is green. One place holds the lock policy and the linter holds the count at 0. No saving in time or tokens is claimed.

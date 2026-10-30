@@ -10,29 +10,27 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Channel Handlers ────────────────────────────────────────────────────────
-//
-// Thin adapters over service.ChannelService (B3-8 channel family): the S-03
-// name/topic/category contract, the type whitelist, the numeric bounds, the
-// audit rows and the delete ordering all live in the service. The handlers
-// decode, resolve through the one S-04 policy, delegate, and fan out to the
-// hub from the rows the service returns.
+// Thin adapters over service.ChannelService: the name/topic/category contract,
+// type whitelist, numeric bounds, audit rows and delete ordering all live in
+// the service. The handlers decode, resolve through the one guild-channel
+// policy, delegate, and fan out to the hub from the rows the service returns.
 
-// resolveGuildChannel adapts service.ChannelService.ResolveGuildChannel — the
-// one non-DM resolution policy (S-04) — to this surface: a missing channel
-// and a DM id answer an identical 404 (A-2026-08-02). Returns nil when a
-// response has already been written.
+// resolveGuildChannel adapts service.ChannelService.ResolveGuildChannel (the
+// one non-DM resolution policy) to this surface: a missing channel and a DM id
+// answer an identical 404. Returns nil when a response has already been
+// written.
 func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter, r *http.Request) *db.Channel {
 	if channels == nil {
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 		return nil
 	}
 	id, err := pathInt64(r, "id")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid channel id")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid channel id")
 		return nil
 	}
 	ch, err := channels.ResolveGuildChannel(r.Context(), id)
@@ -44,29 +42,28 @@ func resolveGuildChannel(channels *service.ChannelService, w http.ResponseWriter
 }
 
 // writeChannelErr maps ChannelService errors onto admin API responses.
-// Validation failures answer INVALID_INPUT with the service's own message —
-// the S-03 contract's wording is the response body.
+// Validation failures answer INVALID_INPUT with the service's own message.
 func writeChannelErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrPermsChanged) {
-		writeErr(w, http.StatusConflict, "PERMISSIONS_CHANGED", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodePermissionsChanged, err.Error())
 		return
 	}
 	if errors.Is(err, service.ErrConflict) {
-		writeErr(w, http.StatusConflict, "CHANNEL_NAME_TAKEN", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeChannelNameTaken, err.Error())
 		return
 	}
-	writeSvcErr(w, err, "channel not found", "INVALID_INPUT", "channel action failed")
+	writeSvcErr(w, err, "channel not found", httperr.CodeInvalidInput, "channel action failed")
 }
 
 func handleListChannels(channels *service.ChannelService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		guildChannels, err := channels.AdminListChannelsSynced(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list channels")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list channels")
 			return
 		}
 		writeJSON(w, http.StatusOK, guildChannels)
@@ -87,15 +84,15 @@ type createChannelRequest struct {
 	Position   int    `json:"position"`
 }
 
-// createChannelPostCommitHook, when non-nil, runs synchronously right after
-// the create commit, before the post-commit re-read and hub fan-out — so
-// tests can land a caller cancellation in that exact window (OC-0158).
+// createChannelPostCommitHook, when non-nil, runs synchronously right after the
+// create commit, before the post-commit re-read and hub fan-out, so tests can
+// land a caller cancellation in that window.
 var createChannelPostCommitHook func()
 
 func handleCreateChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if channels == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "channel service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "channel service unavailable")
 			return
 		}
 		var req createChannelRequest
@@ -149,13 +146,18 @@ type updateChannelRequest struct {
 	VoiceMaxUsers int `json:"voice_max_users"`
 	VoiceMaxVideo int `json:"voice_max_video"`
 	// SyncPermissions replaces the channel's overrides with the template of the
-	// category it ends up in and marks it synced (WP 6.5d). Without it, moving
+	// category it ends up in and marks it synced. Without it, moving
 	// a channel to another category keeps its overrides and unsyncs it.
 	SyncPermissions bool `json:"sync_permissions"`
+	// Password sets, changes or removes a voice channel's password: absent
+	// leaves it alone, "" removes it, anything else becomes the password. Any
+	// value on a channel that is not a voice channel answers 400. It is never
+	// returned by any response.
+	Password *string `json:"password"`
 }
 
 // patchChannelPostCommitHook mirrors createChannelPostCommitHook for the
-// update path's post-commit window (OC-0158).
+// update path's post-commit window.
 var patchChannelPostCommitHook func()
 
 func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) http.HandlerFunc {
@@ -205,6 +207,7 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 
 			SyncPermissions: req.SyncPermissions,
 			ActorRole:       actorRoleFromContext(r),
+			Password:        req.Password,
 		}, patchChannelPostCommitHook)
 		if err != nil {
 			writeChannelErr(w, err)
@@ -216,10 +219,10 @@ func handlePatchChannel(channels *service.ChannelService, hub HubBroadcaster) ht
 				hub.BroadcastChannelCategories(newCats)
 			}
 			// Archiving/unarchiving changes who sees the channel, not just its
-			// metadata — send targeted channel_create/channel_delete so
-			// connected clients re-sync without a reconnect. Archiving also
-			// hides a voice channel the way deleting does, so live
-			// participants are evicted first, matching the delete ordering.
+			// metadata: send targeted channel_create/channel_delete so clients
+			// re-sync without a reconnect. Archiving hides a voice channel the way
+			// deleting does, so live participants are evicted first, matching the
+			// delete ordering.
 			if existing.Archived != updated.Archived {
 				if !existing.Archived && updated.Archived {
 					hub.CleanupVoiceForChannel(existing.ID)
@@ -273,7 +276,7 @@ const (
 func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if settings == nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "settings service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "settings service unavailable")
 			return
 		}
 		limit := queryInt(r, "limit", 50, 1, 500)
@@ -287,17 +290,17 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		action := r.URL.Query().Get("action")
 		hideSignins := r.URL.Query().Get("hide_signins") == "1"
 		if !utf8.ValidString(query) || utf8.RuneCountInString(query) > maxAuditQueryRunes {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("q must be valid text of at most %d characters", maxAuditQueryRunes))
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("q must be valid text of at most %d characters", maxAuditQueryRunes))
 			return
 		}
 		if !utf8.ValidString(action) || len(action) > maxAuditActionLen {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", fmt.Sprintf("action must be valid text of at most %d bytes", maxAuditActionLen))
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("action must be valid text of at most %d bytes", maxAuditActionLen))
 			return
 		}
 
 		entries, err := settings.AuditLog(r.Context(), action, query, hideSignins, limit, offset)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get audit log")
 			return
 		}
 		// The first page also names every action in the whole log, so the
@@ -306,12 +309,12 @@ func handleGetAuditLog(settings *service.SettingsService) http.HandlerFunc {
 		if offset == 0 {
 			actions, err := settings.AuditActions(r.Context(), maxAuditActions)
 			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+				writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get audit log")
 				return
 			}
 			names, err := json.Marshal(actions)
 			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get audit log")
+				writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get audit log")
 				return
 			}
 			w.Header().Set("X-Audit-Actions", string(names))

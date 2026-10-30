@@ -10,7 +10,7 @@
 // the `ended` event the shared camera code listens for when the device is
 // unplugged.
 //
-// Lifecycle (B7-11): the shared camera state owns the track and stops it on
+// Lifecycle: the shared camera state owns the track and stops it on
 // disable/leave; `NativeRoom` also stops it when it disconnects. stop() is
 // idempotent.
 import type {

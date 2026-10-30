@@ -5,17 +5,18 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
 // The admin panel has three actions that end in a process restart: applying a
 // server update, restoring a database backup, and finishing the setup wizard
-// with listener-affecting changes. None of them stop or spawn processes
-// directly — they request a restart through the hook below, and the main
-// package performs the actual work: trigger the same graceful drain a SIGTERM
-// would (which also works on Windows, where a process cannot signal itself),
-// and only after run() has fully torn down either spawn the replacement
-// binary or exit for the process supervisor to relaunch, per
-// server.restart_mode (see Server/internal/app/restart.go).
+// with listener-affecting changes. None stops or spawns processes directly;
+// each requests a restart through the hook below, and the main package
+// triggers the same graceful drain a SIGTERM would (which also works on
+// Windows, where a process cannot signal itself), then after run() has fully
+// torn down either spawns the replacement binary or exits for the supervisor
+// to relaunch, per server.restart_mode (see Server/internal/app/restart.go).
 
 // restartSelf is the process-restart request hook. Swapped by
 // SetRestartHandoff at startup and by tests (StubRestart); the default logs
@@ -47,12 +48,11 @@ func requestRestart(reason string) {
 	fn(reason)
 }
 
-// restartState serializes the restart-ending admin actions against each
-// other. Two problems it closes: concurrent update applies raced the same
-// staged .new file (each download deletes the other's staged file, and the
-// loser broadcast a spurious update_aborted to every client while a restart
-// was actually happening), and a restore could tear the database down under
-// an apply that had already responded 200.
+// restartState serializes the restart-ending admin actions against each other:
+// concurrent update applies would race the same staged .new file (each
+// download deletes the other's, and the loser broadcast a spurious
+// update_aborted during a real restart), and a restore could tear the database
+// down under an apply that had already responded 200.
 //
 //	idle ──beginRestartSensitiveOp──▶ busy ──commitRestartPending──▶ pending
 //	  ▲                                │
@@ -102,10 +102,10 @@ func tryDirectRestartPending() bool {
 // "the process is about to be replaced".
 func writeRestartConflict(w http.ResponseWriter) {
 	if restartState.Load() == restartStatePending {
-		writeErr(w, http.StatusConflict, "RESTART_PENDING",
+		writeErr(w, http.StatusConflict, httperr.CodeRestartPending,
 			"the server is restarting — retry after it comes back")
 		return
 	}
-	writeErr(w, http.StatusConflict, "UPDATE_IN_PROGRESS",
+	writeErr(w, http.StatusConflict, httperr.CodeUpdateInProgress,
 		"another update or restore is already in progress")
 }

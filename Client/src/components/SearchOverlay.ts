@@ -6,18 +6,19 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
-import { closeOnBackdropClick } from "@lib/modalFactory";
-import type { MountableComponent } from "@lib/safe-render";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { SearchResultItem, SearchResponse } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
-import { parseTimestamp, resolveAuthor } from "@lib/formatting";
-import { resolveDisplayName } from "@lib/avatar";
-import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
-import { markdownToPlainText } from "@lib/markdown";
+import { parseTimestamp, resolveAuthor } from "@lib/text/formatting";
+import { resolveDisplayName } from "@lib/ui/avatar";
+import { createImportedName, createImportedTag } from "./message-list/importedAuthor";
+import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
+import { markdownToPlainText } from "@lib/text/markdown";
 import { formatDate } from "../i18n/format";
 import { messagingText } from "../i18n/messaging";
 
@@ -38,7 +39,7 @@ export interface SearchOverlayOptions {
   ) => Promise<SearchResponse>;
   readonly onSelectResult: (result: SearchResultItem) => void;
   readonly onClose: () => void;
-  /** The channel the overlay opened on; omitted behind the NSFW gate (B9-7). */
+  /** The channel the overlay opened on; omitted behind the NSFW gate. */
   readonly currentChannelId?: number;
 }
 
@@ -189,8 +190,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
   // Whole server is the default scope (D4 option b: "Whole server by default
   // with an 'in #channel' chip"), matching Discord. The chip that narrows to
   // the current channel is only offered when the overlay opened on one, so the
-  // NSFW gate (which opens it without a channel) can never be narrowed back in
-  // (B9-7).
+  // NSFW gate (which opens it without a channel) can never be narrowed back in.
   let scopeServer = true;
   let nextBefore: number | null = null;
   // The query that produced the currently displayed results. Paging must use it
@@ -243,15 +243,25 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const channel = createElement("span", { class: "search-result-channel" });
       const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id);
       setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);
-      const who = resolveAuthor(r.user);
-      const authorName = resolveDisplayName(who);
-      const author = createElement("span", { class: "search-result-author" });
-      setText(author, authorName);
-      appendChildren(header, channel, author);
-      if (authorName !== who.username) {
-        const handle = createElement("span", { class: "search-result-handle" });
-        setText(handle, messagingText("search.authorHandle", { username: who.username }));
-        header.appendChild(handle);
+      if (r.imported_author !== undefined) {
+        // No account behind it: the Discord name and tag, and no @handle.
+        appendChildren(
+          header,
+          channel,
+          createImportedName(r.imported_author, "search-result-author"),
+          createImportedTag(),
+        );
+      } else {
+        const who = resolveAuthor(r.user);
+        const authorName = resolveDisplayName(who);
+        const author = createElement("span", { class: "search-result-author" });
+        setText(author, authorName);
+        appendChildren(header, channel, author);
+        if (authorName !== who.username) {
+          const handle = createElement("span", { class: "search-result-handle" });
+          setText(handle, messagingText("search.authorHandle", { username: who.username }));
+          header.appendChild(handle);
+        }
       }
       const time = createElement("span", { class: "search-result-time" });
       setText(time, formatTimestamp(r.timestamp));
@@ -285,7 +295,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       input.setAttribute("aria-activedescendant", `search-result-option-${activeIndex}`);
       // The results box is a fixed max-height scroller, so the roving highlight
       // otherwise walks off the bottom while Enter still opens the hidden row.
-      // The sibling inline autocomplete already does this (OC-0370).
+      // The sibling inline autocomplete already does this.
       (resultsDiv.children[activeIndex] as HTMLElement | undefined)?.scrollIntoView({
         block: "nearest",
       });
@@ -496,7 +506,7 @@ export function createSearchOverlay(options: SearchOverlayOptions): MountableCom
       const selected = results[activeIndex];
       if (selected !== undefined) {
         // Picking a hit jumps to it without closing the panel, so a reader can
-        // walk through several hits (DP-20). Escape or the backdrop closes.
+        // walk through several hits. Escape or the backdrop closes.
         options.onSelectResult(selected);
       }
     }

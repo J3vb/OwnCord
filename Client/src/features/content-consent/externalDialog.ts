@@ -1,11 +1,11 @@
 /**
- * The per-server external-content choice (B9-8, Q3), loaded only when the
+ * The per-server external-content choice, loaded only when the
  * viewer first activates a concealed item. Cancel, Escape and the backdrop
  * choose nothing, so nothing is fetched.
  */
 
 import { appendChildren, createElement } from "@lib/dom";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import { externalConsentText as t } from "../../i18n/externalConsent";
 import type { ExternalConsentChoice } from "./external";
 

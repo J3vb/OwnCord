@@ -1,5 +1,5 @@
 /**
- * The Change Nickname dialog (WP 6.4c): one input, prefilled with the member's
+ * The Change Nickname dialog: one input, prefilled with the member's
  * current nickname, that sets another member's server nickname; Reset clears
  * it.
  *
@@ -18,16 +18,16 @@
  */
 
 import { errorText } from "@lib/api";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import {
   attachLimitHint,
   collapseSpaces,
   lineHintText,
   MAX_DISPLAY_NAME_LEN,
   runeCount,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 import type { ToastType } from "@components/Toast";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";

@@ -12,13 +12,13 @@ import { safetyStore } from "../../features/safety/store";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { shellText } from "../../i18n/shell";
 import type { MessageListOptions } from "../MessageList";
-import { attachReactionTooltip } from "./reaction-tooltip";
-import { buildCustomEmojiNode } from "./custom-emoji";
+import { attachReactionTooltip } from "./reactionTooltip";
+import { buildCustomEmojiNode } from "./customEmoji";
 
 // -- Reaction rendering -------------------------------------------------------
 
 /** Why reacting is disabled: the socket is down (a reaction frame would be
- *  lost), or the user is timed out (B9-15, Q4), with the server's expiry.
+ *  lost), or the user is timed out, with the server's expiry.
  *  Null when reacting works. */
 export function reactionLockReason(canReact?: boolean): string | null {
   const status = uiStore.getState().connectionStatus;
@@ -99,12 +99,12 @@ export function renderReactions(
 }
 
 /** Each wired control's unlocked title, so refreshReactionLocks can lift a
- *  timeout's lock back to it without a row rebuild (P4-02). */
+ *  timeout's lock back to it without a row rebuild. */
 const defaultTitles = new WeakMap<HTMLElement, string>();
 
 /** Wire a reaction control: attach its activation listener once, then apply
  *  the current lock. The listener stays attached across a timeout; the lock is
- *  read at activation time so it can be toggled in place (P4-02). */
+ *  read at activation time so it can be toggled in place. */
 export function wireReactionControl(
   el: HTMLElement,
   onActivate: () => void,

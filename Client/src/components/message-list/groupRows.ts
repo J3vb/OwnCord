@@ -1,12 +1,12 @@
-// Group DM system rows (WP 3B-11a): "A added B to the group", "A left the group",
+// Group DM system rows: "A added B to the group", "A left the group",
 // and the rename / icon lines. The wording is built from `kind` + `groupEvent`
 // alone, never from `content` (the server's English fallback sentence), and the
 // names come from live stores so a rename of a member shows up on re-render.
 import { dmStore } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
-import { resolveDisplayName } from "@lib/avatar";
-import { resolveAuthor } from "@lib/formatting";
+import { resolveDisplayName } from "@lib/ui/avatar";
+import { resolveAuthor } from "@lib/text/formatting";
 import { ChatMessageKind } from "@lib/protocolTypes";
 import { messagingText } from "../../i18n/messaging";
 

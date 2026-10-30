@@ -186,7 +186,7 @@ func (q *Queries) GetAttachmentByID(ctx context.Context, id string) (GetAttachme
 const getAttachmentWithChannel = `-- name: GetAttachmentWithChannel :one
 SELECT a.id, a.message_id, a.filename, a.stored_as, a.mime_type, a.size,
        a.uploaded_at, a.uploader_id, m.channel_id, c.type, c.nsfw,
-       p.nsfw AS parent_nsfw
+       p.nsfw AS parent_nsfw, c.import_pending
 FROM attachments a
 LEFT JOIN messages m ON m.id = a.message_id
 LEFT JOIN channels c ON c.id = m.channel_id
@@ -195,18 +195,19 @@ WHERE a.id = ?
 `
 
 type GetAttachmentWithChannelRow struct {
-	ID         string  `json:"id"`
-	MessageID  *int64  `json:"messageId"`
-	Filename   string  `json:"filename"`
-	StoredAs   string  `json:"storedAs"`
-	MimeType   string  `json:"mimeType"`
-	Size       int64   `json:"size"`
-	UploadedAt string  `json:"uploadedAt"`
-	UploaderID *int64  `json:"uploaderId"`
-	ChannelID  *int64  `json:"channelId"`
-	Type       *string `json:"type"`
-	Nsfw       *int64  `json:"nsfw"`
-	ParentNsfw *int64  `json:"parentNsfw"`
+	ID            string  `json:"id"`
+	MessageID     *int64  `json:"messageId"`
+	Filename      string  `json:"filename"`
+	StoredAs      string  `json:"storedAs"`
+	MimeType      string  `json:"mimeType"`
+	Size          int64   `json:"size"`
+	UploadedAt    string  `json:"uploadedAt"`
+	UploaderID    *int64  `json:"uploaderId"`
+	ChannelID     *int64  `json:"channelId"`
+	Type          *string `json:"type"`
+	Nsfw          *int64  `json:"nsfw"`
+	ParentNsfw    *int64  `json:"parentNsfw"`
+	ImportPending *int64  `json:"importPending"`
 }
 
 // c.nsfw is the channel's label (B5-7's read gate, UploadService.Authorize):
@@ -230,6 +231,7 @@ func (q *Queries) GetAttachmentWithChannel(ctx context.Context, id string) (GetA
 		&i.Type,
 		&i.Nsfw,
 		&i.ParentNsfw,
+		&i.ImportPending,
 	)
 	return i, err
 }

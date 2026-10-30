@@ -40,7 +40,7 @@ function seed(messages: Message[]): void {
 const mine = (over: Partial<Message> = {}): Message =>
   makeMessage({ user: { id: ME, username: "me", avatar: null }, ...over });
 
-describe("message hover bar (WP 3A-7)", () => {
+describe("message hover bar", () => {
   let container: HTMLDivElement;
   let ac: AbortController;
 

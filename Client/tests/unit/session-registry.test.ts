@@ -3,7 +3,7 @@ import {
   listSessionResets,
   registerSessionReset,
   runSessionResets,
-} from "../../src/lib/sessionRegistry";
+} from "../../src/lib/net/sessionRegistry";
 import { authStore, clearAuth, setAuth } from "../../src/stores/auth.store";
 import type { UserWithRole } from "../../src/lib/types";
 import { expectConsole } from "../helpers/console";

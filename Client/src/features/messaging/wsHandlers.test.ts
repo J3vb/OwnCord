@@ -30,9 +30,9 @@ import type { DmChannelsResponse } from "../../lib/types";
 
 vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 import { notifyIncomingMessage } from "../../lib/notifications";
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-import { showToast } from "../../lib/toast";
-import { setLiveTailInView } from "../../lib/read-state";
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
+import { showToast } from "../../lib/ui/toast";
+import { setLiveTailInView } from "../../lib/readState";
 import { expectConsole } from "../../../tests/helpers/console";
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {
@@ -115,7 +115,7 @@ describe("handleChatMessage replay gate", () => {
   });
 });
 
-describe("handleChatMessage clears the sender's typing (DP-15)", () => {
+describe("handleChatMessage clears the sender's typing", () => {
   const bob = { id: 2, username: "bob", avatar: null, role: "member", status: "online" as const };
 
   it("clears the sender's typing state when their message lands", () => {
@@ -221,7 +221,7 @@ describe("handleMessagingError", () => {
     expect(failed?.errorCode).toBe("REQUEST_TIMEOUT");
   });
 
-  it("labels a refused pre-restore retry and keeps its text (OC-0476)", () => {
+  it("labels a refused pre-restore retry and keeps its text", () => {
     const floor = Date.now() + 5 * 60 * 1000 + 1000;
     activatePendingMessages({ host: "chat.example", userId: 1 }, me, true, floor);
     try {
@@ -321,7 +321,7 @@ describe("failPendingOnDisconnect", () => {
   });
 });
 
-describe("failPendingOnDisconnect with an uploading row (WP 3A-9)", () => {
+describe("failPendingOnDisconnect with an uploading row", () => {
   it("leaves the uploading row alone while failing the pending sends beside it", () => {
     addOptimisticMessage({
       correlationId: "up-1",
@@ -597,7 +597,7 @@ function seedActiveChannel(lastMessageId: number | null = null): void {
 const channel = () => channelsStore.getState().channels.get(1)!;
 const live = (id: number) => chat(id, new Date().toISOString());
 
-describe("handleChatMessage counts the active channel while the window is unfocused (P4-03)", () => {
+describe("handleChatMessage counts the active channel while the window is unfocused", () => {
   beforeEach(() => {
     authStore.setState((prev) => ({
       ...prev,
@@ -724,7 +724,7 @@ describe("handleChatMessage counts the active channel while its live tail is out
   });
 });
 
-describe("handleChatMessage counts a group row as unread (WP 3B-11a)", () => {
+describe("handleChatMessage counts a group row as unread", () => {
   afterEach(() => setDmChannels([]));
 
   it("raises the unread badge of a background group DM for each group kind", () => {

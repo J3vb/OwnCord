@@ -10,48 +10,36 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// Hub accessor and stats methods split out of hub.go (OC-0400) to keep it
-// under the B3-5 guardrail (invariants/file_sizes.go). No behavior change —
-// moved verbatim.
-
-// hubLatencyMetrics is the shipped in-process metrics surface (SRE-M1). The
-// zero value is fully usable, so NewHub needs no initializer and the struct
-// adds no allocation to the hot path. These figures exist in every build,
-// unlike the OpenTelemetry instruments in Server/telemetry, which compile only
-// under -tags otel — the release and Docker builds use no build tags, so an
-// OTel-only latency figure is invisible to the operators who run them.
+// hubLatencyMetrics is the shipped in-process metrics surface. The zero value is
+// usable, so NewHub needs no initializer. Unlike the OpenTelemetry instruments in
+// Server/telemetry (compiled only under -tags otel), these exist in every build,
+// including the untagged release and Docker builds.
 type hubLatencyMetrics struct {
-	// broadcast is enqueue→fanout-done: the whole time a frame spent queued
-	// behind other broadcasts plus its own delivery.
+	// broadcast is enqueue to fanout-done: time queued behind other broadcasts plus delivery.
 	broadcast metrics.Histogram
-	// dispatchLag is enqueue→dispatch-start: how long a frame waited for the
-	// single dispatch goroutine to reach it. The direct signal for a
-	// contended dispatch loop (SRV-04).
+	// dispatchLag is enqueue to dispatch-start: how long a frame waited for the single
+	// dispatch goroutine; the direct signal for a contended loop.
 	dispatchLag metrics.Histogram
-	// chatAck is a client's chat_send receipt→its chat_send_ok being queued:
-	// the round trip inside the server, which the load run compares against
-	// k6's client-side figure.
+	// chatAck is chat_send receipt to its chat_send_ok being queued: the in-server
+	// round trip, compared against k6's client-side figure.
 	chatAck metrics.Histogram
-	// seqMuHold is the longest single hold of the broadcast-sequence mutex,
-	// in milliseconds. The purge's full scan (SRV-01) shows up here.
+	// seqMuHold is the longest single hold of the broadcast-sequence mutex, in ms.
 	seqMuHold metrics.MaxGauge
-	// topicSheds counts channel frames the topic limiter dropped before a
-	// seq was assigned (SRV-03). Distinct from broadcastDrops, which is the
-	// hub-wide queue, and from low-priority drops, which lose nothing.
+	// topicSheds counts channel frames the topic limiter dropped before a seq was
+	// assigned (distinct from broadcastDrops, the hub-wide queue).
 	topicSheds atomic.Uint64
 	// voiceJoin is voice_join_ms: each phase of a completed voice join.
 	voiceJoin voiceJoinMetrics
 }
 
-// voiceJoinMetrics times the phases of handleVoiceJoin for joins that reach
-// the joiner; a refused or rolled-back join records nothing, so every phase
-// shares one count.
+// voiceJoinMetrics times the phases of handleVoiceJoin for joins that reach the
+// joiner; a refused or rolled-back join records nothing, so every phase shares
+// one count.
 type voiceJoinMetrics struct {
 	precheck, leave, persist, token, complete, total metrics.Histogram
 }
 
-// observe records one completed join from the timestamps taken as each phase
-// ended.
+// observe records one completed join from the timestamps taken as each phase ended.
 func (m *voiceJoinMetrics) observe(start, precheckDone, leaveDone, persistDone, tokenDone, completeDone time.Time) {
 	ms := func(from, to time.Time) float64 { return float64(to.Sub(from)) / float64(time.Millisecond) }
 	m.precheck.Observe(ms(start, precheckDone))
@@ -62,11 +50,8 @@ func (m *voiceJoinMetrics) observe(start, precheckDone, leaveDone, persistDone, 
 	m.total.Observe(ms(start, completeDone))
 }
 
-// VoiceJoinPhases is the voice_join_ms snapshot: precheck (rate limit,
-// permission and channel gates), leave (leaving the previous channel on a
-// switch), persist (the voice_states write and moderator-flag restore), token
-// (minting and sending voice_token), complete (subscription, voice_state
-// fan-out, existing states and voice_config) and total.
+// VoiceJoinPhases is the voice_join_ms snapshot: precheck, leave (previous channel
+// on a switch), persist, token, complete and total.
 type VoiceJoinPhases struct {
 	Precheck metrics.Summary `json:"precheck"`
 	Leave    metrics.Summary `json:"leave"`
@@ -76,26 +61,23 @@ type VoiceJoinPhases struct {
 	Total    metrics.Summary `json:"total"`
 }
 
-// observeSeqMuHold records how long the current seqMu critical section was
-// held, in milliseconds. Call the sequence:
+// observeSeqMuHold records how long the current seqMu critical section was held,
+// in milliseconds. Call it as:
 //
 //	h.seqMu.Lock()
 //	start := time.Now()
 //	defer h.seqMu.Unlock()
 //	defer h.observeSeqMuHold(start)
 //
-// start is taken after Lock returns, so time spent waiting for the lock is
-// not counted as a hold. Defers are LIFO, so observeSeqMuHold runs BEFORE the
-// unlock — the hold is measured while it is still held. Every seqMu critical section — seq
-// allocation and fan-out, replay purge, visibility bumps, reconnect
-// registration — feeds hub_seqmu_max_hold_ms through this. It is a deferred
-// method call, not a returned closure, so the hot path allocates nothing.
+// start is taken after Lock returns, so lock wait is not counted. Defers are LIFO,
+// so it runs before the unlock and measures the hold while still held. Every
+// seqMu section feeds hub_seqmu_max_hold_ms through this. It is a deferred method
+// call, not a returned closure, so the hot path allocates nothing.
 func (h *Hub) observeSeqMuHold(start time.Time) {
 	h.latency.seqMuHold.Observe(float64(time.Since(start)) / float64(time.Millisecond))
 }
 
-// observeDispatchLag records enqueue→dispatch-start for a frame, in
-// milliseconds. Zero enqueuedAt (test-constructed messages) is skipped.
+// observeDispatchLag records enqueue to dispatch-start in ms; a zero enqueuedAt is skipped.
 func (h *Hub) observeDispatchLag(enqueuedAt time.Time) {
 	if enqueuedAt.IsZero() {
 		return
@@ -103,8 +85,7 @@ func (h *Hub) observeDispatchLag(enqueuedAt time.Time) {
 	h.latency.dispatchLag.Observe(float64(time.Since(enqueuedAt)) / float64(time.Millisecond))
 }
 
-// recordBroadcastLatency records enqueue→fanout-done for a delivered frame, in
-// milliseconds. Zero enqueuedAt is skipped.
+// recordBroadcastLatency records enqueue to fanout-done in ms; a zero enqueuedAt is skipped.
 func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 	if enqueuedAt.IsZero() {
 		return
@@ -112,28 +93,25 @@ func (h *Hub) recordBroadcastLatency(enqueuedAt time.Time) {
 	h.latency.broadcast.Observe(float64(time.Since(enqueuedAt)) / float64(time.Millisecond))
 }
 
-// allowTopicFrame reports whether bm, a channel-scoped broadcast, may proceed
-// under the topic rate limit, counted per channel and sender. The limit is a
-// sliding 1s window via the shared auth.RateLimiter (the deleted TopicRateLimiter was a token bucket
-// with a full refill at each window boundary — sliding is stricter on
-// boundary-straddling bursts, the same sustained rate).
+// allowTopicFrame reports whether bm, a channel-scoped broadcast, may proceed under
+// the per-channel, per-sender topic rate limit: a sliding 1s window via the shared
+// auth.RateLimiter (stricter than a token bucket on boundary-straddling bursts,
+// same sustained rate).
 //
-// A shed frame is counted (topic_sheds_total, SRE-M1). SRV-03: for a
-// CONTENT-bearing frame (nsfwChannelID marks the kinds in contentBearingKinds)
-// it also ratchets the visibility watermark, so a client resuming from a seq at
-// or before this point takes the full-ready path and recovers the message from
-// the database — the shed frame consumed no seq, so replay can never carry it.
-// Metadata sheds are not ratcheted: they are ephemeral or reconstructed
-// elsewhere, and forcing a full resync on a metadata burst would be a herd for
-// nothing. bumpVisibilityWatermark is lock-free, so this is safe to call while
-// holding seqMu.
+// A shed frame is counted (topic_sheds_total). For a content-bearing frame
+// (nsfwChannelID; contentBearingKinds) it also ratchets the visibility watermark,
+// so a client resuming from a seq at or before this point takes the full-ready
+// path and recovers the message from the database: the shed frame consumed no seq,
+// so replay can never carry it. Metadata sheds are not ratcheted (ephemeral or
+// reconstructed elsewhere; a full resync on a metadata burst would be a herd for
+// nothing). bumpVisibilityWatermark is lock-free, so this is safe under seqMu.
 func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	if bm.recipients != nil || bm.channelID == 0 {
 		return true
 	}
-	// Counted per sender, so a few members cannot use up a channel's budget
-	// and suppress live delivery for everyone else in it; server-originated
-	// frames (senderID 0) share the channel's own key.
+	// Counted per sender, so a few members cannot use up a channel's budget and
+	// suppress live delivery for everyone else; server-originated frames (senderID 0)
+	// share the channel's own key.
 	key := "topic:" + string(ChannelTopic(bm.channelID))
 	if bm.senderID != 0 {
 		key += ":" + strconv.FormatInt(bm.senderID, 10)
@@ -152,14 +130,13 @@ func (h *Hub) allowTopicFrame(bm broadcastMsg) bool {
 	return false
 }
 
-// queueDropState records frames the full broadcast queue dropped in enqueue
-// (SRV-03): dropped counts them, applied is how many applyQueueContentDrops
-// has settled into the resync watermark. applied is guarded by seqMu.
+// queueDropState records frames the full broadcast queue dropped in enqueue:
+// dropped counts them, applied is how many applyQueueContentDrops has settled into
+// the resync watermark. applied is guarded by seqMu.
 type queueDropState struct {
 	dropped atomic.Uint64
 	applied uint64
-	// routes are the audiences of drops not yet marked (hub_loss.go);
-	// guarded by mu, a leaf lock.
+	// routes are the audiences of drops not yet marked (hub_loss.go); guarded by mu, a leaf lock.
 	mu             syncutil.Ranked[lockRankLeaf]
 	routes         []lossRoute
 	routesOverflow bool
@@ -168,12 +145,11 @@ type queueDropState struct {
 }
 
 // recordQueueDrop counts a frame enqueue dropped on a full broadcast queue and
-// leaves it for applyQueueContentDrops to settle into the resync watermark
-// under seqMu (SRV-03). Every queued frame would have been sequenced and
-// replayable, so any drop is a hole replay cannot fill, metadata included
-// (a lost chat_deleted leaves the message on screen). A presence snapshot
-// request is the exception: it carries no frame and flushPresenceQueue
-// retries it.
+// leaves it for applyQueueContentDrops to settle into the resync watermark under
+// seqMu. Every queued frame would have been sequenced and replayable, so any drop
+// is a hole replay cannot fill, metadata included (a lost chat_deleted leaves the
+// message on screen). A presence snapshot request is the exception: it carries no
+// frame and flushPresenceQueue retries it.
 func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 	h.broadcastDrops.Add(1)
 	h.noteDropRoute(bm)
@@ -184,15 +160,14 @@ func (h *Hub) recordQueueDrop(bm broadcastMsg, kind string) {
 		"channel_id", bm.channelID, "msg_len", len(bm.msg))
 }
 
-// applyQueueContentDrops is SRV-03's recovery for a frame the full broadcast
-// queue dropped in enqueue. Unlike a topic shed, that frame's
-// place in the seq stream lies behind every frame still queued ahead of it, so
-// while such a drop is unsettled every call ratchets the watermark to the
-// current seq, and the drop only counts as settled once the queue is seen
-// empty — every frame queued before it has been sequenced by then. That proof
-// holds only on the dispatch goroutine, so deliverGated is the sole caller,
-// under seqMu after each frame; mustFullResyncAtRegister bumps for an
-// unsettled drop but never settles it.
+// applyQueueContentDrops is the recovery for a frame the full broadcast queue
+// dropped in enqueue. Unlike a topic shed, that frame's place in the seq stream
+// lies behind every frame still queued ahead of it, so while a drop is unsettled
+// every call ratchets the watermark to the current seq, and the drop settles only
+// once the queue is seen empty (every earlier frame has been sequenced). That
+// proof holds only on the dispatch goroutine, so deliverGated is the sole caller,
+// under seqMu after each frame; mustFullResyncAtRegister bumps for an unsettled
+// drop but never settles it.
 func (h *Hub) applyQueueContentDrops() {
 	h.markDroppedRoutes()
 	n := h.queueDrops.dropped.Load()
@@ -206,22 +181,20 @@ func (h *Hub) applyQueueContentDrops() {
 	}
 }
 
-// mustFullResyncAtRegister is reconnectRegister's final watermark check, run
-// under seqMu. An unsettled queue drop (SRV-03) ratchets the watermark first,
-// so a resume racing the dispatch of the frames ahead of it still takes the
-// full-ready path. So does a targeted fan-out still in flight
-// (beginTargetedFanout), a loss marked for this user (markLoss) since
-// reconnectPrecheck looked, and a role refresh pending or running for this user
-// (role_refresh.go) -- scoped to the affected users, so every other reconnect
-// still resumes by replay.
+// mustFullResyncAtRegister is reconnectRegister's final watermark check, run under
+// seqMu. An unsettled queue drop ratchets the watermark first, so a resume racing
+// the dispatch of earlier frames takes the full-ready path. So does a targeted
+// fan-out in flight (beginTargetedFanout), a loss marked for this user (markLoss)
+// since reconnectPrecheck, and a role refresh pending or running for this user
+// (role_refresh.go), scoped to the affected users so other reconnects still replay.
 func (h *Hub) mustFullResyncAtRegister(lastSeq uint64, userID int64, tokenHash string) bool {
 	if h.queueDrops.dropped.Load() != h.queueDrops.applied {
 		h.bumpVisibilityWatermark()
 	}
-	// The order matters: a refresh round bumps the watermark and only then
-	// stops covering the user. Reading covers first means a reconnect sees
-	// either the user still covered or the new watermark. covers runs under
-	// seqMu and roleRefresh.mu is a leaf, so the lock order is unchanged.
+	// Order matters: a refresh round bumps the watermark and only then stops covering
+	// the user. Reading covers first means a reconnect sees either the user still
+	// covered or the new watermark. covers runs under seqMu and roleRefresh.mu is a
+	// leaf, so the lock order is unchanged.
 	covered := h.roleRefresh.covers(userID)
 	if mustFullResyncMidReadRaceHook != nil {
 		mustFullResyncMidReadRaceHook()
@@ -230,21 +203,19 @@ func (h *Hub) mustFullResyncAtRegister(lastSeq uint64, userID int64, tokenHash s
 		h.presenceResyncPending(userID, tokenHash)
 }
 
-// mustFullResyncMidReadRaceHook, when non-nil, runs between the coverage read
-// and the watermark read in mustFullResyncAtRegister. Test-only (nil in
-// production); pins the order deterministically.
+// mustFullResyncMidReadRaceHook, when non-nil, runs between the coverage read and
+// the watermark read in mustFullResyncAtRegister. Test-only; pins the order.
 var mustFullResyncMidReadRaceHook func()
 
-// BroadcastQueueDepth is the number of frames currently waiting on the hub's
-// dispatch channel — 0 is healthy, approaching the channel's capacity means
-// the dispatch loop cannot keep up. Safe to call from any goroutine.
+// BroadcastQueueDepth is the number of frames waiting on the dispatch channel: 0
+// is healthy, near capacity means the loop cannot keep up. Safe from any goroutine.
 func (h *Hub) BroadcastQueueDepth() int { return len(h.broadcast) }
 
 // SeqMuMaxHoldMs is the longest single seqMu hold observed since start.
 func (h *Hub) SeqMuMaxHoldMs() float64 { return h.latency.seqMuHold.Millis() }
 
-// TopicShedCount is the cumulative number of channel frames dropped by the
-// topic limiter before a sequence number was assigned.
+// TopicShedCount is the cumulative channel frames dropped by the topic limiter
+// before a sequence number was assigned.
 func (h *Hub) TopicShedCount() uint64 { return h.latency.topicSheds.Load() }
 
 // BroadcastMs returns the current enqueue-to-fanout-done latency distribution.
@@ -270,13 +241,11 @@ func (h *Hub) VoiceJoinMs() VoiceJoinPhases {
 }
 
 // LatencyCounts holds the raw cumulative counts of every shipped latency
-// histogram, keyed by its JSON name: "ws_broadcast_ms", "ws_dispatch_lag_ms",
-// "chat_send_ack_ms" and "voice_join_ms.<phase>" (the Prometheus exposition,
-// WP 4.3b). The names are the ones WindowSources registers.
+// histogram keyed by JSON name ("ws_broadcast_ms", "ws_dispatch_lag_ms",
+// "chat_send_ack_ms", "voice_join_ms.<phase>"), as WindowSources registers them.
 type LatencyCounts map[string]metrics.Counts
 
-// LatencyCounts reads every latency histogram's raw counts. Each read is a
-// handful of atomic loads and takes no hub lock.
+// LatencyCounts reads every histogram's raw counts: atomic loads, no hub lock.
 func (h *Hub) LatencyCounts() LatencyCounts {
 	hists, _, _ := h.WindowSources()
 	out := make(LatencyCounts, len(hists))
@@ -286,11 +255,10 @@ func (h *Hub) LatencyCounts() LatencyCounts {
 	return out
 }
 
-// WindowSources lists every figure the windowed metrics block samples (WP
-// 4.3a). The names are the JSON keys under /api/v1/metrics "windows", and the
-// voice phases are "voice_join_ms.<phase>". Every counter is an atomic load, so
-// the sampler takes no hub lock. The returned slices are fresh and point at the
-// hub's own histograms, which live as long as the hub.
+// WindowSources lists every figure the windowed metrics block samples; names are the
+// JSON keys under /api/v1/metrics "windows". Every counter is an atomic load, so
+// the sampler takes no hub lock. The slices are fresh and point at the hub's own
+// histograms.
 func (h *Hub) WindowSources() ([]metrics.NamedHistogram, []metrics.NamedMaxGauge, []metrics.NamedCounter) {
 	v := &h.latency.voiceJoin
 	hists := []metrics.NamedHistogram{
@@ -324,14 +292,12 @@ func (h *Hub) WindowSources() ([]metrics.NamedHistogram, []metrics.NamedMaxGauge
 	return hists, gauges, counters
 }
 
-// IsUserConnected returns true if the user has at least one live connection
-// registered in the hub. Safe to call from any goroutine.
+// IsUserConnected reports whether the user has a live connection. Safe from any goroutine.
 func (h *Hub) IsUserConnected(userID int64) bool {
 	return h.isConnected(userID)
 }
 
-// ClientCount returns the number of live connections (test helper and the
-// admin connection count): an account on two devices counts twice.
+// ClientCount returns the number of live connections: an account on two devices counts twice.
 func (h *Hub) ClientCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -345,49 +311,44 @@ func (h *Hub) UserCount() int {
 	return len(h.clients)
 }
 
-// BroadcastDropCount returns the cumulative number of messages dropped due to a
-// full broadcast channel. Safe to call from any goroutine.
+// BroadcastDropCount returns the cumulative messages dropped on a full broadcast
+// channel. Safe from any goroutine.
 func (h *Hub) BroadcastDropCount() uint64 {
 	return h.broadcastDrops.Load()
 }
 
-// DispatchAlive reports whether the hub's dispatch loop is still running.
-// It is true before Run starts (so a health probe racing startup does not
-// flap) and false once Run has returned — normal shutdown or the panic
-// breaker. Safe to call from any goroutine.
+// DispatchAlive reports whether the dispatch loop is running: true before Run
+// starts (so a health probe racing startup does not flap), false once Run has
+// returned (shutdown or the panic breaker). Safe from any goroutine.
 func (h *Hub) DispatchAlive() bool {
 	return !h.dispatchExited.Load()
 }
 
-// BackpressureStats returns the process-lifetime per-client backpressure
-// counters: connections closed due to send-buffer overflow, high-priority
-// sends that fell back to the normal buffer, and low-priority messages
-// silently dropped. Safe to call from any goroutine.
+// BackpressureStats returns process-lifetime per-client counters: connections
+// closed on send-buffer overflow, high-priority sends that fell back to the normal
+// buffer, and low-priority messages dropped. Safe from any goroutine.
 func (h *Hub) BackpressureStats() (queueDisconnects, highFallbacks, lowDrops uint64) {
 	return h.bpQueueDisconnects.Load(), h.bpHighFallbacks.Load(), h.bpLowDrops.Load()
 }
 
-// PresenceDropCount is the process-lifetime count of presence frames dropped
-// on a full normal buffer, each repaired by a snapshot rather than a
-// disconnect (Client.sendPresenceMsg). Safe to call from any goroutine.
+// PresenceDropCount is the process-lifetime count of presence frames dropped on a
+// full normal buffer, each repaired by a snapshot (Client.sendPresenceMsg).
 func (h *Hub) PresenceDropCount() uint64 { return h.presenceRepair.drops.Load() }
 
-// DeliveryDropCount is the attention panel's delivery-pressure counter: hub
-// broadcast drops, topic-limiter sheds, and send-queue overflow disconnects.
-// Low-priority drops are excluded because they lose nothing and disconnect
-// nobody; a topic shed loses a sequenced frame, so it belongs here (SRV-03).
+// DeliveryDropCount is the attention panel's delivery-pressure counter: broadcast
+// drops, topic-limiter sheds and send-queue overflow disconnects. Low-priority
+// drops are excluded (they lose nothing); a topic shed loses a sequenced frame.
 func (h *Hub) DeliveryDropCount() uint64 {
 	return h.broadcastDrops.Load() + h.latency.topicSheds.Load() + h.bpQueueDisconnects.Load()
 }
 
-// ConnRejectCount returns how many WebSocket upgrade requests were refused by
-// the max_ws_connections capacity guardrail. Safe to call from any goroutine.
+// ConnRejectCount returns upgrade requests refused by the max_ws_connections guardrail.
 func (h *Hub) ConnRejectCount() uint64 {
 	return h.connRejects.Load()
 }
 
-// EventPersisterStats returns the attached persister's lifetime counters.
-// ok is false when event persistence is disabled (no persister attached).
+// EventPersisterStats returns the persister's lifetime counters; ok is false when
+// persistence is disabled.
 func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, ok bool) {
 	p := h.eventPersister.Load()
 	if p == nil {
@@ -397,14 +358,13 @@ func (h *Hub) EventPersisterStats() (persisted, dropped, flushes, errs uint64, o
 	return persisted, dropped, flushes, errs, true
 }
 
-// topicRateLimitPerSecond is the default maximum messages per second for any
-// single channel topic, per sender. Prevents a busy channel from saturating
-// the broadcast loop and starving other channels.
+// topicRateLimitPerSecond is the default per-sender message cap per channel topic,
+// so a busy channel cannot saturate the broadcast loop.
 const topicRateLimitPerSecond = 100
 
-// topicRateWindow is the window topicRateLimitPerSecond counts over: one
-// second. Atomic so a test can widen it while another test's hub still reads
-// it, and so a slow runner cannot spread a burst across two windows.
+// topicRateWindow is the window topicRateLimitPerSecond counts over (one second).
+// Atomic so a test can widen it while another hub still reads it, and a slow
+// runner cannot spread a burst across two windows.
 var topicRateWindow atomic.Int64
 
 func init() { topicRateWindow.Store(int64(time.Second)) }

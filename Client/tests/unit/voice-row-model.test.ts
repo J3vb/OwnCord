@@ -20,7 +20,7 @@ import {
   VOICE_USER_PATCH_FIELDS,
 } from "../../src/features/channels/voiceRow.view";
 import { createAvatarElement } from "../../src/components/message-list/avatar";
-import { reconcileModels, sameModel } from "../../src/lib/reconcile";
+import { reconcileModels, sameModel } from "../../src/lib/net/reconcile";
 import type { Channel } from "../../src/stores/channels.store";
 import type { Member } from "../../src/stores/members.store";
 import type { PeerVerification, VoiceUser } from "../../src/stores/voice.store";
@@ -72,7 +72,7 @@ function inputs(over: Partial<VoiceRowInputs> = {}): VoiceRowInputs {
     selfId: SELF,
     connectionStatus: "connected",
     timeout: null,
-    moderatable: [],
+    movable: [],
     localMute: {},
     ...over,
   };
@@ -230,9 +230,9 @@ describe("voiceUserModel", () => {
     expect(voiceUserModel(user(PEER, { username: "" }), 10, inputs(), ctx).name).toBe("Unknown");
   });
 
-  it("draggable needs moderation, another user, a live socket and a moderatable channel", () => {
+  it("draggable needs moderation, another user, a live socket and a movable channel", () => {
     const mod: VoiceUserContext = { ...ctx, moderation: true };
-    const ok = inputs({ moderatable: [10] });
+    const ok = inputs({ movable: [10] });
     expect(voiceUserModel(user(PEER), 10, ok, mod).draggable).toBe(true);
     expect(voiceUserModel(user(SELF), 10, ok, mod).draggable).toBe(false);
     expect(voiceUserModel(user(PEER), 10, ok, ctx).draggable).toBe(false);
@@ -282,6 +282,47 @@ describe("voiceChannelChrome mentions", () => {
   });
 });
 
+describe("voice row password lock", () => {
+  const lock = (wrapper: Element): HTMLElement | null =>
+    wrapper.querySelector<HTMLElement>(".channel-item > .ch-password");
+
+  it("is drawn only for a protected channel, with an accessible label", () => {
+    const protectedRow = drawVoiceChannelChrome(
+      voiceChannelChrome(channel({ passwordProtected: true }), inputs()),
+    );
+    const badge = lock(protectedRow);
+    expect(badge).not.toBeNull();
+    expect(badge?.getAttribute("role")).toBe("img");
+    expect(badge?.getAttribute("aria-label")).toBe("Password protected");
+    expect(badge?.querySelector("svg")).not.toBeNull();
+
+    expect(lock(drawVoiceChannelChrome(voiceChannelChrome(channel(), inputs())))).toBeNull();
+    expect(
+      lock(
+        drawVoiceChannelChrome(voiceChannelChrome(channel({ passwordProtected: false }), inputs())),
+      ),
+    ).toBeNull();
+  });
+
+  it("appears and disappears in place when the flag changes", () => {
+    const open = voiceChannelChrome(channel({ voiceMaxUsers: 5 }), inputs());
+    const locked = voiceChannelChrome(
+      channel({ voiceMaxUsers: 5, passwordProtected: true }),
+      inputs(),
+    );
+    const wrapper = drawVoiceChannelChrome(open);
+
+    patchVoiceChannelChrome(wrapper, locked);
+    expect(lock(wrapper)).not.toBeNull();
+    // Before the capacity badge, as a fresh draw orders them.
+    expect(lock(wrapper)?.nextElementSibling?.classList.contains("ch-capacity")).toBe(true);
+    expect(wrapper.innerHTML).toBe(drawVoiceChannelChrome(locked).innerHTML);
+
+    patchVoiceChannelChrome(wrapper, open);
+    expect(lock(wrapper)).toBeNull();
+  });
+});
+
 describe("voice row mention badge", () => {
   const chromeFor = (mentionCount: number) =>
     voiceChannelChrome(channel({ mentionCount, unreadCount: 9 }), inputs());
@@ -313,7 +354,7 @@ describe("builders read no store", () => {
     const snap = inputs({
       peerVerifications: new Map([[PEER, verification(PEER, "verified", "1")]]),
       localSessionFingerprint: "FP",
-      moderatable: [10],
+      movable: [10],
       timeout: { expiresAt: new Date(Date.now() + 60_000).toISOString() },
     });
     assertNoStoreReads(() => {

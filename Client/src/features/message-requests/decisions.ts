@@ -1,5 +1,5 @@
 /**
- * Message Request decisions (B9-6): accept, ignore, delete or block one
+ * Message Request decisions: accept, ignore, delete or block one
  * pending request, and what the inbox does with the server's answer.
  *
  * Only the server's 200 decides anything. It is applied to the store at once,
@@ -19,8 +19,8 @@
  */
 
 import type { ApiClient, ApiClientError, DmRequestDecision } from "@lib/api";
-import { createElement } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createConfirmModal } from "../dialogs/confirmModal";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";
 import { setActiveChannel } from "@stores/channels.store";
 import {
@@ -181,39 +181,17 @@ export function confirmDecision(
   signal: AbortSignal,
   on: { readonly onConfirm: () => void; readonly onClose: () => void },
 ): ModalInstance {
-  const titleId = `request-confirm-title-${request.id}`;
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, t(CONFIRM[decision].heading, { name })));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(
-    createElement("p", { class: "modal-danger-text" }, t(CONFIRM[decision].body, { name })),
-  );
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "request-confirm-cancel" },
-    t("confirm.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "request-confirm" },
-    t(CONFIRM[decision].confirm),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "request-confirm-dialog" },
+  return createConfirmModal({
+    title: t(CONFIRM[decision].heading, { name }),
+    titleId: `request-confirm-title-${request.id}`,
+    body: t(CONFIRM[decision].body, { name }),
+    confirmLabel: t(CONFIRM[decision].confirm),
+    cancelLabel: t("confirm.cancel"),
+    testId: "request-confirm-dialog",
+    confirmTestId: "request-confirm",
+    cancelTestId: "request-confirm-cancel",
     signal,
+    onConfirm: on.onConfirm,
     onClose: on.onClose,
   });
-  cancel.addEventListener("click", () => modal.close());
-  confirm.addEventListener("click", () => {
-    modal.close();
-    on.onConfirm();
-  });
-  return modal;
 }

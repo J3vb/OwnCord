@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 )
 
-// LogLevelController owns the runtime log-level override for a bounded window
-// (SRE-07). An operator raises the level to debug to watch a problem live, and
+// LogLevelController owns the runtime log-level override for a bounded window.
+// An operator raises the level to debug to watch a problem live, and
 // it reverts to the base level on its own — a boost that outlived its window
 // would quietly grow disk use and log noise, and the base level is what the
 // next restart returns to anyway.
@@ -153,7 +154,7 @@ func writeLogLevel(w http.ResponseWriter, c *LogLevelController) {
 func handleGetLogLevel(c *LogLevelController) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		if c == nil {
-			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeConfigUnavailable, "running configuration unavailable")
 			return
 		}
 		writeLogLevel(w, c)
@@ -163,7 +164,7 @@ func handleGetLogLevel(c *LogLevelController) http.HandlerFunc {
 func handleSetLogLevel(database *db.DB, c *LogLevelController) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if c == nil {
-			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeConfigUnavailable, "running configuration unavailable")
 			return
 		}
 		var req logLevelRequest
@@ -171,11 +172,11 @@ func handleSetLogLevel(database *db.DB, c *LogLevelController) http.HandlerFunc 
 			return
 		}
 		if req.Level != "debug" || req.DurationSeconds != int(logLevelBoostWindow/time.Second) {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", `only {"level":"debug","duration_seconds":900} is accepted`)
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, `only {"level":"debug","duration_seconds":900} is accepted`)
 			return
 		}
 		if _, err := c.Boost(logLevelBoostWindow); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return
 		}
 		actor := actorFromContext(r)
@@ -189,7 +190,7 @@ func handleSetLogLevel(database *db.DB, c *LogLevelController) http.HandlerFunc 
 func handleRevertLogLevel(database *db.DB, c *LogLevelController) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if c == nil {
-			writeErr(w, http.StatusServiceUnavailable, "CONFIG_UNAVAILABLE", "running configuration unavailable")
+			writeErr(w, http.StatusServiceUnavailable, httperr.CodeConfigUnavailable, "running configuration unavailable")
 			return
 		}
 		actor := actorFromContext(r)

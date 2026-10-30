@@ -6,29 +6,27 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
 // ModQueueBroadcaster is the hub capability the report routes need: notify
-// connected moderation-bit holders of a queue change. Satisfied by *ws.Hub.
-// Takes the INTERNAL report id — the hub resolves the public id itself
-// (db.Report.PublicID) so every caller stays oblivious to the distinction.
-//
-// BroadcastMemberBan/BroadcastChatBulkDeleted are the two transport
-// broadcasts the queue's act route (moderation_queue_handler.go) sends after
-// a report-linked ban or removal commits — the SAME calls the direct admin
-// PATCH route and the direct purge route make (P2-7, Codex review): ban and
-// removal have no live-target notifier of their own the way Warn/Timeout do
-// (ModerationService.notifyModAction), so without these two methods here,
-// acting through the queue silently dropped both broadcasts.
+// connected moderation-bit holders of a queue change (satisfied by *ws.Hub). It
+// takes the INTERNAL report id; the hub resolves the public id
+// (db.Report.PublicID).
+// BroadcastMemberBan/BroadcastChatBulkDeleted are the transport broadcasts the
+// queue's act route sends after a report-linked ban or removal commits, the same
+// calls the direct admin PATCH and purge routes make. Ban and removal have no
+// live-target notifier of their own (unlike Warn/Timeout's
+// ModerationService.notifyModAction), so without these acting through the queue
+// silently dropped both.
 type ModQueueBroadcaster interface {
 	BroadcastModQueue(ctx context.Context, reportID int64, state string)
 	BroadcastMemberBan(userID int64)
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 }
 
-// fileReportRequest is POST /api/v1/reports' body.
 type fileReportRequest struct {
 	TargetType string `json:"target_type"`
 	TargetID   string `json:"target_id"`
@@ -37,7 +35,7 @@ type fileReportRequest struct {
 }
 
 // reportSummaryResponse is one row of GET /api/v1/reports/mine. ID is the
-// PUBLIC id (P2-9) — the sequential internal id never reaches a response.
+// PUBLIC id — the sequential internal id never reaches a response.
 type reportSummaryResponse struct {
 	ID         string  `json:"id"`
 	TargetType string  `json:"target_type"`
@@ -62,7 +60,7 @@ func handleFileReport(svc *service.Services, hub ModQueueBroadcaster) http.Handl
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		var req fileReportRequest
@@ -95,7 +93,7 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		rows, err := svc.Reports.Mine(r.Context(), user.ID)
@@ -114,20 +112,17 @@ func handleMyReports(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// writeReportServiceError special-cases the report-shaped errors this
-// endpoint's wire contract names — validation as INVALID_INPUT (not the
-// generic BAD_REQUEST), duplicates as DUPLICATE_REPORT (not the generic
-// CONFLICT), and a moderator acting on their own filed report as
-// SELF_REVIEW (not the generic FORBIDDEN, P2-6) — falling through to
-// writeServiceError for everything else.
+// writeReportServiceError maps report-shaped errors to this endpoint's wire
+// contract (INVALID_INPUT, DUPLICATE_REPORT, and SELF_REVIEW for a moderator
+// acting on their own report) and falls through to writeServiceError otherwise.
 func writeReportServiceError(ctx context.Context, w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrDuplicateReport):
-		writeErr(w, http.StatusConflict, "DUPLICATE_REPORT", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeDuplicateReport, err.Error())
 	case errors.Is(err, service.ErrSelfReview):
-		writeErr(w, http.StatusForbidden, "SELF_REVIEW", err.Error())
+		writeErr(w, http.StatusForbidden, httperr.CodeSelfReview, err.Error())
 	case errors.Is(err, service.ErrBadRequest):
-		writeErr(w, http.StatusBadRequest, "INVALID_INPUT", err.Error())
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 	default:
 		writeServiceError(ctx, w, err)
 	}

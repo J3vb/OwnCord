@@ -26,14 +26,13 @@ type pollEnder interface {
 	ExpirePoll(ctx context.Context, messageID int64) (*PollUpdate, error)
 }
 
-// PollExpirer pushes the end of polls. Correctness does not depend on it: a
-// vote is refused after expiry by the database clock whether or not the timer
-// ran, and history reads an expired poll as ended. What the expirer adds is the
-// poll_update that tells live clients the final counts, and marking the poll
-// ended so it leaves the pending set. One goroutine (Run) sleeps until the
-// soonest expiry among polls not yet ended, then ends each due poll with the
-// same conditional end the button uses and hands each poll it really ended to
-// the notifier.
+// PollExpirer pushes the end of polls. Correctness does not depend on it: a vote is
+// refused after expiry by the database clock whether or not the timer ran, and
+// history reads an expired poll as ended. It adds the poll_update that tells live
+// clients the final counts and marks the poll ended so it leaves the pending set.
+// One goroutine (Run) sleeps until the soonest pending expiry, ends each due poll
+// with the same conditional end the button uses, and hands each poll it really
+// ended to the notifier.
 type PollExpirer struct {
 	st    pollExpiryStore
 	ender pollEnder
@@ -81,10 +80,9 @@ func (e *PollExpirer) Wake() {
 	}
 }
 
-// Sweep ends every poll that is due, once, and returns the first error. A poll
-// that cannot be ended does not stop the ones behind it. It is also the boot
-// sweep: polls that expired while the server was down are ended and announced
-// before the listener opens.
+// Sweep ends every due poll once and returns the first error; a poll that cannot be
+// ended does not stop the rest. It is also the boot sweep: polls that expired while
+// the server was down are ended and announced before the listener opens.
 func (e *PollExpirer) Sweep(ctx context.Context) error {
 	e.mu.Lock()
 	notifier := e.notifier
@@ -110,9 +108,8 @@ func (e *PollExpirer) Sweep(ctx context.Context) error {
 				notifier.PollUpdated(ctx, *u)
 			}
 		}
-		// A full batch with progress may have more behind it. Every poll that
-		// was ended, announced or skipped has left the pending set, so the
-		// next read cannot return it again.
+		// A full batch with progress may have more behind it. Every poll ended, announced
+		// or skipped has left the pending set, so the next read cannot return it again.
 		if len(rows) < e.batch || done == 0 {
 			return first
 		}

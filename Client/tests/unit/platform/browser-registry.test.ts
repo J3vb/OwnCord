@@ -61,7 +61,7 @@ describe("browser platform registry", () => {
     }
   });
 
-  it("binds the server scope to the page's own host (6.13e)", () => {
+  it("binds the server scope to the page's own host", () => {
     expect(browser.serverScope).toEqual({ fixedHost: location.host });
   });
 
@@ -143,7 +143,16 @@ describe("browser platform registry", () => {
     }
     await expect(b.devTools.open()).resolves.toBeUndefined();
     await expect(b.appMetadata.getVersion()).rejects.toThrow();
-    await expect(b.urlOpener.open("https://example.invalid/")).rejects.toThrow();
+    // The URL opener opens a new tab (opener.browser.test.ts); with no tab
+    // to give, it rejects.
+    const open = vi.fn(() => null);
+    vi.stubGlobal("open", open);
+    try {
+      await expect(b.urlOpener.open("https://example.invalid/")).rejects.toThrow();
+      expect(open).toHaveBeenCalledWith("https://example.invalid/", "_blank");
+    } finally {
+      vi.unstubAllGlobals();
+    }
     expect(await b.systemIdle.idleMs()).toBeNull();
     // The web build scans nothing: no game, and the setting stays hidden.
     expect(b.gameDetector.available).toBe(false);

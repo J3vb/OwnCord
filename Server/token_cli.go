@@ -49,8 +49,7 @@ func runTokenCLI(args []string) int {
 	ctx := context.Background()
 	// The CLI holds the handle (it opens and migrates its own database) but
 	// makes no query of its own: the three subcommands are adapters over the
-	// same TokenService the admin panel uses, which is what keeps the two from
-	// drifting apart again.
+	// TokenService the admin panel uses, so the two cannot drift apart.
 	tokens := service.NewTokenService(database)
 	switch args[0] {
 	case "create":
@@ -166,10 +165,10 @@ func tokenRevoke(ctx context.Context, tokens *service.TokenService, args []strin
 
 	// An argument that parses as an integer is tried as an id first; when no
 	// active token carries that id it is tried as a label, because labels are
-	// free text and an all-digit one is legal (OC-0341). Anything else is a
-	// label. Revoking by label is the CLI's own form — an operator recovering
-	// a compromised credential knows what they typed, not the row id — and
-	// the id keeps precedence, as the usage text says.
+	// free text and an all-digit one is legal. Anything else is a label. Revoking
+	// by label is the CLI's own form (an operator recovering a compromised
+	// credential knows what they typed, not the row id); the id keeps
+	// precedence, as the usage text says.
 	var (
 		affected int64
 		err      error

@@ -1,7 +1,7 @@
 // The connect route: the connect page with its login, register, recover and
 // TOTP callbacks, the profile callbacks, the update-required notifier, the
 // periodic health check and the invite hook. Moved out of main.ts's renderPage
-// connect branch verbatim (WP 7.4h). The edits: the collaborators arrive as
+// connect branch verbatim. The edits: the collaborators arrive as
 // arguments, the three route-scoped `let`s for the 2FA challenge live in the
 // renderConnect closure, and the branch's three outputs (the page handle,
 // the health refresh and the invite hook) are returned as a tuple. Nothing
@@ -9,13 +9,13 @@
 
 import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
-import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/credentials";
+import { deleteCredential, loginWithSavedPassword, parseRelayedLogin } from "@lib/net/credentials";
 import { createLogger } from "@lib/logger";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import type { ProfileManager } from "@lib/profiles";
-import { safeMount } from "@lib/safe-render";
-import type { MountableComponent, RenderRecovery } from "@lib/safe-render";
-import { SessionScope } from "@lib/sessionScope";
+import type { ProfileManager } from "@lib/presence/profiles";
+import { safeMount } from "@lib/text/safeRender";
+import type { MountableComponent, RenderRecovery } from "@lib/text/safeRender";
+import { SessionScope } from "@lib/net/sessionScope";
 import { parseRegistrationMode, retentionNotice } from "@lib/types";
 import type { AuthResponse } from "@lib/types";
 import { bracketBareIPv6Host } from "@lib/ws";
@@ -36,7 +36,8 @@ const log = createLogger("main");
  * Mounts the connect page and returns [page, rerunHealth, applyInvite] as a
  * tuple, not an object: object keys survive minification, and this runs in the
  * startup chunk. `page.destroy` tears the route down; `rerunHealth` re-checks
- * the profiles' servers; `applyInvite` pre-fills the register form. A link that
+ * the profiles' servers and, given the host of a just-trusted certificate,
+ * resubmits a sign-in that certificate refused; `applyInvite` pre-fills the register form. A link that
  * arrived before the page mounted is taken from `takePendingInvite`, which
  * hands it over once and forgets it.
  */
@@ -47,7 +48,11 @@ export function renderConnect(
   renderRecovery: RenderRecovery,
   handleUnauthorized: () => void,
   takePendingInvite: () => { code: string; host?: string } | null,
-): readonly [{ destroy(): void }, () => void, (code: string, host?: string) => void] {
+): readonly [
+  { destroy(): void },
+  (acceptedHost?: string) => void,
+  (code: string, host?: string) => void,
+] {
   // Track partial auth state for TOTP flow
   let pendingTotpHost = "";
   let pendingTotpPartialToken = "";
@@ -57,7 +62,7 @@ export function renderConnect(
   const [getSavedProfiles, persistProfiles, mutateAutoLogin, ensureProfileExists] =
     createConnectProfiles(profileManager, pageOwner);
 
-  // The web portal is bound to the server that served it (WP 6.13e): its one
+  // The web portal is bound to the server that served it: its one
   // profile is all the page lists, so no health check probes anything else.
   // Written literally so the desktop build drops every use.
   const fixedHost = __OWNCORD_WEB__ ? (desktop.serverScope.fixedHost ?? undefined) : undefined;
@@ -166,9 +171,9 @@ export function renderConnect(
         attempt.assertCurrent();
         pageOwner.assertCurrent();
         if (result.status === "pending_approval" || result.token === undefined) {
-          // Approval mode (B4-1): no session yet — an admin decides. This is
+          // Approval mode: no session yet — an admin decides. This is
           // an expected state, not a failure, so it is an informational
-          // notice rather than a red error (DP-54).
+          // notice rather than a red error.
           connectPage.showNotice(connectText("registration.pendingApproval"));
           return;
         }
@@ -362,8 +367,12 @@ export function renderConnect(
   return [
     page,
     // A health-refresh hook so trusting a first-use certificate can re-check
-    // the now-reachable server without a full page navigation.
-    () => runHealthChecks(connectPage, getProfileList(), pageOwner),
+    // the now-reachable server without a full page navigation, and carry on
+    // with the sign-in that certificate refused.
+    (acceptedHost) => {
+      runHealthChecks(connectPage, getProfileList(), pageOwner);
+      if (acceptedHost !== undefined) connectPage.resubmitAfterCertAccept(acceptedHost);
+    },
     (code, host) => connectPage.applyInviteLink(code, host),
   ];
 }

@@ -13,9 +13,9 @@ import {
   validateAvatarFile,
 } from "@components/settings/AccountTab";
 import { authStore } from "@stores/auth.store";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { ApiClientError } from "@lib/api";
-import * as imageCrop from "@lib/imageCrop";
+import * as imageCrop from "@lib/ui/imageCrop";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
 
 /**
@@ -77,7 +77,7 @@ describe("validateAvatarFile", () => {
     expect(validateAvatarFile({ size: 1000, type: "text/plain" }, ok)).not.toBeNull();
   });
 
-  it("rejects a file over 2 MB (WP 8.7)", () => {
+  it("rejects a file over 2 MB", () => {
     expect(validateAvatarFile({ size: 2 * 1024 * 1024 + 1, type: "image/gif" }, ok)).toBe(
       "Avatar must be at most 2048 KB.",
     );
@@ -290,7 +290,7 @@ describe("Remove avatar (3C-7a)", () => {
   });
 });
 
-describe("Banner controls (6.11d)", () => {
+describe("Banner controls", () => {
   afterEach(() => {
     document.body.replaceChildren();
     resetServerCapabilities();
@@ -385,7 +385,7 @@ describe("Banner controls (6.11d)", () => {
   });
 });
 
-describe("prepareBannerFile (WP 8.7)", () => {
+describe("prepareBannerFile", () => {
   afterEach(() => vi.restoreAllMocks());
 
   const animatedWebp = (): Uint8Array<ArrayBuffer> => {

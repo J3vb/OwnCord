@@ -19,7 +19,7 @@ const { fetchMock, createObjectURLMock, playMock, logMock } = vi.hoisted(() => (
 }));
 
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999/proxytoken"),
   stopHttpProxy: () => Promise.resolve(),
 }));
@@ -33,7 +33,7 @@ vi.mock("@lib/icons", () => ({
     return el;
   },
 }));
-vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 vi.mock("@stores/auth.store", () => ({
   getToken: () => "session-token",

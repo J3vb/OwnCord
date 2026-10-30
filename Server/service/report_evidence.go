@@ -7,13 +7,13 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// Why Get withheld a report's evidence snapshot (B5-7/B5-8 follow-up).
+// Why Get withheld a report's evidence snapshot.
 const (
 	EvidenceNSFWAcknowledgementRequired = "NSFW_ACKNOWLEDGEMENT_REQUIRED"
 	EvidenceSourceChannelUnavailable    = "SOURCE_CHANNEL_UNAVAILABLE"
 )
 
-// evidenceWithheld applies decision 13 to the evidence snapshot, a second
+// evidenceWithheld applies the NSFW consent rule to the evidence snapshot, a second
 // content path into its source channel: a moderator reads labelled evidence
 // only with their own acknowledgement of that channel, like anyone else,
 // with no bit or administrator bypass. Both the label and the

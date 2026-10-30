@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, it, expect, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -57,7 +57,7 @@ function fireKey(el: Element, key: string): void {
   el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 }
 
-describe("reaction pill keyboard activation (OC-0186)", () => {
+describe("reaction pill keyboard activation", () => {
   it("toggles the reaction on Enter when the pill is focused", () => {
     const opts = reactionOptions();
     const el = renderReactions(makeMessage(), opts, new AbortController().signal);

@@ -475,3 +475,281 @@ describe("message request decisions", () => {
     expect(pendingIds()).toEqual([]);
   });
 });
+
+const confirmOf = (): HTMLButtonElement =>
+  dialog()!.querySelector<HTMLButtonElement>("[data-testid='request-confirm']")!;
+const errorOf = (id: number): HTMLElement =>
+  row(id).querySelector<HTMLElement>("[data-testid='request-error']")!;
+
+const named = (name: string, status: number): Error =>
+  Object.assign(new Error("boom"), { name, status });
+
+const dmEntry = (channelId: number, id: number, text: string) => ({
+  channel_id: channelId,
+  recipient: { id: 11, username: "stranger1", avatar: "", status: "online" },
+  last_message_id: id,
+  last_message: text,
+  last_message_at: "2026-09-05T12:00:00Z",
+  unread_count: 0,
+});
+
+describe("which failures count as a lost race", () => {
+  it.each([
+    ["an error that is not from the API client", named("Error", 409)],
+    ["a plain object that only looks like one", { name: "ApiClientError", status: 409 }],
+    ["an API error that is neither a conflict nor a missing request", named("ApiClientError", 500)],
+  ])("treats %s as a failed decision, without a refetch", async (_label, thrown) => {
+    await open(1);
+    button(1, "ignore").click();
+    fx.decisions[0]!.reject(thrown);
+    await settle();
+    expect(errorOf(1).hidden).toBe(false);
+    expect(outcome()).toContain("didn't go through");
+    expect(fx.api.listDmRequests).toHaveBeenCalledTimes(1);
+    expect(pendingIds()).toEqual([1]);
+  });
+
+  it("treats a named API error with 404 as a lost race", async () => {
+    await open(1);
+    button(1, "ignore").click();
+    fx.decisions[0]!.reject(named("ApiClientError", 404));
+    await settle();
+    expect(fx.api.listDmRequests).toHaveBeenCalledTimes(2);
+    expect(errorOf(1).hidden).toBe(true);
+  });
+});
+
+describe("a decision that settles after the view closed", () => {
+  it("does not refetch, re-read blocks or show anything for a refusal", async () => {
+    await open(1);
+    button(1, "block").click();
+    confirmOf().click();
+    owner.abort();
+    fx.decisions[0]!.reject(new ApiClientError(409, "CONFLICT", "not pending"));
+    await settle();
+    expect(fx.api.listDmRequests).toHaveBeenCalledTimes(1);
+    expect(fx.api.listBlocks).not.toHaveBeenCalled();
+    expect(outcome()).toBe("");
+    expect(errorOf(1).hidden).toBe(true);
+    expect(row(1).getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("applies nothing for a 200 that arrives late, and marks nobody blocked", async () => {
+    await open(1);
+    button(1, "block").click();
+    confirmOf().click();
+    owner.abort();
+    fx.decisions[0]!.resolve();
+    await settle();
+    expect(pendingIds()).toEqual([1]);
+    expect(blocksStore.getState().blockedByMe.has(11)).toBe(false);
+    expect(outcome()).toBe("");
+  });
+
+  it("ignores decision buttons once the view has closed", async () => {
+    await open(1);
+    owner.abort();
+    button(1, "ignore").click();
+    button(1, "delete").click();
+    expect(fx.api.decideDmRequest).not.toHaveBeenCalled();
+    expect(dialog()).toBeNull();
+  });
+});
+
+describe("decision side effects", () => {
+  it("does not record a sender as blocked for any other decision", async () => {
+    await open(1);
+    button(1, "ignore").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    expect(pendingIds()).toEqual([]);
+    expect(blocksStore.getState().blockedByMe.has(11)).toBe(false);
+  });
+
+  it("asks for the DM list only when accepting", async () => {
+    await open(1);
+    const dms = vi.fn(() => Promise.resolve({ dm_channels: [] }));
+    Object.assign(fx.api, { getDmChannels: dms });
+    button(1, "ignore").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    await settle();
+    expect(dms).not.toHaveBeenCalled();
+  });
+
+  it("clears the previous outcome as soon as the next decision starts", async () => {
+    await open(1);
+    button(1, "ignore").click();
+    fx.decisions[0]!.reject(new TypeError("Failed to fetch"));
+    await settle();
+    expect(outcome()).toContain("didn't go through");
+    button(1, "ignore").click();
+    expect(outcome()).toBe("");
+  });
+
+  it("leaves a decided row busy instead of re-enabling it before the list drops it", async () => {
+    await open(1);
+    const li = row(1);
+    button(1, "ignore").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    expect(li.isConnected).toBe(false);
+    expect(li.getAttribute("aria-busy")).toBe("true");
+    expect(li.querySelector("button")!.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("sends one decision while another is running, even from an open confirm", async () => {
+    await open(1);
+    button(1, "delete").click();
+    const confirm = confirmOf();
+    button(1, "ignore").click();
+    expect(fx.api.decideDmRequest).toHaveBeenCalledTimes(1);
+    confirm.click();
+    expect(fx.api.decideDmRequest).toHaveBeenCalledTimes(1);
+    expect(fx.decisions[0]).toMatchObject({ id: 1, decision: "ignore" });
+  });
+
+  it("opens no confirm while a decision is running", async () => {
+    await open(1);
+    button(1, "ignore").click();
+    button(1, "delete").click();
+    button(1, "block").click();
+    expect(dialog()).toBeNull();
+  });
+
+  it("forgets a closed confirm, so a later removal does not move focus", async () => {
+    await open(1, 2);
+    button(2, "delete").click();
+    dialog()!.querySelector<HTMLButtonElement>("[data-testid='request-confirm-cancel']")!.click();
+    (document.activeElement as HTMLElement).blur();
+    expect(row(2).contains(document.activeElement)).toBe(false);
+    handleDmRequest({ ...item(2), state: "accepted", preview: null, decided_at: "x" });
+    messageRequestsStore.flush();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("moves focus on to the next-newest request after the newest is decided", async () => {
+    await open(1, 2, 3);
+    // Requests are added one frame at a time later: the list order must still
+    // follow the ids when a row is removed.
+    handleDmRequest({ ...item(4), state: "pending", decided_at: null });
+    messageRequestsStore.flush();
+    button(4, "ignore").focus();
+    button(4, "ignore").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    expect(document.activeElement).toBe(row(3));
+  });
+});
+
+describe("entering an accepted conversation", () => {
+  it("clears its unread badge, lists it in the channels store and focuses the composer", async () => {
+    await open(7);
+    const composer = document.createElement("textarea");
+    composer.dataset["testid"] = "msg-textarea";
+    document.body.appendChild(composer);
+    addDmChannel({ ...dm(7), unreadCount: 3, mentionCount: 1 });
+    expect(channelsStore.getState().channels.get(107)).toBeUndefined();
+    button(7, "accept").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    await Promise.resolve();
+    expect(dmStore.getState().channels.find((c) => c.channelId === 107)).toMatchObject({
+      unreadCount: 0,
+      mentionCount: 0,
+    });
+    expect(channelsStore.getState().channels.get(107)?.type).toBe("dm");
+    expect(document.activeElement).toBe(composer);
+  });
+
+  it("waits for the accepted request's own conversation, not any other one", async () => {
+    await open(5, 6);
+    addDmChannel(dm(5));
+    button(6, "accept").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    expect(channelsStore.getState().activeChannelId).toBeNull();
+    addDmChannel(dm(6));
+    await settle();
+    expect(channelsStore.getState().activeChannelId).toBe(106);
+  });
+
+  it("stops waiting for the conversation once the view closes", async () => {
+    await open(1);
+    const unsub = vi.fn();
+    const spy = vi.spyOn(dmStore, "subscribe").mockReturnValue(unsub);
+    try {
+      button(1, "accept").click();
+      fx.decisions[0]!.resolve();
+      await settle();
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(unsub).not.toHaveBeenCalled();
+      owner.abort();
+      expect(unsub).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("takes the preview from the accepted conversation's own entry in GET /dms", async () => {
+    await open(1);
+    addDmChannel(dm(1));
+    Object.assign(fx.api, {
+      getDmChannels: () =>
+        Promise.resolve({
+          dm_channels: [dmEntry(150, 900, "someone else's"), dmEntry(101, 501, "hello 1")],
+        }),
+    });
+    button(1, "accept").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    await settle();
+    expect(dmStore.getState().channels.find((c) => c.channelId === 101)).toMatchObject({
+      lastMessageId: 501,
+      lastMessage: "hello 1",
+    });
+  });
+
+  it("does not add a conversation from GET /dms after the view closed", async () => {
+    await open(1);
+    let answer!: () => void;
+    Object.assign(fx.api, {
+      getDmChannels: () =>
+        new Promise((resolve) => {
+          answer = () =>
+            resolve({
+              dm_channels: [
+                {
+                  channel_id: 101,
+                  recipient: { id: 11, username: "stranger1", avatar: "", status: "online" },
+                  last_message_id: 501,
+                  last_message: "hello 1",
+                  last_message_at: "2026-09-05T12:00:00Z",
+                  unread_count: 0,
+                },
+              ],
+            });
+        }),
+    });
+    button(1, "accept").click();
+    fx.decisions[0]!.resolve();
+    await settle();
+    owner.abort();
+    answer();
+    await settle();
+    expect(dmStore.getState().channels.find((c) => c.channelId === 101)).toBeUndefined();
+    expect(channelsStore.getState().activeChannelId).toBeNull();
+  });
+});
+
+describe("a snapshot failure from an older request", () => {
+  it("does not mark the inbox unavailable once a newer snapshot has started", async () => {
+    const { beginSnapshot, failSnapshot } = await import("./store");
+    const first = beginSnapshot();
+    const second = beginSnapshot();
+    failSnapshot(first);
+    expect(messageRequestsStore.getState().status).toBe("loading");
+    failSnapshot(second);
+    expect(messageRequestsStore.getState().status).toBe("unavailable");
+  });
+});

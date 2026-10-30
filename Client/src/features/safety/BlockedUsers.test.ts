@@ -3,19 +3,21 @@
 // fallback and the teardown/refetch edge cases.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 import { expectConsole } from "../../../tests/helpers/console";
+import { captureLogs } from "../../../tests/helpers/log-capture";
 import { ApiClientError } from "@lib/api";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { blocksStore, setUserBlockedByMe } from "@stores/blocks.store";
-import { dmStore, type DmChannel } from "@stores/dm.store";
+import { dmStore, type DmChannel, type DmUser } from "@stores/dm.store";
 import { membersStore, type Member } from "@stores/members.store";
 import { createAvatarElement } from "@components/message-list/avatar";
 import {
   buildBlockedUsersSection,
   resetPendingUnblocks,
   type BlockedUsersApi,
+  type CreateAvatar,
 } from "./BlockedUsers";
 
 interface Deferred<T> {
@@ -98,6 +100,9 @@ afterEach(() => {
   tab.abort();
   document.body.replaceChildren();
 });
+
+const idOf = (s: HTMLElement): number =>
+  Number(/^blocked-users-(\d+)$/.exec(s.querySelector("h3")!.id)![1]);
 
 describe("blocked users list", () => {
   it("loads GET /blocks and shows avatar, name, @username and Unblock per row in server order", async () => {
@@ -388,5 +393,349 @@ describe("teardown and races", () => {
     expect(showToast).toHaveBeenCalledWith("x", "error");
     expect(blocksStore.getState().blockedByMe.has(3)).toBe(true);
     expect(unblockBtn(rowsOf(s)[0]!).textContent).toBe("Unblocking…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Markup, who each row is drawn as, focus, live-region text and teardown.
+// ---------------------------------------------------------------------------
+
+function mountSpy(createAvatar: CreateAvatar): HTMLElement {
+  const section = buildBlockedUsersSection(tab.signal, api, createAvatar);
+  document.body.appendChild(section);
+  return section;
+}
+
+function dmUser(id: number, username: string, over: Partial<DmUser> = {}): DmUser {
+  return { id, username, avatar: "", status: "online", displayName: "", ...over };
+}
+
+function dmOf(participants: DmUser[], recipient: DmUser): DmChannel {
+  return { ...dm(recipient.id, recipient.username), participants, recipient };
+}
+
+describe("blocked users markup", () => {
+  it("builds the section, heading, description, live regions, Retry and list", async () => {
+    const s = mount();
+    expect(s.tagName).toBe("SECTION");
+    expect(s.className).toBe("blocked-users");
+    expect(s.dataset["testid"]).toBe("blocked-users");
+    const heading = s.querySelector("h3")!;
+    expect(heading.className).toBe("safety-heading");
+    expect(heading.getAttribute("tabindex")).toBe("-1");
+    expect(heading.textContent).toBe("Blocked users");
+    expect(heading.id).toMatch(/^blocked-users-\d+$/);
+    expect(s.getAttribute("aria-labelledby")).toBe(heading.id);
+    expect(s.querySelector("p")!.className).toBe("setting-desc");
+    const region = s.querySelector("[role=status]")!;
+    expect(region.className).toBe("my-reports-status");
+    const alert = s.querySelector("[role=alert]")!;
+    expect(alert.className).toBe("form-error");
+    expect(retryBtn(s).type).toBe("button");
+    expect(retryBtn(s).className).toBe("ac-btn secondary");
+    expect(retryBtn(s).hidden).toBe(true);
+    expect(s.querySelector("ul")!.className).toBe("blocked-users-list");
+    gets[0]!.resolve({ blocked_user_ids: [] });
+    await flush();
+  });
+
+  it("gives each section its own title id, counting up", () => {
+    const first = mount();
+    const second = mount();
+    expect(idOf(second)).toBe(idOf(first) + 1);
+  });
+
+  it("builds a row with its classes, ids, avatar class and a typed Unblock button", async () => {
+    const s = await mountWith(7);
+    const li = rowsOf(s)[0]!;
+    expect(li.tagName).toBe("LI");
+    expect(li.className).toBe("session-row blocked-user-row");
+    expect(li.dataset["userId"]).toBe("7");
+    expect(li.querySelector(".blocked-user-info")!.className).toBe(
+      "session-info blocked-user-info",
+    );
+    expect(li.querySelector(".blocked-user-avatar")).not.toBeNull();
+    const button = unblockBtn(li);
+    expect(button.type).toBe("button");
+    expect(button.className).toBe("ac-btn secondary");
+    expect(button.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+describe("who a blocked user is drawn as", () => {
+  it("draws a roster member with their own name, username and avatar", async () => {
+    setRoster(member(3, "carol", { displayName: "Carol C", avatar: "a/carol.png" }));
+    const createAvatar = vi.fn<CreateAvatar>(createAvatarElement);
+    mountSpy(createAvatar);
+    gets[0]!.resolve({ blocked_user_ids: [3] });
+    await flush();
+    expect(createAvatar).toHaveBeenCalledWith(
+      { username: "carol", displayName: "Carol C", avatar: "a/carol.png", isDeleted: false },
+      { className: "blocked-user-avatar" },
+    );
+  });
+
+  it("draws an unknown id as a deleted user with a '?' avatar", async () => {
+    const createAvatar = vi.fn<CreateAvatar>(createAvatarElement);
+    mountSpy(createAvatar);
+    gets[0]!.resolve({ blocked_user_ids: [9] });
+    await flush();
+    expect(createAvatar).toHaveBeenCalledWith(
+      { username: "?", displayName: "Unknown user", avatar: null, isDeleted: true },
+      { className: "blocked-user-avatar" },
+    );
+  });
+
+  it("names a DM participant by display name, or by username when the display name is blank or absent", async () => {
+    setDms(
+      dmOf([dmUser(4, "dave", { displayName: "  Dave D  " })], dmUser(40, "x")),
+      dmOf([dmUser(5, "erin", { displayName: "   " })], dmUser(50, "y")),
+      dmOf([dmUser(6, "frank", { displayName: undefined })], dmUser(60, "z")),
+    );
+    const s = mountSpy(vi.fn<CreateAvatar>(createAvatarElement));
+    gets[0]!.resolve({ blocked_user_ids: [4, 5, 6] });
+    await flush();
+    const names = rowsOf(s).map((r) => r.querySelector(".session-device")!.textContent);
+    expect(names).toEqual(["  Dave D  ", "erin", "frank"]);
+  });
+
+  it("passes a DM participant's avatar through, and no avatar when it is empty", async () => {
+    setDms(
+      dmOf([dmUser(4, "dave", { avatar: "a/dave.png" })], dmUser(40, "x")),
+      dmOf([dmUser(5, "erin", { avatar: "" })], dmUser(50, "y")),
+    );
+    const createAvatar = vi.fn<CreateAvatar>(createAvatarElement);
+    mountSpy(createAvatar);
+    gets[0]!.resolve({ blocked_user_ids: [4, 5] });
+    await flush();
+    const avatars = createAvatar.mock.calls.map(([subject]) => [subject.username, subject.avatar]);
+    expect(avatars).toEqual([
+      ["dave", "a/dave.png"],
+      ["erin", null],
+    ]);
+  });
+
+  it("skips a DM participant entry that has no username and uses the next entry for the same id", async () => {
+    setDms(
+      dmOf([dmUser(4, "", { displayName: "Ghost" })], dmUser(4, "dave", { displayName: "Dave D" })),
+    );
+    const s = mountSpy(vi.fn<CreateAvatar>(createAvatarElement));
+    gets[0]!.resolve({ blocked_user_ids: [4] });
+    await flush();
+    const r = rowsOf(s)[0]!;
+    expect(r.querySelector(".session-device")!.textContent).toBe("Dave D");
+    expect(r.querySelector(".session-detail")!.textContent).toBe("@dave");
+  });
+});
+
+describe("blocked users status text", () => {
+  it("keeps the loading line off while known blocks are already listed", () => {
+    setUserBlockedByMe(3, true);
+    blocksStore.flush();
+    setRoster(member(3, "carol"));
+    const s = mount();
+    expect(rowsOf(s)).toHaveLength(1);
+    expect(status(s)).toBe("");
+  });
+
+  it("keeps the empty line off once blocks are listed", async () => {
+    const s = await mountWith(1, 2);
+    expect(status(s)).toBe("");
+  });
+
+  it("shows the loading line again while Retry is in flight with nothing listed", async () => {
+    const s = mount();
+    gets[0]!.reject(new Error("offline"));
+    await flush();
+    expectConsole("warn", "Failed to load blocked users");
+    expect(status(s)).toBe("");
+    retryBtn(s).click();
+    expect(status(s)).toBe("Loading blocked users…");
+  });
+});
+
+describe("blocked users load failure", () => {
+  it("logs the error under BlockedUsers, clears busy and re-enables Retry", async () => {
+    const logs = captureLogs();
+    const s = mount();
+    gets[0]!.reject(new Error("offline"));
+    await flush();
+    expectConsole("warn", "Failed to load blocked users");
+    expect(logs.find("Failed to load blocked users")).toMatchObject([
+      { level: "warn", component: "BlockedUsers", data: { error: "Error: offline" } },
+    ]);
+    expect(s.hasAttribute("aria-busy")).toBe(false);
+    expect(retryBtn(s).hasAttribute("aria-disabled")).toBe(false);
+    expect(retryBtn(s).hidden).toBe(false);
+  });
+
+  it("ignores Retry presses while a load is in flight", async () => {
+    const s = mount();
+    gets[0]!.reject(new Error("offline"));
+    await flush();
+    expectConsole("warn", "Failed to load blocked users");
+    retryBtn(s).click();
+    retryBtn(s).click();
+    expect(gets).toHaveLength(2);
+  });
+
+  it("ignores Retry once the tab was closed", async () => {
+    const s = mount();
+    gets[0]!.reject(new Error("offline"));
+    await flush();
+    expectConsole("warn", "Failed to load blocked users");
+    tab.abort();
+    retryBtn(s).click();
+    expect(gets).toHaveLength(1);
+  });
+});
+
+describe("blocked users revision guard", () => {
+  it("applies a reply when the store's revision has moved on from zero but not since the request", async () => {
+    setUserBlockedByMe(8, true);
+    setUserBlockedByMe(8, false);
+    expect(blocksStore.getState().blockedByMeRev).toBe(2);
+    mount();
+    gets[0]!.resolve({ blocked_user_ids: [5] });
+    await flush();
+    expect([...blocksStore.getState().blockedByMe]).toEqual([5]);
+  });
+});
+
+describe("blocked users focus", () => {
+  it("leaves focus alone while rows are first drawn and when the first load ends", async () => {
+    const outside = document.createElement("input");
+    document.body.appendChild(outside);
+    outside.focus();
+    setRoster(member(1, "u1"), member(2, "u2"));
+    const s = mount();
+    gets[0]!.resolve({ blocked_user_ids: [1, 2] });
+    await flush();
+    expect(rowsOf(s)).toHaveLength(2);
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("keeps focus on a row's button when that row is redrawn as busy", async () => {
+    const s = await mountWith(1, 2);
+    const button = unblockBtn(rowsOf(s)[1]!);
+    button.focus();
+    button.click();
+    const busy = unblockBtn(rowsOf(s)[1]!);
+    expect(busy).not.toBe(button);
+    expect(busy.textContent).toBe("Unblocking…");
+    expect(document.activeElement).toBe(busy);
+  });
+
+  it("does not move focus when a row is redrawn while focus is elsewhere", async () => {
+    const s = await mountWith(1, 2);
+    const outside = document.createElement("input");
+    document.body.appendChild(outside);
+    outside.focus();
+    unblockBtn(rowsOf(s)[0]!).click();
+    expect(unblockBtn(rowsOf(s)[0]!).textContent).toBe("Unblocking…");
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("moves focus to the row that takes the place of a removed middle row", async () => {
+    const s = await mountWith(1, 2, 3);
+    unblockBtn(rowsOf(s)[1]!).focus();
+    unblockBtn(rowsOf(s)[1]!).click();
+    await finish(0);
+    expect(rowsOf(s).map((r) => r.dataset["userId"])).toEqual(["1", "3"]);
+    expect(document.activeElement).toBe(unblockBtn(rowsOf(s)[1]!));
+  });
+
+  it("leaves focus alone when the unblocked row did not hold it", async () => {
+    const s = await mountWith(1, 2);
+    const outside = document.createElement("input");
+    document.body.appendChild(outside);
+    outside.focus();
+    unblockBtn(rowsOf(s)[0]!).click();
+    await finish(0);
+    expect(rowsOf(s)).toHaveLength(1);
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("leaves focus on another row's button when a different row is unblocked", async () => {
+    const s = await mountWith(1, 2);
+    const other = unblockBtn(rowsOf(s)[1]!);
+    other.focus();
+    unblockBtn(rowsOf(s)[0]!).click();
+    await finish(0);
+    expect(rowsOf(s).map((r) => r.dataset["userId"])).toEqual(["2"]);
+    expect(document.activeElement).toBe(other);
+  });
+});
+
+describe("blocked users row lifecycle", () => {
+  it("keeps an unchanged row's element when another block arrives", async () => {
+    const s = await mountWith(1, 2);
+    const before = rowsOf(s)[0]!;
+    setRoster(member(1, "u1"), member(2, "u2"), member(3, "u3"));
+    setUserBlockedByMe(3, true);
+    blocksStore.flush();
+    expect(rowsOf(s)).toHaveLength(3);
+    expect(rowsOf(s)[0]).toBe(before);
+  });
+
+  it("builds a fresh row when a user is blocked again after an unblock elsewhere", async () => {
+    const s = await mountWith(1);
+    const before = rowsOf(s)[0]!;
+    setUserBlockedByMe(1, false);
+    blocksStore.flush();
+    expect(rowsOf(s)).toHaveLength(0);
+    setUserBlockedByMe(1, true);
+    blocksStore.flush();
+    const after = rowsOf(s)[0]!;
+    expect(after).not.toBe(before);
+    expect(after.isConnected).toBe(true);
+  });
+
+  it("shows a user blocked again after an unblock as ready, not busy", async () => {
+    const s = await mountWith(1);
+    unblockBtn(rowsOf(s)[0]!).click();
+    await finish(0);
+    setUserBlockedByMe(1, true);
+    blocksStore.flush();
+    const again = unblockBtn(rowsOf(s)[0]!);
+    expect(again.textContent).toBe("Unblock");
+    expect(again.hasAttribute("aria-disabled")).toBe(false);
+  });
+
+  it("has removed the row and told the user by the time the success toast shows", async () => {
+    const s = await mountWith(1, 2);
+    const rowsAtToast: number[] = [];
+    vi.mocked(showToast).mockImplementation(() => {
+      rowsAtToast.push(rowsOf(s).length);
+    });
+    unblockBtn(rowsOf(s)[0]!).click();
+    deletes[0]!.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(rowsAtToast).toEqual([1]);
+    vi.mocked(showToast).mockReset();
+  });
+
+  it("answers no Unblock press once the tab was closed", async () => {
+    const s = await mountWith(1);
+    const button = unblockBtn(rowsOf(s)[0]!);
+    tab.abort();
+    button.click();
+    expect(deletes).toHaveLength(0);
+  });
+});
+
+describe("blocked users teardown", () => {
+  it("drops its store subscription when the tab closes", async () => {
+    const stop = vi.fn();
+    const subscribe = vi.spyOn(blocksStore, "subscribeSelector").mockReturnValue(stop);
+    try {
+      mount();
+      expect(stop).not.toHaveBeenCalled();
+      tab.abort();
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally {
+      subscribe.mockRestore();
+    }
   });
 });

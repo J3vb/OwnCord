@@ -87,7 +87,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node scripts/verify-gate-evidence.mjs "${{ github.sha }}"
+        run: node scripts/release/verify-gate-evidence.mjs "${{ github.sha }}"
 
   # The release rehearsal (upgrade-rehearsal job below) skips the failure and
   # recovery drills, so the nightly is their only run — and from 2026-10-02 it
@@ -115,7 +115,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           ALLOW_RED_NIGHTLY: ${{ inputs.allow_red_nightly == true || vars.RELEASE_ALLOW_RED_NIGHTLY == 'true' }}
-        run: node scripts/verify-nightly-drills.mjs
+        run: node scripts/release/verify-nightly-drills.mjs
 
   # Five betas shipped while the plan index still said the beta launch was next:
   # nothing tied a tag to a status record. docs/STATUS.md is that record, and
@@ -135,7 +135,7 @@ jobs:
           node-version: 26
           package-manager-cache: false
       - name: The tagged version must have a row in docs/STATUS.md
-        run: node scripts/verify-release-status.mjs "$RELEASE_TAG"
+        run: node scripts/release/verify-release-status.mjs "$RELEASE_TAG"
 
   # The v1.1.0-alpha.4 release shipped clients still versioned 1.1.0-alpha.3
   # because the client manifests weren't bumped before tagging — deployed
@@ -292,6 +292,11 @@ jobs:
             xdg-utils \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev
+
+      # H.264/AAC playback and PipeWire cameras for the AppImage; the script
+      # says which plugins and why.
+      - name: Choose the AppImage's GStreamer plugins
+        run: bash Client/scripts/appimage-gst-plugins.sh
 
       # clang >= 21 plus the prebuilt libwebrtc the Linux client links against
       # (livekit -> webrtc-sys). Deliberately NO actions/cache restore here:
@@ -665,6 +670,11 @@ jobs:
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev
 
+      # H.264/AAC playback and PipeWire cameras for the AppImage; the script
+      # says which plugins and why.
+      - name: Choose the AppImage's GStreamer plugins
+        run: bash Client/scripts/appimage-gst-plugins.sh
+
       # Same prerequisite and same no-cache rule as the x86_64 job — see the
       # comment there: clang-21 from the same GPG-signed apt.llvm.org channel,
       # and the arm64 libwebrtc zip verified by its pinned sha256.
@@ -845,9 +855,10 @@ jobs:
       # Shared with ci.yml and nightly-docker-smoke.yml so the smoke itself is
       # exercised pre-merge — the first alpha.3 release run died here on a
       # smoke-harness bug (bare `docker run`, nowhere writable for the default
-      # config) that no pre-merge check had ever run.
+      # config) that no pre-merge check had ever run. Only this caller has the
+      # web bundle in the image, so only it asks for the browser-client phase.
       - name: Lifecycle-smoke Docker image
-        run: bash Server/scripts/docker-smoke.sh owncord-smoke:candidate
+        run: bash Server/scripts/docker-smoke.sh --browser-client owncord-smoke:candidate
 
       # The config digest of the image this leg just smoked, read only after the
       # smoke passed. release-server-docker compares it against the digest it

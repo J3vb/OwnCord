@@ -14,14 +14,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// The browser client portal (6.13a). MountPortal serves exactly two routes:
+// The browser client portal. MountPortal serves exactly two routes:
 // the bundle's index.html at GET / and its hashed files under GET /assets/*.
 // It adds no NotFound fallback, so every other unclaimed path keeps answering
 // the router's plain 404 and an unknown API path is never answered with HTML.
 // The router mounts it only when server.browser_client_enabled is on.
 
-// portalNotIncluded is the body of GET / when the binary carries only the
-// placeholder bundle.
 const portalNotIncluded = "browser client not included in this build\n"
 
 const (
@@ -163,8 +161,8 @@ func loadPortalAssets(bundle fs.FS) map[string][]byte {
 	return assets
 }
 
-// mountBrowserClient mounts the browser client portal (6.13a), an owner
-// opt-in (BG-01). Off, nothing is mounted at / or /assets/*
+// mountBrowserClient mounts the browser client portal, an owner
+// opt-in. Off, nothing is mounted at / or /assets/*
 // (browser_hosting_posture_test.go). A nil bundle uses the embedded one.
 func mountBrowserClient(r chi.Router, cfg *config.Config, bundle fs.FS) {
 	if !cfg.Server.BrowserClientEnabled {
@@ -177,7 +175,7 @@ func mountBrowserClient(r chi.Router, cfg *config.Config, bundle fs.FS) {
 }
 
 // warnOnBrowserClient reports a browser-client portal that is switched on but
-// cannot work as the owner expects (6.13a). The key is an owner opt-in; with
+// cannot work as the owner expects. The key is an owner opt-in; with
 // it on and no bundle in the binary, GET / answers "not included in this
 // build", and with a self-signed certificate every browser shows its own
 // warning before the page loads.

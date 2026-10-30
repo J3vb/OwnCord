@@ -9,7 +9,7 @@
 // (`screenAudioTrack.ts`) that the host captures from the other applications'
 // sound streams and publishes beside this video.
 //
-// Lifecycle (B7-11): the shared screen-share state owns the track and stops
+// Lifecycle: the shared screen-share state owns the track and stops
 // it on disable/leave; `NativeRoom` also stops it when it disconnects.
 // stop() is idempotent.
 import type {
@@ -19,7 +19,7 @@ import type {
   NativeVoiceStats,
 } from "../../../platform/contracts/nativeVoice";
 import type { PublishCodec } from "../videoCodec";
-import type { StreamQuality } from "@lib/screenShare";
+import type { StreamQuality } from "@lib/voice/screenShare";
 import { PICKER_DISMISSED, PORTAL_NOT_STARTED } from "./platform";
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";

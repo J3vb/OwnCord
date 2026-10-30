@@ -4,13 +4,17 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: vi.fn(() => false),
   rePinPeerIdentity: vi.fn(async () => true),
 }));
-vi.mock("@lib/toast", () => ({ showToast: vi.fn(), initToast: vi.fn(), teardownToast: vi.fn() }));
+vi.mock("@lib/ui/toast", () => ({
+  showToast: vi.fn(),
+  initToast: vi.fn(),
+  teardownToast: vi.fn(),
+}));
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import {
@@ -27,8 +31,8 @@ import {
   resetThreadsStore,
 } from "../../src/stores/threads.store";
 import { followedThreadsStore } from "../../src/stores/followedThreads.store";
-import { muteChannel, unmuteChannel } from "../../src/lib/channel-mutes";
-import { setHideMutedChannels } from "../../src/lib/hide-muted-channels";
+import { muteChannel, unmuteChannel } from "../../src/lib/prefs/channelMutes";
+import { setHideMutedChannels } from "../../src/lib/prefs/hideMutedChannels";
 import type { ReadyChannel, ReadyThread } from "../../src/lib/types";
 import { makeThread } from "../helpers/thread-fixtures";
 

@@ -8,24 +8,20 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
-// serverInfoResponse is the JSON shape returned by GET /api/v1/server-info
-// (B6-7, B7-15a): public identity, compatibility, registration mode and the
-// server-default message retention window.
-//
-// ProtocolEpoch is here because a client — a browser client above all — has to
-// know whether it can speak to this server BEFORE it opens a WebSocket; without
-// it the only way to find out is a rejected connection, which is the confusing
-// failure B2-2 set out to remove.
-//
-// There is deliberately no version field. C-2 keeps build identity off every
-// unauthenticated endpoint so a server cannot be matched against a CVE list;
-// an epoch does not leak that (every 1.2.x server reports epoch 1). Version
-// lives on the admin-gated diagnostics endpoint. See handleServerInfo.
+// serverInfoResponse is GET /api/v1/server-info: public identity, compatibility,
+// registration mode and the server-default message retention window.
+// ProtocolEpoch is here because a client (a browser above all) must know whether
+// it can speak to this server BEFORE opening a WebSocket; otherwise the only
+// signal is a rejected connection. There is deliberately no version field: build
+// identity stays off unauthenticated endpoints so a server cannot be matched
+// against a CVE list, and an epoch does not leak that. Version lives on the
+// admin-gated diagnostics endpoint.
 type serverInfoResponse struct {
 	Name                 string           `json:"name"`
 	ProtocolEpoch        int              `json:"protocol_epoch"`
@@ -99,7 +95,7 @@ func handleServerInfo(cfg *config.Config, deps serverInfoDeps) http.HandlerFunc 
 		response, err := cached, cachedErr
 		mu.Unlock()
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
@@ -119,7 +115,7 @@ func buildServerInfo(ctx context.Context, cfg *config.Config, deps serverInfoDep
 	if err != nil {
 		return serverInfoResponse{}, err
 	}
-	// C-2: no version, build or commit on an unauthenticated endpoint —
+	// No version, build or commit on an unauthenticated endpoint —
 	// that is what lets a scanner match this server to a CVE list. If you
 	// are here to add one, it belongs on the admin-gated diagnostics
 	// endpoint instead (TestAPIV1ServerInfoOmitsVersion enforces this).

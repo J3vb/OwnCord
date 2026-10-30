@@ -11,19 +11,16 @@ import (
 	"github.com/google/uuid"
 )
 
-// FileCloner is the storage half of forwarding a file (WP 6.9a): Clone gives a
-// stored file a second name, by hard link where the volume allows it. Delete
-// takes a clone back out when the forward that wanted it fails.
-// *storage.Storage satisfies it.
+// FileCloner is the storage half of forwarding a file: Clone gives a stored file a
+// second name (hard link where the volume allows); Delete takes a clone back out
+// when the forward fails. *storage.Storage satisfies it.
 type FileCloner interface {
 	Clone(ctx context.Context, src, dst string) error
 	Delete(name string) error
 }
 
-// SetFileCloner installs the storage that forwarded files are cloned in. The
-// composition root does it beside the other storage installs; until then a
-// forward that carries files is refused (ErrInternal) and a text-only forward
-// works.
+// SetFileCloner installs the storage forwarded files are cloned in. Until then a
+// forward carrying files is refused (ErrInternal) and a text-only forward works.
 func (s *UploadService) SetFileCloner(c FileCloner) {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
@@ -45,10 +42,10 @@ type ClonedFiles struct {
 	uid int64
 }
 
-// Discard takes the clones back out after a forward that did not commit:
-// deletes the still-unlinked rows, returns their bytes to the user's counter
-// and removes the files. Best effort and safe on a cancelled ctx; whatever it
-// cannot reach the orphan sweep reclaims, because the rows are unlinked.
+// Discard takes the clones back out after a forward that did not commit: deletes
+// the still-unlinked rows, returns their bytes to the user's counter and removes
+// the files. Best effort and safe on a cancelled ctx; the orphan sweep reclaims
+// what it cannot reach, since the rows are unlinked.
 func (c *ClonedFiles) Discard(ctx context.Context) {
 	if c == nil {
 		return
@@ -75,15 +72,14 @@ func (c *ClonedFiles) Discard(ctx context.Context) {
 	c.IDs = nil
 }
 
-// CloneAttachments gives userID their own copy of each of src for a forward.
-// Every copy is charged to userID through Reserve (the counter is recounted
-// from rows by uploader, so the charge must land on the forwarder), cloned on
-// disk, and recorded as an unlinked row with the forwarder as uploader. The
-// forward's transaction then links them through the ordinary send path.
-//
-// A file whose bytes are already gone (swept after its message was deleted) is
-// skipped, as a send skips a missing upload. Any other failure, a quota
-// refusal included, discards the copies made so far and returns the error.
+// CloneAttachments gives userID their own copy of each of src for a forward. Each
+// copy is charged to userID through Reserve (the counter is recounted from rows by
+// uploader, so the charge must land on the forwarder), cloned on disk and recorded
+// as an unlinked row with the forwarder as uploader; the forward's transaction then
+// links them through the ordinary send path. A file whose bytes are gone (swept
+// after its message was deleted) is skipped, as a send skips a missing upload. Any
+// other failure, a quota refusal included, discards the copies made so far and
+// returns the error.
 func (s *UploadService) CloneAttachments(ctx context.Context, userID int64, src []db.ForwardAttachment) (*ClonedFiles, error) {
 	out := &ClonedFiles{up: s, uid: userID}
 	if len(src) == 0 {

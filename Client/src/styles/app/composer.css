@@ -176,6 +176,21 @@
   align-items: center;
   gap: 8px;
 }
+.attachment-upload-error-action {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-danger);
+  font-weight: 600;
+  text-decoration: underline;
+}
+.attachment-upload-error-action:hover {
+  background: color-mix(in srgb, var(--red) 20%, transparent);
+}
+.attachment-upload-error-action + .attachment-upload-error-dismiss {
+  margin-left: 0;
+}
 .attachment-upload-error-dismiss {
   margin-left: auto;
   flex-shrink: 0;

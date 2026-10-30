@@ -54,13 +54,13 @@ vi.mock("@stores/voice.store", async (importOriginal) => ({
   isSelfMuted: (await importOriginal<typeof import("@stores/voice.store")>()).isSelfMuted,
 }));
 
-vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast: mockShowToast }));
 
 vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: mockUiGetState },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: mockVoiceSessionLeave,
   setMuted: mockSetMuted,
   setDeafened: mockSetDeafened,
@@ -238,7 +238,7 @@ describe("createVoiceWidgetCallbacks", () => {
       expect(mockSetMuted).not.toHaveBeenCalled();
     });
 
-    it("does not send voice_deafen{deafened:false} on unmute while server-deafened (OC-0216)", () => {
+    it("does not send voice_deafen{deafened:false} on unmute while server-deafened", () => {
       // Mirrors onDeafenToggle's localServerMuted guard (OC-0179): a
       // moderator-imposed deafen is not ours to lift, so unmuting must not
       // spend a doomed voice_deafen round-trip that the server will refuse
@@ -420,7 +420,7 @@ describe("createVoiceWidgetCallbacks", () => {
       expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_mute" }));
     });
 
-    it("does not send voice_mute{muted:false} on undeafen while server-muted (OC-0179)", () => {
+    it("does not send voice_mute{muted:false} on undeafen while server-muted", () => {
       // Mirrors onMuteToggle's localServerMuted guard: a moderator-imposed
       // mute is not ours to lift, so undeafening must not spend a doomed
       // voice_mute round-trip that the server will refuse with SERVER_MUTED.
@@ -554,7 +554,7 @@ describe("createSidebarVoiceCallbacks", () => {
     expect(takeJoinRefusal("FORBIDDEN", "join-42")).toBe(true);
   });
 
-  it("onVoiceJoin is a no-op when already in the requested voice channel (OC-0289)", () => {
+  it("onVoiceJoin is a no-op when already in the requested voice channel", () => {
     // A redial into a live call (e.g. DM "Start a call" clicked again to
     // nudge a callee who hasn't answered) must not re-send voice_join for the
     // channel this client already occupies -- the server refuses a

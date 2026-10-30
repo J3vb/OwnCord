@@ -1,6 +1,6 @@
 // Behaviour suite for the `CredentialStore` contract
 // (`src/platform/contracts/credentials.ts`). Run now against the legacy
-// binding (`credentials.legacy.test.ts`, today's `lib/credentials.ts`
+// binding (`credentials.legacy.test.ts`, today's `lib/net/credentials.ts`
 // exports) and again in B7-4 against `platform/desktop` — a green run
 // before and after that move is the evidence the move changed nothing.
 //

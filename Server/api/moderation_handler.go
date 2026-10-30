@@ -8,28 +8,26 @@ import (
 	"strings"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
 )
 
-// warnRequest is POST /api/v1/moderation/users/{id}/warn's body.
 type warnRequest struct {
 	Reason string `json:"reason"`
 }
 
-// timeoutRequest is POST /api/v1/moderation/users/{id}/timeout's body.
 type timeoutRequest struct {
 	Reason          string `json:"reason"`
 	DurationSeconds int64  `json:"duration_seconds"`
 }
 
-// moderationActionIDResponse is Warn's response body.
 type moderationActionIDResponse struct {
 	ID int64 `json:"id"`
 }
 
 // timeoutResponse is Timeout's response body: Voice is "applied" or
-// "skipped" — decision 6, the actor lacked MUTE_MEMBERS.
+// "skipped" when the actor lacked MUTE_MEMBERS.
 type timeoutResponse struct {
 	ID    int64  `json:"id"`
 	Voice string `json:"voice"`
@@ -37,7 +35,7 @@ type timeoutResponse struct {
 
 // moderationActionResponse is one row of GET .../users/{id}/actions and the
 // queue detail's "actions taken" list. ReportID, when present, is the
-// report's PUBLIC id (P2-9) — the sequential internal id never reaches a
+// report's PUBLIC id — the sequential internal id never reaches a
 // response.
 type moderationActionResponse struct {
 	ID             int64   `json:"id"`
@@ -53,10 +51,10 @@ type moderationActionResponse struct {
 }
 
 // moderationActionResponses maps a ledger slice to the wire shape, resolving
-// each row's internal report_id to its public one (P2-9) — the sequential
+// each row's internal report_id to its public one — the sequential
 // id never reaches a response. viewerID authorizes each row's report link
-// individually through the report's own confidentiality guard (P1-5, Codex
-// review): a moderator who is the SUBJECT of a report linked from their own
+// individually through the report's own confidentiality guard:
+// a moderator who is the SUBJECT of a report linked from their own
 // action ledger must not have that report's id surface here just because
 // they still hold MODERATE_MEMBERS — the id is simply omitted (the rest of
 // the row still renders) rather than the whole read failing.
@@ -101,7 +99,7 @@ func MountModerationRoutes(r chi.Router, svc *service.Services, broadcaster Prof
 func moderationTargetIDParam(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	targetID, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "id must be a positive integer")
 		return 0, false
 	}
 	return targetID, true
@@ -111,7 +109,7 @@ func handleModerationWarn(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -136,7 +134,7 @@ func handleModerationTimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -171,7 +169,7 @@ func handleModerationUntimeout(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -190,7 +188,7 @@ func handleModerationActions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -210,12 +208,12 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		actionID, ok := pathID(r, "id")
 		if !ok {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "id must be a positive integer")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "id must be a positive integer")
 			return
 		}
 		if err := svc.Moderation.AcknowledgeWarning(r.Context(), userID, actionID); err != nil {
@@ -226,7 +224,6 @@ func handleModerationAckNotice(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// ownModerationAppeal is the appeal filed against an own ledger row.
 type ownModerationAppeal struct {
 	ID    string `json:"id"`
 	State string `json:"state"`
@@ -284,7 +281,6 @@ type nicknameRequest struct {
 	DisplayName json.RawMessage `json:"display_name"`
 }
 
-// nicknameResponse is the committed nickname, null when cleared.
 type nicknameResponse struct {
 	UserID      int64   `json:"user_id"`
 	DisplayName *string `json:"display_name"`
@@ -294,7 +290,7 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 	return func(w http.ResponseWriter, r *http.Request) {
 		actorID, ok := currentUserID(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		targetID, ok := moderationTargetIDParam(w, r)
@@ -307,12 +303,12 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 			return
 		}
 		if req.DisplayName == nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name is required (a string, or null to clear)")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name is required (a string, or null to clear)")
 			return
 		}
 		var name *string
 		if err := json.Unmarshal(req.DisplayName, &name); err != nil {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "display_name must be a string or null")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name must be a string or null")
 			return
 		}
 		updated, err := svc.Moderation.SetNickname(r.Context(), actorID, targetID, name)
@@ -320,7 +316,7 @@ func handleModerationNickname(svc *service.Services, broadcaster ProfileBroadcas
 			// Same code as the member's own PATCH /users/me; the message is the
 			// validator's text without the sentinel prefix.
 			msg := strings.TrimPrefix(err.Error(), service.ErrBadRequest.Error()+": ")
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", msg)
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, msg)
 			return
 		}
 		if err != nil {

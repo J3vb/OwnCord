@@ -11,7 +11,7 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
+import { findUnnamedControls, focusIndicator } from "./support/accessibility";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
@@ -23,6 +23,7 @@ import {
   voiceJoinWithTokenHandlers,
   parkLiveKitSocket,
   connectVoiceSession,
+  openDmRow,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -198,7 +199,7 @@ async function boot(page: Page, { chime = false } = {}): Promise<void> {
 }
 
 async function openDm(page: Page, index = 0): Promise<void> {
-  await page.locator("[data-testid='dm-entry']").nth(index).click();
+  await openDmRow(page, index);
   await expect(page.locator("[data-testid='call-btn']")).toBeVisible({ timeout: 5_000 });
 }
 
@@ -552,7 +553,7 @@ test.describe("DM calls — call panel", () => {
     );
   });
 
-  test("[F-11] your own avatar in the call shows your own safety number", async ({ page }) => {
+  test("your own avatar in the call shows your own safety number", async ({ page }) => {
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();

@@ -172,7 +172,7 @@ func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, err
 	return sessions, nil
 }
 
-// MarkSessionsSeen acknowledges the account's new logins (B4-7): every
+// MarkSessionsSeen acknowledges the account's new logins: every
 // session's unseen flag clears except the caller's own, since a listing from
 // another device is what "seen" means. Returns how many rows changed.
 func (d *DB) MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error) {
@@ -209,7 +209,7 @@ func (d *DB) DeleteSessionByID(ctx context.Context, sessionID, userID int64) err
 
 // SignOutEverywhere revokes every session of the user — the caller's own
 // included — and every live API token in one transaction, so either both go
-// or neither does, and reports how many of each went (B4-7).
+// or neither does, and reports how many of each went.
 func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {

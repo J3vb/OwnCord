@@ -1,8 +1,7 @@
 import { defineCatalog } from "./format";
 
-/** The Moderation Center queue, report evidence (B9-11), review workflow (B9-12), BPR-071,
- *  warning and timeout actions (B9-13), removal, kick and ban (B9-14), BPR-072, and appeal
- *  review (B9-17), BPR-073. */
+/** The Moderation Center queue, report evidence, review workflow,
+ *  warning and timeout actions, removal, kick and ban, and appeal review. */
 export const moderationText = defineCatalog("moderation", {
   intro:
     "Reports sent to this server's moderators. Reports about you are never shown here, and reports you sent show no internal notes.",

@@ -5,16 +5,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── API Token Handlers ──────────────────────────────────────────────────────
 //
 // These are the HTTP-panel equivalent of `server token create|list|revoke`
 // (token_cli.go). Both are thin adapters over service.TokenService, which is
 // what keeps them in sync — they used to wrap the same db.*APIToken calls
 // twice and had already drifted apart. All three routes sit behind the
-// owner-or-MANAGE_TOKENS gate in api.go (WP 8.4d): minting a long-lived bearer
+// owner-or-MANAGE_TOKENS gate in api.go: minting a long-lived bearer
 // credential over the network is the one admin action that, via a hijacked
 // session, would outlive a password change or an admin force-logout (API
 // tokens deliberately live outside the session table; only sign-out-everywhere
@@ -25,10 +25,10 @@ import (
 func handleListAPITokens(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// A MANAGE_TOKENS holder who is not the owner sees only the tokens
-		// bound to them (WP 8.4d).
+		// bound to them.
 		list, err := tokens.ListFor(r.Context(), actorFromContext(r), isOwnerFromContext(r))
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list tokens")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list tokens")
 			return
 		}
 		writeJSON(w, http.StatusOK, list)
@@ -65,30 +65,30 @@ func handleCreateAPIToken(tokens *service.TokenService) http.HandlerFunc {
 		// overflow int64 nanoseconds into a past instant. 87600h = 10 years,
 		// the same ceiling the service enforces on the duration it receives.
 		if req.ExpiresHours < 0 || req.ExpiresHours > 24*365*10 {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "expires_hours must be between 0 and 87600")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "expires_hours must be between 0 and 87600")
 			return
 		}
 
-		// A MANAGE_TOKENS holder who is not the owner mints for themself only
-		// (WP 8.4d); another username is a 403.
+		// A MANAGE_TOKENS holder who is not the owner mints for themself only;
+		// another username is a 403.
 		minted, err := tokens.CreateFor(r.Context(), actorUserFromContext(r), isOwnerFromContext(r),
 			req.Username, req.Label, time.Duration(req.ExpiresHours)*time.Hour)
 		switch {
 		case errors.Is(err, service.ErrForbidden):
-			writeErr(w, http.StatusForbidden, "FORBIDDEN", "you can only create tokens for your own account")
+			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "you can only create tokens for your own account")
 			return
 		case errors.Is(err, service.ErrBadRequest):
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, err.Error())
 			return
 		case errors.Is(err, service.ErrNotFound), errors.Is(err, service.ErrNoOwnerAccount):
 			// Both are "there is nobody to bind this token to". The panel is
 			// only reachable once an owner exists, so the bootstrap case is
 			// unreachable here in practice; it is mapped rather than dropped
 			// so a future caller cannot fall through to a 500.
-			writeErr(w, http.StatusBadRequest, "NOT_FOUND", "user not found")
+			writeErr(w, http.StatusBadRequest, httperr.CodeNotFound, "user not found")
 			return
 		case err != nil:
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create token")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to create token")
 			return
 		}
 
@@ -102,16 +102,16 @@ func handleRevokeAPIToken(tokens *service.TokenService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid token id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid token id")
 			return
 		}
-		// A holder who is not the owner revokes only their own (WP 8.4d).
+		// A holder who is not the owner revokes only their own.
 		switch err := tokens.RevokeFor(r.Context(), actorFromContext(r), id, isOwnerFromContext(r)); {
 		case errors.Is(err, service.ErrNotFound):
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "no active token with that id")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "no active token with that id")
 			return
 		case err != nil:
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to revoke token")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to revoke token")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

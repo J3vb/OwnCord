@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Thread follows (WP 6.9c, migration 079). thread_members is never
+// Thread follows (migration 079). thread_members is never
 // permission: nothing here decides who may see a thread, and every caller that
 // turns a follow into something a user receives joins it with the parent's
 // visibility first.

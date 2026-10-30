@@ -11,11 +11,11 @@ and schema are documented in `docs/protocol.md`, `docs/schema.md`, and
 
 CI fails on drift, and the next generator run silently discards your edit.
 
-| Generated                                                                             | Source of truth                                                         | Workflow                                              |
-| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------- |
-| `Server/db/dbgen/`                                                                    | `Server/db/queries/sqlite/*.sql`, `Server/migrations/`                  | `db-change` skill                                     |
-| `Server/ws/message_types.go` **and** `Client/src/lib/protocolTypes.ts`                | `protocol/schema.json`                                                  | `protocol-change` skill                               |
-| `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md` | `Server/api/router.go`, `Server/migrations/`, `Server/config/config.go` | `cd Server && go run -tags otel,wazero ./cmd/gendocs` |
+| Generated                                                                                         | Source of truth                                                         | Workflow                                              |
+| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------- |
+| `Server/db/dbgen/`                                                                                | `Server/db/queries/sqlite/*.sql`, `Server/migrations/`                  | `db-change` skill                                     |
+| `Server/ws/message_types.go`, `Server/httperr/codes.go` **and** `Client/src/lib/protocolTypes.ts` | `protocol/schema.json`                                                  | `protocol-change` skill                               |
+| `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md`             | `Server/api/router.go`, `Server/migrations/`, `Server/config/config.go` | `cd Server && go run -tags otel,wazero ./cmd/gendocs` |
 
 ## Bug-hunt ledger
 
@@ -96,7 +96,7 @@ and proceeds, so a reviewer can see what was assumed.
 
 - **`any` is banned.** Use the precise type, a generated protocol type, or
   `unknown` plus a narrowing check. `@typescript-eslint/no-explicit-any` is an
-  error in `eslint.config.js`. The residue in `src/lib/livekitReconnect.ts`
+  error in `eslint.config.js`. The residue in `src/lib/voice/livekitReconnect.ts`
   only shrinks — never add an `eslint-disable` for this rule.
 - **Every Tauri `invoke()` is wrapped in `try/catch`** where it is called, in
   `src/platform/desktop/` (the only place a `@tauri-apps` import may appear).

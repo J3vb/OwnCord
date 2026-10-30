@@ -1,5 +1,5 @@
 /**
- * Category management calls (WP 6.5b): create, rename, delete and move. Each is
+ * Category management calls: create, rename, delete and move. Each is
  * a REST call wrapped in try/catch at the call site that turns a failure into a
  * user-visible toast; none writes a store. The result arrives the way every
  * other category change does, as `channel_update` frames and a
@@ -11,11 +11,12 @@ import { ApiClientError, errorText } from "../../lib/api";
 import type { ApiClient } from "../../lib/api";
 import { channelsStore } from "../../stores/channels.store";
 import { shellText } from "../../i18n/shell";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 /** The server refused a create or rename onto a name another category holds. */
-export const CATEGORY_NAME_TAKEN = "CATEGORY_NAME_TAKEN";
+export const CATEGORY_NAME_TAKEN = RestErrorCode.CATEGORY_NAME_TAKEN;
 /** A reorder named a set of ids that is not the server's current set. */
-export const CATEGORY_LIST_STALE = "CATEGORY_LIST_STALE";
+export const CATEGORY_LIST_STALE = RestErrorCode.CATEGORY_LIST_STALE;
 
 /** What the actions need from the toast container. */
 export interface CategoryToast {
@@ -129,7 +130,7 @@ export async function moveCategory(
 }
 
 /**
- * Drop a dragged category before or after another (WP 6.5c): the full id list
+ * Drop a dragged category before or after another: the full id list
  * with `id` taken out and put back next to `targetId`. A drop that leaves the
  * order as it is, or names a category the list does not hold, sends nothing.
  */

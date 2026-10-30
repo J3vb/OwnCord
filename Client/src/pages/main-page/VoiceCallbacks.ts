@@ -14,7 +14,7 @@ import {
   saveSelfVoiceState,
 } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { noteJoinFailed } from "../../features/voice/joinBackoff";
 import { noteJoinSent } from "../../features/voice/joinRequest";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";
@@ -27,7 +27,7 @@ import {
   disableCamera,
   enableScreenshare,
   disableScreenshare,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 
 const log = createLogger("voice-callbacks");
 
@@ -207,7 +207,7 @@ export function createSidebarVoiceCallbacks(ws: WsClient): SidebarVoiceCallbacks
       // Already there: a same-channel re-join (e.g. a DM "Start a call"
       // redial while the caller is still in the call) buys nothing and the
       // server refuses it with ALREADY_JOINED, which the dispatcher's
-      // catch-all turns into a user-facing error toast (OC-0289). Callers
+      // catch-all turns into a user-facing error toast. Callers
       // that used to hand-check this (ChannelSidebar's item click / stream
       // watch) stay correct since the guard is idempotent with theirs.
       const { currentChannelId, voiceStatus } = voiceStore.getState();

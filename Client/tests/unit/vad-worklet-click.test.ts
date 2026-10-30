@@ -4,7 +4,7 @@
 // in the 128-sample render quanta the audio thread delivers.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FIXTURE_SAMPLE_RATE, placeInRoomTone, readAudioFixture } from "../helpers/wav";
-import { vadThreshold } from "../../src/lib/audioPipeline";
+import { vadThreshold } from "../../src/lib/voice/audioPipeline";
 
 type Message = { type: string; gated?: boolean; value?: number };
 type Processor = {

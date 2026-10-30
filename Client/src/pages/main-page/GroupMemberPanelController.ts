@@ -1,6 +1,6 @@
 /**
  * GroupMemberPanelController -- owns the group DM member panel's lifecycle in
- * the chat layout (WP 3B-11a). It mirrors how MainPage drives the 1:1 profile
+ * the chat layout. It mirrors how MainPage drives the 1:1 profile
  * panel: a lazily imported component mounted in the same right-hand slot, a
  * saved open/closed preference, a header toggle whose `aria-pressed` follows the
  * panel, and a sync that makes the panel match the active conversation without
@@ -13,7 +13,7 @@
  */
 
 import { ApiClientError, type ApiClient } from "@lib/api";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import type { Member } from "@stores/members.store";
 import { membersStore } from "@stores/members.store";
 import { getActiveChannel } from "@stores/channels.store";
@@ -22,7 +22,8 @@ import { openUserProfilePopup } from "../../features/profiles/openUserProfilePop
 import type { GroupDmMemberPanelComponent } from "@components/GroupDmMemberPanel";
 import type * as GroupMembers from "../../features/direct-messages/groupMembers";
 import { createMemberPickerModal } from "./MemberPickerModal";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
+import { RestErrorCode } from "@lib/protocolTypes";
 
 /** Saved preference: the group member panel opens with the conversation. */
 export const GROUP_MEMBERS_PREF = "dmMembersOpen";
@@ -63,7 +64,7 @@ function membershipKey(dm: DmChannel | undefined): string {
 
 /** The error the server would answer a full group with. */
 function fullError(): ApiClientError {
-  return new ApiClientError(409, "GROUP_DM_FULL", "full");
+  return new ApiClientError(409, RestErrorCode.GROUP_DM_FULL, "full");
 }
 
 function activeGroupId(): number | null {

@@ -6,10 +6,10 @@ import (
 	"math"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Registration queue (B4-1, approval mode) ────────────────────────────────
 //
 // An approval-mode application is an account row that cannot sign in until
 // an admin approves it; denial deletes it. Both decisions are audited by the
@@ -28,7 +28,7 @@ func handleListRegistrations(users *service.UserService) http.HandlerFunc {
 
 		pending, err := users.ListPendingRegistrations(r.Context(), limit, offset)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list pending registrations")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list pending registrations")
 			return
 		}
 		out := make([]pendingRegistrationResponse, len(pending))
@@ -51,16 +51,16 @@ func decideRegistration(decide func(ctx context.Context, actorID, userID int64) 
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid registration id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid registration id")
 			return
 		}
 		err = decide(r.Context(), actorFromContext(r), id)
 		if errors.Is(err, service.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "no pending registration with that id")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "no pending registration with that id")
 			return
 		}
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to decide the registration")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to decide the registration")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

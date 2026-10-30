@@ -16,11 +16,10 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
-
-// ─── Ticket Store for SSE Log Stream ────────────────────────────────────────
 
 // ticketEntry holds a single-use ticket with a creation timestamp for TTL.
 type ticketEntry struct {
@@ -88,14 +87,14 @@ func handleLogTicket(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hash, ok := r.Context().Value(adminTokenHashKey).(string)
 		if !ok || hash == "" {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or expired session")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session")
 			return
 		}
 
 		ticket, err := logTickets.issue(hash)
 		if err != nil {
 			slog.Error("failed to issue log stream ticket", "err", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to generate ticket")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to generate ticket")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"ticket": ticket})
@@ -111,18 +110,16 @@ type LogEntry struct {
 	Attrs     string `json:"attrs,omitempty"`
 }
 
-// RingBuffer is a bounded, thread-safe circular buffer of log entries
-// with fan-out to SSE subscriber channels.
-//
-// It is a true ring (fixed backing array + write position), modelled on
-// ws.EventRingBuffer: overwriting the oldest entry is a single slot store,
-// not a fresh capacity-sized allocation + copy per write.
+// RingBuffer is a bounded, thread-safe circular buffer of log entries with
+// fan-out to SSE subscriber channels. It is a true ring (fixed backing array +
+// write position, like ws.EventRingBuffer), so overwriting the oldest entry is
+// a single slot store rather than an allocation + copy per write.
 type RingBuffer struct {
 	mu  syncutil.Mutex
 	all logRing
 	// warn holds the last supportEventsMax WARN-and-above entries, so an
 	// INFO/DEBUG burst longer than all cannot evict a failure from the
-	// support bundle (SRE-03).
+	// support bundle.
 	warn        logRing
 	subscribers map[*chan LogEntry]struct{}
 	streamsEnd  chan struct{} // closed by EndStreams
@@ -141,9 +138,9 @@ func NewRingBuffer(capacity int) *RingBuffer {
 
 // EndStreams ends every open log stream, and any opened after it, for good.
 // The server registers it with http.Server.RegisterOnShutdown: a stream never
-// returns on its own, and Shutdown waits for every active handler, so an open
-// admin Logs tab would otherwise hold the drain for its whole budget (SRV-06).
-// Safe to call more than once.
+// returns on its own and Shutdown waits for every active handler, so an open
+// Logs tab would hold the drain for its whole budget. Safe to call more than
+// once.
 func (rb *RingBuffer) EndStreams() {
 	rb.endOnce.Do(func() { close(rb.streamsEnd) })
 }
@@ -233,14 +230,11 @@ func (rb *RingBuffer) subscribeLocked() (<-chan LogEntry, func()) {
 // SnapshotAndSubscribe atomically copies the current backfill entries and
 // registers a new subscriber channel under a single lock acquisition.
 //
-// Doing this as two separate calls (Snapshot() then Subscribe()) leaves a
-// window between them where Write's fan-out — which only reaches entries
-// already in rb.subscribers — cannot deliver to a caller that has not
-// subscribed yet, while the caller's snapshot was already taken and will
-// never include it either. Any entry written in that window is lost from
-// both the backfill and the live feed. handleLogStream's window is not
-// instantaneous: a token-resolution DB round-trip runs per backfilled entry
-// before the (formerly) separate Subscribe() call.
+// Two separate calls (Snapshot() then Subscribe()) leave a window where an
+// entry written in between reaches neither the backfill nor the live feed,
+// because Write's fan-out only reaches registered subscribers. The window is
+// not instantaneous: handleLogStream runs a token-resolution DB round-trip per
+// backfilled entry.
 func (rb *RingBuffer) SnapshotAndSubscribe() ([]LogEntry, <-chan LogEntry, func()) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
@@ -311,24 +305,19 @@ func (rh *ringHandler) Enabled(level slog.Level) bool {
 	return level >= rh.level.Level()
 }
 
-// logAttrValue converts an slog.Value to the value stored in the ring
-// buffer's JSON attrs, matching what slog's own JSONHandler does for stdout
-// (see appendJSONValue in log/slog/json_handler.go):
+// logAttrValue converts an slog.Value to the value stored in the ring buffer's
+// JSON attrs, matching slog's own JSONHandler for stdout:
 //
-//   - Resolve() first, so an slog.LogValuer (db.User, db.Session,
-//     config.Config and its secret-bearing sections — see
-//     Server/db/logvalue.go and Server/config/logvalue.go) is redacted before
-//     it reaches JSON. Record.Attrs does not resolve on its own, so without
-//     this the ring buffer bypasses that redaction even though stdout honors it.
-//   - error values marshal to "{}" (errors.errorString / fmt.wrapError have
-//     only unexported fields), so an error not otherwise handled by
-//     json.Marshal is rendered as its Error() string instead.
-//   - a resolved group (LogValue returning slog.GroupValue, as every type
-//     above does) is walked into a map instead of json.Marshal-ed as-is: a
-//     bare []slog.Attr marshals to "{}" per element, since slog.Value's
-//     fields are unexported. Resolve() only resolves the outer LogValuer, not
-//     nested ones (see its doc comment), so nested group members are resolved
-//     by this same recursive call.
+//   - Resolve() first, so an slog.LogValuer (db.User, db.Session, config.Config
+//     and its secret-bearing sections) is redacted before it reaches JSON.
+//     Record.Attrs does not resolve on its own, so without this the ring
+//     buffer would bypass redaction that stdout honors.
+//   - error values marshal to "{}" (only unexported fields), so they are
+//     rendered as their Error() string instead.
+//   - a resolved group is walked into a map instead of json.Marshal-ed as-is:
+//     a bare []slog.Attr marshals to "{}" per element. Resolve() only resolves
+//     the outer LogValuer, so nested group members are resolved by the same
+//     recursive call.
 func logAttrValue(v slog.Value) any {
 	v = v.Resolve()
 	if v.Kind() == slog.KindGroup {
@@ -448,26 +437,17 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 	ticket := r.URL.Query().Get("ticket")
 	entry, ok := logTickets.redeem(ticket)
 	if ticket == "" || !ok {
-		errResp, _ := json.Marshal(map[string]string{
-			"error":   "UNAUTHORIZED",
-			"message": "invalid or expired ticket",
-		})
-		http.Error(w, string(errResp), http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired ticket")
 		return nil, false
 	}
-	// Stream lifetime == request lifetime, so all principal re-checks below
-	// use the stream request's context. The ticket's hash is resolved the
-	// same way adminAuthMiddleware resolves a bearer credential — login
-	// session first, then API token — so revoking either kind mid-stream
-	// cuts the stream.
+	// Stream lifetime == request lifetime, so all principal re-checks below use
+	// the stream request's context. The ticket's hash is resolved like
+	// adminAuthMiddleware resolves a bearer credential (session first, then API
+	// token), so revoking either kind mid-stream cuts the stream.
 	ctx := r.Context()
 	user, role, _, err := auth.ResolveTokenHash(ctx, database, entry.tokenHash)
 	if err != nil || user == nil || role == nil {
-		errResp, _ := json.Marshal(map[string]string{
-			"error":   "UNAUTHORIZED",
-			"message": "invalid or expired session",
-		})
-		http.Error(w, string(errResp), http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "invalid or expired session")
 		return nil, false
 	}
 	principalStillAuthorized := func() bool {
@@ -483,11 +463,7 @@ func logStreamAuthorize(w http.ResponseWriter, r *http.Request, database *db.DB)
 		return permissions.CanViewDiagnostics(currentRole.Permissions)
 	}
 	if !principalStillAuthorized() {
-		errResp, _ := json.Marshal(map[string]string{
-			"error":   "FORBIDDEN",
-			"message": "VIEW_DIAGNOSTICS permission required",
-		})
-		http.Error(w, string(errResp), http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "VIEW_DIAGNOSTICS permission required")
 		return nil, false
 	}
 	return principalStillAuthorized, true
@@ -507,7 +483,7 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		// Check that we can flush (required for SSE).
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "streaming not supported")
 			return
 		}
 
@@ -519,28 +495,23 @@ func handleLogStream(database *db.DB, ringBuf *RingBuffer) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
-		// This handler streams through the ordinary ResponseWriter (no
-		// Hijack), so it is otherwise subject to http.Server.WriteTimeout:
-		// net/http sets the connection's write deadline exactly once, when
-		// request headers are read, and nothing about writing more data
-		// later extends it. Without clearing it here, every write past that
-		// deadline (including the keepalive ticks below) silently times out
-		// — the caller discards write errors, per SSE convention, since a
-		// client that vanishes is detected via ctx.Done() instead — so the
-		// stream goes silently dead and the client eventually sees the
-		// connection close, then reconnects and replays the full backfill.
-		// SetWriteDeadline(zero) clears the deadline on HTTP/1 and cancels
-		// the per-stream deadline timer on HTTP/2; ErrNotSupported means the
-		// ResponseWriter doesn't sit over a real connection (e.g. in tests),
-		// which is fine to ignore.
+		// This handler streams through the ordinary ResponseWriter, so it is
+		// subject to http.Server.WriteTimeout: net/http sets the write deadline
+		// once, when headers are read, and writing more data does not extend it.
+		// Left in place, every write past it (keepalives included) silently
+		// times out, since the caller discards write errors per SSE convention,
+		// and the stream goes dead until the client reconnects and replays the
+		// full backfill. SetWriteDeadline(zero) clears it on HTTP/1 and cancels
+		// the per-stream timer on HTTP/2; ErrNotSupported means no real
+		// connection (tests) and is ignored.
 		if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
 			slog.Warn("log stream: failed to clear write deadline; stream may be cut by WriteTimeout", "err", err)
 		}
 
-		// Snapshot the backfill and subscribe to new entries atomically: the
-		// per-entry principalStillAuthorized() check below is a DB round-trip,
-		// so the backfill loop is slow enough that a Snapshot()-then-Subscribe()
-		// gap would silently drop any entry written in between (v059).
+		// Snapshot the backfill and subscribe atomically: the per-entry
+		// principalStillAuthorized() check below is a DB round-trip, so a
+		// Snapshot()-then-Subscribe() gap would silently drop entries written
+		// in between.
 		backfill, ch, unsub := ringBuf.SnapshotAndSubscribe()
 		defer unsub()
 

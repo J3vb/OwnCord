@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ─── Role Handlers ───────────────────────────────────────────────────────────
 //
 // The whole group sits behind requirePerm(MANAGE_ROLES); RoleService re-checks
 // the bit and owns the hierarchy rules (manage only below your own position,
@@ -15,7 +15,7 @@ import (
 // stay adapters: decode, call, respond.
 //
 // Permission-cache invalidation and the live fan-out (the hub's role refresh
-// worker, WP 4.4b) belong to RoleService since WP 5.1a: a second caller of the
+// worker) belong to RoleService: a second caller of the
 // service gets the same effects, and nothing after the commit reads
 // r.Context(), so a request deadline or an aborted client cannot cut them.
 
@@ -23,14 +23,14 @@ import (
 // was constructed without a RoleService. Refusing beats falling back to an
 // unchecked UPDATE, mirroring the nil-ModerationService branches.
 func roleServiceUnavailable(w http.ResponseWriter) {
-	writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "role service unavailable")
+	writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "role service unavailable")
 }
 
 // writeRoleErr maps RoleService errors onto admin API responses. Separate from
 // writeModerationErr only because NOT_FOUND means "role", not "user".
 func writeRoleErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrConflict) {
-		writeErr(w, http.StatusConflict, "ROLE_CONFLICT", err.Error())
+		writeErr(w, http.StatusConflict, httperr.CodeRoleConflict, err.Error())
 		return
 	}
 	writeSvcErr(w, err, "role not found", "", "role action failed")
@@ -44,7 +44,7 @@ type roleRequest struct {
 	Color       *string `json:"color"`
 	Permissions *int64  `json:"permissions"`
 	Position    *int    `json:"position"`
-	// Hoist and Mentionable (WP 6.3c): absent leaves them unchanged on PATCH
+	// Hoist and Mentionable: absent leaves them unchanged on PATCH
 	// and false on POST.
 	Hoist       *bool `json:"hoist"`
 	Mentionable *bool `json:"mentionable"`
@@ -114,7 +114,7 @@ func handlePatchRole(roles *service.RoleService) http.HandlerFunc {
 		}
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid role id")
 			return
 		}
 		var req roleRequest
@@ -140,7 +140,7 @@ func handleDeleteRole(roles *service.RoleService) http.HandlerFunc {
 		}
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid role id")
 			return
 		}
 		_, _, _, err = roles.DeleteRole(r.Context(), actorFromContext(r), id)

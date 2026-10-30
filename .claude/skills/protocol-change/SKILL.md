@@ -5,8 +5,10 @@ description: Add or change a WebSocket message type in OwnCord. Use before editi
 
 # protocol-change
 
-`protocol/schema.json` is the source of truth. Both constant files are
-generated from it by `Server/cmd/genprotocol/`.
+`protocol/schema.json` is the source of truth. All three constant files
+(`Server/ws/message_types.go`, `Server/httperr/codes.go`,
+`Client/src/lib/protocolTypes.ts`) are generated from it by
+`Server/cmd/genprotocol/`.
 
 **The schema holds message-type NAMES and a few closed value sets (`enums`,
 e.g. `server_restart.reason`) only.** Route by what you are changing —
@@ -17,6 +19,7 @@ regenerate cycle below is wasted work:
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | New message type                                         | schema + regenerate (steps below)                                                                                      |
 | New or changed value of a schema `enums` field           | schema `enums` + regenerate (steps below)                                                                              |
+| New REST or WebSocket error code                         | schema `error_codes.rest` / `.ws` + regenerate; reply with `httperr.CodeX` / `ws.ErrCodeX`, never the string           |
 | New or changed payload **field** on an existing type     | `Server/ws/command.go`/`messages.go`, `Client/src/lib/protocolTypes.ts`, `docs/protocol.md` — no schema, no regenerate |
 | Content inside an opaque blob the server relays verbatim | `docs/protocol.md` only; often zero Go change                                                                          |
 
@@ -27,10 +30,10 @@ NOT backward compatible with older servers.
 
 1. Edit `protocol/schema.json`.
 2. Run `make protocol-generate` from `Server/`.
-3. Commit **both** outputs — `Server/ws/message_types.go` and
-   `Client/src/lib/protocolTypes.ts`. One run regenerates the
-   pair; committing only the Go side is the usual mistake, and CI's
-   `make protocol-verify` fails on either being stale.
+3. Commit **all three** outputs — `Server/ws/message_types.go`,
+   `Server/httperr/codes.go` and `Client/src/lib/protocolTypes.ts`. One run
+   regenerates them; committing only the Go side is the usual mistake, and
+   CI's `make protocol-verify` fails on any being stale.
 
 Document the semantics in `docs/protocol.md` — the schema carries names and
 shapes, not behaviour.

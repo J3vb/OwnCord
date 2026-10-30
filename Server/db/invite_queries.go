@@ -8,7 +8,7 @@ import (
 )
 
 // ListInvites returns invites ordered by creation time descending.
-// M-12: Limited to 200 rows to prevent unbounded result sets.
+// Limited to 200 rows to prevent unbounded result sets.
 func (d *DB) ListInvites(ctx context.Context) ([]*Invite, error) {
 	rows, err := d.q.ListInvites(ctx)
 	if err != nil {

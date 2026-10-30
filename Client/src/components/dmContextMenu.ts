@@ -4,10 +4,9 @@
  * Also owns the destructive group-leave confirm both menus open.
  */
 
-import { Disposable } from "@lib/disposable";
-import { createElement } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
+import { createConfirmModal } from "../features/dialogs/confirmModal";
+import type { ModalInstance } from "@lib/ui/modalFactory";
+import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
 import { muteChoices, mutedUntilLabel } from "./muteMenu";
@@ -22,9 +21,9 @@ export interface DmMenuConvo {
   readonly userId: number;
   readonly username: string;
   readonly isGroup: boolean;
-  /** The group reports an owner (a server with WP 3B-10): the leave copy says it can be rejoined. */
+  /** The group reports an owner (a server that reports one): the leave copy says it can be rejoined. */
   readonly hasOwner?: boolean;
-  /** The group has an uploaded icon (WP 3B-11b): the menu offers Remove Group Icon. */
+  /** The group has an uploaded icon: the menu offers Remove Group Icon. */
   readonly hasIcon?: boolean;
   readonly unread: boolean;
   readonly muted: boolean;
@@ -62,7 +61,7 @@ export interface DmMenuActions {
 export type DmConfirmLeave = (convo: DmMenuConvo, onClose: (channelId: number) => void) => void;
 
 /**
- * The destructive group-leave confirm, modelled on DeleteChannelModal: Cancel
+ * The destructive group-leave confirm, on the shared confirm preset: Cancel
  * first and focused, Escape and the backdrop cancel, focus returns to the
  * opener. Tied to the sidebar's lifetime, not the row's: a row is rebuilt on
  * every new message or call change, and that must not dismiss the prompt. The
@@ -73,53 +72,20 @@ export function openLeaveConfirm(
   onClose: (channelId: number) => void,
   sidebarSignal: AbortSignal,
 ): ModalInstance {
-  const owner = new Disposable();
-  const titleId = `dm-leave-title-${convo.channelId}`;
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, requestsText("dm.leaveConfirmTitle")));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(
-    createElement(
-      "p",
-      { class: "modal-danger-text" },
-      requestsText(convo.hasOwner === true ? "dm.leaveConfirmBodyRejoin" : "dm.leaveConfirmBody", {
-        name: convo.username,
-      }),
+  return createConfirmModal({
+    title: requestsText("dm.leaveConfirmTitle"),
+    titleId: `dm-leave-title-${convo.channelId}`,
+    body: requestsText(
+      convo.hasOwner === true ? "dm.leaveConfirmBodyRejoin" : "dm.leaveConfirmBody",
+      { name: convo.username },
     ),
-  );
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "dm-leave-cancel" },
-    shellText("common.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "dm-leave-confirm" },
-    requestsText("dm.leaveConfirm"),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "dm-leave-modal" },
+    confirmLabel: requestsText("dm.leaveConfirm"),
+    testId: "dm-leave-modal",
+    confirmTestId: "dm-leave-confirm",
+    cancelTestId: "dm-leave-cancel",
     signal: sidebarSignal,
-    // The modal owns its own listeners; drop this prompt's with it.
-    onClose: () => owner.destroy(),
+    onConfirm: () => onClose(convo.channelId),
   });
-  cancel.addEventListener("click", () => modal.close(), { signal: owner.signal });
-  confirm.addEventListener(
-    "click",
-    () => {
-      modal.close();
-      onClose(convo.channelId);
-    },
-    { signal: owner.signal },
-  );
-  return modal;
 }
 
 export interface DmContextMenuRequest {
@@ -202,7 +168,7 @@ export function openDmContextMenu(req: DmContextMenuRequest): void {
     });
   }
   // Any member may set or clear the icon, so this is not gated on ownership,
-  // only on the server being one that reports an owner (WP 3B-10).
+  // only on the server being one that reports an owner.
   if (isGroup && convo.hasOwner === true) {
     const change = actions.onChangeGroupIcon;
     if (change !== undefined) {

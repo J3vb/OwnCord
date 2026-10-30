@@ -7,8 +7,7 @@ import (
 )
 
 // PromContentType is the Content-Type of the Prometheus text exposition format
-// (version 0.0.4). Prometheus 3 rejects a scrape whose type it cannot parse, so
-// the handler sends exactly this.
+// (version 0.0.4); Prometheus 3 rejects a scrape whose type it cannot parse.
 const PromContentType = "text/plain; version=0.0.4; charset=utf-8"
 
 // Prometheus family types.
@@ -61,14 +60,12 @@ func (p *PromText) Sample(labels []PromLabel, v float64) {
 }
 
 // Histogram writes one labelled histogram of the current family from raw
-// counts: the cumulative _bucket series, +Inf, _sum and _count. The bounds are
-// the shared latency bounds converted from milliseconds to seconds, and
-// SumMicros becomes seconds.
+// counts: the cumulative _bucket series, +Inf, _sum and _count. Bounds are the
+// shared latency bounds converted to seconds, and SumMicros becomes seconds.
 //
-// The buckets, +Inf and _count come from one pass over the loaded bucket
-// counters, so +Inf == _count holds in every scrape even while observations
-// land. _sum is a separate atomic load and can differ by one in-flight
-// observation from the buckets; Prometheus tolerates that.
+// Buckets, +Inf and _count come from one pass over the loaded counters, so
+// +Inf == _count holds in every scrape. _sum is a separate atomic load and can
+// differ by one in-flight observation; Prometheus tolerates that.
 func (p *PromText) Histogram(labels []PromLabel, c Counts) {
 	var cumulative uint64
 	for i, bound := range latencyBoundsMs {

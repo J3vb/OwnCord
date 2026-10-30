@@ -36,7 +36,7 @@ function makeOptions(overrides: Partial<DmProfileSidebarOptions> = {}): DmProfil
   };
 }
 
-describe("DmProfileSidebar banner (6.11d)", () => {
+describe("DmProfileSidebar banner", () => {
   let container: HTMLDivElement;
   beforeEach(() => {
     fetchImageAsObjectUrl.mockReset();
@@ -255,7 +255,7 @@ describe("DmProfileSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("colors the status dots with design tokens, never a literal hex (P4-19)", () => {
+  it("colors the status dots with design tokens, never a literal hex", () => {
     const cases: Array<[DmProfileData["status"], string]> = [
       ["online", "var(--green)"],
       ["idle", "var(--yellow)"],
@@ -281,7 +281,7 @@ describe("DmProfileSidebar", () => {
     }
   });
 
-  it("repaints the token color on update() for a new status (P4-19)", () => {
+  it("repaints the token color on update() for a new status", () => {
     const sidebar = createDmProfileSidebar(makeOptions({ user: makeUser({ status: "online" }) }));
     sidebar.mount(container);
 
@@ -423,7 +423,7 @@ describe("DmProfileSidebar", () => {
     localStorage.removeItem("owncord:dm-note:a.example.com:42");
   });
 
-  it("consumes the legacy note on migration so a second host does not inherit it (OC-0329)", () => {
+  it("consumes the legacy note on migration so a second host does not inherit it", () => {
     // User ids are per-server, so the pre-scoping note about server A's user
     // 42 must reach server A exactly once and never show for the unrelated
     // user 42 on server B.
@@ -460,7 +460,7 @@ describe("DmProfileSidebar", () => {
     }
   });
 
-  it("still shows the legacy note and keeps its key bound to this host when the scoped copy cannot be written (Codex on PRs #1502 and #1505)", () => {
+  it("still shows the legacy note and keeps its key bound to this host when the scoped copy cannot be written", () => {
     // Storage at quota: the scoped setItem throws. The note was read fine,
     // so it must still show, and the legacy key must survive for a later
     // migration attempt instead of the panel going blank for as long as
@@ -520,7 +520,7 @@ describe("DmProfileSidebar", () => {
     }
   });
 
-  describe("Block / Unblock (WP 3B-2)", () => {
+  describe("Block / Unblock", () => {
     beforeEach(() => resetBlocksStore());
 
     it("shows Block, then Unblock once blocksStore has the user, and reports the toggle", async () => {
@@ -547,7 +547,7 @@ describe("DmProfileSidebar", () => {
     });
   });
 
-  describe("avatar repaint and modal-aware Escape (WP 3B-3)", () => {
+  describe("avatar repaint and modal-aware Escape", () => {
     it("swaps the picture for the new one when update() changes the avatar", async () => {
       fetchImageAsObjectUrl.mockImplementation((url: string) =>
         Promise.resolve(`data:image/png;base64,${url.endsWith("a.png") ? "AAA" : "BBB"}`),
@@ -651,7 +651,7 @@ describe("DmProfileSidebar", () => {
     });
   });
 
-  describe("server-synced note (6.11c)", () => {
+  describe("server-synced note", () => {
     it("server note shown when capable", async () => {
       localStorage.clear();
       const getUserNote = vi.fn(() => Promise.resolve({ user_id: 7, note: "from the server" }));

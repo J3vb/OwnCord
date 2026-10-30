@@ -10,10 +10,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Voice message limits (WP 8.9). A voice message is an ordinary attachment that
+// Voice message limits. A voice message is an ordinary attachment that
 // also carries its length and a small waveform, so a client can draw the player
 // before it has downloaded the file.
 const (
@@ -91,7 +92,6 @@ func parseVoiceWaveform(s string) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// voiceMimeAllowed reports whether a sniffed type can be a voice recording.
 func voiceMimeAllowed(mimeType string) bool {
 	base, _, _ := strings.Cut(mimeType, ";")
 	base = strings.ToLower(strings.TrimSpace(base))
@@ -103,7 +103,7 @@ func voiceMimeAllowed(mimeType string) bool {
 func writeVoiceParamError(w http.ResponseWriter, err error) {
 	slog.Debug("upload refused: voice parameters", "error", err)
 	msg := strings.TrimPrefix(err.Error(), errVoiceParams.Error()+": ")
-	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", msg)
+	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, msg)
 }
 
 // checkStored refuses a voice upload whose sniffed type is not an audio
@@ -116,12 +116,10 @@ func (v voiceMeta) checkStored(w http.ResponseWriter, store FileStore, stored st
 	if delErr := store.Delete(stored.id); delErr != nil {
 		slog.Error("failed to clean up refused upload file", "stored_as", stored.id, "error", delErr)
 	}
-	writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "a voice message must be an audio recording")
+	writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "a voice message must be an audio recording")
 	return false
 }
 
-// record builds the attachment row of a stored upload, with the voice fields
-// when this is a voice upload.
 func (v voiceMeta) record(userID int64, filename string, stored storedUpload) service.AttachmentRecord {
 	rec := service.AttachmentRecord{
 		ID:         stored.id,

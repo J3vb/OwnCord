@@ -172,6 +172,10 @@ describe("My reports", () => {
   it("says so in the pane when the section fails to load", async () => {
     vi.doMock("./myReports", () => Promise.reject(new Error("chunk failed")));
     try {
+      // vitest 5 registers a doMock on the next import, and a second import
+      // started in the same tick skips the wait and gets the real module. The
+      // pane starts two imports at once, so register the mock first.
+      await expect(import("./myReports")).rejects.toThrow();
       const pane = buildSafetyPane(tab.signal, api);
       // Other Safety sections keep their own (empty) alert regions; find ours.
       await vi.waitFor(() =>
@@ -182,6 +186,9 @@ describe("My reports", () => {
       expect(signals).toEqual([]);
     } finally {
       vi.doUnmock("./myReports");
+      // Same reason as above: apply the unmock before the next test's pane
+      // starts its imports.
+      await import("./myReports");
     }
   });
 
@@ -208,5 +215,108 @@ describe("reportStateKey", () => {
     ["archived", "", "state.unknown"],
   ])("%s/%s → %s", (state, outcome, key) => {
     expect(reportStateKey({ state, outcome })).toBe(key);
+  });
+});
+
+const retryOf = (s: HTMLElement): HTMLButtonElement => s.querySelector("button")!;
+const statusOf = (s: HTMLElement): HTMLElement => s.querySelector("[role=status]")!;
+const headingNum = (s: HTMLElement): number => Number(s.querySelector("h3")!.id.split("-").pop());
+const alertOf = (s: HTMLElement): HTMLElement => s.querySelector("[role=alert]")!;
+
+describe("My reports markup and states", () => {
+  it("gives the section a unique, positive heading id and its styling classes", () => {
+    const first = mount();
+    const second = mount();
+    expect(first.querySelector("h3")!.id).toMatch(/^my-reports-\d+$/);
+    expect(headingNum(second)).toBeGreaterThan(headingNum(first));
+    expect(headingNum(first)).toBeGreaterThan(0);
+    expect(first.className).toBe("my-reports");
+    expect(first.querySelector("h3")!.className).toBe("safety-heading");
+    expect(first.querySelector("h3")!.getAttribute("tabindex")).toBe("-1");
+    expect(first.querySelector("p")!.className).toBe("setting-desc");
+    expect(statusOf(first).className).toBe("my-reports-status");
+    expect(alertOf(first).className).toBe("form-error");
+    expect(first.querySelector("ul")!.className).toBe("my-reports-list");
+    expect(retryOf(first).getAttribute("type")).toBe("button");
+    expect(retryOf(first).className).toBe("btn-modal-save");
+  });
+
+  it("keeps Try again hidden and disabled while the first load runs", () => {
+    const section = mount();
+    expect(retryOf(section).hidden).toBe(true);
+    expect(retryOf(section).getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("clears the busy state, the loading line and the disabled Try again on failure", async () => {
+    const section = mount();
+    pending[0]!.reject(new Error("offline"));
+    await flush();
+    expect(section.hasAttribute("aria-busy")).toBe(false);
+    expect(retryOf(section).hasAttribute("aria-disabled")).toBe(false);
+    expect(retryOf(section).hidden).toBe(false);
+    expect(statusOf(section).textContent).toBe("");
+    expect(alertOf(section).textContent).toBe("Couldn't load your reports.");
+  });
+
+  it("shows nothing for a failure that lands after the tab is closed", async () => {
+    const section = mount();
+    tab.abort();
+    pending[0]!.reject(new Error("offline"));
+    await flush();
+    expect(alertOf(section).textContent).toBe("");
+    expect(retryOf(section).hidden).toBe(true);
+    expect(statusOf(section).textContent).toBe("Loading your reports…");
+    expect(section.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("replaces the list on a reload instead of adding to it", async () => {
+    const section = mount();
+    pending[0]!.resolve([row(), row({ reason: "spam" })]);
+    await flush();
+    expect(section.querySelectorAll("li")).toHaveLength(2);
+    retryOf(section).click();
+    expect(pending).toHaveLength(2);
+    pending[1]!.resolve([row({ reason: "illegal" })]);
+    await flush();
+    const items = [...section.querySelectorAll(".my-reports-what")];
+    expect(items.map((i) => i.textContent)).toEqual(["Message reported for Illegal content"]);
+  });
+
+  it("accepts another load once a load has finished", async () => {
+    const section = mount();
+    pending[0]!.resolve([row()]);
+    await flush();
+    retryOf(section).click();
+    expect(pending).toHaveLength(2);
+  });
+
+  it("leaves focus alone when Try again did not have it", async () => {
+    const section = mount();
+    pending[0]!.reject(new Error("offline"));
+    await flush();
+    retryOf(section).click();
+    pending[1]!.resolve([row()]);
+    await flush();
+    expect(document.activeElement).not.toBe(section.querySelector("h3"));
+  });
+
+  it("keeps focus on Try again when it fails again", async () => {
+    const section = mount();
+    pending[0]!.reject(new Error("offline"));
+    await flush();
+    retryOf(section).focus();
+    retryOf(section).click();
+    pending[1]!.reject(new Error("offline"));
+    await flush();
+    expect(document.activeElement).toBe(retryOf(section));
+  });
+
+  it("does not load again from Try again once the tab is closed", async () => {
+    const section = mount();
+    pending[0]!.reject(new Error("offline"));
+    await flush();
+    tab.abort();
+    retryOf(section).click();
+    expect(pending).toHaveLength(1);
   });
 });

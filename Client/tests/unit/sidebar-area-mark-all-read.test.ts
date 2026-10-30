@@ -12,16 +12,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   rePinPeerIdentity: vi.fn(),
   leaveVoice: vi.fn(),
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
 }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/presence/profiles", () => ({
   createProfileManager: vi.fn().mockReturnValue({
     loadProfiles: vi.fn().mockResolvedValue(undefined),
     getAll: vi.fn().mockReturnValue([]),
@@ -54,7 +54,7 @@ import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { membersStore } from "../../src/stores/members.store";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [

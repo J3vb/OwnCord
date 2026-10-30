@@ -15,10 +15,10 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
-import { messageActionGates } from "@components/message-list/message-actions";
+import { messageActionGates } from "@components/message-list/messageActions";
 import { groupRowText } from "@components/message-list/groupRows";
-import { shouldGroup } from "@lib/formatting";
-import { isServerRowKind } from "@lib/messageKind";
+import { shouldGroup } from "@lib/text/formatting";
+import { isServerRowKind } from "@lib/text/messageKind";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { messagesStore, type Message } from "@stores/messages.store";
@@ -267,7 +267,7 @@ describe("group row gates", () => {
     rowEl(7).dispatchEvent(
       new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
     );
-    await import("@components/message-list/message-menu");
+    await import("@components/message-list/messageMenu");
     await new Promise((r) => setTimeout(r, 0));
     expect(document.querySelector(".message-context-menu")).toBeNull();
   });

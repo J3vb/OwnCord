@@ -13,10 +13,10 @@
 // This module must not import ./deepLinks: the deep-link handlers import it,
 // and the cycle lint forbids the loop.
 
-import { renderFallback, safeMount, type RenderRecovery } from "@lib/safe-render";
+import { renderFallback, safeMount, type RenderRecovery } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
-import type { ProfileManager } from "@lib/profiles";
+import type { ProfileManager } from "@lib/presence/profiles";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { voiceStore, leaveVoiceChannel } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
@@ -40,7 +40,7 @@ let activePage: PageId = "connect";
 // Re-run the connect page's health checks (set while the connect page is
 // mounted, cleared otherwise) — refreshes a server's status after its
 // certificate is trusted for the first time.
-let rerunConnectHealth: (() => void) | null = null;
+let rerunConnectHealth: ((acceptedHost?: string) => void) | null = null;
 // Set while the connect page is mounted so an owncord:// deep link can pre-fill
 // its register form; the pending value covers links that arrive before it mounts.
 let applyInviteToConnectPage: ((code: string, host?: string) => void) | null = null;
@@ -89,9 +89,13 @@ export function renderActive(): Promise<void> {
   return renderPage(activePage);
 }
 
-/** Re-run the mounted connect page's health checks; a no-op when it is not mounted. */
-export function rerunHealth(): void {
-  rerunConnectHealth?.();
+/**
+ * Re-run the mounted connect page's health checks; a no-op when it is not
+ * mounted. `acceptedHost` (a just-trusted certificate's normalized host) also
+ * resubmits a sign-in that certificate refused.
+ */
+export function rerunHealth(acceptedHost?: string): void {
+  rerunConnectHealth?.(acceptedHost);
 }
 
 /** Remember an invite link for the next connect mount to take (null clears it). */
@@ -134,7 +138,7 @@ async function reloadAfterVoiceLeave(): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
+        import("@lib/voice/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
         }),

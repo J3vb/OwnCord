@@ -16,20 +16,22 @@ Knowing the kind tells you how far to trust a page:
 
 ## Start here
 
-| I want to…                        | Read                                                         |
-| --------------------------------- | ------------------------------------------------------------ |
-| Run a server                      | [quick-start.md](quick-start.md)                             |
-| Run a server for real             | [deployment.md](deployment.md)                               |
-| Fix something that is wrong       | [deployment.md — When it fails](deployment.md#when-it-fails) |
-| Know what the beta does not do    | [known-limitations.md](known-limitations.md)                 |
-| See the current release and plans | [STATUS.md](STATUS.md)                                       |
-| Contribute a change               | [contributing.md](contributing.md)                           |
-| Understand how it is built        | [architecture/](architecture/README.md)                      |
-| Report a bug                      | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)  |
-| Ask a question or suggest an idea | [Discussions](https://github.com/J3vb/OwnCord/discussions)   |
-| Report a security problem         | [security.md](security.md)                                   |
-| Know who can read what            | [trust-model.md](trust-model.md)                             |
-| Know how much one server can hold | [capacity.md](capacity.md)                                   |
+| I want to…                          | Read                                                         |
+| ----------------------------------- | ------------------------------------------------------------ |
+| Run a server                        | [quick-start.md](quick-start.md)                             |
+| Run a server for real               | [deployment.md](deployment.md)                               |
+| Fix something that is wrong         | [deployment.md — When it fails](deployment.md#when-it-fails) |
+| Know what the beta does not do      | [known-limitations.md](known-limitations.md)                 |
+| See the current release and plans   | [STATUS.md](STATUS.md)                                       |
+| Contribute a change                 | [contributing.md](contributing.md)                           |
+| Understand how it is built          | [architecture/](architecture/README.md)                      |
+| Report a bug                        | [Issues](https://github.com/J3vb/OwnCord/issues/new/choose)  |
+| Ask a question or suggest an idea   | [Discussions](https://github.com/J3vb/OwnCord/discussions)   |
+| Report a security problem           | [security.md](security.md)                                   |
+| Know who can read what              | [trust-model.md](trust-model.md)                             |
+| Know how much one server can hold   | [capacity.md](capacity.md)                                   |
+| Moderate a server                   | [moderation.md](moderation.md)                               |
+| Know what works with assistive tech | [accessibility.md](accessibility.md)                         |
 
 ## Guides
 
@@ -39,6 +41,8 @@ Knowing the kind tells you how far to trust a page:
 | [deployment.md](deployment.md)               | Run a server on Windows or Linux, and keep it running: logs, storage, failures, restore, updates.               |
 | [linux-install.md](linux-install.md)         | Install the desktop app on Linux: .deb, AppImage, tray, keyring, Wayland and uninstall.                         |
 | [known-limitations.md](known-limitations.md) | What the beta does not do, and a short FAQ.                                                                     |
+| [moderation.md](moderation.md)               | For owners, admins and moderators: roles, reports, actions, appeals and who can join.                           |
+| [accessibility.md](accessibility.md)         | Keyboard, screen reader, text size, contrast and motion support, and the known gaps.                            |
 | [STATUS.md](STATUS.md)                       | The current release, nightly test health and the roadmap.                                                       |
 | [contributing.md](contributing.md)           | Set up, the branch and pull request model, coding standards, and how to run the CI checks.                      |
 | [code-style.md](code-style.md)               | Formatting, lint rules, error handling and test conventions for any code change.                                |
@@ -57,18 +61,18 @@ Knowing the kind tells you how far to trust a page:
 These pages describe contracts the code implements. If one disagrees with the
 code, the code is right and the page has a bug.
 
-| Document                                           | What it covers                                              |
-| -------------------------------------------------- | ----------------------------------------------------------- |
-| [api.md](api.md)                                   | The REST API under `/api/v1`.                               |
-| [protocol.md](protocol.md)                         | The WebSocket protocol: frames, sequencing and reconnect.   |
-| [schema.md](schema.md)                             | The SQLite schema and migrations.                           |
-| [server-configuration.md](server-configuration.md) | Every server configuration option.                          |
-| [credential-storage.md](credential-storage.md)     | What the desktop app saves, and where.                      |
-| [../protocol/schema.json](../protocol/schema.json) | The source of truth for WebSocket message types. See below. |
+| Document                                           | What it covers                                                    |
+| -------------------------------------------------- | ----------------------------------------------------------------- |
+| [api.md](api.md)                                   | The REST API under `/api/v1`.                                     |
+| [protocol.md](protocol.md)                         | The WebSocket protocol: frames, sequencing and reconnect.         |
+| [schema.md](schema.md)                             | The SQLite schema and migrations.                                 |
+| [server-configuration.md](server-configuration.md) | Every server configuration option.                                |
+| [credential-storage.md](credential-storage.md)     | What the desktop app saves, and where.                            |
+| [../protocol/schema.json](../protocol/schema.json) | The source of truth for message types and error codes. See below. |
 
 `protocol/schema.json` sits at the repository root because neither the server
-nor the client owns it. `Server/ws/message_types.go` and
-`Client/src/lib/protocolTypes.ts` are generated from it. Never edit either by
+nor the client owns it. `Server/ws/message_types.go`, `Server/httperr/codes.go`
+and `Client/src/lib/protocolTypes.ts` are generated from it. Never edit them by
 hand. See [../protocol/README.md](../protocol/README.md).
 
 ## Architecture
@@ -102,7 +106,7 @@ Inventories and design records:
   content and moderation services, with abuse cases and data ownership
 - [rich-content-inventory.md](architecture/rich-content-inventory.md): every
   place OwnCord fetches outside content, and its limits
-- [b9-ui-contract.md](architecture/b9-ui-contract.md): the shared UI rules
+- [ui-contract.md](architecture/ui-contract.md): the shared UI rules
   (colours, focus, keyboard, announcements, motion)
 
 Target state, not shipped behaviour:
@@ -147,6 +151,6 @@ page. Each kind of status has one owner:
 
 A CI job checks the counts in a few current summaries against the live
 ledger. To add a summary to that check, add its document to the allow-list in
-`scripts/check-doc-counts.mjs`. Dated baselines and signed scorecards keep the
+`scripts/checks/check-doc-counts.mjs`. Dated baselines and signed scorecards keep the
 numbers they measured at their source commits. Never change them to make the
 live count check pass.

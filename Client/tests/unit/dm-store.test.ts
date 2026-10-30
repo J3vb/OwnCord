@@ -11,10 +11,17 @@ import {
   updateDmParticipant,
   setDmActivityLookup,
   setDmListeningLookup,
+  restoreDmChannel,
+  addDmToChannelsStore,
+  dmChannelFromPayload,
+  reviseDmLastMessage,
+  setDmReadPointer,
+  dmDisplayName,
 } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { Channel } from "../../src/stores/channels.store";
+import type { DmChannelPayload } from "../../src/lib/types";
 
 function makeMirrorChannel(overrides: Partial<Channel> = {}): Channel {
   return {
@@ -95,7 +102,7 @@ describe("dmStore", () => {
       setDmActivityLookup(() => undefined);
     });
 
-    it("seeds a new DM's partner with the song presence already gave them (WP 8.10)", () => {
+    it("seeds a new DM's partner with the song presence already gave them", () => {
       const song = { title: "T", artist: "A", player: "Spotify", startedAt: 1, durationMs: 0 };
       setDmListeningLookup((id) => (id === 1 ? song : undefined));
       addDmChannel(makeDm());
@@ -105,7 +112,7 @@ describe("dmStore", () => {
       setDmListeningLookup(() => undefined);
     });
 
-    it("keeps the song a re-sent DM already showed (WP 8.10)", () => {
+    it("keeps the song a re-sent DM already showed", () => {
       const quiet = { id: 1, username: "alice", avatar: "", status: "online", listening: null };
       addDmChannel(makeDm({ recipient: quiet, participants: [quiet] }));
       addDmChannel(makeDm());
@@ -554,5 +561,479 @@ describe("dmStore", () => {
       clearDmUnread(999);
       expect(dmStore.getState().channels[0]!.unreadCount).toBe(3);
     });
+  });
+});
+
+const person = (id: number, extra: Partial<DmChannel["recipient"]> = {}) => ({
+  id,
+  username: `user${id}`,
+  avatar: "",
+  status: "online",
+  ...extra,
+});
+
+const resetChannels = () =>
+  channelsStore.setState(() => ({
+    channels: new Map(),
+    activeChannelId: null,
+    roles: [],
+    categories: [],
+  }));
+
+describe("dmStore presence carry-over", () => {
+  beforeEach(() => {
+    dmStore.setState(() => ({ channels: [] }));
+    setDmActivityLookup(() => undefined);
+    setDmListeningLookup(() => undefined);
+  });
+
+  it("a re-sent group keeps each person's own game, not the first participant's", () => {
+    const gameA = { name: "Factorio", startedAt: 1 };
+    const gameB = { name: "Satisfactory", startedAt: 2 };
+    const a = person(1, { activity: gameA });
+    const b = person(2, { activity: gameB });
+    addDmChannel(makeDm({ isGroup: true, recipient: a, participants: [a, b] }));
+    addDmChannel(
+      makeDm({
+        isGroup: true,
+        recipient: person(1),
+        participants: [person(1), person(2)],
+      }),
+    );
+    const [first, second] = dmStore.getState().channels[0]!.participants;
+    expect(first?.activity).toEqual(gameA);
+    expect(second?.activity).toEqual(gameB);
+  });
+
+  it("a re-sent group keeps each person's own song", () => {
+    const songA = { title: "A", artist: "x", player: "p", startedAt: 1, durationMs: 0 };
+    const songB = { title: "B", artist: "y", player: "p", startedAt: 2, durationMs: 0 };
+    const a = person(1, { listening: songA });
+    const b = person(2, { listening: songB });
+    addDmChannel(makeDm({ isGroup: true, recipient: a, participants: [a, b] }));
+    addDmChannel(
+      makeDm({ isGroup: true, recipient: person(1), participants: [person(1), person(2)] }),
+    );
+    const [first, second] = dmStore.getState().channels[0]!.participants;
+    expect(first?.listening).toEqual(songA);
+    expect(second?.listening).toEqual(songB);
+  });
+
+  it("a stated game or song wins over the one already shown and over presence", () => {
+    setDmActivityLookup(() => ({ name: "Presence", startedAt: 9 }));
+    setDmListeningLookup(() => ({
+      title: "P",
+      artist: "p",
+      player: "p",
+      startedAt: 9,
+      durationMs: 0,
+    }));
+    const old = person(1, {
+      activity: { name: "Old", startedAt: 1 },
+      listening: { title: "O", artist: "o", player: "p", startedAt: 1, durationMs: 0 },
+    });
+    addDmChannel(makeDm({ recipient: old, participants: [old] }));
+    const stated = person(1, {
+      activity: { name: "New", startedAt: 2 },
+      listening: { title: "N", artist: "n", player: "p", startedAt: 2, durationMs: 0 },
+    });
+    addDmChannel(makeDm({ recipient: stated, participants: [stated] }));
+    const dm = dmStore.getState().channels[0]!;
+    expect(dm.recipient.activity?.name).toBe("New");
+    expect(dm.recipient.listening?.title).toBe("N");
+  });
+
+  it("a stated nothing clears what was shown", () => {
+    const old = person(1, {
+      activity: { name: "Old", startedAt: 1 },
+      listening: { title: "O", artist: "o", player: "p", startedAt: 1, durationMs: 0 },
+    });
+    addDmChannel(makeDm({ recipient: old, participants: [old] }));
+    const quiet = person(1, { activity: null, listening: null });
+    addDmChannel(makeDm({ recipient: quiet, participants: [quiet] }));
+    const dm = dmStore.getState().channels[0]!;
+    expect(dm.recipient.activity).toBeNull();
+    expect(dm.recipient.listening).toBeNull();
+  });
+
+  it("leaves the fields off entirely when nobody knows a game or song", () => {
+    addDmChannel(makeDm());
+    const recipient = dmStore.getState().channels[0]!.recipient;
+    expect("activity" in recipient).toBe(false);
+    expect("listening" in recipient).toBe(false);
+  });
+});
+
+describe("dmStore addDmChannel merge", () => {
+  beforeEach(() => {
+    dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("takes the incoming counts when they are above zero, and the local ones otherwise", () => {
+    setDmChannels([makeDm({ unreadCount: 5, mentionCount: 4 })]);
+    addDmChannel(makeDm({ unreadCount: 2, mentionCount: 1 }));
+    expect(dmStore.getState().channels[0]).toMatchObject({ unreadCount: 2, mentionCount: 1 });
+    addDmChannel(makeDm({ unreadCount: 0, mentionCount: 0 }));
+    expect(dmStore.getState().channels[0]).toMatchObject({ unreadCount: 2, mentionCount: 1 });
+  });
+
+  it("a zero incoming count over a zero local count stays zero", () => {
+    setDmChannels([makeDm({ unreadCount: 0, mentionCount: 0 })]);
+    addDmChannel(makeDm({ unreadCount: 0, mentionCount: 0 }));
+    expect(dmStore.getState().channels[0]).toMatchObject({ unreadCount: 0, mentionCount: 0 });
+  });
+
+  it("keeps the local last message id and read pointer a rename does not carry", () => {
+    setDmChannels([makeDm({ lastMessageId: 7, lastReadMessageId: 6 })]);
+    addDmChannel(makeDm({ lastMessageId: null }));
+    expect(dmStore.getState().channels[0]).toMatchObject({
+      lastMessageId: 7,
+      lastReadMessageId: 6,
+    });
+  });
+
+  it("takes an incoming last message id and read pointer over the local ones", () => {
+    setDmChannels([makeDm({ lastMessageId: null, lastReadMessageId: 1 })]);
+    addDmChannel(makeDm({ lastMessageId: 9, lastReadMessageId: 8 }));
+    expect(dmStore.getState().channels[0]).toMatchObject({
+      lastMessageId: 9,
+      lastReadMessageId: 8,
+    });
+  });
+
+  it("keeps the local preview a rename does not carry and takes a stated one", () => {
+    setDmChannels([makeDm({ lastMessage: "old text", lastMessageAt: "T1" })]);
+    addDmChannel(makeDm({ lastMessage: "", lastMessageAt: "" }));
+    expect(dmStore.getState().channels[0]).toMatchObject({
+      lastMessage: "old text",
+      lastMessageAt: "T1",
+    });
+    addDmChannel(makeDm({ lastMessage: "new text", lastMessageAt: "T2" }));
+    expect(dmStore.getState().channels[0]).toMatchObject({
+      lastMessage: "new text",
+      lastMessageAt: "T2",
+    });
+  });
+});
+
+describe("restoreDmChannel", () => {
+  beforeEach(() => {
+    dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("puts a DM back at its old position", () => {
+    setDmChannels([makeDm({ channelId: 1 }), makeDm({ channelId: 3 })]);
+    restoreDmChannel(makeDm({ channelId: 2 }), 1);
+    expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([1, 2, 3]);
+    restoreDmChannel(makeDm({ channelId: 0 }), 0);
+    expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("does nothing when the DM came back some other way", () => {
+    setDmChannels([makeDm({ channelId: 1 }), makeDm({ channelId: 2 })]);
+    const before = dmStore.getState();
+    restoreDmChannel(makeDm({ channelId: 2, name: "stale copy" }), 0);
+    expect(dmStore.getState()).toBe(before);
+  });
+
+  it("restores into an empty list", () => {
+    restoreDmChannel(makeDm({ channelId: 4 }), 0);
+    expect(dmStore.getState().channels.map((c) => c.channelId)).toEqual([4]);
+  });
+});
+
+describe("addDmToChannelsStore", () => {
+  beforeEach(resetChannels);
+
+  it("synthesises the mirror row a DM is opened through", () => {
+    addDmToChannelsStore(
+      makeDm({
+        channelId: 5,
+        unreadCount: 3,
+        mentionCount: 1,
+        lastMessageId: 11,
+        lastReadMessageId: 10,
+      }),
+    );
+    expect(channelsStore.getState().channels.get(5)).toStrictEqual({
+      id: 5,
+      name: "alice",
+      type: "dm",
+      category: null,
+      position: 0,
+      unreadCount: 3,
+      mentionCount: 1,
+      lastMessageId: 11,
+      lastReadMessageId: 10,
+      canSend: true,
+      slowMode: 0,
+      topic: "",
+      nsfw: false,
+      isPrivate: false,
+      voiceMaxUsers: 0,
+      voiceMaxVideo: 0,
+    });
+  });
+
+  it("leaves an up-to-date mirror row alone", () => {
+    addDmToChannelsStore(makeDm({ channelId: 5, unreadCount: 3 }));
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map(prev.channels).set(5, { ...prev.channels.get(5)!, unreadCount: 8 }),
+    }));
+    const before = channelsStore.getState().channels;
+    addDmToChannelsStore(makeDm({ channelId: 5, unreadCount: 0 }));
+    expect(channelsStore.getState().channels).toBe(before);
+    expect(channelsStore.getState().channels.get(5)?.unreadCount).toBe(8);
+  });
+
+  it("re-synthesises a row whose name has gone stale", () => {
+    addDmToChannelsStore(makeDm({ channelId: 5, name: "old name", isGroup: true }));
+    addDmToChannelsStore(makeDm({ channelId: 5, name: "new name", isGroup: true }));
+    expect(channelsStore.getState().channels.get(5)?.name).toBe("new name");
+  });
+});
+
+describe("dmChannelFromPayload", () => {
+  const recipient = (id: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    username: `user${id}`,
+    avatar: "a.png",
+    status: "online",
+    ...extra,
+  });
+  const base = (extra: Partial<DmChannelPayload> = {}): DmChannelPayload => ({
+    channel_id: 40,
+    recipient: recipient(1),
+    last_message_id: null,
+    last_message: "",
+    last_message_at: "",
+    unread_count: 0,
+    ...extra,
+  });
+
+  it("maps a 1:1 summary from the legacy single recipient", () => {
+    expect(dmChannelFromPayload(base())).toStrictEqual({
+      channelId: 40,
+      recipient: {
+        id: 1,
+        username: "user1",
+        avatar: "a.png",
+        status: "online",
+        displayName: "",
+      },
+      participants: [
+        { id: 1, username: "user1", avatar: "a.png", status: "online", displayName: "" },
+      ],
+      name: "",
+      isGroup: false,
+      lastMessageId: null,
+      lastReadMessageId: undefined,
+      lastMessage: "",
+      lastMessageAt: "",
+      unreadCount: 0,
+      mentionCount: 0,
+    });
+  });
+
+  it("maps a group summary with every recipient, nicknames, owner and icon", () => {
+    const dm = dmChannelFromPayload(
+      base({
+        recipients: [recipient(1, { display_name: "Al" }), recipient(2)],
+        name: "crew",
+        is_group: true,
+        owner_id: 2,
+        icon: "",
+        last_message_id: 9,
+        last_read_message_id: 8,
+        last_message: "yo",
+        last_message_at: "T1",
+        unread_count: 4,
+        mention_count: 2,
+      }),
+    );
+    expect(dm.participants.map((p) => p.displayName)).toEqual(["Al", ""]);
+    expect(dm.recipient.id).toBe(1);
+    expect(dm.recipient.displayName).toBe("Al");
+    expect(dm).toMatchObject({
+      name: "crew",
+      isGroup: true,
+      ownerId: 2,
+      icon: "",
+      lastMessageId: 9,
+      lastReadMessageId: 8,
+      lastMessage: "yo",
+      lastMessageAt: "T1",
+      unreadCount: 4,
+      mentionCount: 2,
+    });
+  });
+
+  it("keeps the nickname of a single recipient", () => {
+    const dm = dmChannelFromPayload(base({ recipient: recipient(1, { display_name: "Al" }) }));
+    expect(dm.participants[0]?.displayName).toBe("Al");
+    expect(dm.recipient.displayName).toBe("Al");
+  });
+
+  it("leaves owner and icon off when the server sends neither", () => {
+    const dm = dmChannelFromPayload(base());
+    expect("ownerId" in dm).toBe(false);
+    expect("icon" in dm).toBe(false);
+  });
+
+  it("falls back to the legacy recipient when the recipient list is empty", () => {
+    const dm = dmChannelFromPayload(
+      base({ recipients: [], recipient: recipient(3, { display_name: "Cy" }) }),
+    );
+    expect(dm.participants).toEqual([]);
+    expect(dm.recipient).toEqual({
+      id: 3,
+      username: "user3",
+      avatar: "a.png",
+      status: "online",
+      displayName: "Cy",
+    });
+    expect(
+      dmChannelFromPayload(base({ recipients: [], recipient: recipient(3) })).recipient.displayName,
+    ).toBe("");
+  });
+});
+
+describe("dmStore message updates", () => {
+  beforeEach(() => {
+    dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("a new message counts as a mention only when it is one", () => {
+    setDmChannels([makeDm({ channelId: 5, lastMessageId: 1 })]);
+    updateDmLastMessage(5, 2, "plain", "T1");
+    expect(dmStore.getState().channels[0]).toMatchObject({ unreadCount: 1, mentionCount: 0 });
+    updateDmLastMessage(5, 3, "hey @me", "T2", true);
+    expect(dmStore.getState().channels[0]).toMatchObject({ unreadCount: 2, mentionCount: 1 });
+  });
+
+  it("a preview update for the message already shown changes nothing", () => {
+    setDmChannels([makeDm({ channelId: 5, lastMessageId: 4, lastMessage: "kept" })]);
+    const before = dmStore.getState();
+    updateDmLastMessagePreview(5, 4, "again", "T9");
+    expect(dmStore.getState()).toBe(before);
+  });
+
+  it("revising a preview changes only the DM showing that message", () => {
+    const first = makeDm({ channelId: 1, lastMessageId: 7, lastMessage: "one" });
+    const second = makeDm({ channelId: 2, lastMessageId: 7, lastMessage: "two" });
+    setDmChannels([first, second]);
+    reviseDmLastMessage(2, 7, { lastMessage: "edited" });
+    const [a, b] = dmStore.getState().channels;
+    expect(a).toBe(first);
+    expect(b).toMatchObject({ lastMessage: "edited", lastMessageId: 7 });
+  });
+
+  it("revising ignores an unknown DM or a message that is no longer the last", () => {
+    setDmChannels([makeDm({ channelId: 1, lastMessageId: 7 })]);
+    const before = dmStore.getState();
+    reviseDmLastMessage(9, 7, { lastMessage: "x" });
+    reviseDmLastMessage(1, 6, { lastMessage: "x" });
+    expect(dmStore.getState()).toBe(before);
+  });
+
+  it("revising can move the preview back to an earlier message", () => {
+    setDmChannels([makeDm({ channelId: 1, lastMessageId: 7, lastMessage: "gone" })]);
+    reviseDmLastMessage(1, 7, { lastMessageId: 6, lastMessage: "before", lastMessageAt: "T0" });
+    expect(dmStore.getState().channels[0]).toMatchObject({
+      lastMessageId: 6,
+      lastMessage: "before",
+      lastMessageAt: "T0",
+    });
+  });
+});
+
+describe("setDmReadPointer", () => {
+  beforeEach(() => {
+    dmStore.setState(() => ({ channels: [] }));
+  });
+
+  it("sets the pointer of the named DM only, leaving counts alone without any", () => {
+    const first = makeDm({ channelId: 1, unreadCount: 3, mentionCount: 2 });
+    const second = makeDm({ channelId: 2, unreadCount: 5, mentionCount: 1 });
+    setDmChannels([first, second]);
+    setDmReadPointer(2, 40);
+    const [a, b] = dmStore.getState().channels;
+    expect(a).toBe(first);
+    expect(b).toMatchObject({ lastReadMessageId: 40, unreadCount: 5, mentionCount: 1 });
+  });
+
+  it("sets both counts together with the pointer when given", () => {
+    setDmChannels([makeDm({ channelId: 1, unreadCount: 3, mentionCount: 2 })]);
+    setDmReadPointer(1, 12, { unread: 0, mention: 0 });
+    expect(dmStore.getState().channels[0]).toMatchObject({
+      lastReadMessageId: 12,
+      unreadCount: 0,
+      mentionCount: 0,
+    });
+  });
+
+  it("can clear the pointer", () => {
+    setDmChannels([makeDm({ channelId: 1, lastReadMessageId: 5 })]);
+    setDmReadPointer(1, undefined);
+    expect(dmStore.getState().channels[0]?.lastReadMessageId).toBeUndefined();
+  });
+
+  it("leaves the state untouched for a DM it does not list", () => {
+    setDmChannels([makeDm({ channelId: 1 })]);
+    const before = dmStore.getState();
+    setDmReadPointer(9, 3, { unread: 0, mention: 0 });
+    expect(dmStore.getState()).toBe(before);
+  });
+});
+
+describe("dmDisplayName", () => {
+  const group = (names: string[], extra: Partial<DmChannel> = {}) => {
+    const participants = names.map((n, i) => person(i + 1, { username: n }));
+    return makeDm({
+      isGroup: true,
+      recipient: participants[0] ?? person(0, { username: "" }),
+      participants,
+      ...extra,
+    });
+  };
+
+  it("uses a group's own name", () => {
+    expect(dmDisplayName(group(["a", "b", "c"], { name: "crew" }))).toBe("crew");
+  });
+
+  it("joins up to three members and counts the rest", () => {
+    expect(dmDisplayName(group(["a", "b"]))).toBe("a, b");
+    expect(dmDisplayName(group(["a", "b", "c"]))).toBe("a, b, c");
+    expect(dmDisplayName(group(["a", "b", "c", "d"]))).toBe("a, b, c and 1 more");
+    expect(dmDisplayName(group(["a", "b", "c", "d", "e", "f"]))).toBe("a, b, c and 3 more");
+  });
+
+  it("prefers a nickname to a username", () => {
+    const dm = makeDm({
+      isGroup: true,
+      participants: [person(1, { displayName: "Al" }), person(2, { displayName: "" })],
+    });
+    expect(dmDisplayName(dm)).toBe("Al, user2");
+  });
+
+  it("names a 1:1 DM after the person on the other end, even with more participants listed", () => {
+    const dm = makeDm({
+      isGroup: false,
+      participants: [person(1, { username: "first" }), person(2, { username: "second" })],
+    });
+    expect(dmDisplayName(dm)).toBe("first");
+  });
+
+  it("falls back to the recipient, then to a placeholder, with no participants", () => {
+    expect(dmDisplayName(makeDm({ participants: [] }))).toBe("alice");
+    expect(
+      dmDisplayName(makeDm({ participants: [], recipient: person(1, { username: "" }) })),
+    ).toBe("Unknown user");
+    expect(
+      dmDisplayName(
+        makeDm({ participants: [], isGroup: true, recipient: person(1, { username: "" }) }),
+      ),
+    ).toBe("Empty group");
   });
 });

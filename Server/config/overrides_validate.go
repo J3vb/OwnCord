@@ -18,14 +18,13 @@ const maxMiB = math.MaxInt64 >> 20
 // not import service (an import cycle).
 const maxUploadSizeMB = 10240
 
-// editableRules is the single registry of panel-editable keys. Each entry
-// validates one JSON-decoded value and returns the normalised Go value to
-// store. Adding a key is one row here plus a rule; the exact-inventory test
-// pins the set. Only three keys stay out: server.data_dir (the overrides file
-// and the TOTP/erasure/VAPID keys live inside it) and the two upload-type
-// lists, which the Settings page already owns live.
+// editableRules is the single registry of panel-editable keys: each entry
+// validates one JSON-decoded value and returns the normalised Go value to store.
+// Adding a key is one row here plus a rule; the exact-inventory test pins the
+// set. Excluded: server.data_dir (the overrides file and the TOTP/erasure/VAPID
+// keys live inside it) and the two upload-type lists, which the Settings page
+// owns live.
 var editableRules = map[string]func(any) (any, error){
-	// Integers.
 	"attention.delivery_drops_per_min":          intRule(1, 1_000_000),
 	"attention.disk_warn_free_mb":               intRule(0, maxMiB),
 	"attention.reconnects_per_min":              intRule(1, 1_000_000),
@@ -50,10 +49,10 @@ var editableRules = map[string]func(any) (any, error){
 	"server.pprof_block_profile_rate":           intRule(0, 1_000_000_000),
 	"server.pprof_mutex_profile_fraction":       intRule(0, 1_000_000),
 	"upload.max_size_mb":                        intRule(1, maxUploadSizeMB),
+	"upload.import_max_mb":                      intRule(1, maxMiB),
 	"upload.user_quota_mb":                      intRule(0, maxMiB),
 	"voice.udp_port":                            udpPortRule,
 
-	// Booleans.
 	"event_persistence.enabled":          boolRule,
 	"plugins.enabled":                    boolRule,
 	"push.dispatch_enabled":              boolRule,
@@ -66,16 +65,13 @@ var editableRules = map[string]func(any) (any, error){
 	"voice.advertise_internal_ip":        boolRule,
 	"voice.auto_download_livekit":        boolRule,
 
-	// Floats.
 	"security.auth_rate_limit_multiplier": authMultiplierRule,
 
-	// Enums.
 	"logging.level":       enumRule("debug", "info", "warn", "error"),
 	"server.waf_crs_mode": enumRule("off", "detect", "block"),
 	"telemetry.exporter":  enumRule("none", "prometheus", "otlp"),
 	"voice.quality":       enumRule("low", "medium", "high"),
 
-	// Strings.
 	"push.contact":            contactRule,
 	"telemetry.otlp_endpoint": otlpEndpointRule,
 	"telemetry.service_name":  serviceNameRule,
@@ -83,7 +79,6 @@ var editableRules = map[string]func(any) (any, error){
 	"voice.livekit_version":   liveKitVersionRule,
 	"voice.node_ip":           nodeIPRule,
 
-	// Lists.
 	"server.allowed_origins":               listRule(checkOrigin),
 	"server.metrics_allowed_cidrs":         listRule(checkCIDR),
 	"server.livekit_webhook_allowed_cidrs": listRule(checkCIDR),
@@ -114,7 +109,6 @@ var editableRules = map[string]func(any) (any, error){
 	"server.trusted_proxies":     listRule(checkTrustedProxy),
 }
 
-// boolRule accepts a JSON boolean only.
 func boolRule(v any) (any, error) {
 	b, ok := v.(bool)
 	if !ok {
@@ -123,7 +117,6 @@ func boolRule(v any) (any, error) {
 	return b, nil
 }
 
-// intRule accepts a whole number inside [min, max].
 func intRule(min, max int) func(any) (any, error) {
 	return func(v any) (any, error) {
 		n, ok := wholeInt(v)
@@ -181,7 +174,6 @@ func authMultiplierRule(v any) (any, error) {
 	return f, nil
 }
 
-// enumRule accepts one of the listed strings.
 func enumRule(allowed ...string) func(any) (any, error) {
 	return func(v any) (any, error) {
 		s, err := cleanString(v)
@@ -267,7 +259,7 @@ func liveKitVersionRule(v any) (any, error) {
 		return nil, err
 	}
 	if s != "" && !liveKitVersionRe.MatchString(s) {
-		return nil, fmt.Errorf("must be empty or a version like 1.13.10")
+		return nil, fmt.Errorf("must be empty or a version like 1.13.11")
 	}
 	return s, nil
 }

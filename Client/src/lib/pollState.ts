@@ -1,4 +1,4 @@
-// Poll reducers for the messages store (WP 6.9b): a live `poll_update`, the
+// Poll reducers for the messages store: a live `poll_update`, the
 // vote acknowledgement, and `mergePoll`, which keeps a poll from going back.
 // Pure (prev, input) => next functions; stores/messages.store.ts wraps each in
 // messagesStore.setState. Returning `prev` by identity when nothing changed is

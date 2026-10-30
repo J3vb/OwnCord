@@ -263,7 +263,7 @@ describe("createReactionController", () => {
       expect(document.querySelector(".reaction-picker-wrap")).toBeNull();
     });
 
-    it("passes the server's custom emoji to the picker (OC-0149)", async () => {
+    it("passes the server's custom emoji to the picker", async () => {
       const customEmoji = [{ id: 1, shortcode: "partyparrot", url: "/api/v1/emoji/1/image" }];
       mockListCustomEmoji.mockReturnValue(customEmoji);
 

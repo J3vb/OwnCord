@@ -1,9 +1,9 @@
-// The web portal's page for a browser context that is not secure (WP 6.13e):
+// The web portal's page for a browser context that is not secure:
 // one notice, no form. The browser platform keeps its credential, network and
 // storage adapters inert there, so nothing on this page may reach them.
 
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { portalText } from "../../i18n/portal";
 
 export function createInsecureContextPage(): MountableComponent {

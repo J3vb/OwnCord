@@ -253,10 +253,10 @@ describe("DeleteChannelModal", () => {
     trigger.focus();
 
     const { modal } = makeModal();
-    // First focusable is the header's close button — safely away from the
+    // Focus starts on Cancel (the shared confirm preset) — safely away from the
     // destructive confirm.
-    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
-    expect(document.activeElement).toBe(closeBtn);
+    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
+    expect(document.activeElement).toBe(cancelBtn);
 
     modal.destroy?.();
     expect(document.activeElement).toBe(trigger);

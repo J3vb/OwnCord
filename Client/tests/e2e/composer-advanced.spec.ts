@@ -9,7 +9,7 @@
  *     markers and unwrap it on a second press.
  *   - attachment preview / remove and clipboard paste-upload
  *     (`MessageInput.ts` handlePasteFile).
- *   - the who-reacted tooltip (`message-list/reaction-tooltip.ts`) — hover a
+ *   - the who-reacted tooltip (`message-list/reactionTooltip.ts`) — hover a
  *     reaction pill fetches the reactor list and renders it, and the list is
  *     cached per message+emoji.
  *
@@ -25,7 +25,7 @@ import {
   focusIndicator,
   keyboardReachable,
   textContrast,
-} from "./support/b9-accessibility";
+} from "./support/accessibility";
 import {
   buildTauriMockScript,
   MOCK_LOGIN_RESPONSE,
@@ -725,7 +725,7 @@ test.describe("Reaction tooltip", () => {
 // UX-1 — per-channel drafts survive a switch
 // ---------------------------------------------------------------------------
 
-test.describe("Composer — per-channel drafts (UX-1)", () => {
+test.describe("Composer — per-channel drafts", () => {
   test.beforeEach(async ({ page }) => {
     await bootComposer(page);
   });

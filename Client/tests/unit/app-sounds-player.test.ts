@@ -17,9 +17,9 @@ import {
   startRingback,
   stopRingback,
   stopRingChime,
-} from "@lib/notificationSound";
-import { loadAppSoundsGain, soundSwitchOn } from "@lib/soundPrefs";
-import { savePref } from "@lib/preferences";
+} from "@lib/media/notificationSound";
+import { loadAppSoundsGain, soundSwitchOn } from "@lib/prefs/soundPrefs";
+import { savePref } from "@lib/prefs/preferences";
 
 interface FakeGain {
   readonly connect: ReturnType<typeof vi.fn>;
@@ -109,6 +109,13 @@ describe("app sounds volume prefs", () => {
     localStorage.setItem("owncord:settings:appSoundsVolume", JSON.stringify("loud"));
     expect(loadAppSoundsGain()).toBe(1);
     localStorage.setItem("owncord:settings:appSoundsVolume", "{not json");
+    expect(loadAppSoundsGain()).toBe(1);
+  });
+
+  it("reads a stored value too large to be a number as 100%, never as silence", () => {
+    localStorage.setItem("owncord:settings:appSoundsVolume", "-1e999");
+    expect(loadAppSoundsGain()).toBe(1);
+    localStorage.setItem("owncord:settings:appSoundsVolume", "1e999");
     expect(loadAppSoundsGain()).toBe(1);
   });
 

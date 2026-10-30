@@ -47,7 +47,7 @@ import {
   type ReadyActivity,
   type ReadyListening,
 } from "../../lib/types";
-import { loadLastChannel } from "../../lib/last-channel";
+import { loadLastChannel } from "../../lib/prefs/lastChannel";
 import {
   acceptReadState,
   failMarkUnread,
@@ -57,7 +57,7 @@ import {
   markChannelRead,
   markChannelReadSeen,
   writeReadPointer,
-} from "../../lib/read-state";
+} from "../../lib/readState";
 import {
   applyGameActivityPolicy,
   applyReadyCapabilities,
@@ -65,8 +65,8 @@ import {
   hasReceivedReady,
   readPointerEnabled,
   stickersEnabled,
-} from "../../lib/serverCapabilities";
-import { showToast } from "../../lib/toast";
+} from "../../lib/net/serverCapabilities";
+import { showToast } from "../../lib/ui/toast";
 import {
   notifyChannelActivity,
   notifyMention,
@@ -80,13 +80,14 @@ import {
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
-import { registerSessionReset } from "../../lib/sessionRegistry";
+import { registerSessionReset } from "../../lib/net/sessionRegistry";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** The channel/role/member snapshot of `ready`. */
 export function applyReadyChannels(payload: Payload<"ready">): void {
   setChannels(payload.channels);
   // Managers only; absent for everyone else and for older servers, which leaves
-  // the list empty so the groups come from the channels alone (WP 6.5a).
+  // the list empty so the groups come from the channels alone.
   setCategories(payload.categories ?? []);
   setRoles(payload.roles ?? []);
   setMembers(payload.members);
@@ -146,11 +147,11 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
   // before this ready — distinct from "no channel was active", which
   // must NOT mark-read whatever the auto-select branch just picked.
   let activeChannelCleared = false;
-  // A content view (B9-4) leaves no channel active on purpose; auto-selecting
+  // A content view leaves no channel active on purpose; auto-selecting
   // one would close it.
   const viewOpen = uiStore.getState().activeView !== null;
   if (currentActive === null && !viewOpen && payload.channels.length > 0) {
-    // UX-8: restore where the user left off rather than always jumping to the
+    // Restore where the user left off rather than always jumping to the
     // first text channel. The stored id is a hint — ignore it when the channel
     // is gone or no longer visible. Selecting is not viewing, so neither this
     // nor the fallback clears the badge (clearUnread: false); the channel
@@ -190,10 +191,10 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
  * applyReadyActiveChannel just cleared a channel that's gone — it returns
  * null for both.
  *
- * P4-03: only while the reader is actually watching — a focused window whose
+ * Only while the reader is actually watching — a focused window whose
  * loaded window is not detached. An unfocused or background resync restates
  * the messages missed while away, and clearing them here would silently mark
- * those unseen messages read (isChannelAway, lib/read-state.ts).
+ * those unseen messages read (isChannelAway, lib/readState.ts).
  */
 export function markReadyActiveChannelRead(currentActive: number | null): void {
   // A forum holds no messages, so there is nothing in it to mark read.
@@ -274,9 +275,9 @@ export function handleReadState(payload: Payload<"read_state">): void {
 export function handleMarkUnreadError(payload: Payload<"error">, id: string | undefined): boolean {
   // Any refusal of this frame ends the request; only two have copy of their own.
   const notice =
-    payload.code === "RATE_LIMITED"
+    payload.code === WsErrorCode.RATE_LIMITED
       ? "rateLimited"
-      : payload.code === "NOT_FOUND"
+      : payload.code === WsErrorCode.NOT_FOUND
         ? "notFound"
         : "failed";
   return failMarkUnread(id, notice);
@@ -289,8 +290,8 @@ export function applyReadyEmoji(api: DispatchApi | undefined): void {
   // them once here; `emoji_update` keeps them fresh from then on. A
   // failure is non-fatal — unresolved shortcodes stay plain text.
   //
-  // OC-0251: snapshot the revision emojiStore was at right before issuing
-  // this fetch, mirroring the OC-0218 blockedByMeRev guard above. The GET
+  // Snapshot the revision emojiStore was at right before issuing
+  // this fetch, mirroring the blockedByMeRev guard above. The GET
   // travels over a separate HTTP connection while an `emoji_update` can
   // arrive on the already-open socket — if one lands (bumping the
   // revision) while this GET is in flight, setCustomEmoji sees the
@@ -306,7 +307,7 @@ export function applyReadyEmoji(api: DispatchApi | undefined): void {
 }
 
 /**
- * The custom-sticker slice of `ready` (WP 8.8). Like emoji, the set is not in
+ * The custom-sticker slice of `ready`. Like emoji, the set is not in
  * the ready payload: load it once here, only on a server that advertises the
  * `stickers` capability (applyReadyCapabilities has already run), and let
  * `sticker_update` keep it fresh. A failure is non-fatal: the picker shows its
@@ -325,7 +326,7 @@ export function applyReadyStickers(api: DispatchApi | undefined): void {
 }
 
 /**
- * `ready.activities` (WP 8.3) and `ready.listening` (WP 8.10): who plays what
+ * `ready.activities` and `ready.listening`: who plays what
  * and who listens to what right now. Applied after the roster and the DM list
  * are in, so it reaches both copies; a server without the key sends none, and
  * the members then play and listen to nothing.
@@ -335,7 +336,7 @@ export function applyReadyGameActivities(payload: Payload<"ready">): void {
 }
 
 /**
- * `game_activity_policy` (WP 8.3e-2): an admin turned game activity on or off.
+ * `game_activity_policy`: an admin turned game activity on or off.
  * The capability follows at once. Off also clears every shown game, so none
  * lingers if a clearing `presence` frame is dropped; on restates nothing,
  * since the games return with presence.
@@ -387,12 +388,12 @@ export function handlePresence(payload: Payload<"presence">): void {
   // custom_status is passed through verbatim, undefined included: the
   // store treats "field absent" as "leave the text alone", which is what
   // an older server's presence event means.
-  // activity follows the same rule (WP 8.3): absent leaves the shown game alone.
+  // activity follows the same rule: absent leaves the shown game alone.
   // While the server states game activity is off, a game on a frame that
-  // outran the off frame is not shown (WP 8.3e-2).
+  // outran the off frame is not shown.
   const off = gameActivityPolicyIsOff();
   const activity = off ? null : payload.activity;
-  // The same switch covers the song (WP 8.10).
+  // The same switch covers the song.
   const listening = off ? null : payload.listening;
   updatePresence(
     payload.user_id,
@@ -459,18 +460,18 @@ export function handleChannelUpdate(payload: Payload<"channel_update">): void {
   updateChannel(payload);
 }
 
-/** The manager's category list changed: replace what we hold (WP 6.5a). */
+/** The manager's category list changed: replace what we hold. */
 export function handleChannelCategories(payload: Payload<"channel_categories">): void {
   setCategories(payload.categories);
 }
 
-/** Another device of this account acknowledged or revoked a labelled channel (B5-7). */
+/** Another device of this account acknowledged or revoked a labelled channel. */
 export function handleNsfwAck(payload: Payload<"nsfw_ack">): void {
   setNsfwAcknowledged(payload.channel_id, payload.acknowledged);
 }
 
 /**
- * A mention changed this user's badge in a channel (DP-27). The server pushes
+ * A mention changed this user's badge in a channel. The server pushes
  * the reader's new total per user, raising it when a mention lands and lowering
  * it when a delete or purge reverses one; the channel is typically one this
  * client is not viewing, whose chat_message broadcast never arrives. The frame
@@ -509,11 +510,11 @@ export function handleMentionCount(payload: Payload<"mention_count">): void {
   const previous = ch.mentionCount;
   setMentionCount(payload.channel_id, payload.count);
   // A raised total on a channel the reader is not viewing is a new mention that
-  // no chat_message announced, so alert for it (WP 2B-1, interim). A lowered or
+  // no chat_message announced, so alert for it. A lowered or
   // unchanged total (delete, purge, repeat frame) is not a new mention. The
   // active channel never alerts here: its own chat_message already does.
   // A channel_activity entry for the mention alerts with the author and the
-  // message instead (WP 2B-2), so this alert waits a moment for one.
+  // message instead, so this alert waits a moment for one.
   // A lowered total takes back the rises it reverses, pending alerts included.
   if (payload.count > previous) deferMentionAlert(payload.channel_id, payload.count - previous);
   else if (payload.count < previous)
@@ -652,7 +653,7 @@ function newestLoadedId(channelId: number): number {
 }
 
 /**
- * channel_activity (WP 2B-2): new messages in readable channels the reader is
+ * channel_activity: new messages in readable channels the reader is
  * not viewing, so their unread dot shows without waiting for the next `ready`.
  * Each entry bumps unread through noteChannelMessage, whose id watermark keeps
  * a message `ready` already counted from counting again. The mention flags are

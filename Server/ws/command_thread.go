@@ -7,7 +7,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// The thread commands (WP 6.9c): thread_create, thread_update, thread_delete
+// The thread commands: thread_create, thread_update, thread_delete
 // and thread_focus, with the frames the server answers and announces.
 
 // ThreadCreateCmd represents a thread_create message: start a thread on
@@ -31,7 +31,7 @@ type ThreadUpdateCmd struct {
 	Archived           *bool
 	Locked             *bool
 	AutoArchiveMinutes *int
-	// TagIDs replaces a forum post's tags; nil leaves them (WP 6.9d).
+	// TagIDs replaces a forum post's tags; nil leaves them.
 	TagIDs *[]int64
 }
 

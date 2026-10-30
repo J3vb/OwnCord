@@ -96,3 +96,90 @@ describe("isUnreconciledEcho", () => {
     });
   });
 });
+
+describe("echoNormalize bound", () => {
+  it("stops after twenty passes on a string that keeps changing", () => {
+    // Each pass removes two layers of entity encoding; 41 layers need 21 passes.
+    const deep = `a&${"amp;".repeat(40)}lt;b`;
+    expect(echoNormalize(deep)).toBe("a&lt;b");
+  });
+
+  it("finishes a string that settles within the bound", () => {
+    const settles = `a&${"amp;".repeat(38)}lt;b`;
+    expect(echoNormalize(settles)).toBe("a<b");
+  });
+});
+
+describe("isUnreconciledEcho matching", () => {
+  const candidate = row({ id: 9, status: "sent", correlationId: null, content: "hi" });
+
+  it("matches a pending or OFFLINE-failed row with the same author and text", () => {
+    expect(isUnreconciledEcho(row({ status: "pending" }), candidate)).toBe(true);
+    expect(isUnreconciledEcho(row({ status: "failed", errorCode: "OFFLINE" }), candidate)).toBe(
+      true,
+    );
+  });
+
+  it("never matches a row that is delivered, uploading or failed for another reason", () => {
+    expect(isUnreconciledEcho(row({ status: "sent" }), candidate)).toBe(false);
+    expect(isUnreconciledEcho(row({ status: "uploading" }), candidate)).toBe(false);
+    expect(isUnreconciledEcho(row({ status: "failed", errorCode: "SLOW_MODE" }), candidate)).toBe(
+      false,
+    );
+    expect(isUnreconciledEcho(row({ status: "failed", errorCode: null }), candidate)).toBe(false);
+  });
+
+  it("a row that is not awaiting an ack never matches, whatever its error code says", () => {
+    expect(isUnreconciledEcho(row({ status: "uploading", errorCode: "OFFLINE" }), candidate)).toBe(
+      false,
+    );
+    expect(isUnreconciledEcho(row({ status: "sent", errorCode: "OFFLINE" }), candidate)).toBe(
+      false,
+    );
+  });
+
+  it("needs a correlation id and the same author", () => {
+    expect(isUnreconciledEcho(row({ correlationId: null }), candidate)).toBe(false);
+    expect(
+      isUnreconciledEcho(row({ user: { id: 2, username: "bob", avatar: null } }), candidate),
+    ).toBe(false);
+  });
+
+  it("matches text exactly even when sanitising it would change it", () => {
+    const literal = "fish &amp; chips";
+    expect(isUnreconciledEcho(row({ content: literal }), { ...candidate, content: literal })).toBe(
+      true,
+    );
+  });
+
+  it("matches the server's sanitised form of what was typed, and nothing else", () => {
+    expect(
+      isUnreconciledEcho(row({ content: "<b>bold</b>" }), { ...candidate, content: "bold" }),
+    ).toBe(true);
+    expect(isUnreconciledEcho(row({ content: "hi" }), { ...candidate, content: "bye" })).toBe(
+      false,
+    );
+  });
+
+  it("matches by client id alone when the optimistic row has one", () => {
+    const optimistic = row({ clientMessageId: "m-1", content: "typed" });
+    expect(
+      isUnreconciledEcho(optimistic, { ...candidate, clientMessageId: "m-1", content: "other" }),
+    ).toBe(true);
+    expect(isUnreconciledEcho(optimistic, { ...candidate, clientMessageId: "m-2" })).toBe(false);
+    expect(isUnreconciledEcho(optimistic, candidate)).toBe(false);
+    expect(
+      isUnreconciledEcho(row({ clientMessageId: "m-1", status: "sent" }), {
+        ...candidate,
+        clientMessageId: "m-1",
+      }),
+    ).toBe(false);
+    expect(
+      isUnreconciledEcho(optimistic, {
+        ...candidate,
+        clientMessageId: "m-1",
+        user: { id: 2, username: "bob", avatar: null },
+      }),
+    ).toBe(false);
+  });
+});

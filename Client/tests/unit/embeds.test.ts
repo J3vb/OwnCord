@@ -27,7 +27,7 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
   externalContent: { preview: previewMock, image: imageMock },
 }));
 
-vi.mock("@lib/media-visibility", () => ({
+vi.mock("@lib/prefs/mediaVisibility", () => ({
   observeMedia: mockObserveMedia,
 }));
 

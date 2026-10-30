@@ -14,6 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -29,7 +30,6 @@ type gifFavoriteJSON struct {
 	Title      string `json:"title"`
 }
 
-// allowedGIFFavoriteURL reports whether raw is an https Klipy CDN URL.
 func allowedGIFFavoriteURL(raw string) bool {
 	if raw == "" || len(raw) > gifFavMaxURLLen {
 		return false
@@ -51,7 +51,7 @@ func handleListGIFFavorites(favorites *service.GIFFavoriteService) http.HandlerF
 		favs, err := favorites.List(r.Context(), user.ID)
 		if err != nil {
 			slog.Error("list gif favorites", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not load favorites")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not load favorites")
 			return
 		}
 		out := make([]gifFavoriteJSON, len(favs))
@@ -74,7 +74,7 @@ func handleAddGIFFavorite(favorites *service.GIFFavoriteService) http.HandlerFun
 			return
 		}
 		if !allowedGIFFavoriteURL(in.URL) || !allowedGIFFavoriteURL(in.PreviewURL) {
-			writeErr(w, http.StatusBadRequest, "INVALID_INPUT", "url must be an https GIF URL from the GIF provider")
+			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "url must be an https GIF URL from the GIF provider")
 			return
 		}
 		if len(in.Title) > gifFavMaxTitleLen {
@@ -86,12 +86,12 @@ func handleAddGIFFavorite(favorites *service.GIFFavoriteService) http.HandlerFun
 		}
 		err := favorites.Add(r.Context(), user.ID, service.GIFFavorite{URL: in.URL, PreviewURL: in.PreviewURL, Title: in.Title})
 		if errors.Is(err, service.ErrGIFFavoritesFull) {
-			writeErr(w, http.StatusConflict, "GIF_FAVORITES_FULL", "you have reached the favorite GIF limit")
+			writeErr(w, http.StatusConflict, httperr.CodeGIFFavoritesFull, "you have reached the favorite GIF limit")
 			return
 		}
 		if err != nil {
 			slog.Error("add gif favorite", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not save favorite")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not save favorite")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -106,7 +106,7 @@ func handleRemoveGIFFavorite(favorites *service.GIFFavoriteService) http.Handler
 		}
 		if err := favorites.Remove(r.Context(), user.ID, r.URL.Query().Get("url")); err != nil {
 			slog.Error("remove gif favorite", "error", err)
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "could not remove favorite")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "could not remove favorite")
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

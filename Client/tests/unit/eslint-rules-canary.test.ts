@@ -55,7 +55,7 @@ interface Canary {
 const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-leave-voice-when-superseded",
-    filePath: "src/lib/livekitReconnect.ts",
+    filePath: "src/lib/voice/livekitReconnect.ts",
     code: `async function attemptAutoReconnect(deps, signal, channelId, owner) {
       const superseded = () => reconnectSuperseded(signal, channelId, owner, deps.getState());
       if (superseded()) {
@@ -132,7 +132,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-store-write-in-ws-on",
     shape: "getState() mutator",
-    filePath: "src/lib/presence.ts",
+    filePath: "src/lib/presence/presence.ts",
     code: `import { messagesStore } from "@stores/messages.store";
     ws.on("x", (p) => { messagesStore.getState().addMessage(p); });`,
     messageId: "storeWriteOutsideDispatcher",
@@ -170,7 +170,7 @@ const CANARIES: readonly Canary[] = [
     rule: "local/subscription-result-kept",
     shape: "registerSessionReset",
     filePath: "src/stores/messages.store.ts",
-    code: `import { registerSessionReset } from "@lib/sessionRegistry";
+    code: `import { registerSessionReset } from "@lib/net/sessionRegistry";
     registerSessionReset("x:y", reset);`,
     messageId: "discarded",
   },
@@ -190,7 +190,7 @@ const CANARIES: readonly Canary[] = [
   },
   {
     rule: "local/layer-direction",
-    filePath: "src/lib/presence.ts",
+    filePath: "src/lib/presence/presence.ts",
     code: `import { MainPage } from "@pages/MainPage";`,
     messageId: "upwardImport",
     hasOptions: true,
@@ -206,14 +206,14 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/layer-direction",
     shape: "dynamic import",
-    filePath: "src/lib/livekitSession.ts",
+    filePath: "src/lib/voice/livekitSession.ts",
     code: `async function f() { return import("@pages/MainPage"); }`,
     messageId: "upwardImport",
     hasOptions: true,
   },
 ];
 
-describe("custom lint-rule canaries (ARCH-06)", () => {
+describe("custom lint-rule canaries", () => {
   for (const canary of CANARIES) {
     const shape = canary.shape === undefined ? "" : ` (${canary.shape})`;
     it(`${canary.rule}${shape} is enabled at ${canary.filePath} and fires on its canary shape`, async () => {
@@ -270,7 +270,7 @@ describe("custom lint-rule canaries (ARCH-06)", () => {
 
 // 5.4e: a *.view.ts draws from a row model and imports no store. These are
 // core rules, so they are checked through the real config, not a flat Linter.
-describe("view-file store ban (5.4e)", () => {
+describe("view-file store ban", () => {
   const VIEW = "src/features/members/memberRow.view.ts";
   const NON_VIEW = "src/features/members/memberRowModel.ts";
 
@@ -289,7 +289,7 @@ describe("view-file store ban (5.4e)", () => {
     expect(await restricted(`import { x } from "../../stores/ui.store";`, VIEW)).toContain(
       "no-restricted-imports",
     );
-    expect(await restricted(`import { x } from "@lib/livekitSession";`, VIEW)).toContain(
+    expect(await restricted(`import { x } from "@lib/voice/livekitSession";`, VIEW)).toContain(
       "no-restricted-imports",
     );
     expect(await restricted(`import { x } from "../safety/store";`, VIEW)).toContain(
@@ -305,7 +305,7 @@ describe("view-file store ban (5.4e)", () => {
       await restricted(`export const f = () => import("../moderation/store");`, VIEW),
     ).toContain("no-restricted-syntax");
     expect(
-      await restricted(`export const f = () => import("@lib/livekitSession");`, VIEW),
+      await restricted(`export const f = () => import("@lib/voice/livekitSession");`, VIEW),
     ).toContain("no-restricted-syntax");
   }, 60_000);
 
@@ -322,7 +322,7 @@ describe("view-file store ban (5.4e)", () => {
 // 6.13b: the browser platform must stay free of native imports. The ban in
 // eslint.config.js exempts only src/platform/desktop, so it already covers
 // src/platform/browser; these cases fail if that exemption ever widens.
-describe("browser platform native-import ban (6.13b)", () => {
+describe("browser platform native-import ban", () => {
   const BROWSER = "src/platform/browser/index.ts";
   const DESKTOP = "src/platform/desktop/appMetadata.ts";
 

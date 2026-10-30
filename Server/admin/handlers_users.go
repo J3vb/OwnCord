@@ -9,11 +9,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 )
-
-// ─── User Handlers ───────────────────────────────────────────────────────────
 
 // statsResponse is the dashboard payload: the database stats flattened with
 // the TLS mode and the served certificate (see SetServedCertificate). The
@@ -30,7 +29,7 @@ func handleGetStats(users *service.UserService, hub HubBroadcaster) http.Handler
 	return func(w http.ResponseWriter, r *http.Request) {
 		stats, err := users.ServerStats(r.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get stats")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to get stats")
 			return
 		}
 		if hub != nil {
@@ -59,13 +58,13 @@ func handleListUsers(users *service.UserService) http.HandlerFunc {
 			BannedOnly: r.URL.Query().Get("banned") == "1",
 		}
 		if utf8.RuneCountInString(filter.Query) > maxUserSearchLen {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "search is too long")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "search is too long")
 			return
 		}
 
 		page, err := users.ListAll(r.Context(), filter, limit, offset)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list users")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to list users")
 			return
 		}
 
@@ -104,14 +103,10 @@ const maxBanDurationHours = 24 * 365
 
 // memberUnbanBroadcaster is an optional capability of HubBroadcaster: tell
 // every connected client a user is back in the roster after an unban, the
-// mirror of BroadcastMemberBan. It is checked with a type assertion instead
-// of being added to HubBroadcaster directly (admin/types.go, not owned by
-// this change) so this fix does not force every HubBroadcaster
-// implementation — production and test doubles alike — to gain the method
-// before it compiles. See the batch report's cross_batch note: *ws.Hub needs
-// BroadcastMemberUnban(userID int64) wired up for this to take effect at
-// runtime; until then the assertion below simply misses and the handler's
-// existing (pre-fix) behavior is unchanged.
+// mirror of BroadcastMemberBan. It is checked with a type assertion so
+// HubBroadcaster implementations (including test doubles) need not gain the
+// method; *ws.Hub implements it, and an implementation without it sends
+// nothing.
 type memberUnbanBroadcaster interface {
 	BroadcastMemberUnban(userID int64)
 }
@@ -130,7 +125,7 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 
 	id, err := pathInt64(r, "id")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 		return 0, req, 0, false
 	}
 
@@ -140,9 +135,9 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 
 	if _, err := users.Get(r.Context(), id); err != nil {
 		if errors.Is(err, service.ErrNotFound) {
-			writeErr(w, http.StatusNotFound, "NOT_FOUND", "user not found")
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "user not found")
 		} else {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch user")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to fetch user")
 		}
 		return 0, req, 0, false
 	}
@@ -152,7 +147,7 @@ func patchUserPrecheck(w http.ResponseWriter, r *http.Request, users *service.Us
 	// Prevent admins from modifying their own role or ban status, which
 	// could lock them out of the admin panel with no recovery path.
 	if id == actor {
-		writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "cannot modify your own account via admin panel")
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "cannot modify your own account via admin panel")
 		return 0, req, 0, false
 	}
 
@@ -169,7 +164,7 @@ func patchUserAuthorizeRole(w http.ResponseWriter, r *http.Request, mod *service
 	}
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 		return false
 	}
 	if _, _, _, err := mod.AuthorizeRoleChange(r.Context(), actor, id, *req.RoleID); err != nil {
@@ -189,7 +184,7 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	}
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 		return false
 	}
 	banReason := ""
@@ -210,10 +205,10 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 	case *req.Banned && hub != nil:
 		hub.BroadcastMemberBan(id)
 	case !*req.Banned && hub != nil:
-		// Ban had no WS event on the way out (member_ban hard-deletes
-		// the row client-side); unban needs one on the way back in, or
-		// every already-connected client keeps the user missing from
-		// its member store while a freshly connecting client sees them.
+		// Ban had no WS event on the way out (member_ban hard-deletes the row
+		// client-side); unban needs one on the way back in, or connected
+		// clients keep the user missing from their member store while a freshly
+		// connecting client sees them.
 		if mub, ok := hub.(memberUnbanBroadcaster); ok {
 			mub.BroadcastMemberUnban(id)
 		}
@@ -223,22 +218,21 @@ func patchUserApplyBan(w http.ResponseWriter, r *http.Request, hub HubBroadcaste
 
 // patchUserApplyRole commits the role half of the PATCH; ModerationService
 // invalidates the target's cached permissions and fans the change out to
-// connected clients (WP 5.1a). A request without role_id is a no-op. It reports
+// connected clients. A request without role_id is a no-op. It reports
 // whether the handler may continue; on false it has already written the error
 // response.
 func patchUserApplyRole(w http.ResponseWriter, r *http.Request, mod *service.ModerationService, actor, id int64, req patchUserRequest) bool {
 	if req.RoleID == nil {
 		return true
 	}
-	// Routed through ModerationService, which re-runs the same
-	// MANAGE_ROLES, actor-outranks-target, and assign-below-own-rank
-	// checks the AuthorizeRoleChange pre-flight above already passed
-	// (a second pass, not a redundant one: it catches anything that
-	// changed in the window between the pre-flight and here, e.g. a
-	// concurrent role delete), then commits and writes the audit row.
+	// Routed through ModerationService, which re-runs the same MANAGE_ROLES,
+	// actor-outranks-target and assign-below-own-rank checks the
+	// AuthorizeRoleChange pre-flight passed (a second pass catches anything that
+	// changed in between, e.g. a concurrent role delete), then commits and
+	// writes the audit row.
 	if mod == nil {
 		// Fail closed rather than fall back to an unchecked UPDATE.
-		writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 		return false
 	}
 	_, err := mod.ChangeUserRole(r.Context(), actor, id, *req.RoleID)
@@ -261,16 +255,12 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 			return
 		}
 
-		// Authorize the role change before applying anything else. Without
-		// this pre-flight, a PATCH combining banned + role_id would commit
-		// and broadcast the ban first and only then attempt the role change:
-		// if that role change was then refused (missing MANAGE_ROLES, or the
-		// new role outranks the actor), the handler reported the whole
-		// request as failed while the target was in fact banned, audited,
-		// and already dropped from every connected client's member list
-		// (OC-0215). Running every ChangeUserRole precondition up front,
-		// before either mutation lands, keeps the PATCH all-or-nothing from
-		// the caller's perspective.
+		// Authorize the role change before applying anything else. Otherwise a
+		// PATCH combining banned + role_id would commit and broadcast the ban
+		// first, and a then-refused role change (missing MANAGE_ROLES, or the
+		// new role outranks the actor) would report the request as failed while
+		// the target was in fact banned. Running every ChangeUserRole
+		// precondition up front keeps the PATCH all-or-nothing.
 		if !patchUserAuthorizeRole(w, r, mod, actor, id, req) {
 			return
 		}
@@ -291,10 +281,8 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 
 		// Ban/unban first: it routes through ModerationService, which enforces
 		// BAN_MEMBERS + role hierarchy (the admin-auth perimeter alone does
-		// not — any admin-panel actor could previously ban the owner). The
-		// role change, if requested, was already authorized above, so a ban
-		// committing here cannot be followed by a refused role change leaving
-		// a half-applied PATCH behind.
+		// not). The role change was already authorized above, so a committed ban
+		// cannot be followed by a refused role change.
 		if !retry && !patchUserApplyBan(w, r, hub, mod, actor, id, req, banExpires) {
 			return
 		}
@@ -310,7 +298,7 @@ func handlePatchUser(users *service.UserService, hub HubBroadcaster, mod *servic
 
 		updated, roleName, err := users.GetWithRoleName(r.Context(), id)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to fetch updated user")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "failed to fetch updated user")
 			return
 		}
 		if purge != nil {
@@ -331,12 +319,12 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		if mod == nil {
 			// Fail closed rather than cut sessions without a hierarchy check.
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 			return
 		}
 
@@ -352,14 +340,14 @@ func handleForceLogout(mod *service.ModerationService) http.HandlerFunc {
 // last role answers 409 LAST_ROLE, everything else follows writeModerationErr.
 func writeMemberRoleErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrLastRole) {
-		writeErr(w, http.StatusConflict, "LAST_ROLE", "a member must keep at least one role")
+		writeErr(w, http.StatusConflict, httperr.CodeLastRole, "a member must keep at least one role")
 		return
 	}
 	writeModerationErr(w, err)
 }
 
 // handleMemberRole serves PUT and DELETE {base}/{id}/roles/{roleId}: add or
-// remove one role of a member without touching the others (WP 6.3c). The route
+// remove one role of a member without touching the others. The route
 // is perimeter-level like PATCH; ModerationService enforces MANAGE_ROLES, the
 // actor-outranks-target rule and the assign-below-own-rank rule, owns the
 // cache invalidation and live fan-out, and writes the role_add/role_remove
@@ -368,17 +356,17 @@ func handleMemberRole(mod *service.ModerationService, add bool) http.HandlerFunc
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		roleID, err := pathInt64(r, "roleId")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid role id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid role id")
 			return
 		}
 		if mod == nil {
 			// Fail closed rather than write user_roles without the checks.
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 			return
 		}
 		if add {
@@ -394,7 +382,7 @@ func handleMemberRole(mod *service.ModerationService, add bool) http.HandlerFunc
 	}
 }
 
-// handleDeleteUser erases the target account (B4-9). The route is gated on
+// handleDeleteUser erases the target account. The route is gated on
 // ADMINISTRATOR; ModerationService additionally enforces the
 // actor-outranks-target hierarchy, refuses the last admin-class account and
 // writes the audit row. On success every connected client gets the same
@@ -403,12 +391,12 @@ func handleDeleteUser(mod *service.ModerationService, hub HubBroadcaster) http.H
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathInt64(r, "id")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid user id")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid user id")
 			return
 		}
 		if mod == nil {
 			// Fail closed rather than erase without a hierarchy check.
-			writeErr(w, http.StatusInternalServerError, "INTERNAL_ERROR", "moderation service unavailable")
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "moderation service unavailable")
 			return
 		}
 
@@ -433,7 +421,7 @@ func handleGetMe(settings *service.SettingsService, version string) http.Handler
 		user, userOK := r.Context().Value(adminUserKey).(*db.User)
 		role, roleOK := r.Context().Value(adminRoleKey).(*db.Role)
 		if !userOK || user == nil || !roleOK || role == nil {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "not authenticated")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "not authenticated")
 			return
 		}
 		me := adminMeResponse{

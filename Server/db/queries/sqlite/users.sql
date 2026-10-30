@@ -131,7 +131,8 @@ WHERE banned != 0
   AND replace(ban_expires, ' ', 'T') > strftime('%Y-%m-%dT%H:%M:%SZ', 'now');
 
 -- name: CountUsers :one
-SELECT COUNT(*) FROM users;
+-- Not the hidden import account (registration_status 'system'), as in UserCount.
+SELECT COUNT(*) FROM users WHERE registration_status <> 'system';
 
 -- A lapsed temporary ban must not hide a TOTP-less user from this count: the
 -- ban_expires arm mirrors auth.IsEffectivelyBanned (and db.notBannedClause /

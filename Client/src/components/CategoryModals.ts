@@ -1,18 +1,21 @@
 /**
- * CategoryModals — the two dialogs of category management (WP 6.5b): a name
+ * CategoryModals — the two dialogs of category management: a name
  * prompt that serves Create and Rename, and the Delete confirmation. They
  * follow DeleteChannelModal's shape: the caller owns the request and the toast,
  * the dialog only re-arms its button and shows the inline error when the
- * caller's promise rejects. They load on first use (SidebarArea), so neither
- * is in the main-page chunk.
+ * caller's promise rejects. The Delete confirmation is the shared confirm
+ * preset (features/dialogs/confirmModal.ts); the name prompt keeps its own form
+ * shell. They load on first use (SidebarArea), so neither is in the main-page
+ * chunk.
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
-import type { MountableComponent } from "@lib/safe-render";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import { createConfirmModal, type ConfirmModalInstance } from "../features/dialogs/confirmModal";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 import { categoryErrorText } from "../features/channels/categoryActions";
 
@@ -188,11 +191,12 @@ export interface DeleteCategoryModalOptions {
 
 export function createDeleteCategoryModal(options: DeleteCategoryModalOptions): MountableComponent {
   const { categoryName, onConfirm, onClose } = options;
-  const disposable = new Disposable();
-  let instance: ModalInstance | null = null;
+  let instance: ConfirmModalInstance | null = null;
+  // destroy() is the owner tearing the dialog down; it must not call back into
+  // the owner's own onClose (which would destroy again and clear its slot).
+  let destroying = false;
 
   function mount(container: Element): void {
-    const body = createElement("div", { class: "modal-body" });
     const warning = createElement("div", { class: "modal-danger-text" });
     // The name stays data inside one translatable sentence: split at a marker
     // the parameter can never contain.
@@ -200,57 +204,37 @@ export function createDeleteCategoryModal(options: DeleteCategoryModalOptions): 
       category: "\u0000",
     }).split("\u0000");
     appendChildren(warning, before, createElement("strong", {}, categoryName), after);
-    const errorEl = createElement("div", {
-      style: "color: var(--text-danger); font-size: 13px; display: none; margin-top: 8px;",
-      "data-testid": "delete-category-error",
-    });
-    appendChildren(body, warning, errorEl);
 
-    const footer = createElement("div", { class: "modal-footer" });
-    const cancelBtn = createElement(
-      "button",
-      { class: "btn-modal-cancel", type: "button" },
-      shellText("common.cancel"),
-    );
-    cancelBtn.addEventListener("click", onClose, { signal: disposable.signal });
-    const deleteBtn = createElement(
-      "button",
-      { class: "btn-danger", type: "button", "data-testid": "delete-category-confirm" },
-      shellText("category.delete"),
-    );
-    deleteBtn.addEventListener(
-      "click",
-      async () => {
-        deleteBtn.setAttribute("disabled", "true");
-        setText(deleteBtn, shellText("common.deleting"));
-        try {
-          await onConfirm();
-        } catch (err) {
-          errorEl.style.display = "block";
-          setText(errorEl, categoryErrorText(err, shellText("category.deleteFailed")));
-        } finally {
-          if (instance?.overlay.isConnected === true) {
-            deleteBtn.removeAttribute("disabled");
-            setText(deleteBtn, shellText("category.delete"));
-          }
-        }
+    // The shared confirm preset: Cancel focused, Escape and the backdrop
+    // cancel, a rejected request shows the inline error and re-arms the button.
+    instance = createConfirmModal(
+      {
+        title: shellText("category.delete"),
+        titleId: "delete-category-title",
+        body: warning,
+        confirmLabel: shellText("category.delete"),
+        cancelLabel: shellText("common.cancel"),
+        closeButton: true,
+        testId: "delete-category-modal",
+        confirmTestId: "delete-category-confirm",
+        errorTestId: "delete-category-error",
+        // The caller closes the dialog itself: a success destroys it inside
+        // onConfirm.
+        onConfirm,
+        staysOpen: true,
+        closeOnResolve: false,
+        busyLabel: shellText("common.deleting"),
+        failureText: (err) => categoryErrorText(err, shellText("category.deleteFailed")),
+        onClose: () => {
+          if (!destroying) onClose();
+        },
       },
-      { signal: disposable.signal },
+      container,
     );
-    appendChildren(footer, cancelBtn, deleteBtn);
-
-    instance = openDialog(container, disposable, {
-      titleId: "delete-category-title",
-      title: shellText("category.delete"),
-      testId: "delete-category-modal",
-      body,
-      footer,
-      onClose,
-    });
   }
 
   function destroy(): void {
-    disposable.destroy();
+    destroying = true;
     instance?.destroy();
     instance = null;
   }

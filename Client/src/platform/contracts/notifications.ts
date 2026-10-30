@@ -1,7 +1,7 @@
 /**
  * Desktop notifications and the taskbar flash. Which notification fires, and
  * the Web Notification fallback when this seam rejects, are the caller's
- * (`lib/notifications.ts`). B7-5 lifted the native calls out of its private
+ * (`lib/notifications.ts`). The platform seam lifted the native calls out of its private
  * helpers in place, pinned them with `notifier.suite.ts`, then moved them to
  * `platform/desktop/notifications.ts`.
  */
@@ -53,7 +53,7 @@ export interface Notifier {
   ): Promise<void>;
   /**
    * Withdraw the ringing call notification for `channelId` from the
-   * notification centre (D-13). Windows only; elsewhere a no-op.
+   * notification centre. Windows only; elsewhere a no-op.
    */
   clearCall(channelId: number): Promise<void>;
   /**

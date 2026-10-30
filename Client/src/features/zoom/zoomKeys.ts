@@ -4,7 +4,7 @@
  * binding) only when a zoom key is pressed or a non-default level is stored.
  */
 
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import type { ZoomController } from "./zoom";
 
 export const DEFAULT_ZOOM = 100;

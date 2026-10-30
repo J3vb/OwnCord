@@ -1,5 +1,5 @@
-// Safety handler bodies (B9-15), called only from lib/dispatcher.ts.
-import { showToast } from "../../lib/toast";
+// Safety handler bodies, called only from lib/dispatcher.ts.
+import { showToast } from "../../lib/ui/toast";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import {
@@ -10,6 +10,7 @@ import {
   setActiveTimeout,
   setReadyNotices,
 } from "./store";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 type SafetyApi = DispatchApi | undefined;
 
@@ -51,12 +52,12 @@ export function handleModAction(api: SafetyApi, payload: Payload<"mod_action">):
 
 /** The server refused an action with TIMED_OUT: learn or revalidate the expiry. */
 export function handleTimedOutRefusal(api: SafetyApi, payload: Payload<"error">): void {
-  if (payload.code !== "TIMED_OUT") return;
+  if (payload.code !== WsErrorCode.TIMED_OUT) return;
   confirmTimeout(null);
   refresh(api);
 }
 
-/** The caller's own appeal changed (B9-16): show it now, then re-read (an overturn lifts or acknowledges). */
+/** The caller's own appeal changed: show it now, then re-read (an overturn lifts or acknowledges). */
 export function handleAppealStatus(api: SafetyApi, payload: Payload<"appeal_status">): void {
   applyAppealStatus(payload);
   refresh(api);

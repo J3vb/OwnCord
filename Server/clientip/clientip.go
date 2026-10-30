@@ -1,11 +1,9 @@
 // Package clientip resolves the real client IP for an HTTP request, honouring
 // the operator's trusted_proxies configuration.
 //
-// SRE-11: this logic lived privately in api/middleware.go, so the WebSocket
-// handshake could not use it and logged/audited r.RemoteAddr — the reverse
-// proxy's address, not the client's — in the recommended reverse-proxy
-// deployment. Extracting it here gives every trust boundary one implementation
-// instead of a third parallel copy.
+// Every trust boundary (HTTP middleware, the WebSocket handshake) shares this
+// one implementation, so none logs or audits r.RemoteAddr, which is the
+// reverse proxy's address in the recommended reverse-proxy deployment.
 package clientip
 
 import (
@@ -17,7 +15,7 @@ import (
 
 // ParseCIDRList parses CIDR strings into networks, skipping invalid entries —
 // a misconfigured entry must not take the server down. Call it once at
-// construction, never on the request path (W3-3a).
+// construction, never on the request path.
 func ParseCIDRList(cidrs []string) []*net.IPNet {
 	nets := make([]*net.IPNet, 0, len(cidrs))
 	for _, c := range cidrs {
@@ -53,10 +51,9 @@ func InNets(ipStr string, nets []*net.IPNet) bool {
 //     IP to bypass rate limits or pollute the audit trail.
 //   - If trustedNets is empty (the default), RemoteAddr is always used.
 //
-// X-Forwarded-For wins over X-Real-IP when both are present from a trusted
-// proxy: the project's documented nginx and Caddy recipes forward X-Real-IP
-// verbatim from whatever the client sent rather than overwriting it, so it is
-// only ever a last resort (OC-0240).
+// X-Forwarded-For wins over X-Real-IP when both come from a trusted proxy: the
+// documented nginx and Caddy recipes forward X-Real-IP verbatim from whatever
+// the client sent rather than overwriting it, so it is only a last resort.
 func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -73,13 +70,13 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 	}
 
 	// Walk X-Forwarded-For from the RIGHT and skip entries that are themselves
-	// trusted proxies. The first non-trusted, valid address is the real client.
-	// Taking the leftmost entry (BUG-112) would trust a client-supplied value:
-	// a client can prepend a spoofed IP (`X-Forwarded-For: <spoofed>, <real>`)
-	// that the proxy then appends to, letting it forge per-IP rate-limit and
-	// lockout keys. Every header line is joined first: a proxy that adds its
-	// own X-Forwarded-For line instead of extending the client's (HAProxy's
-	// `option forwardfor`) leaves the client-supplied line first.
+	// trusted proxies; the first non-trusted, valid address is the real client.
+	// The leftmost entry would trust a client-supplied value: a client can
+	// prepend a spoofed IP (`X-Forwarded-For: <spoofed>, <real>`) that the
+	// proxy appends to, forging per-IP rate-limit and lockout keys. Every
+	// header line is joined first: a proxy that adds its own X-Forwarded-For
+	// line instead of extending the client's (HAProxy's `option forwardfor`)
+	// leaves the client-supplied line first.
 	if xff := strings.Join(r.Header.Values("X-Forwarded-For"), ","); xff != "" {
 		parts := strings.Split(xff, ",")
 		leftmostValid := ""
@@ -94,14 +91,14 @@ func Resolve(r *http.Request, trustedNets []*net.IPNet) string {
 			}
 			return candidate
 		}
-		// Every entry fell inside trustedNets — a config that covers client
-		// networks too (e.g. trusted_proxies: 10.0.0.0/8 with LAN clients).
-		// Falling back to RemoteAddr here would collapse ALL clients behind
-		// the proxy into one rate-limit/lockout bucket, so one user's failed
-		// logins would lock out everyone. The leftmost valid entry is the
-		// furthest-upstream hop — the best distinct per-client key available
-		// under such a config. trusted_proxies must list only proxy hops;
-		// startup validation warns about entries that cannot be proxies.
+		// Every entry fell inside trustedNets (a config that covers client
+		// networks too, e.g. trusted_proxies: 10.0.0.0/8 with LAN clients).
+		// Falling back to RemoteAddr would collapse ALL clients behind the
+		// proxy into one rate-limit/lockout bucket, so one user's failed logins
+		// would lock out everyone. The leftmost valid entry is the
+		// furthest-upstream hop, the best distinct per-client key available.
+		// trusted_proxies must list only proxy hops; startup validation warns
+		// about entries that cannot be proxies.
 		if leftmostValid != "" {
 			return leftmostValid
 		}

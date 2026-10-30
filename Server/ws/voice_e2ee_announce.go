@@ -2,7 +2,7 @@ package ws
 
 // e2eeAnnounce is what a client announced with voice_e2ee_announce: the ECDH
 // P-256 public key (base64), the identity-key signature over it (F3 TOFU; ""
-// for legacy announces) and the sanitized video decode list (WP M-4; nil when
+// for legacy announces) and the sanitized video decode list (nil when
 // absent). It is stored, replayed and carried across resume and the grace
 // window as one value so no path can drop a field. Guarded by voiceSlot.voiceMu.
 type e2eeAnnounce struct {

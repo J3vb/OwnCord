@@ -89,7 +89,7 @@ impl Dispatch<ExtIdleNotificationV1, ()> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
-        let mut since = state.idle_since.lock().unwrap_or_else(|e| e.into_inner());
+        let mut since = crate::sync::lock(&state.idle_since);
         match event {
             ext_idle_notification_v1::Event::Idled => *since = Some(spell_start(Instant::now())),
             ext_idle_notification_v1::Event::Resumed => *since = None,
@@ -150,7 +150,7 @@ impl IdleMonitor {
     }
 
     pub fn idle_ms(&self) -> u64 {
-        let since = *self.idle_since.lock().unwrap_or_else(|e| e.into_inner());
+        let since = *crate::sync::lock(&self.idle_since);
         idle_ms_since(since, Instant::now())
     }
 }

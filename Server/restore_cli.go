@@ -15,19 +15,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// runRestoreCLI implements `server restore <file>` (B11-7, OP-10): put a
-// database backup back on a server that will not boot, without the admin
-// panel. It is the offline counterpart to POST /admin/api/backups/{name}/restore.
+// runRestoreCLI implements `server restore <file>`: put a database backup back
+// on a server that will not boot, without the admin panel. It is the offline
+// counterpart to POST /admin/api/backups/{name}/restore.
 //
 // It refuses rather than overwrites silently. Without --force it makes no
-// change and explains what to do; with --force it still takes a pre-restore
-// safety copy, verifies the backup, and only then swaps it in. The swap is the
-// admin panel's and the boot's: db.StageRestore stages the verified backup and
+// change and explains what to do; with --force it takes a pre-restore safety
+// copy, verifies the backup, and only then swaps it in via the panel's and
+// boot's code: db.StageRestore stages the verified backup and
 // db.ApplyStagedRestore moves the live files aside, renames the staged copy in
 // and rolls back if it fails its check. The CLI holds the database's
-// single-process lock for the whole operation, so a running server stops it
-// rather than letting two processes fight over one file, and it refuses while
-// another restore is still staged or half done.
+// single-process lock for the whole operation, so a running server stops it,
+// and it refuses while another restore is staged or half done.
 //
 // Path flags are separated from the config so a test never starts a real
 // server: runRestoreCLI takes the config path explicitly.
@@ -127,11 +126,11 @@ first), or copy the file in by hand if that is what you meant to do.
 // admin panel and boot use. The caller holds the process lock, has verified
 // source and has checked that no other restore is pending.
 func replaceLiveDatabase(source, dbPath, backupDir string) int {
-	// A pre-restore safety copy of the CURRENT database, so the overwrite is
+	// A pre-restore safety copy of the CURRENT database makes the overwrite
 	// reversible. It is skipped only when the live database is missing or
-	// unreadable (the usual reason for restoring): there is nothing to copy,
-	// and refusing would block the very recovery the command exists for. Any
-	// other failure refuses, like the admin path, with the database untouched.
+	// unreadable (the usual reason for restoring): there is nothing to copy and
+	// refusing would block the recovery the command exists for. Any other
+	// failure refuses, like the admin path, with the database untouched.
 	safety := ""
 	if err := db.CheckBackupIntegrity(context.Background(), dbPath); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: the live database is missing or unreadable, so no pre-restore safety copy was taken (%v); its files will be moved aside instead\n", err)
@@ -147,9 +146,9 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 
 	// With a safety copy the apply moves the live database and its sidecars
 	// aside itself and drops them once the swap holds. Without one, the
-	// unreadable database and its sidecars are the only pre-restore state left
-	// and the apply deletes its own rollback file on success, so they are moved
-	// to a name the apply does not know. A dead server's -wal is never replayed
+	// unreadable database and sidecars are the only pre-restore state left and
+	// the apply deletes its own rollback file on success, so they are moved to
+	// a name the apply does not know. A dead server's -wal is never replayed
 	// onto the restored file either way.
 	aside := ""
 	if safety == "" {
@@ -216,11 +215,11 @@ func replaceLiveDatabase(source, dbPath, backupDir string) int {
 // past the replacement. It reports false, having said why, when the restore
 // must be refused; nothing has been moved yet at that point.
 func preserveFloors(dbPath string) bool {
-	// Preserve the message-delivery cutoff across the replacement, exactly as
-	// the admin restore path does: a restored database may have lost the
-	// receipts for messages this server already accepted. The apply takes the
-	// floors again (they are idempotent max-floors), but the unreadable-live
-	// case moves the live files aside first, so only this call can read them.
+	// Preserve the message-delivery cutoff across the replacement, as the admin
+	// restore path does: a restored database may have lost receipts for
+	// messages this server already accepted. The apply takes the floors again
+	// (idempotent max-floors), but the unreadable-live case moves the live
+	// files aside first, so only this call can read them.
 	if err := db.AdvanceMessageDeliveryFloorForRestore(dbPath); err != nil {
 		fmt.Fprintf(os.Stderr, "error: could not preserve message retry protection — database untouched: %v\n", err)
 		return false
@@ -306,7 +305,7 @@ func checkRestoreSource(source, dbPath string) error {
 		return fmt.Errorf("%s is not a readable database backup: %w", source, err)
 	}
 	// A backup a newer server wrote would leave this binary refusing to boot
-	// on a schema it has never seen (REL-02), exactly as the admin path refuses.
+	// on a schema it has never seen, exactly as the admin path refuses.
 	ahead, err := db.CheckBackupSchemaAhead(context.Background(), source)
 	if err != nil {
 		return fmt.Errorf("could not read the schema version of %s: %w", source, err)

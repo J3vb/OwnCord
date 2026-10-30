@@ -1,5 +1,5 @@
-// Which video codecs the Linux native engine encodes beyond VP8 (WP LP-7c) and
-// decodes (WP M-11a), asked of libwebrtc once and remembered: the answer is
+// Which video codecs the Linux native engine encodes beyond VP8 and
+// decodes, asked of libwebrtc once and remembered: the answer is
 // fixed by the build.
 import { desktop } from "../../../platform/desktop";
 import type { NativeVoiceVideoCodecs } from "../../../platform/contracts/nativeVoice";

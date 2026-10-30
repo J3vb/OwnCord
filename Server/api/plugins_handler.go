@@ -1,8 +1,6 @@
-// Phase C Step 9 — Plugin admin REST surface.
-//
-// All endpoints are mounted under the existing AdminIPRestrict group so they
-// inherit the same network ACL as the rest of the admin panel. Authentication
-// is handled by the admin handler's middleware before this handler runs.
+// Plugin admin REST surface, mounted under the AdminIPRestrict group so it
+// inherits the admin panel's network ACL; authentication is the admin handler's
+// middleware before this handler runs.
 
 package api
 
@@ -17,6 +15,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/plugin"
 	"github.com/go-chi/chi/v5"
 )
@@ -47,25 +46,28 @@ func NewPluginAdminHandler(registry *plugin.Registry, st plugin.PluginStore, aud
 	return r
 }
 
-// install accepts a multipart upload with a single "plugin" file part
-// containing a .zip. The zip is validated (zip-slip safe, no symlinks,
-// uncompressed total capped, manifest required at root) and installed via
-// Registry.InstallFromZip. Returns 201 with the new plugin name on success.
+// install accepts a multipart upload with one "plugin" .zip part, validated
+// (zip-slip safe, no symlinks, capped uncompressed total, manifest at root) and
+// installed via Registry.InstallFromZip. Returns 201 with the plugin name.
 func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	if h.registry == nil {
-		http.Error(w, "plugin runtime disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, httperr.CodePluginsDisabled, "plugin runtime disabled")
 		return
 	}
 	// Hard cap on the request body before parsing multipart so a hostile
 	// client can't tie up parsing memory.
 	r.Body = http.MaxBytesReader(w, r.Body, maxPluginUploadBytes+1024)
 	if err := r.ParseMultipartForm(maxPluginUploadBytes); err != nil {
-		http.Error(w, "invalid multipart upload", http.StatusBadRequest)
+		if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
+			writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "plugin upload too large")
+			return
+		}
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "invalid multipart upload")
 		return
 	}
 	file, header, err := r.FormFile("plugin")
 	if err != nil {
-		http.Error(w, "missing 'plugin' file part", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "missing 'plugin' file part")
 		return
 	}
 	defer file.Close() //nolint:errcheck
@@ -77,33 +79,31 @@ func (h *PluginAdminHandler) install(w http.ResponseWriter, r *http.Request) {
 	// inside the registry.
 	if header != nil {
 		if ct := header.Header.Get("Content-Type"); ct != "" && !isZipContentType(ct) {
-			http.Error(w, "plugin upload must be a .zip archive", http.StatusUnsupportedMediaType)
+			writeErr(w, http.StatusUnsupportedMediaType, httperr.CodeUnsupportedMediaType, "plugin upload must be a .zip archive")
 			return
 		}
 	}
 
-	// Read the entire zip into memory — InstallFromZip needs an io.ReaderAt
-	// for archive/zip and the cap is small enough to be safe.
 	body, err := io.ReadAll(io.LimitReader(file, maxPluginUploadBytes+1))
 	if err != nil {
-		http.Error(w, "failed to read upload", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "failed to read upload")
 		return
 	}
 	if int64(len(body)) > maxPluginUploadBytes {
-		http.Error(w, "plugin upload too large", http.StatusRequestEntityTooLarge)
+		writeErr(w, http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, "plugin upload too large")
 		return
 	}
-	// Magic-byte check: a real .zip starts with "PK\x03\x04" (local file
-	// header) or "PK\x05\x06" (empty archive). Anything else is definitively
-	// not a zip regardless of what the client labelled it.
+	// Magic-byte check: a real .zip starts with "PK\x03\x04" or "PK\x05\x06"
+	// (empty archive); anything else is not a zip whatever the client labelled
+	// it.
 	if !hasZipMagic(body) {
-		http.Error(w, "plugin upload is not a valid zip archive", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "plugin upload is not a valid zip archive")
 		return
 	}
 	name, err := h.registry.InstallFromZip(r.Context(), body)
 	if err != nil {
 		slog.Error("plugin install failed", "error", err)
-		writeErr(w, http.StatusBadRequest, "INSTALL_FAILED", "plugin installation failed")
+		writeErr(w, http.StatusBadRequest, httperr.CodeInstallFailed, "plugin installation failed")
 		return
 	}
 	h.writeAudit(r, "plugin_install", h.installedID(r.Context(), name), name)
@@ -124,7 +124,7 @@ func (h *PluginAdminHandler) list(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.store.ListPlugins(ctx)
 	if err != nil {
 		slog.Error("plugin list failed", "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
@@ -136,12 +136,12 @@ func (h *PluginAdminHandler) enable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.registry == nil {
-		http.Error(w, "plugin runtime disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, httperr.CodePluginsDisabled, "plugin runtime disabled")
 		return
 	}
 	if err := h.registry.EnablePlugin(r.Context(), id); err != nil {
 		slog.Error("plugin enable failed", "id", id, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -153,12 +153,12 @@ func (h *PluginAdminHandler) disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.registry == nil {
-		http.Error(w, "plugin runtime disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, httperr.CodePluginsDisabled, "plugin runtime disabled")
 		return
 	}
 	if err := h.registry.DisablePlugin(r.Context(), id); err != nil {
 		slog.Error("plugin disable failed", "id", id, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -170,7 +170,7 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.registry == nil {
-		http.Error(w, "plugin runtime disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, httperr.CodePluginsDisabled, "plugin runtime disabled")
 		return
 	}
 	// Registry.UninstallPlugin is idempotent on an unknown id, so check the
@@ -179,24 +179,24 @@ func (h *PluginAdminHandler) uninstall(w http.ResponseWriter, r *http.Request) {
 	if h.store != nil {
 		if _, err := h.store.GetPlugin(r.Context(), id); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				http.Error(w, "plugin not found", http.StatusNotFound)
+				writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "plugin not found")
 				return
 			}
 			slog.Error("plugin lookup failed", "id", id, "error", err)
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 			return
 		}
 	}
 	if err := h.registry.UninstallPlugin(r.Context(), id); err != nil {
 		slog.Error("plugin uninstall failed", "id", id, "error", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "internal server error")
 		return
 	}
 	h.writeAudit(r, "plugin_uninstall", id, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// writeAudit records a plugin lifecycle mutation (B2-6) against the admin
+// writeAudit records a plugin lifecycle mutation against the admin
 // principal RequireAdminAuth put on the request. A nil auditor (unit tests
 // that only exercise the HTTP surface) records nothing.
 func (h *PluginAdminHandler) writeAudit(r *http.Request, action string, pluginID int64, detail string) {
@@ -230,10 +230,9 @@ func pluginRuntimeState(registry *plugin.Registry) string {
 	return "enabled"
 }
 
-// isZipContentType reports whether ct looks like a zip MIME type. Both the
-// IANA-registered application/zip and the legacy application/x-zip-compressed
-// (used by some Windows clients) are accepted. The comparison is case-
-// insensitive and strips any parameters after a semicolon.
+// isZipContentType reports whether ct looks like a zip MIME type
+// (application/zip or the legacy application/x-zip-compressed some Windows
+// clients send), case-insensitively and ignoring parameters.
 func isZipContentType(ct string) bool {
 	for i := 0; i < len(ct); i++ {
 		if ct[i] == ';' {
@@ -248,9 +247,8 @@ func isZipContentType(ct string) bool {
 	return false
 }
 
-// hasZipMagic reports whether b begins with the PK signature used by every
-// .zip archive. Empty archives use 0x50,0x4b,0x05,0x06; non-empty archives
-// start with a local file header 0x50,0x4b,0x03,0x04. Both are accepted.
+// hasZipMagic reports whether b starts with the PK signature (local file header
+// 03 04, or the empty-archive marker 05 06).
 func hasZipMagic(b []byte) bool {
 	if len(b) < 4 {
 		return false
@@ -264,7 +262,7 @@ func hasZipMagic(b []byte) bool {
 func parsePluginID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, ok := pathID(r, "id")
 	if !ok {
-		http.Error(w, "invalid plugin id", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid plugin id")
 		return 0, false
 	}
 	return id, true

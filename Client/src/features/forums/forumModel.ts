@@ -1,9 +1,9 @@
 /**
- * What a forum's post list decides without touching the DOM or a store (WP
- * 6.9d): the list route's query, which posts a tag filter keeps, and the order
- * the list shows them in. The order must agree with the server's, because the
- * view merges live `thread_changed` frames into the pages it fetched and sorts
- * the union again locally.
+ * What a forum's post list decides without touching the DOM or a store: the list
+ * route's query, which posts a tag filter keeps, and the order the list shows them
+ * in. The order must agree with the server's, because the view merges live
+ * `thread_changed` frames into the pages it fetched and sorts the union again
+ * locally.
  */
 
 import type { ThreadInfo } from "@lib/types";

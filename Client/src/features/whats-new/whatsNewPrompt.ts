@@ -4,7 +4,7 @@
  * an unchanged version or a version without notes shows nothing.
  */
 
-import type { MountableComponent } from "../../lib/safe-render";
+import type { MountableComponent } from "../../lib/text/safeRender";
 import { Disposable } from "../../lib/disposable";
 import { createLogger } from "../../lib/logger";
 import { readAppVersion } from "./appVersion";

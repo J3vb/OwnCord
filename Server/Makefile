@@ -13,7 +13,7 @@
 # sqlc-generate      Regenerate type-safe Go from sqlc.yaml (db/dbgen).
 # sqlc-verify        Fail if the committed dbgen output is stale (used by CI).
 # sqlc-install       Install the pinned sqlc version into $GOBIN.
-# protocol-generate  Regenerate WS message-type constants (Go + TS) from ../protocol/schema.json.
+# protocol-generate  Regenerate protocol constants and error codes (Go + TS) from ../protocol/schema.json.
 # protocol-verify    Fail if the committed protocol constants are stale (used by CI).
 # docs-generate      Regenerate the route/table/config index blocks in ../docs.
 # docs-verify        Fail if those generated blocks are stale (used by CI).
@@ -112,7 +112,7 @@ protocol-generate:
 
 protocol-verify:
 	go run ./cmd/genprotocol
-	@git diff --exit-code ws/message_types.go ../Client/src/lib/protocolTypes.ts || ( \
+	@git diff --exit-code ws/message_types.go httperr/codes.go ../Client/src/lib/protocolTypes.ts || ( \
 		echo "ERROR: generated protocol constants are stale. Run 'make protocol-generate' and commit the result." ; \
 		exit 1 ; \
 	)
@@ -140,7 +140,7 @@ docs-verify:
 # Prometheus UI:  http://localhost:9090
 # Run the server with: go build -tags otel . && ./owncord-server
 otel-up:
-	docker compose -f docker-compose.otel.yml up -d
+	docker compose -f ../deploy/docker/docker-compose.otel.yml up -d
 
 otel-down:
-	docker compose -f docker-compose.otel.yml down
+	docker compose -f ../deploy/docker/docker-compose.otel.yml down

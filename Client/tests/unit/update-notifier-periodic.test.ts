@@ -12,7 +12,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: mockCheckForUpdate,
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: mockSubscribeToUpdateInstall,
@@ -26,7 +26,7 @@ import {
   getActiveUpdateChecker,
 } from "../../src/features/updates/updateChecker";
 import { setConnectionStatus } from "../../src/stores/ui.store";
-import type { UpdateInstallState } from "../../src/lib/updater";
+import type { UpdateInstallState } from "../../src/lib/net/updater";
 
 const NONE = { available: false, version: null, body: null, manual_upgrade: false };
 const update = (version: string) => ({ available: true, version, body: "", manual_upgrade: false });

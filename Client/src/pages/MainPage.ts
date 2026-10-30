@@ -2,9 +2,15 @@
 // Composes standalone components; never sets innerHTML with user content.
 // Delegates sidebar and chat-area DOM construction to sub-orchestrators.
 
+import { addServer, loadSavedServers, switchToServer } from "../features/server-rail/switchServer";
+import {
+  confirmAndJoinInvite,
+  currentServerName,
+  parseInviteInput,
+} from "../features/server-rail/joinInvite";
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
@@ -12,7 +18,7 @@ import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
-import { createRateLimiterSet } from "@lib/rate-limiter";
+import { createRateLimiterSet } from "@lib/net/rateLimiter";
 import type { CallState, VideoGridComponent } from "@components/VideoGrid";
 import { isConnecting } from "@components/voiceStatusText";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
@@ -20,30 +26,30 @@ import type { ServerBannerControl } from "@components/ServerBanner";
 import { createSettingsOverlay } from "@components/SettingsOverlay";
 import { createToastContainer } from "@components/Toast";
 import type { ToastContainer } from "@components/Toast";
-import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/toast";
+import { initToast, teardownToast, showToast, showChangeOutcomeToast } from "@lib/ui/toast";
 import { accountText as account } from "../i18n/account";
 import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
 import { joinBackoffText } from "../features/voice/joinBackoffText";
 import { shareBlockReason } from "../features/voice/shareGate";
-import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
-import { logout } from "@lib/logout";
+import { sessionNoticeMessage, startSessionNotice } from "@lib/net/sessionNotice";
+import { logout } from "@lib/net/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
 import { closeSettings, openSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
-import { loadUserStatus } from "@lib/userStatus";
-import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
+import { loadUserStatus } from "@lib/presence/userStatus";
+import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
 import {
   anyTriggerBound,
   clearPortalBound,
   globalKeysErrorCode,
   portalBoundBefore,
-} from "@lib/globalKeys";
-import { loadPref, onPrefChange, savePref } from "@lib/preferences";
-import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
-import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
-import type { GameActivityLoop } from "@lib/gameActivity";
-import type { MusicActivityLoop } from "@lib/musicActivity";
-import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/statusTimer";
+} from "@lib/ui/globalKeys";
+import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
+import { createPresenceSender, setActivePresenceSender } from "@lib/presence/presence";
+import { startAutoIdle, type AutoIdleController } from "@lib/presence/autoIdle";
+import type { GameActivityLoop } from "@lib/presence/gameActivity";
+import type { MusicActivityLoop } from "@lib/presence/musicActivity";
+import { startStatusTimerWatcher, type StatusTimerWatcher } from "@lib/presence/statusTimer";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { watchGroupDmExits } from "../features/direct-messages/groupExitWatch";
@@ -69,7 +75,7 @@ import {
   setRemoteVideoView,
   setRemoteVideoWatched,
   forgetRemoteVideoWatch,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
   pruneAttachmentCacheScope,
@@ -81,11 +87,11 @@ import {
   clearReactionUsersCache,
 } from "../features/messaging/reactionUsers";
 import { createNotesContext, setNotesContextSource } from "../features/profiles/userNotes";
-import { markAllRead, setMarkReadSender } from "@lib/read-state";
-import { setMarkUnreadSender } from "@components/message-list/mark-unread";
-import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
-import { setChannelMutesHost } from "@lib/channel-mutes";
-import { setAudioVolumeHost } from "@lib/audioElements";
+import { markAllRead, setMarkReadSender } from "@lib/readState";
+import { setMarkUnreadSender } from "@components/message-list/markUnread";
+import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
+import { setChannelMutesHost } from "@lib/prefs/channelMutes";
+import { setAudioVolumeHost } from "@lib/voice/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
@@ -105,10 +111,15 @@ import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmPro
 import type { GroupMemberPanelController } from "./main-page/GroupMemberPanelController";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
-import { createRingController, createOutgoingCall } from "@lib/call-ring";
-import type { RingController, OutgoingCall } from "@lib/call-ring";
+import { createRingController, createOutgoingCall } from "@lib/voice/callRing";
+import type { RingController, OutgoingCall } from "@lib/voice/callRing";
 import type { DmCallPanelComponent } from "@components/DmCallPanel";
-import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib/notificationSound";
+import {
+  startRingChime,
+  stopRingChime,
+  startRingback,
+  stopRingback,
+} from "@lib/media/notificationSound";
 import { startVoiceUiSounds } from "../features/voice/uiSounds";
 import { createSidebarVoiceCallbacks } from "./main-page/VoiceCallbacks";
 import { createSidebarArea } from "./main-page/SidebarArea";
@@ -131,7 +142,7 @@ const SESSION_NOTICE_TOAST_MS = 12_000;
  *  poller outlives a logout or server switch, so a remount keeps standing down. */
 let globalPollerActive = false;
 /**
- * DP-24's call notification and missed-call notice. They are re-exported by the
+ * The call notification and missed-call notice. They are re-exported by the
  * DM call panel, which the page already loads at mount, so the ring's OS alert
  * costs no second dynamic chunk here.
  */
@@ -284,7 +295,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   );
 
   // The native screen-share picker adapter is a lower layer and may not import
-  // a component (ARCH-06); the UI registers the dialog here. It is loaded on
+  // a component; the UI registers the dialog here. It is loaded on
   // demand — the dialog is its own lazy chunk, not part of startup — and
   // the dynamic import is the sanctioned lower-layer-to-UI seam (Queue.ts's
   // NsfwGate does the same).
@@ -312,13 +323,12 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   // below, and the UserBar status picker it's threaded to through
   // SidebarArea) shares the exact same budget the server enforces (1
   // update / 10s, keyed by user id — service/channel.go). A limiter created
-  // per producer instead cannot predict that shared, cross-surface budget
-  // (OC-0210).
+  // per producer instead cannot predict that shared, cross-surface budget.
   const presenceSender = createPresenceSender(ws, limiters.presence);
   // Publish this as the session's one PresenceSender so producers wired up
   // outside MainPage — main.ts's tray "status-change" listener — share the
   // same limiter token, coalescing retry, and optimistic update instead of
-  // opening a second budget the server doesn't know about (OC-0176). Cleared
+  // opening a second budget the server doesn't know about. Cleared
   // in this page's teardown, alongside presenceSender.destroy() below.
   setActivePresenceSender(presenceSender);
 
@@ -346,7 +356,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
   /** Inactivity watcher that flips the status to idle after ten quiet
    *  minutes. Started once the socket is up, torn down with the page. */
   let autoIdle: AutoIdleController | null = null;
-  /** Reports the game running on this machine (WP 8.3). Desktop only, and
+  /** Reports the game running on this machine. Desktop only, and
    *  loaded on first use so the web build and the startup path never carry it. */
   let gameActivity: GameActivityLoop | null = null;
   let musicActivity: MusicActivityLoop | null = null;
@@ -374,7 +384,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  the current load when it resolves. */
   let dmProfileLoad: object | null = null;
 
-  // Group DM member panel (WP 3B-11a): mounted in the same slot as the 1:1
+  // Group DM member panel: mounted in the same slot as the 1:1
   // profile panel, only one of the two showing at a time.
   // The controller's code loads the first time a group DM is on screen, so a
   // session that never opens one never pays for it.
@@ -417,7 +427,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     });
   }
 
-  // B9-4: the content view (Message Requests, Moderation) shown in place of
+  // The content view (Message Requests, Moderation) shown in place of
   // the chat column. Created in mount, once the chat column exists.
   let contentNav: ContentNavigator | null = null;
 
@@ -475,7 +485,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
    *  stuck on "idle" with nothing left to correct it. `presenceSender`
    *  retries once the window reopens instead, re-reading the status at that
    *  time so a burst of calls in between coalesces onto one retry carrying
-   *  the latest value — see @lib/presence. */
+   *  the latest value — see @lib/presence/presence. */
   function applyPresence(status: UserStatus): void {
     presenceSender.send(status);
   }
@@ -766,14 +776,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     if (roster !== undefined && [...roster.keys()].some((id) => id !== self)) return;
     const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     // The server drops rings to offline members, so waiting on them would
-    // hold "Calling…" to the 30s timeout after every online callee declined
-    // (D-12). Keep them when nobody is online: nothing else to wait on.
+    // hold "Calling…" to the 30s timeout after every online callee declined.
+    // Keep them when nobody is online: nothing else to wait on.
     const all = dm?.participants ?? [];
     const online = all.filter((p) => p.status !== "offline");
     outgoingCall?.start(
       channelId,
       (online.length > 0 ? online : all).map((p) => p.id),
-      // A 1:1 callee shown offline is told at once (D-14). The ring above still
+      // A 1:1 callee shown offline is told at once. The ring above still
       // went out: an invisible contact shows offline but can answer.
       dm?.isGroup === false && online.length === 0,
     );
@@ -956,7 +966,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     if (uiStore.getState().connectionStatus === "connected") restoreSavedPresence();
 
     // Auto-idle. It only ever moves a status it is itself responsible for
-    // (see @lib/autoIdle) — a manually chosen Idle, Do Not Disturb or
+    // (see @lib/presence/autoIdle) — a manually chosen Idle, Do Not Disturb or
     // Invisible is never touched — so it is safe to leave running for the
     // whole session. The OS idle source makes input in other apps count too.
     autoIdle = startAutoIdle({
@@ -967,7 +977,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // loop sends nothing unless the setting is on and the server advertises
     // game_activity; the web build has no detector and never loads it.
     if (desktop.gameDetector.available) {
-      void import("@lib/gameActivity").then(
+      void import("@lib/presence/gameActivity").then(
         ({ startGameActivity }) => {
           if (tornDown) return;
           gameActivity = startGameActivity({
@@ -981,7 +991,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // The song being listened to, for the "Listening to <player>" line. Same
     // rules as the game loop, with its own capability (listening_activity).
     if (desktop.mediaDetector.available) {
-      void import("@lib/musicActivity").then(
+      void import("@lib/presence/musicActivity").then(
         ({ startMusicActivity }) => {
           if (tornDown) return;
           musicActivity = startMusicActivity({
@@ -1063,7 +1073,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       destinations: NAVIGATION_DESTINATIONS,
       onOpenView: (id, opener) => contentNav?.open(id, opener),
       // The member list's profile popup Call action opens the DM then starts
-      // its call through this, the same startCall the DM header uses (BUG-05).
+      // its call through this, the same startCall the DM header uses.
       onStartCall: () => startCall(),
       // The DM row menu's Profile: select the DM, then show its panel fresh
       // (a panel already open for another DM is replaced, not toggled away) and
@@ -1086,6 +1096,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       getRoot: () => root,
       getToast: () => toast,
       getChannelCtrl: () => channelCtrl,
+      subscribeDeletes: (listener) => {
+        const offOne = ws.on("chat_deleted", (p) => listener(p.channel_id, [p.message_id]));
+        const offMany = ws.on("chat_bulk_deleted", (p) => listener(p.channel_id, p.ids));
+        return () => {
+          offOne();
+          offMany();
+        };
+      },
       onToggleDmProfile: () => {
         toggleDmProfile();
       },
@@ -1179,6 +1197,40 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     const memberColumnBody = createElement("div", { class: "member-column-body" });
     memberColumnEl.appendChild(memberColumnBody);
 
+    // The server rail sits left of the sidebar. The web portal serves exactly
+    // one server, so it has none there. The slot holds the rail's width while
+    // the rail loads on demand, keeping it out of the eager MainPage chunk.
+    let railSlot: HTMLDivElement | null = null;
+    if (!__OWNCORD_WEB__) {
+      railSlot = createElement("div", { class: "server-rail-slot" });
+      app.classList.add("has-server-rail");
+      const slot = railSlot;
+      const railHost = api.getConfig().host ?? "";
+      void import("@components/ServerRail")
+        .then(({ createServerRail }) => {
+          if (tornDown) return;
+          const rail = createServerRail({
+            currentHost: railHost,
+            currentName: authStore.getState().serverName ?? "",
+            loadServers: loadSavedServers,
+            switchServer: switchToServer,
+            addServer,
+            onOpenDm: (dm) => sidebar.openDm(dm),
+            onShowServer: () => sidebar.returnToChannel(),
+            joinInvite: (text) => {
+              const invite = parseInviteInput(text);
+              if (invite === null) return false;
+              confirmAndJoinInvite(invite, currentServerName(railHost));
+              return true;
+            },
+          });
+          rail.mount(slot);
+          unsubscribers.push(() => rail.destroy?.());
+        })
+        .catch((err: unknown) => log.warn("Server rail failed to load", err));
+    }
+
+    if (railSlot !== null) app.appendChild(railSlot);
     appendChildren(
       app,
       sidebar.sidebarWrapper,
@@ -1203,6 +1255,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
         fallbackFocus: focusReachable,
         onOpen: () => {
           chatAreaResult.closePinnedPanel();
+          chatAreaResult.closeMediaGallery();
           memberColumn?.closeOverlay();
         },
       });
@@ -1250,7 +1303,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       memberColumn = null;
     });
 
-    // --- Moderation notices (B9-15, Q4): persistent, above the app row ---
+    // --- Moderation notices: persistent, above the app row ---
     const notices = new Disposable();
     unsubscribers.push(() => notices.destroy());
     root.insertBefore(
@@ -1363,7 +1416,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onDeleteAccount: async (password) => {
         await api.deleteAccount(password);
         clearAuth();
-        // The account is gone, so its cached server images go too (B7-15c).
+        // The account is gone, so its cached server images go too.
         // clearAuth has already disarmed the scope, so no late write follows.
         if (cacheScope !== null) await pruneAttachmentCacheScope(cacheScope);
         showToast(account("toast.accountDeleted"), "success");
@@ -1403,7 +1456,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       },
       onRefreshTotpStatus: async () => {
         // GET /auth/me is the only response that states totp_enabled;
-        // auth_ok never does (OC-0354). A failed read changes nothing, and
+        // auth_ok never does. A failed read changes nothing, and
         // a read that lands after the user enabled or disabled 2FA in the
         // meantime is discarded: the local change is newer than the answer.
         const epoch = totpEpoch;
@@ -1573,11 +1626,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Timed mutes: redraws the sidebars when one ends. Page-owned, so a socket
     // reconnect leaves it alone and a server switch remounts a fresh one.
     // Loaded on demand; the same !tornDown guard as the badge below.
-    void import("@lib/channel-mute-expiry").then((expiry) => {
+    void import("@lib/prefs/channelMuteExpiry").then((expiry) => {
       if (!tornDown) unsubscribers.push(expiry.startMuteExpiryWatch());
     });
 
-    // DP-27: the taskbar and tray unread badge, cleared again on teardown so a
+    // The taskbar and tray unread badge, cleared again on teardown so a
     // logout or server switch does not leave this session's count behind.
     // destroy() sets tornDown before it runs unsubscribers, so a stopper
     // pushed while !tornDown always runs.
@@ -1585,7 +1638,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       if (!tornDown) unsubscribers.push(badge.startUnreadBadge(desktop.notifier));
     });
 
-    // DP-40: short voice UI sounds on join/leave and mute/deafen. This module
+    // Short voice UI sounds on join/leave and mute/deafen. This module
     // statically imports stores the page already pulls in, so it rides the
     // MainPage chunk rather than splitting a new shared one off the entry.
     if (!tornDown) unsubscribers.push(startVoiceUiSounds());
@@ -1628,7 +1681,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onChange: (state) => {
         callPanel?.setOutgoing(state);
         // The panel is the caller's feedback only while their DM is on screen;
-        // elsewhere the ringback and a toast are all they get (DP-25).
+        // elsewhere the ringback and a toast are all they get.
         if (state !== null && state.phase !== "ringing") {
           const ui = uiStore.getState();
           const panelShows =
@@ -1774,7 +1827,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // Resolve through the members store, same as every other identity
           // surface (voice roster, member list, DM header) -- the raw wire
           // username is only a fallback for a caller this client hasn't
-          // seen yet (OC-0303).
+          // seen yet.
           const caller = membersStore.getState().members.get(payload.from_user);
           ringCtrl?.incoming({
             channelId: payload.channel_id,
@@ -1809,7 +1862,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // when it actually emptied the room. A group DM can still hold other
     // callees who already accepted (voiceStore.voiceUsers answers that), and
     // the ringer hanging up must not silence a call that is still live for
-    // them (OC-0235); the last one out, ringer or not, ends it (D-06).
+    // them; the last one out, ringer or not, ends it.
     unsubscribers.push(
       ws.on("voice_leave", (payload) => {
         const ringing = ringCtrl?.current();
@@ -1892,15 +1945,14 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // voice roster, message rows, the member list) — falling back to the
     // voice roster's (possibly frozen) username, then a placeholder. Single
     // writer so tile creation (setOnRemoteVideo below) and tile relabeling
-    // on a mid-call rename (the voiceStore subscriber below) cannot disagree
-    // (OC-0227).
+    // on a mid-call rename (the voiceStore subscriber below) cannot disagree.
     //
     // Self-aware, because the relabel loop walks the whole voice roster and the
     // roster includes you: VideoModeController registers the local tiles as
     // "<name> (You)" / "Your Screen", and a bare remote label written over them
-    // leaves your own tile indistinguishable from a participant's (OC-0375).
+    // leaves your own tile indistinguishable from a participant's.
     // These two branches must keep matching VideoModeController's addStream
-    // labels — that is what the OC-0375 test pins.
+    // labels — that is what the test pins.
 
     function tileLabel(userId: number, isScreenshare: boolean): string {
       const name = personName(userId);
@@ -1961,6 +2013,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           void import("../features/voice/cameraMenu")
             .then((m) => m.showCameraMenu(anchor, signal))
             .catch((err: unknown) => log.warn("Camera menu failed to open", err)),
+        cameraFlip: {
+          available: () =>
+            import("../features/voice/cameraFlip").then((m) => m.cameraFlipAvailable()),
+          flip: () => import("../features/voice/cameraFlip").then((m) => m.flipCamera()),
+        },
         onScreenshareToggle: () => voiceKeybindActions.onScreenshareToggle(),
       },
       getStreamStats: (tileId) =>
@@ -2104,7 +2161,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
           // writer of its own lastChannelId — never runs for that switch,
           // so lastChannelId is still the old channel the next time it runs
           // (e.g. right after setOnRemoteVideo adds a fresh remote tile),
-          // and it clears the grid it was just given (OC-0207).
+          // and it clears the grid it was just given.
           let sig =
             `${String(channelId)}|` +
             (state.localCamera ? `c${String(state.localCameraRev ?? 0)}` : "") +
@@ -2119,7 +2176,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
                 if (u.screenshare) sig += `:s${uid}`;
                 // Relabel an already-open remote tile whose display name
                 // changed (mid-call rename) — addStream only runs once per
-                // tile, so nothing else keeps its label in sync (OC-0227).
+                // tile, so nothing else keeps its label in sync.
                 // setLabel() no-ops for a tile that isn't open yet.
                 const name = personName(uid) || undefined;
                 if (u.camera) {
@@ -2153,7 +2210,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Auto-update notifier — checks server for newer client version
     if (apiConfig.host) {
       // A bare IPv6 literal must be bracketed or the URL is unparseable and
-      // the updater silently reports "no update available" forever (OC-0332).
+      // the updater silently reports "no update available" forever.
       // Same helper as ws.ts, admin-panel.ts and attachments.ts.
       const serverUrl = `https://${bracketBareIPv6Host(apiConfig.host)}`;
       const updateNotifier = createUpdateNotifier({ serverUrl, keepChecking: true });
@@ -2175,11 +2232,11 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     container.appendChild(root);
 
     // Only the channel that owns the current call keeps the grid up: the joined
-    // voice channel (its chat sits beside the grid, WP 6.1b) or the DM whose
+    // voice channel (its chat sits beside the grid) or the DM whose
     // call panel shows the video above the chat (its own update re-seats the
     // grid through onVideoHostChange). Every other channel mounts a chat
     // surface and must dismiss it, another voice channel's chat opened from
-    // its menu included (WP 6.1d).
+    // its menu included.
     const showChatFor = (active: { id: number; type: string }): void => {
       const ownsCall =
         (active.type === "dm" || active.type === "voice") &&
@@ -2279,7 +2336,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // The lightbox is a module-level overlay appended straight to
       // document.body — renderPage only clears #app, so a forced logout with
       // it open would otherwise leave it floating over the login screen with
-      // live document listeners and a since-revoked blob URL (B6-15).
+      // live document listeners and a since-revoked blob URL.
       step("closeActiveLightbox", closeActiveLightbox);
       step("autoIdle", () => {
         autoIdle?.destroy();
@@ -2307,7 +2364,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       // a paced burst survives teardown and fires against whichever server
       // is live when its timer elapses — channel ids are per-server, so
       // that can silently mark an unrelated channel read on the NEXT
-      // connection (OC-0418).
+      // connection.
       step("markReadSender", () => setMarkReadSender(null));
       step("markUnreadSender", () => setMarkUnreadSender(null));
       // The native screen-share picker is registered per page; drop it so a

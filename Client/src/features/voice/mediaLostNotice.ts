@@ -4,7 +4,7 @@
 // there, so for a share that could not come back the user gets a toast with
 // one button to share again.
 
-import { showActionToast } from "../../lib/toast";
+import { showActionToast } from "../../lib/ui/toast";
 import { voiceText } from "../../i18n/voice";
 
 export interface LostMedia {

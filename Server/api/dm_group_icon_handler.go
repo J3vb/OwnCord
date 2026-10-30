@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Group DM icon routes (WP 3B-10c). The upload follows the avatar rules
+// Group DM icon routes. The upload follows the avatar rules
 // (handleUploadAvatar): the same size, type and dimension checks, the same
 // storage quota, stored as an unlinked attachment. What differs is where the
 // id lands (channels.dm_icon, with a group_icon row in the same transaction)
@@ -29,7 +30,7 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 			return
 		}
 		if limiter != nil && !limiter.Allow(auth.Key("dm_icon_upload", user.ID), avatarUploadRateLimitPerMinute, time.Minute) {
-			writeErr(w, http.StatusTooManyRequests, "RATE_LIMITED", "icon upload rate limit exceeded, try again later")
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "icon upload rate limit exceeded, try again later")
 			return
 		}
 		// Membership, group-ness and timeout are decided before any byte is
@@ -41,12 +42,12 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 
 		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
 		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "invalid multipart form")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
 			return
 		}
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "BAD_REQUEST", "missing file field")
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
 			return
 		}
 		defer file.Close() //nolint:errcheck
@@ -74,7 +75,6 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 	}
 }
 
-// discardGroupIconUpload removes an uploaded icon whose transaction failed.
 func discardGroupIconUpload(ctx context.Context, svc *service.Services, store FileStore, fileID string, userID int64) {
 	ctx = context.WithoutCancel(ctx)
 	if err := svc.Uploads.Unrecord(ctx, fileID, userID); err != nil {

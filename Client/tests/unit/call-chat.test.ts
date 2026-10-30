@@ -56,7 +56,7 @@ function lastBeside(ctrl: ReturnType<typeof fakeCtrl>): boolean | undefined {
   return ctrl.setChatBeside.mock.calls.at(-1)?.[0];
 }
 
-describe("callChat (WP 6.1b)", () => {
+describe("callChat", () => {
   let chat: CallChat | null = null;
 
   beforeEach(() => {
@@ -232,7 +232,7 @@ describe("callChat (WP 6.1b)", () => {
     expect(ctrl.setChatBeside).not.toHaveBeenCalled();
   });
 
-  describe("Hide chat / Show chat (WP 6.1c)", () => {
+  describe("Hide chat / Show chat", () => {
     function inCall(ctrl: ReturnType<typeof fakeCtrl>, onStateChange?: (s: CallChatState) => void) {
       chat = createCallChat({ videoModeCtrl: ctrl, onStateChange });
       joinVoiceChannel(VOICE_A);

@@ -4,7 +4,7 @@
  * Mounted only for actors holding MANAGE_CHANNELS; the server enforces the same
  * bit on the PATCH behind it.
  *
- * Category is a <select> of the known categories and "No category" (WP 6.5b):
+ * Category is a <select> of the known categories and "No category":
  * moving a channel between groups is an edit, not a recreate, and no category
  * is special (a voice channel groups under whatever it carries).
  *
@@ -19,11 +19,11 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { errorText } from "@lib/api";
 import { canManageChannels } from "@lib/permissions";
-import { forumsEnabled } from "@lib/serverCapabilities";
-import type { MountableComponent } from "@lib/safe-render";
+import { forumsEnabled } from "@lib/net/serverCapabilities";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";
 import { shellText } from "../i18n/shell";
 import type { ForumSettingsSection } from "../features/forums/ForumSettingsSection";
@@ -97,7 +97,15 @@ export interface EditChannelData {
    */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /**
+   * Voice channels only, and only when the user changed it: "" removes the
+   * password, anything else sets or changes it. Absent keeps it as it is.
+   */
+  readonly password?: string;
 }
+
+/** The server's ceiling for a channel password, mirrored on the input. */
+export const MAX_CHANNEL_PASSWORD_LENGTH = 64;
 
 export interface EditChannelModalOptions {
   /** Current channel ID. */
@@ -119,6 +127,8 @@ export interface EditChannelModalOptions {
   /** Current voice capacity limits (0 = unlimited). Voice channels only. */
   readonly channelVoiceMaxUsers?: number;
   readonly channelVoiceMaxVideo?: number;
+  /** Whether the voice channel currently has a password. The password itself is never known here. */
+  readonly channelPasswordProtected?: boolean;
   /**
    * Writes a forum's tags and settings (PUT .../forum). Its presence, a forum
    * channel, the forums capability and MANAGE_CHANNELS together show the
@@ -168,6 +178,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     channelNsfw,
     channelVoiceMaxUsers,
     channelVoiceMaxVideo,
+    channelPasswordProtected,
     onSave,
     onSaveForum,
     onClose,
@@ -289,7 +300,7 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     );
     appendChildren(slowGroup, slowLabel, slowSelect, slowHint);
 
-    // NSFW flag. The hint says what the label does (B5-7/B9-7): the server
+    // NSFW flag. The hint says what the label does: the server
     // withholds the channel's content from each member until they agree.
     const nsfwGroup = createElement("div", { class: "form-group" });
     const nsfwLabelRow = createElement("label", { class: "form-check" });
@@ -308,6 +319,122 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
     appendChildren(nsfwGroup, nsfwLabelRow, nsfwHint);
 
     appendChildren(body, typeGroup, nameGroup, topicGroup, categoryGroup, slowGroup, nsfwGroup);
+
+    // Password (voice channels only). The password is never shown or held
+    // anywhere but this input: the section knows only whether one is set. Only
+    // a change the user made is sent, so saving other fields never touches it.
+    type PasswordMode = "keep" | "change" | "remove";
+    let passwordSet = channelPasswordProtected === true;
+    let passwordMode: PasswordMode = "keep";
+    const passwordGroup = createElement("div", {
+      class: "form-group",
+      "data-testid": "edit-channel-password-group",
+    });
+    const passwordInput = createElement("input", {
+      id: "edit-channel-password",
+      class: "form-input",
+      type: "password",
+      autocomplete: "new-password",
+      maxlength: String(MAX_CHANNEL_PASSWORD_LENGTH),
+      "data-testid": "edit-channel-password-input",
+    });
+    const passwordButton = (label: string, testId: string, onClick: () => void): HTMLElement => {
+      const btn = createElement(
+        "button",
+        { class: "btn-modal-cancel", type: "button", "data-testid": testId },
+        label,
+      );
+      btn.addEventListener("click", onClick, { signal: disposable.signal });
+      return btn;
+    };
+    function setPasswordMode(mode: PasswordMode): void {
+      passwordMode = mode;
+      if (mode !== "change") passwordInput.value = "";
+      renderPassword();
+      // The control that was clicked is gone: land on the one that replaced it.
+      const next =
+        mode === "change"
+          ? passwordInput
+          : passwordGroup.querySelector<HTMLElement>(
+              mode === "remove"
+                ? "[data-testid='edit-channel-password-keep']"
+                : "[data-testid='edit-channel-password-change']",
+            );
+      next?.focus();
+    }
+    function renderPassword(): void {
+      // Redrawing detaches the input, which drops focus a remote update would
+      // otherwise take from someone typing.
+      const hadFocus = document.activeElement === passwordInput;
+      drawPassword();
+      if (hadFocus && passwordInput.isConnected) passwordInput.focus();
+    }
+    function drawPassword(): void {
+      const label = createElement(
+        "label",
+        { class: "form-label", for: "edit-channel-password" },
+        shellText("channelForm.password"),
+      );
+      const hint = createElement(
+        "div",
+        { class: "form-hint" },
+        shellText("channelForm.passwordHint"),
+      );
+      passwordGroup.replaceChildren(label);
+      if (!passwordSet) {
+        appendChildren(passwordGroup, passwordInput, hint);
+        return;
+      }
+      if (passwordMode === "keep") {
+        const row = createElement("div", { class: "form-row", style: "align-items: center;" });
+        appendChildren(
+          row,
+          createElement(
+            "span",
+            { "data-testid": "edit-channel-password-set" },
+            shellText("channelForm.passwordSet"),
+          ),
+          passwordButton(
+            shellText("channelForm.passwordChange"),
+            "edit-channel-password-change",
+            () => setPasswordMode("change"),
+          ),
+          passwordButton(
+            shellText("channelForm.passwordRemove"),
+            "edit-channel-password-remove",
+            () => setPasswordMode("remove"),
+          ),
+        );
+        appendChildren(passwordGroup, row, hint);
+      } else if (passwordMode === "change") {
+        appendChildren(
+          passwordGroup,
+          passwordInput,
+          passwordButton(shellText("channelForm.passwordKeep"), "edit-channel-password-keep", () =>
+            setPasswordMode("keep"),
+          ),
+        );
+      } else {
+        appendChildren(
+          passwordGroup,
+          createElement(
+            "div",
+            { class: "form-hint", "data-testid": "edit-channel-password-removed" },
+            shellText("channelForm.passwordRemoved"),
+          ),
+          passwordButton(shellText("channelForm.passwordUndo"), "edit-channel-password-keep", () =>
+            setPasswordMode("keep"),
+          ),
+        );
+      }
+    }
+    /** What the password part of the PATCH carries, undefined when the user left it alone. */
+    function passwordChange(): string | undefined {
+      if (!isVoice) return undefined;
+      if (passwordSet && passwordMode === "remove") return "";
+      if (passwordSet && passwordMode !== "change") return undefined;
+      return passwordInput.value === "" ? undefined : passwordInput.value;
+    }
 
     // Voice-only section. Rendered for a voice channel alone: the columns exist
     // on every row, but on a text channel they are values nothing reads, and
@@ -338,8 +465,9 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       );
       maxUsersInput = users.input;
       maxVideoInput = video.input;
-      appendChildren(voiceSection, voiceHeading, users.group, video.group);
+      appendChildren(voiceSection, voiceHeading, users.group, video.group, passwordGroup);
       body.appendChild(voiceSection);
+      renderPassword();
     }
 
     // Fields the user has not touched follow the store while the dialog is
@@ -445,6 +573,16 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
       (state) => state.channels.get(options.channelId),
       (ch) => {
         if (ch === undefined) return;
+        // Another admin set or removed the password while this is open: follow
+        // it, and drop a pending removal that no longer means anything.
+        const nowSet = ch.passwordProtected === true;
+        if (isVoice && nowSet !== passwordSet) {
+          passwordSet = nowSet;
+          // A flip to protected must not carry a half-typed value into "change".
+          if (nowSet) passwordInput.value = "";
+          else passwordMode = "keep";
+          renderPassword();
+        }
         for (const f of fields) {
           const next = f.fromChannel(ch);
           if (touched(f)) {
@@ -524,6 +662,8 @@ export function createEditChannelModal(options: EditChannelModalOptions): Mounta
         if (warnUnsavedForum()) return;
         const data: Mutable = {};
         for (const f of fields) if (touched(f)) f.send(data);
+        const password = passwordChange();
+        if (password !== undefined) data.password = password;
         // Nothing changed: there is nothing to PATCH.
         if (Object.keys(data).length === 0) {
           requestClose();

@@ -8,25 +8,35 @@ vi.mock("../../stores/members.store", () => ({
   memberDisplayName: (m: { username: string }) => m.username,
 }));
 vi.mock("../../stores/voice.store", () => ({ setPeerVerification: vi.fn() }));
-vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-vi.mock("../../lib/identity", () => ({
+vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
+vi.mock("../../lib/net/identity", () => ({
   getIdentityPin: vi.fn(),
   storeIdentityPin: vi.fn(),
 }));
-vi.mock("../../lib/e2eeCrypto", () => ({
+vi.mock("../../lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(async (b64: string) => `idkey:${b64}`),
   verifyEphemeralKeySignature: vi.fn(),
   computeKeyFingerprint: vi.fn(async () => "safety-number"),
   computeRawKeyFingerprint: vi.fn(async () => "session-fp"),
 }));
+const log = vi.hoisted(() => ({
+  create: vi.fn(),
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+}));
 vi.mock("../../lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  createLogger: (name: string) => {
+    log.create(name);
+    return { debug: log.debug, info: log.info, warn: log.warn, error: log.error };
+  },
 }));
 
 import { setPeerVerification } from "../../stores/voice.store";
-import { showToast } from "../../lib/toast";
-import { getIdentityPin, storeIdentityPin } from "../../lib/identity";
-import { verifyEphemeralKeySignature } from "../../lib/e2eeCrypto";
+import { showToast } from "../../lib/ui/toast";
+import { getIdentityPin, storeIdentityPin } from "../../lib/net/identity";
+import { verifyEphemeralKeySignature } from "../../lib/net/e2eeCrypto";
 import { E2EEPeerState } from "./e2eePeerState";
 
 const PEER = 42;
@@ -325,7 +335,7 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
   });
 });
 
-/** A pin store that behaves like lib/identity: keys are added, never replaced. */
+/** A pin store that behaves like lib/net/identity: keys are added, never replaced. */
 function statefulPins(initial: string[] = []) {
   const keys = [...initial];
   vi.mocked(getIdentityPin).mockImplementation(async () => {
@@ -451,5 +461,254 @@ describe("verifyPeerAnnounce with a key per device", () => {
       peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "new-device-id"),
     ).resolves.toBe(true);
     expect(showToast).toHaveBeenCalledTimes(1);
+  });
+});
+
+const announce = (userId: number, key = "k") => ({ userId, publicKeyBase64: key });
+
+describe("announces held for a queued join", () => {
+  it("holds nothing until a join is queued, so the live session processes the announce", () => {
+    const { peers } = setup();
+    expect(peers.stageAnnounce(announce(1))).toBe(false);
+    expect(peers.takeStagedAnnounces(5)).toEqual([]);
+  });
+
+  it("holds announces for the queued channel and hands them over once", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(5);
+    expect(peers.stageAnnounce(announce(1))).toBe(true);
+    expect(peers.stageAnnounce(announce(2))).toBe(true);
+    expect(peers.takeStagedAnnounces(5)).toEqual([announce(1), announce(2)]);
+    // Handing them over stops the hold.
+    expect(peers.stageAnnounce(announce(3))).toBe(false);
+    expect(peers.takeStagedAnnounces(5)).toEqual([]);
+  });
+
+  it("keeps one entry per peer, the latest, after the others", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(5);
+    peers.stageAnnounce(announce(1, "first"));
+    peers.stageAnnounce(announce(2));
+    peers.stageAnnounce(announce(1, "second"));
+    expect(peers.takeStagedAnnounces(5)).toEqual([announce(2), announce(1, "second")]);
+  });
+
+  it("drops one peer's held announce when they leave", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(5);
+    peers.stageAnnounce(announce(1));
+    peers.stageAnnounce(announce(2));
+    peers.dropStagedAnnounce(1);
+    peers.dropStagedAnnounce(99);
+    expect(peers.takeStagedAnnounces(5)).toEqual([announce(2)]);
+  });
+
+  it("keeps what is held when the same channel is held again", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(5);
+    peers.stageAnnounce(announce(1));
+    peers.holdAnnouncesFor(5);
+    expect(peers.takeStagedAnnounces(5)).toEqual([announce(1)]);
+  });
+
+  it("drops what was held for the previous channel when the hold moves on", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(5);
+    peers.stageAnnounce(announce(1));
+    peers.holdAnnouncesFor(6);
+    peers.stageAnnounce(announce(2));
+    expect(peers.takeStagedAnnounces(6)).toEqual([announce(2)]);
+  });
+
+  it("never hands another channel's announces to an earlier join, and leaves them held", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(6);
+    peers.stageAnnounce(announce(2));
+    expect(peers.takeStagedAnnounces(5)).toEqual([]);
+    expect(peers.stageAnnounce(announce(3))).toBe(true);
+    expect(peers.takeStagedAnnounces(6)).toEqual([announce(2), announce(3)]);
+  });
+
+  it("discarding stops the hold and forgets what was held", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(5);
+    peers.stageAnnounce(announce(1));
+    peers.discardStagedAnnounces();
+    expect(peers.stageAnnounce(announce(2))).toBe(false);
+    peers.holdAnnouncesFor(5);
+    expect(peers.takeStagedAnnounces(5)).toEqual([]);
+  });
+
+  it("holds for channel 0 like any other channel", () => {
+    const { peers } = setup();
+    peers.holdAnnouncesFor(0);
+    expect(peers.stageAnnounce(announce(1))).toBe(true);
+    expect(peers.takeStagedAnnounces(0)).toEqual([announce(1)]);
+  });
+});
+
+describe("announced identity keys", () => {
+  it("has none for a peer that has not announced", () => {
+    const { peers } = setup();
+    expect(peers.announcedIdentityKey(PEER)).toBeNull();
+    expect(peers.announcedIdentityKeys.size).toBe(0);
+    expect(peers.keyChangedPeers.size).toBe(0);
+  });
+
+  it("records the key an announce was verified against, per peer", async () => {
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current, "device-key");
+    expect(peers.announcedIdentityKey(PEER)).toBe("device-key");
+    expect(peers.announcedIdentityKey(7)).toBeNull();
+    expect(peers.announcedIdentityKeys.get(PEER)).toBe("device-key");
+  });
+
+  it("does not record the key of an announce that was superseded", async () => {
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => false, "device-key");
+    expect(peers.announcedIdentityKey(PEER)).toBeNull();
+  });
+});
+
+describe("what verification logs", () => {
+  it("logs an unreadable pin store as an error for that peer", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "unavailable" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(log.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("identity pin store unreadable"),
+      { userId: PEER },
+    );
+  });
+
+  it("logs a stripped identity key on a pinned peer as an error", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: "old-id" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(log.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("pinned peer identity key missing"),
+      { userId: PEER },
+    );
+  });
+
+  it("logs a legacy peer without an identity key as a warning", async () => {
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, undefined, current);
+    expect(log.warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("no identity key"), {
+      userId: PEER,
+    });
+  });
+
+  it("logs an invalid signature as an error", async () => {
+    vi.mocked(verifyEphemeralKeySignature).mockResolvedValueOnce(false);
+    members.set(PEER, { identityPublicKey: "id" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(log.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("signature invalid"),
+      { userId: PEER },
+    );
+  });
+
+  it("logs the first-sight pin as info and nothing louder", async () => {
+    members.set(PEER, { identityPublicKey: "id" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(log.info).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("pinned peer identity key on first sight"),
+      { userId: PEER },
+    );
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("logs a new device key as a warning, not as a first-sight pin", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: "old-id" });
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(log.warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("new device key"), {
+      userId: PEER,
+    });
+    expect(log.info).not.toHaveBeenCalled();
+  });
+
+  it("logs a failed pin write as an error and reports no pin message", async () => {
+    vi.mocked(storeIdentityPin).mockResolvedValueOnce("failed");
+    members.set(PEER, { identityPublicKey: "id" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(log.error).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining("failed to persist identity pin"),
+      { userId: PEER },
+    );
+    expect(log.info).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it("logs a failed pin write for a new device key as the write failure only", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValueOnce({ status: "pinned", pin: "old-id" });
+    vi.mocked(storeIdentityPin).mockResolvedValueOnce("failed");
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("a verification overtaken by a newer attempt", () => {
+  it("buffers nothing and verifies nothing when it is overtaken during the pin lookup", async () => {
+    let live = true;
+    vi.mocked(getIdentityPin).mockImplementationOnce(async () => {
+      live = false;
+      return { status: "pinned", pin: "old-id" };
+    });
+    const { peers } = setup();
+    await expect(peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => live)).resolves.toBe(false);
+    expect(peers.blockedAnnounces.size).toBe(0);
+    expect(setPeerVerification).not.toHaveBeenCalled();
+  });
+
+  it("does not check the signature once it is already overtaken", async () => {
+    members.set(PEER, { identityPublicKey: "id" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", () => false);
+    expect(verifyEphemeralKeySignature).not.toHaveBeenCalled();
+  });
+
+  it("raises the new-device notice once per key however often the same key is announced", async () => {
+    // The pin store keeps answering with the old pin, so every announce sees a changed key.
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "old-id" });
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", current);
+    expect(storeIdentityPin).toHaveBeenCalledTimes(2);
+    expect(showToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the new-device notice when the pin write failed but the attempt is still current", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "old-id" });
+    vi.mocked(storeIdentityPin).mockResolvedValueOnce("failed");
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", peers.peerAttemptIsCurrent(PEER));
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(lastVerification()).toMatchObject({ status: "unverified" });
+  });
+
+  it("stays quiet about a new device whose pin write failed once the attempt was overtaken", async () => {
+    vi.mocked(getIdentityPin).mockResolvedValue({ status: "pinned", pin: "old-id" });
+    members.set(PEER, { identityPublicKey: "new-id", username: "alice" });
+    const { peers } = setup();
+    const isCurrent = peers.peerAttemptIsCurrent(PEER);
+    vi.mocked(storeIdentityPin).mockImplementationOnce(async () => {
+      peers.peerGenerations.set(PEER, 1);
+      return "failed";
+    });
+    await peers.verifyPeerAnnounce(PEER, EPHEMERAL, "sig", isCurrent);
+    expect(showToast).not.toHaveBeenCalled();
+    expect(setPeerVerification).not.toHaveBeenCalled();
   });
 });

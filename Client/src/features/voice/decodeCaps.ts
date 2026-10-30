@@ -1,6 +1,6 @@
 /**
  * Which video codecs this client decodes, and the pure rule that picks the one
- * codec every viewer in a channel can decode (WP M-4).
+ * codec every viewer in a channel can decode.
  *
  * Voice E2EE publishes no backup codec and the SFU cannot transcode, so a
  * sharer must publish a codec every channel peer decodes or that peer sees a
@@ -9,7 +9,7 @@
  * as a peer that decodes everything.
  */
 
-import { readStored } from "@lib/preferences";
+import { readStored } from "@lib/prefs/preferences";
 import { isLinuxDesktop } from "./native/platform";
 import { nativeVideoCodecs } from "./native/videoCodecs";
 

@@ -1,5 +1,5 @@
 /**
- * Custom stickers in the message list and the picker (WP 8.8).
+ * Custom stickers in the message list and the picker.
  *
  * A sticker message has no text body: the image stands alone at 160x160, and a
  * sticker deleted since it was sent leaves a small grey "Deleted sticker: name"

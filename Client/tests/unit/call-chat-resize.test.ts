@@ -5,7 +5,7 @@ import {
   createCallChatResize,
   type CallChatResize,
 } from "../../src/features/voice/callChatResize";
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 
 describe("clampCallChatWidth", () => {
   it("keeps 280-640 and leaves the grid 360 px", () => {

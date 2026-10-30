@@ -1,5 +1,5 @@
 /**
- * Block / Unblock as one action every surface shares (WP 3B-2): the member
+ * Block / Unblock as one action every surface shares: the member
  * list, the profile popup, the DM profile panel and the DM row menu all end in
  * `toggleBlock`, and the three that did not already confirm go through
  * `confirmAndToggleBlock` first.
@@ -11,8 +11,7 @@
  */
 
 import { errorText, type ApiClient } from "@lib/api";
-import { createElement } from "@lib/dom";
-import { createModal } from "@lib/modalFactory";
+import { createConfirmModal } from "../dialogs/confirmModal";
 import { setUserBlockedByMe } from "@stores/blocks.store";
 import type { ToastType } from "@components/Toast";
 import { messageRequestsText as t } from "../../i18n/messageRequests";
@@ -54,39 +53,19 @@ export async function toggleBlock(
   }
 }
 
-/** The destructive-action confirm (DeleteChannelModal's shape): Cancel first,
+/** The destructive-action confirm (the shared preset): Cancel first,
  *  Escape and the backdrop cancel, focus returns to the opener. */
 function confirmBlockModal(name: string, onConfirm: () => void): void {
-  const titleId = "block-confirm-title";
-  const content = createElement("div");
-  const header = createElement("div", { class: "modal-header" });
-  header.appendChild(createElement("h3", { id: titleId }, t("confirm.block.title", { name })));
-  const body = createElement("div", { class: "modal-body" });
-  body.appendChild(
-    createElement("p", { class: "modal-danger-text" }, t("confirm.blockUser.body", { name })),
-  );
-  const footer = createElement("div", { class: "modal-footer" });
-  const cancel = createElement(
-    "button",
-    { class: "btn-modal-cancel", type: "button", "data-testid": "block-confirm-cancel" },
-    t("confirm.cancel"),
-  );
-  const confirm = createElement(
-    "button",
-    { class: "btn-danger", type: "button", "data-testid": "block-confirm" },
-    t("confirm.block.confirm"),
-  );
-  footer.append(cancel, confirm);
-  content.append(header, body, footer);
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "block-confirm-dialog" },
-  });
-  cancel.addEventListener("click", () => modal.close());
-  confirm.addEventListener("click", () => {
-    modal.close();
-    onConfirm();
+  createConfirmModal({
+    title: t("confirm.block.title", { name }),
+    titleId: "block-confirm-title",
+    body: t("confirm.blockUser.body", { name }),
+    confirmLabel: t("confirm.block.confirm"),
+    cancelLabel: t("confirm.cancel"),
+    testId: "block-confirm-dialog",
+    confirmTestId: "block-confirm",
+    cancelTestId: "block-confirm-cancel",
+    onConfirm,
   });
 }
 

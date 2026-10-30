@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -55,8 +55,8 @@ describe("lazy emoji data", () => {
 
     expect(picker.element.querySelector(".ep-loading")).toBeNull();
     expect(labels()).toEqual(expect.arrayContaining(["Smileys", "Travel", "Flags"]));
-    const buttons = Array.from(picker.element.querySelectorAll(".ep-category-btn")).map(
-      (b) => b.textContent,
+    const buttons = Array.from(picker.element.querySelectorAll(".ep-category-btn")).map((b) =>
+      b.getAttribute("aria-label"),
     );
     expect(buttons).toContain("Flags");
 

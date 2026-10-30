@@ -10,7 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 const toastCalls: Array<{ msg: string; type: string }> = [];
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: (msg: string, type: string) => {
     toastCalls.push({ msg, type });
   },
@@ -42,8 +42,8 @@ import { createMessageController } from "../../src/pages/main-page/MessageContro
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
-import { renderMentionSegment } from "../../src/components/message-list/content-parser";
-import { jumpToMessage, setMessageJumpHandler } from "@lib/message-navigation";
+import { renderMentionSegment } from "../../src/components/message-list/contentParser";
+import { jumpToMessage, setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import {
   deleteMessage,
   messagesStore,
@@ -281,7 +281,7 @@ describe("createMessageJumper", () => {
     expect(messagesStore.getState().detachedChannels.has(1)).toBe(false);
   });
 
-  it("says a message the store knows is deleted is gone, without the around fetch (WP 3A-8)", async () => {
+  it("says a message the store knows is deleted is gone, without the around fetch", async () => {
     setMessages(1, [response(41), response(42)], false);
     deleteMessage({ channel_id: 1, message_id: 42 });
     const { ctrl, scrollToMessage } = fakeCtrl(1);
@@ -647,7 +647,7 @@ describe("Copy Message Link action", () => {
 
     // Copy Message Link left the hover bar: it is in the message menu.
     expect(row.querySelector('[data-testid="msg-copy-link-42"]')).toBeNull();
-    const { openMessageMenu } = await import("../../src/components/message-list/message-menu");
+    const { openMessageMenu } = await import("../../src/components/message-list/messageMenu");
     openMessageMenu({
       msg,
       opts: {

@@ -15,8 +15,7 @@ import {
   formatRateCompact,
   qualityFromSignals,
   type ConnectionStatsPoller,
-  type QualityLevel,
-} from "../../src/lib/connectionStats";
+} from "../../src/lib/voice/connectionStats";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -260,7 +259,7 @@ describe("createConnectionStatsPoller", () => {
     expect(stats.quality).toBe("fair");
   });
 
-  it("lowers quality when a good-RTT link is dropping packets (DP-41)", async () => {
+  it("lowers quality when a good-RTT link is dropping packets", async () => {
     const room = createMockRoom([
       {
         id: "cp1",
@@ -291,7 +290,7 @@ describe("createConnectionStatsPoller", () => {
     expect(stats.quality).toBe("poor");
   });
 
-  it("lowers quality when a good-RTT link is jittery (DP-41)", async () => {
+  it("lowers quality when a good-RTT link is jittery", async () => {
     const room = createMockRoom([
       {
         id: "cp1",
@@ -676,7 +675,7 @@ describe("createConnectionStatsPoller", () => {
     expect(qualityCb).toHaveBeenCalledWith("bad", "excellent");
   });
 
-  it("fires quality change callback once the debounce elapses, even though the room stays active and every 2s poll keeps re-reporting the changed quality (OC-0132)", async () => {
+  it("fires quality change callback once the debounce elapses, even though the room stays active and every 2s poll keeps re-reporting the changed quality", async () => {
     // Regression test for OC-0132: POLL_INTERVAL_MS (2000) < QUALITY_DEBOUNCE_MS (3000)
     // means that while the room stays active and quality remains different from
     // lastQuality, every poll must NOT keep clearing/rescheduling the debounce

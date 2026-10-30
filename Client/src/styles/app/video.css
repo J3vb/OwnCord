@@ -90,7 +90,7 @@
   background: var(--bg-secondary);
 }
 
-/* A <video> whose picture a canvas draws (Linux, lib/videoSurface.ts) gives
+/* A <video> whose picture a canvas draws (Linux, lib/voice/videoSurface.ts) gives
    its place to that canvas, which every rule below styles as the video. */
 video[data-surface],
 video[hidden] + .video-surface {
@@ -103,7 +103,7 @@ video[hidden] + .video-surface {
   height: 100%;
   object-fit: contain;
 }
-/* Ctrl + wheel zoom and drag pan (lib/zoomPan.ts bindVideoZoom): the host
+/* Ctrl + wheel zoom and drag pan (lib/ui/zoomPan.ts bindVideoZoom): the host
    tile or pop-out carries the view, its picture shows it. The individual
    properties apply outside `transform`, so your own camera's mirror stays. */
 .video-cell video,
@@ -540,6 +540,9 @@ video[hidden] + .video-surface {
 .video-fs-btn[data-call-control="share"][aria-pressed="true"] {
   background: var(--accent);
   color: var(--on-accent);
+}
+.video-fs-btn[hidden] {
+  display: none;
 }
 .video-fs-btn:disabled {
   opacity: 0.5;

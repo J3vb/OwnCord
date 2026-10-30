@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 // jsdom does not provide ResizeObserver — stub it so MessageList can mount.
 // jsdom does not provide ResizeObserver: a stub that lets a test fire the callbacks.
@@ -36,7 +36,7 @@ vi.mock("../../src/features/content-consent/external", async (importOriginal) =>
   ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
   externalAllowed: () => true,
 }));
-vi.mock("@lib/media-visibility", () => ({
+vi.mock("@lib/prefs/mediaVisibility", () => ({
   observeMedia: observeMediaMock,
   discardMedia: discardMediaMock,
 }));

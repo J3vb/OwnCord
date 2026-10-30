@@ -1,6 +1,6 @@
 /**
- * Opening a thread, or a channel's Threads list, from outside the channel view
- * (WP 6.9c): a followed thread's sidebar row, or a parent's "N more" row.
+ * Opening a thread, or a channel's Threads list, from outside the channel view:
+ * a followed thread's sidebar row, or a parent's "N more" row.
  *
  * Both need the parent channel mounted first, and the channel view only exists
  * once navigation lands, so a request waits here until the channel controller
@@ -9,7 +9,7 @@
  */
 
 import { channelsStore } from "../../stores/channels.store";
-import { navigateToChannel } from "../../lib/channel-navigation";
+import { navigateToChannel } from "../../lib/nav/channelNavigation";
 
 export type ThreadNavigationRequest =
   | { readonly kind: "thread"; readonly threadId: number; readonly parentId: number }

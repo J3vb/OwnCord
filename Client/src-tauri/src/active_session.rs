@@ -83,9 +83,7 @@ impl ActiveSession {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, SessionState> {
-        self.state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        crate::sync::lock(&self.state)
     }
 
     /// One consistent view of the active host and the verified hosts.
@@ -149,7 +147,7 @@ impl ActiveSession {
 }
 
 /// The bare host part of an identity scope. Identity-key commands receive
-/// `{userId}@{host}` (see `lib/identity.ts::identityScopeKey`); a legacy host
+/// `{userId}@{host}` (see `lib/net/identity.ts::identityScopeKey`); a legacy host
 /// has no `@`. `isValidHost` forbids `@` in a real host, so splitting on the
 /// last `@` is unambiguous.
 fn scope_host(scope: &str) -> &str {

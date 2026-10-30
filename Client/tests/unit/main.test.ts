@@ -35,14 +35,23 @@ vi.mock("@tauri-apps/api/core", async () => ({
 vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
-const { mockOnOpenUrl } = vi.hoisted(() => ({
-  mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
-}));
+// main.ts registers its deep-link listener once at startup, and every test
+// runs with its mock calls cleared, so the handler is kept here as it arrives.
+const { mockOnOpenUrl, deepLink } = vi.hoisted(() => {
+  const deepLink: { handler: ((urls: readonly string[]) => void) | null } = { handler: null };
+  return {
+    deepLink,
+    mockOnOpenUrl: vi.fn((handler: (urls: readonly string[]) => void) => {
+      deepLink.handler = handler;
+      return Promise.resolve(undefined);
+    }),
+  };
+});
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
-vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
@@ -53,31 +62,33 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn().mockResolvedValue(undefined),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@lib/prefs/windowState", () => ({
+  initWindowState: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
-  onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
+  onOpenUrl: (handler: (urls: readonly string[]) => void) => mockOnOpenUrl(handler),
 }));
 // The Reload recovery leaves a call through this lazily imported module.
 const { mockLeaveVoice } = vi.hoisted(() => ({
   mockLeaveVoice: vi.fn((..._args: unknown[]): Promise<void> => Promise.resolve()),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
 }));
-vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
+vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
-vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
 const mockProfileManager = vi.hoisted(() => ({
   loadProfiles: vi.fn().mockResolvedValue(undefined),
   saveProfiles: vi.fn().mockResolvedValue(undefined),
@@ -90,8 +101,9 @@ const mockProfileManager = vi.hoisted(() => ({
   setLastConnected: vi.fn(),
 }));
 
-vi.mock("@lib/profiles", async (importOriginal) => ({
-  deriveCompatibility: (await importOriginal<typeof import("@lib/profiles")>()).deriveCompatibility,
+vi.mock("@lib/presence/profiles", async (importOriginal) => ({
+  deriveCompatibility: (await importOriginal<typeof import("@lib/presence/profiles")>())
+    .deriveCompatibility,
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => mockProfileManager),
 }));
@@ -109,7 +121,7 @@ const mockRegister = vi.fn();
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
 const mockCheckForUpdate = vi.fn();
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
@@ -126,13 +138,16 @@ const mockServerInfo: { value: unknown } = {
 const mockHealthFails = { value: false };
 // When set, a failing health probe rejects with this instead of a network error.
 const mockHealthError: { value: (() => Error) | null } = { value: null };
+// main.ts builds its API client once at startup; mock calls are cleared before
+// every test, so the client is kept here rather than read from mock.results.
+const createdApiClients: unknown[] = [];
 vi.mock("@lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/api")>();
   return {
     ...actual,
     createApiClient: vi.fn(() => {
       const api = actual.createApiClient({ host: "" });
-      return {
+      const client = {
         ...api,
         setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
           if (cfg.host !== undefined) mockApiState.host = cfg.host;
@@ -155,6 +170,8 @@ vi.mock("@lib/api", async (importOriginal) => {
             : Promise.resolve(mockServerInfo.value),
         ),
       };
+      createdApiClients.push(client);
+      return client;
     }),
   };
 });
@@ -183,10 +200,13 @@ const capturedConnectCallbacks: {
   onDeleteProfile?: (profileId: string) => void;
   onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
 } = {};
+// Every connect page main.ts builds, in order. The first is built at startup,
+// before the per-test mock clear, so tests read pages from here.
+const createdConnectPages: unknown[] = [];
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
     Object.assign(capturedConnectCallbacks, callbacks);
-    return {
+    const page = {
       mount: vi.fn(),
       destroy: vi.fn(),
       showTotp: vi.fn(),
@@ -201,10 +221,13 @@ vi.mock("@pages/ConnectPage", () => ({
       getRememberPassword: vi.fn(() => false),
       getAutoConnect: vi.fn(() => false),
       getPassword: vi.fn(() => ""),
+      resubmitAfterCertAccept: vi.fn(),
       refreshProfiles: vi.fn(),
       selectServer: vi.fn(),
       applyInviteLink: vi.fn(),
     };
+    createdConnectPages.push(page);
+    return page;
   }),
 }));
 
@@ -242,18 +265,22 @@ import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { ApiClientError, createApiClient } from "@lib/api";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { setMarkReadSender } from "@lib/read-state";
+import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "@lib/types";
 import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
-import { deleteCredential, loadCredential, saveCredential } from "@lib/credentials";
+import { deleteCredential, loadCredential, saveCredential } from "@lib/net/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
-import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
+import { loadUserStatus, loadUserStatusOrigin } from "@lib/presence/userStatus";
 import { createMainPage } from "@pages/MainPage";
 import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
-import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
+import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
 import { createConnectPage } from "@pages/ConnectPage";
-import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
+import { setActivePresenceSender, type PresenceSender } from "@lib/presence/presence";
+
+const latestConnectPage = () =>
+  vi.mocked(createdConnectPages.at(-1) as ReturnType<typeof createConnectPage>, true);
+const startupApiClient = () => createdApiClients[0] as ReturnType<typeof createApiClient>;
 
 // ---------------------------------------------------------------------------
 // Import the module under test AFTER all mocks are registered. #app must
@@ -368,7 +395,7 @@ describe("main.ts beforeunload", () => {
   });
 });
 
-describe("main.ts tray status-change listener (OC-0037)", () => {
+describe("main.ts tray status-change listener", () => {
   it("persists a tray-selected status through saveUserStatus, not just the wire", async () => {
     expect(eventHandlers.has("status-change")).toBe(true);
 
@@ -376,7 +403,7 @@ describe("main.ts tray status-change listener (OC-0037)", () => {
 
     // This is the crux of OC-0037: the tray path must agree with the
     // client's own documented "single source of truth" for the selected
-    // status (lib/userStatus.ts), the same way UserBar's StatusPicker does.
+    // status (lib/presence/userStatus.ts), the same way UserBar's StatusPicker does.
     // Before the fix nothing here ever calls saveUserStatus, so this stays
     // "online" forever regardless of what the tray sent over the wire.
     expect(loadUserStatus()).toBe("dnd");
@@ -392,12 +419,12 @@ describe("main.ts tray status-change listener (OC-0037)", () => {
 
 describe("main.ts notification-click opens the message (U1d)", () => {
   it("routes a clicked message notification through the shared jumper", async () => {
-    const { jumpToMessage } = await import("@lib/message-navigation");
+    const { jumpToMessage } = await import("@lib/nav/messageNavigation");
     // Let the notifier's subscription register (the event API resolves async).
     await Promise.resolve();
     await Promise.resolve();
 
-    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     setChannelMutesHost("a.example");
     vi.mocked(jumpToMessage).mockClear();
 
@@ -410,10 +437,10 @@ describe("main.ts notification-click opens the message (U1d)", () => {
   });
 
   it("routes a clicked call notification (no message id) to the jumper, to open the DM", async () => {
-    const { jumpToMessage } = await import("@lib/message-navigation");
+    const { jumpToMessage } = await import("@lib/nav/messageNavigation");
     await Promise.resolve();
     await Promise.resolve();
-    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     setChannelMutesHost("a.example");
     vi.mocked(jumpToMessage).mockClear();
 
@@ -424,10 +451,10 @@ describe("main.ts notification-click opens the message (U1d)", () => {
   });
 
   it("forwards a cross-server click to the jumper, which applies the guard (F6)", async () => {
-    const { jumpToMessage } = await import("@lib/message-navigation");
+    const { jumpToMessage } = await import("@lib/nav/messageNavigation");
     await Promise.resolve();
     await Promise.resolve();
-    const { setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     setChannelMutesHost("b.example");
     vi.mocked(jumpToMessage).mockClear();
 
@@ -447,7 +474,7 @@ describe("main.ts clears the per-server notification scope on logout (F13)", () 
       server_name: "Scope Co",
       motd: "",
     });
-    const { getChannelMutesHost, setChannelMutesHost } = await import("@lib/channel-mutes");
+    const { getChannelMutesHost, setChannelMutesHost } = await import("@lib/prefs/channelMutes");
     // MainPage sets this on mount; stand in for that here.
     setChannelMutesHost("scope.example:8443");
 
@@ -462,7 +489,7 @@ describe("main.ts clears the per-server notification scope on logout (F13)", () 
   });
 });
 
-describe("main.ts tray status-change routes through the shared PresenceSender (OC-0176)", () => {
+describe("main.ts tray status-change routes through the shared PresenceSender", () => {
   afterEach(() => {
     setActivePresenceSender(null);
   });
@@ -493,7 +520,7 @@ describe("main.ts tray status-change routes through the shared PresenceSender (O
   });
 });
 
-describe("main.ts MainPage prefetch (CL-04)", () => {
+describe("main.ts MainPage prefetch", () => {
   it("starts the MainPage chunk load when the login is accepted, before the socket connects", async () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     mockPrefetchMainPage.mockClear();
@@ -519,7 +546,7 @@ describe("main.ts pre-auth connection deadline", () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!("offline.example:8443", "alex", "hunter2");
     await vi.advanceTimersByTimeAsync(10);
-    const attempt = vi.mocked(createApiClient).mock.results[0]!.value.getSession();
+    const attempt = startupApiClient().getSession();
 
     // The socket was asked to open, but the offline server never answers — so
     // the deadline must give up rather than leave the spinner running forever.
@@ -590,7 +617,7 @@ describe("main.ts pre-auth connection deadline", () => {
     // accepts: the re-dial must still have its host and token to resume with.
     await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS / 2);
     const { reconnectAfterCertAccept: realReconnect } =
-      await vi.importActual<typeof import("@lib/cert-reconnect")>("@lib/cert-reconnect");
+      await vi.importActual<typeof import("@lib/net/certReconnect")>("@lib/net/certReconnect");
     vi.mocked(reconnectAfterCertAccept).mockImplementationOnce(realReconnect);
     vi.mocked(createCertMismatchModal).mock.lastCall![0].onAccept();
     await vi.advanceTimersByTimeAsync(10);
@@ -647,6 +674,9 @@ describe("main.ts pre-auth connection deadline", () => {
     vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
     await vi.advanceTimersByTimeAsync(10);
     expect(mockInvoke).toHaveBeenCalledWith("ws_connect", expect.anything());
+    expect(latestConnectPage().resubmitAfterCertAccept).toHaveBeenCalledWith(
+      "unpinned.example:8443",
+    );
 
     clearAuth();
   });
@@ -675,6 +705,7 @@ describe("main.ts native certificate-dialog decline", () => {
       status: "first_use",
     });
     expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    await vi.advanceTimersByTimeAsync(10); // the modal chunk loads on demand
     const modalCallsBefore = vi.mocked(createCertFirstUseModal).mock.calls.length;
 
     declineAcceptFingerprint();
@@ -693,6 +724,7 @@ describe("main.ts native certificate-dialog decline", () => {
       status: "first_use",
     });
     expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    await vi.advanceTimersByTimeAsync(10);
     expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(modalCallsBefore + 1);
     vi.mocked(createCertFirstUseModal).mock.lastCall![0].onReject();
 
@@ -769,6 +801,7 @@ describe("main.ts native certificate-dialog decline", () => {
     };
     emitTauriEvent("cert-tofu", firstUse);
     expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    await vi.advanceTimersByTimeAsync(10); // the modal chunk loads on demand
 
     // The native dialog stays open until the test answers it.
     let answerNative!: (value: unknown) => void;
@@ -810,7 +843,7 @@ describe("main.ts native certificate-dialog decline", () => {
   });
 });
 
-describe("main.ts connected overlay (OC-0063)", () => {
+describe("main.ts connected overlay", () => {
   it("shows the auth_ok payload's server_name and motd, not the pre-handshake authStore snapshot", async () => {
     await loginAndReachAuthOk("192.168.1.10:8443", "alex", {
       user: { id: 1, username: "alex", avatar: null, role: "member" },
@@ -835,7 +868,7 @@ describe("main.ts connected overlay (OC-0063)", () => {
   });
 });
 
-describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
+describe("main.ts remember-password opt-out delete", () => {
   afterEach(() => {
     vi.mocked(loadCredential).mockReset().mockResolvedValue(null);
     vi.mocked(deleteCredential).mockReset().mockResolvedValue(false);
@@ -866,7 +899,7 @@ describe("main.ts remember-password opt-out delete (OCV-001/OCV-022)", () => {
   });
 });
 
-describe("main.ts stay-signed-in storage split (WP 2B-4)", () => {
+describe("main.ts stay-signed-in storage split", () => {
   const host = "split.example:8443";
   const authOk = {
     user: { id: 9, username: "alice", avatar: null, role: "member" },
@@ -874,7 +907,7 @@ describe("main.ts stay-signed-in storage split (WP 2B-4)", () => {
     motd: "",
   };
   const page = () =>
-    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    latestConnectPage() as {
       getRememberPassword: ReturnType<typeof vi.fn>;
       getAutoConnect: ReturnType<typeof vi.fn>;
     };
@@ -923,7 +956,7 @@ describe("main.ts stay-signed-in storage split (WP 2B-4)", () => {
   });
 });
 
-describe("main.ts drops an orphaned stay-signed-in token (WP 2B-4)", () => {
+describe("main.ts drops an orphaned stay-signed-in token", () => {
   type P = {
     id: string;
     name: string;
@@ -973,7 +1006,7 @@ describe("main.ts drops an orphaned stay-signed-in token (WP 2B-4)", () => {
 
   it("deletes the previous holder's token when a second server claims auto-connect", async () => {
     profiles = [mk("a", true, false), mk("b", false, false)];
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       getAutoConnect: ReturnType<typeof vi.fn>;
     };
     page.getAutoConnect.mockReturnValue(true);
@@ -992,7 +1025,7 @@ describe("main.ts drops an orphaned stay-signed-in token (WP 2B-4)", () => {
   });
 });
 
-describe("main.ts startup resume of the stored token (WP 2B-4)", () => {
+describe("main.ts startup resume of the stored token", () => {
   const host = "resume.example:8443";
   const autoProfile = {
     id: "p-r",
@@ -1040,7 +1073,7 @@ describe("main.ts startup resume of the stored token (WP 2B-4)", () => {
     for (let i = 0; i < 12; i++) await Promise.resolve();
   }
   const lastPage = () =>
-    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    latestConnectPage() as {
       showAutoConnecting: ReturnType<typeof vi.fn>;
     };
 
@@ -1113,7 +1146,7 @@ describe("main.ts profile deletion clears the saved credential (F11)", () => {
   });
 });
 
-describe("main.ts connected overlay teardown on mid-handshake session end (OC-0157)", () => {
+describe("main.ts connected overlay teardown on mid-handshake session end", () => {
   it('destroys the connected overlay when auth clears before the router leaves "connect"', async () => {
     await loginAndReachAuthOk("mid-handshake.example:8443", "casey", {
       user: { id: 7, username: "casey", avatar: null, role: "member" },
@@ -1144,7 +1177,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
     expect(document.querySelector('[data-testid="connected-overlay"]')).toBeNull();
   });
 
-  it("cancels the overlay's armed onReady hand-off when the session ends right after `ready` (OC-0107)", async () => {
+  it("cancels the overlay's armed onReady hand-off when the session ends right after `ready`", async () => {
     const mainPageCallsBefore = vi.mocked(createMainPage).mock.calls.length;
 
     await loginAndReachAuthOk("wide-window.example:8443", "riley", {
@@ -1176,7 +1209,7 @@ describe("main.ts connected overlay teardown on mid-handshake session end (OC-01
   });
 });
 
-describe("main.ts connect-page skip-auto-login flag (OC-0028)", () => {
+describe("main.ts connect-page skip-auto-login flag", () => {
   afterEach(() => {
     sessionStorage.clear();
     mockApiState.host = "";
@@ -1267,7 +1300,7 @@ describe("main.ts quick-switch resume", () => {
     for (let i = 0; i < 8; i++) await Promise.resolve();
   };
   const lastPage = () =>
-    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    latestConnectPage() as {
       showAutoConnecting: ReturnType<typeof vi.fn>;
     };
 
@@ -1320,7 +1353,7 @@ async function signedInWithDeepLinkHandler(
   expectConsole("warn", /\[main\] Credential delete failed/);
   emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
   await vi.advanceTimersByTimeAsync(800);
-  deepLinkHandler ??= mockOnOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
+  deepLinkHandler ??= deepLink.handler as (urls: readonly string[]) => void;
   expect(deepLinkHandler).toBeTypeOf("function");
   return deepLinkHandler;
 }
@@ -1433,7 +1466,7 @@ describe("main.ts external invite link asks before leaving the signed-in server 
     await vi.advanceTimersByTimeAsync(50);
     for (let i = 0; i < 12; i++) await Promise.resolve();
 
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       applyInviteLink: ReturnType<typeof vi.fn>;
     };
     expect(page.applyInviteLink).toHaveBeenCalledTimes(1);
@@ -1490,7 +1523,7 @@ describe("main.ts external invite link asks before leaving the signed-in server 
 
     expect(dialogEl()).toBeNull();
     // Even a click on the detached button does nothing.
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       applyInviteLink: ReturnType<typeof vi.fn>;
     };
     page.applyInviteLink.mockClear();
@@ -1662,7 +1695,7 @@ describe("main.ts render failure recovery (4.12)", () => {
   });
 });
 
-describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
+describe("main.ts connect page after a protocol-epoch refusal", () => {
   it("mounts the update notifier on the connect page so a refused client can update in place", async () => {
     await loginAndReachAuthOk("server-a.example:8443", "alex", {
       user: { id: 1, username: "alex", avatar: null, role: "member" },
@@ -1709,7 +1742,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
 
   it("shows the server-older notice without offering a client update when the refused server is older", async () => {
     mockCheckForUpdate.mockClear();
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       showIncompatible: ReturnType<typeof vi.fn>;
     };
     page.showIncompatible.mockClear();
@@ -1782,9 +1815,7 @@ describe("main.ts connect page after a protocol-epoch refusal (B2-2)", () => {
 
 describe("main.ts session ownership", () => {
   it("invalidates API work synchronously on logout before deferred store notifications", () => {
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+    const api = startupApiClient();
     const owner = api.getSession();
     const cleanup = vi.fn();
     owner.addCleanup(cleanup);
@@ -1806,7 +1837,7 @@ describe("main.ts session ownership", () => {
     }
   });
 
-  it("reads the registration mode from the per-host server-info snapshot (B7-15a)", async () => {
+  it("reads the registration mode from the per-host server-info snapshot", async () => {
     // The startup health/health-check path fills serverInfoByHost; the connect
     // page's getRegistrationMode callback reads it. An unavailable snapshot
     // (fetch failed / older server) must yield null, never a widened mode.
@@ -1849,7 +1880,7 @@ describe("main.ts session ownership", () => {
 
     // A failed health probe drops the snapshot and refreshes the form through
     // updateCompatibility, so the stale "approval" form cannot outlive it.
-    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    const connectPage = latestConnectPage();
     connectPage.updateCompatibility.mockClear();
     mockHealthFails.value = true;
     await vi.advanceTimersByTimeAsync(15_000);
@@ -1887,7 +1918,7 @@ describe("main.ts session ownership", () => {
     clearAuth();
     for (let i = 0; i < 4; i++) await Promise.resolve();
     await vi.advanceTimersByTimeAsync(50);
-    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    const connectPage = latestConnectPage();
     connectPage.updateCompatibility.mockClear();
     mockHealthFails.value = true;
     mockHealthError.value = () => new ApiClientError(503, "DEGRADED", "degraded");
@@ -1917,7 +1948,7 @@ describe("main.ts session ownership", () => {
   });
 
   it("probes server-info for a typed host that is not a saved profile", async () => {
-    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    const connectPage = latestConnectPage();
     connectPage.updateCompatibility.mockClear();
     mockServerInfo.value = {
       name: "Typed",
@@ -1937,9 +1968,7 @@ describe("main.ts session ownership", () => {
   });
 
   it("does not start a second server-info probe for a host already being probed", async () => {
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+    const api = startupApiClient();
     const calls = vi.mocked(api.getServerInfo).mock.calls.length;
     let release!: () => void;
     vi.mocked(api.getServerInfo).mockImplementationOnce(
@@ -1953,10 +1982,8 @@ describe("main.ts session ownership", () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it("signs a recovered session in exactly as a login does (B7-15b)", async () => {
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+  it("signs a recovered session in exactly as a login does", async () => {
+    const api = startupApiClient();
     const secret = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
     mockRecoverAccount.mockResolvedValueOnce({ token: "recovered-token", requires_2fa: false });
     await capturedConnectCallbacks.onRecover!("recover.example", "alice", secret, "N3w-Str0ng!");
@@ -1968,7 +1995,7 @@ describe("main.ts session ownership", () => {
     clearAuth();
   });
 
-  it("keeps the partial token across a wrong emergency recovery code (B7-15b)", async () => {
+  it("keeps the partial token across a wrong emergency recovery code", async () => {
     mockLogin.mockResolvedValueOnce({ partial_token: "partial-1", requires_2fa: true });
     await capturedConnectCallbacks.onLogin!("totp.example", "alice", "hunter22");
     mockVerifyTotp
@@ -1998,9 +2025,7 @@ describe("main.ts session ownership", () => {
     const rejected = expect(old).rejects.toMatchObject({ name: "AbortError" });
     await capturedConnectCallbacks.onLogin!("same.example", "bob", "second-password");
     expectConsole("warn", /\[main\] Credential delete failed/);
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+    const api = startupApiClient();
     const current = api.getSession();
     resolveOld({ token: "old-account-token", requires_2fa: false });
     await rejected;
@@ -2009,7 +2034,7 @@ describe("main.ts session ownership", () => {
   });
 });
 
-describe("main.ts pending-approval notice (DP-54)", () => {
+describe("main.ts pending-approval notice", () => {
   it("shows registration pending approval as an info notice, not a red error", async () => {
     mockRegister.mockResolvedValueOnce({
       user: { id: 3, username: "newbie" },
@@ -2017,7 +2042,7 @@ describe("main.ts pending-approval notice (DP-54)", () => {
     });
     await capturedConnectCallbacks.onRegister!("approve.example:8443", "newbie", "hunter22", "");
 
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       showNotice: ReturnType<typeof vi.fn>;
       showError: ReturnType<typeof vi.fn>;
     };
@@ -2078,7 +2103,7 @@ describe("main.ts external links (C16)", () => {
   });
 
   it("opens a masked link to a trusted domain without the dialog", async () => {
-    const { trustDomain } = await import("@lib/trustedDomains");
+    const { trustDomain } = await import("@lib/net/trustedDomains");
     mockInvoke.mockClear();
     trustDomain("trusted.example");
 

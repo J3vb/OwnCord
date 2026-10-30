@@ -7,7 +7,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
 import { groupRowIcon, groupRowText } from "./groupRows";
 import { renderPinRowText } from "./pinRows";
 import { canWaveIn, renderWaveButton, welcomeGreeting } from "./welcomeRows";
@@ -16,8 +16,8 @@ import { renderPollCard } from "./pollCard";
 import { renderStickerBody, stickerReplyPreview, stickerReplyText } from "./sticker";
 import { renderThreadChip } from "./threadChip";
 import { threadOfMessage } from "@stores/threads.store";
-import { connectionLockReason, messageActionGates } from "./message-actions";
-import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quick-reactions";
+import { connectionLockReason, messageActionGates } from "./messageActions";
+import { QUICK_REACTIONS, emojiNode, quickReactionEmojiForPass } from "./quickReactions";
 import { messagesStore, type Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messageStatusText } from "../../i18n/messageStatus";
@@ -41,14 +41,14 @@ export {
   shouldGroup,
   getUserRole,
   roleColorVar,
-} from "@lib/formatting";
+} from "@lib/text/formatting";
 
 export {
   renderInlineContent,
   renderMentions,
   renderMentionSegment,
   renderMessageContent,
-} from "./content-parser";
+} from "./contentParser";
 
 export { setServerHost } from "./attachments";
 import { isVoiceAttachment } from "../../features/voice-messages/player";
@@ -60,15 +60,17 @@ import {
   formatFullDate,
   formatMessageTimestamp,
   parseTimestamp,
-} from "@lib/formatting";
+} from "@lib/text/formatting";
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
-import { resolveAuthor, userRoleColorVar } from "@lib/formatting";
+import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
 import { createAvatarElement, pickAvatarColor } from "./avatar";
-import { resolveDisplayName } from "@lib/avatar";
-import { renderMentions, renderMessageContent } from "./content-parser";
-import { markdownToPlainText } from "@lib/markdown";
-import { highlightsCurrentUser } from "@lib/mentions";
-import { readableRoleColor } from "@lib/themes";
+import { importedAuthorKey } from "../../features/messaging/importedAuthor";
+import { createImportedAvatar, createImportedName, createImportedTag } from "./importedAuthor";
+import { resolveDisplayName } from "@lib/ui/avatar";
+import { renderMentions, renderMessageContent } from "./contentParser";
+import { markdownToPlainText } from "@lib/text/markdown";
+import { highlightsCurrentUser } from "@lib/text/mentions";
+import { readableRoleColor } from "@lib/prefs/themes";
 import { isLoneImageEmbed, renderUrlEmbeds } from "./media";
 import {
   isGalleryImage,
@@ -77,6 +79,7 @@ import {
   type LightboxGallery,
 } from "./attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 /** What a row render reads beyond the list's own options. */
 export interface MessageRenderOptions extends MessageListOptions {
@@ -134,7 +137,7 @@ export function renderDayDivider(iso: string): HTMLDivElement {
 }
 
 /**
- * The unread bar pinned to the top of the message region (P4-03 step B). The
+ * The unread bar pinned to the top of the message region. The
  * caller owns the label text and the `hidden` state; the button only reports
  * the click.
  */
@@ -190,7 +193,7 @@ export function renderNewDivider(): HTMLDivElement {
  * A stable key for the identity a row's author is drawn from — the avatar URL,
  * the displayed name, the username (the hover handle) and the role colour.
  * MessageList compares it against the last render to repaint only the rows
- * whose author actually changed (P4-02), so a role change or a rename does not
+ * whose author actually changed, so a role change or a rename does not
  * rebuild every other row.
  */
 export function authorAvatarKey(
@@ -204,7 +207,7 @@ export function authorAvatarKey(
   return `${author.avatar ?? ""}\u0000${resolveDisplayName(author)}\u0000${author.username}\u0000${roleColor}`;
 }
 
-/** Apply the connection gate to one delete button in place (CLI-08). */
+/** Apply the connection gate to one delete button in place. */
 function applyDeleteGate(
   btn: HTMLButtonElement,
   status: "connected" | "reconnecting" | "disconnected",
@@ -278,7 +281,7 @@ function renderReplyRef(
     bar.classList.add("msg-reply-ref--blocked");
     setText(bar, messagingText("blocked.message"));
   } else if (ref) {
-    // A sticker message has no text of its own: say what it is (WP 8.8).
+    // A sticker message has no text of its own: say what it is.
     const plain =
       stickerReplyText(ref.sticker, ref.content) ??
       Array.from(markdownToPlainText(ref.content, messagingText("spoiler.revealed")))
@@ -287,10 +290,21 @@ function renderReplyRef(
     // A message that is only an attachment (or only a spoiler) has no plain
     // text; show a placeholder rather than an empty preview (F24).
     const preview = plain === "" ? messagingText("reply.attachment") : plain;
+    if (ref.importedAuthor !== undefined) {
+      bar.dataset["authorKey"] = importedAuthorKey(ref.importedAuthor);
+      appendChildren(
+        bar,
+        createImportedAvatar(ref.importedAuthor, "rr-avatar"),
+        createImportedName(ref.importedAuthor, "rr-author"),
+        createImportedTag(),
+        createElement("span", { class: "rr-text" }, preview),
+      );
+      return bar;
+    }
     const author = resolveAuthor(ref.user);
     const roleColor = userRoleColorVar(ref.user.id);
     // Tag the quoted author so a rename/role change repaints it in place,
-    // without rebuilding the row (P4-02).
+    // without rebuilding the row.
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
     const miniAvatar = createAvatarElement(author, {
       className: "rr-avatar",
@@ -303,6 +317,25 @@ function renderReplyRef(
       createElement("span", { class: "rr-text" }, preview),
     );
   } else if (referenced?.user) {
+    const importedParent = referenced.imported_author;
+    if (importedParent !== undefined) {
+      bar.dataset["authorKey"] = importedAuthorKey(importedParent);
+      const snippet =
+        stickerReplyPreview(referenced.content) ??
+        markdownToPlainText(referenced.content, messagingText("spoiler.revealed"));
+      appendChildren(
+        bar,
+        createImportedAvatar(importedParent, "rr-avatar"),
+        createImportedName(importedParent, "rr-author"),
+        createImportedTag(),
+        createElement(
+          "span",
+          { class: "rr-text" },
+          snippet === "" ? messagingText("reply.attachment") : snippet,
+        ),
+      );
+      return bar;
+    }
     const author = resolveAuthor(referenced.user);
     const roleColor = userRoleColorVar(referenced.user.id);
     bar.dataset["authorKey"] = authorAvatarKey(author, roleColor);
@@ -340,7 +373,7 @@ function renderSystemMessage(msg: Message): HTMLDivElement {
 }
 
 /**
- * A DM call log row (WP 3B-9c), drawn from `kind` and `call` only, never from
+ * A DM call log row, drawn from `kind` and `call` only, never from
  * `content`. Live calls offer Join; an ended call reads "lasted N minutes" to
  * the author and anyone who joined, and "You missed a call" to everyone else.
  */
@@ -412,7 +445,7 @@ function renderCallRow(
 }
 
 /**
- * A group DM system row (WP 3B-11a): add, remove, leave, rename, icon. A
+ * A group DM system row: add, remove, leave, rename, icon. A
  * one-line record like a call row, drawn from `kind` + `groupEvent` alone. The
  * group name is set as text, so it is never parsed as markdown or mentions.
  */
@@ -435,7 +468,7 @@ function renderGroupRow(msg: Message, text: string): HTMLDivElement {
 }
 
 /**
- * A "pinned a message" row (WP 6.12): the same one-line record as a group row,
+ * A "pinned a message" row: the same one-line record as a group row,
  * with two links in its sentence. See pinRows.ts.
  */
 function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSignal): HTMLDivElement {
@@ -455,7 +488,7 @@ function renderPinRow(msg: Message, opts: MessageListOptions, signal: AbortSigna
 }
 
 /**
- * A welcome row (WP 8.6): the joiner's avatar, one greeting line picked by the
+ * A welcome row: the joiner's avatar, one greeting line picked by the
  * row id, and a Wave button for everyone else who can post in the channel.
  */
 function renderWelcomeRow(
@@ -491,13 +524,13 @@ function renderWelcomeRow(
 /** Map a send-failure error code to a short, user-facing reason. */
 function sendErrorReason(code: string | null): string {
   switch (code) {
-    case "SLOW_MODE":
+    case WsErrorCode.SLOW_MODE:
       return messagingText("send.slowMode");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return messagingText("send.rateLimited");
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return messagingText("send.forbidden");
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return messageStatusText("send.requestTimeout");
     case "OFFLINE":
       return messagingText("send.disconnected");
@@ -509,9 +542,9 @@ function sendErrorReason(code: string | null): string {
       return messagingText("send.unconfirmed");
     case "RECOVERED":
       return messagingText("send.recovered");
-    case "BAD_REQUEST":
+    case WsErrorCode.BAD_REQUEST:
       return messagingText("send.rejected");
-    case "STICKER_NOT_FOUND":
+    case WsErrorCode.STICKER_NOT_FOUND:
       return stickersText("send.notFound");
     case "UPLOAD_FAILED":
       return messagingText("send.uploadFailed");
@@ -524,7 +557,7 @@ function sendErrorReason(code: string | null): string {
   }
 }
 
-/** A message that is nothing but voice messages (WP 8.9): no empty text line above the player. */
+/** A message that is nothing but voice messages: no empty text line above the player. */
 function isVoiceOnly(msg: Message): boolean {
   return (
     msg.content === "" && msg.attachments.length > 0 && msg.attachments.every(isVoiceAttachment)
@@ -588,7 +621,7 @@ export function renderMessage(
   allMessages: readonly Message[],
   opts: MessageRenderOptions,
   signal: AbortSignal,
-  /** The inline editor to host in place of the message body (WP 3A-8). */
+  /** The inline editor to host in place of the message body. */
   editor?: HTMLElement,
 ): HTMLDivElement {
   // id 0 is the reserved sentinel for server-synthesized system rows (DB
@@ -644,14 +677,20 @@ export function renderMessage(
   // rename or a new avatar has to show up on the messages already on screen.
   const author = resolveAuthor(msg.user);
   const roleColor = userRoleColorVar(msg.user.id);
+  const imported = msg.importedAuthor;
   // Tag the row with the identity it was drawn from, so MessageList can repaint
-  // only the rows whose author actually changed on a roleRevision bump (P4-02).
-  el.dataset["authorKey"] = authorAvatarKey(author, roleColor);
-  const avatar = createAvatarElement(author, {
-    className: "msg-avatar",
-    background: pickAvatarColor(author.username),
-    attrs: { "data-user-id": String(msg.user.id) },
-  });
+  // only the rows whose author actually changed on a roleRevision bump.
+  el.dataset["authorKey"] =
+    imported === undefined ? authorAvatarKey(author, roleColor) : importedAuthorKey(imported);
+  // An imported author has no account to open, so its avatar carries no user id.
+  const avatar =
+    imported === undefined
+      ? createAvatarElement(author, {
+          className: "msg-avatar",
+          background: pickAvatarColor(author.username),
+          attrs: { "data-user-id": String(msg.user.id) },
+        })
+      : createImportedAvatar(imported, "msg-avatar");
   el.appendChild(avatar);
 
   if (isGrouped) {
@@ -673,23 +712,26 @@ export function renderMessage(
   }
 
   const header = createElement("div", { class: "msg-header" });
-  const authorEl = createElement(
-    "span",
-    {
-      class: "msg-author",
-      // The list's one delegated handler opens the author's profile from this
-      // (and from the avatar), so the name is a real control for the keyboard.
-      role: "button",
-      tabindex: "0",
-      "data-user-id": String(msg.user.id),
-      // The username stays as the title so the handle you would @mention is
-      // one hover away even when a display name is standing in for it.
-      title: author.username,
-      style: `color: ${readableRoleColor(roleColor)}`,
-      "data-role-color": roleColor,
-    },
-    resolveDisplayName(author),
-  );
+  const authorEl =
+    imported !== undefined
+      ? createImportedName(imported, "msg-author msg-author--imported")
+      : createElement(
+          "span",
+          {
+            class: "msg-author",
+            // The list's one delegated handler opens the author's profile from this
+            // (and from the avatar), so the name is a real control for the keyboard.
+            role: "button",
+            tabindex: "0",
+            "data-user-id": String(msg.user.id),
+            // The username stays as the title so the handle you would @mention is
+            // one hover away even when a display name is standing in for it.
+            title: author.username,
+            style: `color: ${readableRoleColor(roleColor)}`,
+            "data-role-color": roleColor,
+          },
+          resolveDisplayName(author),
+        );
   const time = createElement(
     "span",
     { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
@@ -702,7 +744,9 @@ export function renderMessage(
     { class: "msg-compact-time", title: fullDateTimeTitle(msg.timestamp) },
     formatClockTime(msg.timestamp),
   );
-  appendChildren(header, compactTime, authorEl, time);
+  appendChildren(header, compactTime, authorEl);
+  if (imported !== undefined) header.appendChild(createImportedTag());
+  header.appendChild(time);
   el.appendChild(header);
 
   if (editor !== undefined) {
@@ -726,7 +770,7 @@ export function renderMessage(
       el.appendChild(renderReactions(msg, opts, signal));
     }
   } else if (msg.sticker !== undefined) {
-    // A sticker stands alone (WP 8.8): the server's "[Sticker: name]" fallback
+    // A sticker stands alone: the server's "[Sticker: name]" fallback
     // is for clients that predate stickers. It has no files or embeds, and
     // reactions stay.
     el.appendChild(renderStickerBody(msg.sticker, signal));
@@ -736,12 +780,12 @@ export function renderMessage(
   } else {
     // Key the parse cache by the message's identity plus its edit stamp: an
     // unchanged message reuses its parse when a row is re-materialised, and an
-    // edit changes the key so the new content is parsed (P4-02). Id 0 is the
+    // edit changes the key so the new content is parsed. Id 0 is the
     // unconfirmed-optimistic sentinel shared by every pending row, so it is not
     // a unique identity — those parse uncached.
     const cacheKey = msg.id === 0 ? undefined : `${msg.id}\u0000${msg.editedAt ?? ""}`;
     const body = renderMessageContent(msg.content, mentionInfo, cacheKey);
-    // A forward's text, files and embeds sit inside its "Forwarded" frame (WP 6.9a).
+    // A forward's text, files and embeds sit inside its "Forwarded" frame.
     const box = msg.forward === undefined ? el : startForwardBlock();
     if (msg.status === "uploading" && msg.correlationId !== null) {
       // A queued row's Cancel describes itself by this text (3A-9).
@@ -778,7 +822,7 @@ export function renderMessage(
       el.appendChild(box);
     }
 
-    // The thread this message started, below its body (WP 6.9c).
+    // The thread this message started, below its body.
     const thread = threadOfMessage(msg);
     if (thread !== undefined) el.appendChild(renderThreadChip(thread, opts.onOpenThread, signal));
 
@@ -829,7 +873,7 @@ export function renderMessage(
     const actionsBar = createElement("div", { class: "msg-actions-bar" });
 
     // The lock is applied at render from the current timeout, then updated in
-    // place by refreshReactionLocks when the timeout changes (P4-02).
+    // place by refreshReactionLocks when the timeout changes.
     quickReactionEmojiForPass(QUICK_REACTIONS).forEach((emoji, index) => {
       // A new emoji on a message at the cap is left out, as in the menu.
       if (atReactionLimit(msg.reactions, emoji)) return;
@@ -914,7 +958,7 @@ export function renderMessage(
       // The listener is attached once; whether the button is disabled is read
       // at click time, so a connection flip is a class/attribute change on the
       // already-rendered button (refreshConnectionControls) rather than a row
-      // rebuild (CLI-08).
+      // rebuild.
       deleteBtn.addEventListener(
         "click",
         (e) => {

@@ -5,7 +5,7 @@
  */
 
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { createLazyVideoGrid } from "./lazyVideoGrid";
@@ -14,10 +14,12 @@ import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
+import { createMediaGalleryController } from "./MediaGalleryController";
+import type { MessageDeleteSubscriber } from "./MediaGalleryController";
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "./MessageJump";
-import { setMessageJumpHandler } from "@lib/message-navigation";
-import { navigateToChannel } from "@lib/channel-navigation";
+import { setMessageJumpHandler } from "@lib/nav/messageNavigation";
+import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { channelsStore } from "@stores/channels.store";
 import { channelBitOrRole } from "@lib/permissions";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
@@ -41,6 +43,8 @@ export interface ChatAreaOptions {
   readonly onStartVideoCall?: () => void;
   /** Rename the open group DM (the header's group name click). */
   readonly onRenameGroup?: () => void;
+  /** Deleted-message events, so an open media gallery drops their items. */
+  readonly subscribeDeletes: MessageDeleteSubscriber;
 }
 
 export interface ChatAreaResult {
@@ -65,11 +69,13 @@ export interface ChatAreaResult {
   readonly sidebarToggle: HTMLButtonElement;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
+  /** Close the media gallery if it is open. */
+  readonly closeMediaGallery: () => void;
   /** Close the pinned-messages panel if it is open. */
   readonly closePinnedPanel: () => void;
   /** Open the pinned-messages panel; a no-op when it is already open. */
   readonly openPinnedPanel: () => Promise<void>;
-  /** Where a thread's side panel mounts, beside the chat area (WP 6.9c). */
+  /** Where a thread's side panel mounts, beside the chat area. */
   readonly threadSlot: HTMLDivElement;
   /** Slot for the DM profile sidebar (right panel, sibling of chat area). */
   readonly dmProfileSlot: HTMLDivElement;
@@ -126,6 +132,19 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     pinnedCtrl.cleanup();
   });
 
+  const mediaCtrl = createMediaGalleryController({
+    api,
+    getRoot,
+    getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
+    subscribeDeletes: opts.subscribeDeletes,
+    onJumpToMessage: (channelId: number, msgId: number) => {
+      void jumper.jumpTo(channelId, msgId);
+    },
+  });
+  unsubscribers.push(() => {
+    mediaCtrl.cleanup();
+  });
+
   const searchCtrl = createSearchOverlayController({
     api,
     getRoot,
@@ -138,8 +157,8 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     searchCtrl.cleanup();
   });
 
-  // A channel that becomes gated takes its content out of the overlays
-  // (B9-7), mounted or not: the pins panel outlives a channel switch and a
+  // A channel that becomes gated takes its content out of the overlays,
+  // mounted or not: the pins panel outlives a channel switch and a
   // server-wide search spans every channel.
   let knownChannels = channelsStore.getState().channels;
   unsubscribers.push(
@@ -162,9 +181,14 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   // --- Chat header ---
   const chatHeader = buildChatHeader({
     onTogglePins: () => {
+      mediaCtrl.cleanup();
       void pinnedCtrl.toggle();
     },
     onToggleThreads: (anchor) => getChannelCtrl()?.toggleThreadList(anchor),
+    onToggleMedia: () => {
+      pinnedCtrl.cleanup();
+      void mediaCtrl.toggle();
+    },
     onSearchFocus: () => {
       searchCtrl.open();
     },
@@ -209,7 +233,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   });
 
   // --- Video grid ---
-  // The grid's code loads on first use (O-6c); the proxy answers until then.
+  // The grid's code loads on first use; the proxy answers until then.
   const videoGrid = createLazyVideoGrid();
   videoGrid.mount(videoGridSlot);
   children.push(videoGrid);
@@ -238,6 +262,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     sidebarToggle: chatHeader.refs.sidebarToggle,
     searchCtrl,
     closePinnedPanel: pinnedCtrl.cleanup,
+    closeMediaGallery: mediaCtrl.cleanup,
     openPinnedPanel: pinnedCtrl.open,
     threadSlot,
     dmProfileSlot,

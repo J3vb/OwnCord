@@ -16,7 +16,7 @@ function fakeAudioTrack(): MediaStreamTrack {
   } as unknown as MediaStreamTrack;
 }
 
-describe("RT-6: livekit capture device", () => {
+describe("livekit capture device", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("opens the saved input on the first capture after switchActiveDevice with no mic published", async () => {

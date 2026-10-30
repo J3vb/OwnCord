@@ -6,31 +6,35 @@ import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
-import { installGlobalErrorHandlers } from "@lib/safe-render";
+import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { installGlobalGuards } from "./app/globalGuards";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { openNotificationTarget } from "@lib/notifications";
-import { settleNotificationLevelDefault } from "@lib/notificationLevel";
+import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { wireConnectionStatus } from "@lib/dispatcher";
-import { markActiveChannelReadOnUnload } from "@lib/read-state";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { markActiveChannelReadOnUnload } from "@lib/readState";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
-import { applyStoredAppearance } from "@lib/appearance";
+import { applyStoredAppearance } from "@lib/prefs/appearance";
+import {
+  applyStoredCustomTheme,
+  installCustomThemeEscape,
+} from "./features/custom-themes/customTheme";
 import { startZoom } from "./features/zoom/zoomKeys";
-import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
+import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/ui/inputMode";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
-import { initWindowState } from "@lib/window-state";
-import { createProfileManager, createTauriBackend } from "@lib/profiles";
-import { saveUserStatus } from "@lib/userStatus";
-import { getActivePresenceSender } from "@lib/presence";
+import { initWindowState } from "@lib/prefs/windowState";
+import { createProfileManager, createTauriBackend } from "@lib/presence/profiles";
+import { saveUserStatus } from "@lib/presence/userStatus";
+import { getActivePresenceSender } from "@lib/presence/presence";
 
 import { desktop } from "./platform/desktop";
 import { connectText } from "./i18n/connect";
@@ -59,13 +63,17 @@ installGlobalErrorHandlers();
 // Start log persistence immediately after: an early startup failure (a missing
 // #app element, a failing lazy chunk) must still reach the on-disk log, not
 // just the in-memory ring. The listener is installed before the first render
-// and back-fills the bootstrap window (CLI-03).
+// and back-fills the bootstrap window.
 void initLogPersistence();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+// After the built-in theme and accent: a custom theme paints on top of them.
+applyStoredCustomTheme();
 // Native webview zoom: the stored level now, and the zoom keys everywhere.
 startZoom(() => import("./features/zoom").then((m) => m.appZoom), new Disposable().signal);
+// Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
+installCustomThemeEscape(new Disposable().signal);
 
 // A profile from before automatic sensitivity keeps a tuned slider.
 migrateAutoInputSensitivity();
@@ -81,7 +89,7 @@ if (!appEl) {
 }
 
 // Create core services
-// REST traffic is tunneled through the Rust HTTP TOFU proxy (src/lib/httpProxy.ts
+// REST traffic is tunneled through the Rust HTTP TOFU proxy (src/lib/net/httpProxy.ts
 // → src-tauri/src/http_proxy.rs), which pins the server certificate to the same
 // trust-on-first-use fingerprint as the WS proxy. No cert is ever blindly
 // accepted; the bearer token never rides an unpinned TLS connection.
@@ -100,9 +108,9 @@ function handleUnauthorized(): void {
 const api = createApiClient({ host: "" }, handleUnauthorized);
 const ws = createWsClient();
 // Diagnostics back the lazily loaded Settings > Diagnostics & logs panel, so their engine and
-// text stay out of the startup chunk (B9-20). The import resolves long before
+// text stay out of the startup chunk. The import resolves long before
 // the panel can be opened, and the panel's own module imports the same chunk.
-void import("@lib/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
+void import("@lib/net/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
   configureConnectionDiagnostics(api, ws);
 });
 // App-lifetime hook: main.ts runs once per window. The other per-server resets
@@ -137,17 +145,17 @@ installCertPrompts(ws, activePageId, navigate, rerunHealth);
 
 // Route the tray's Status submenu (Online/Idle/Do Not Disturb/Offline) into
 // the same path the in-app StatusPicker uses (UserBar.ts): persist through
-// saveUserStatus() — lib/userStatus.ts's documented single source of truth —
+// saveUserStatus() — lib/presence/userStatus.ts's documented single source of truth —
 // before sending the wire message, not just a raw ws.send. Without this the
 // tray's choice never reaches loadUserStatus(), so notifications.ts's DND
 // gate, autoIdle's "never touch a manual DND/invisible" guard, and
 // restoreSavedPresence() on the next reconnect all silently disagree with
-// what the tray just set (OC-0037). The send itself goes through the
+// what the tray just set. The send itself goes through the
 // session's shared PresenceSender (registered by MainPage.ts via
 // setActivePresenceSender) rather than a raw ws.send: the server enforces a
 // single 1-update/10s budget per user regardless of which surface sent the
 // frame, and a raw send here would open a second, uncoordinated budget that
-// silently drops whichever frame the server sees second (OC-0176). When no
+// silently drops whichever frame the server sees second. When no
 // session is mounted the optional call is a no-op, matching the old raw
 // ws.send's "safe no-op when disconnected" behavior, so no auth guard is
 // needed here.

@@ -1,7 +1,7 @@
 /**
  * One rebindable in-app action in the Keybinds tab: a button that captures a
  * key combination, plus Reset and Remove, and an alert line for a refused
- * combination (WP 3E-3c). Capture goes through `comboFromEvent(e, "inApp")`,
+ * combination. Capture goes through `comboFromEvent(e, "inApp")`,
  * the one function dispatch uses too, and saving goes through `saveKeybind`.
  *
  * Mute and deafen are not built here: they keep their global Ctrl+Shift
@@ -10,9 +10,9 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { actionLabel, comboOrNotSet } from "@lib/keybindLabels";
-import { loadPref } from "@lib/preferences";
-import { keyEventToVk } from "@lib/voiceShortcuts";
+import { actionLabel, comboOrNotSet } from "@lib/prefs/keybindLabels";
+import { loadPref } from "@lib/prefs/preferences";
+import { keyEventToVk } from "@lib/voice/voiceShortcuts";
 import {
   REBINDABLE_ACTIONS,
   comboFromEvent,
@@ -24,8 +24,8 @@ import {
   type KeyCombo,
   type KeybindConflict,
   type RebindableId,
-} from "@lib/keybinds";
-import type { SettingsTextKey } from "@lib/keybindCatalog";
+} from "@lib/prefs/keybinds";
+import type { SettingsTextKey } from "@lib/prefs/keybindCatalog";
 import { settingsText as t } from "../../i18n/settings";
 
 /** The alert text of each refusal that names no other action. */

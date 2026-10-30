@@ -1,5 +1,5 @@
 /**
- * Poll composer (WP 6.9b): the dialog behind the composer's Poll button. A
+ * Poll composer: the dialog behind the composer's Poll button. A
  * question (300 characters), two to ten answers (55 each, each with an optional
  * emoji), a duration and an "Allow multiple answers" switch, with a live
  * counter on every field. Post sends `poll_create` and waits for its reply; a
@@ -16,7 +16,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { newClientMessageId } from "@lib/pendingMessages";
 import { listCustomEmoji } from "@stores/emoji.store";
 import {
@@ -35,6 +35,7 @@ import {
 import { createPoll, type PollWs } from "../features/messaging/pollSend";
 import { pollComposerText } from "../i18n/pollComposer";
 import { shellText } from "../i18n/shell";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 export interface PollComposerOptions {
   readonly ws: PollWs;
@@ -46,7 +47,7 @@ export interface PollComposerOptions {
 }
 
 /** Replies that leave the poll possibly posted: Retry, with the same id, is the safe way on. */
-const AMBIGUOUS = new Set(["UNCONFIRMED", "OFFLINE", "NETWORK", "REQUEST_TIMEOUT"]);
+const AMBIGUOUS = new Set(["UNCONFIRMED", "OFFLINE", "NETWORK", WsErrorCode.REQUEST_TIMEOUT]);
 
 function durationLabel(hours: number): string {
   if (hours === 168) return pollComposerText("duration.week");
@@ -58,15 +59,15 @@ function durationLabel(hours: number): string {
 
 function createErrorText(code: string): string {
   switch (code) {
-    case "BAD_REQUEST":
+    case WsErrorCode.BAD_REQUEST:
       return pollComposerText("createError.BAD_REQUEST");
-    case "FORBIDDEN":
+    case WsErrorCode.FORBIDDEN:
       return pollComposerText("createError.FORBIDDEN");
-    case "RATE_LIMITED":
+    case WsErrorCode.RATE_LIMITED:
       return pollComposerText("createError.RATE_LIMITED");
-    case "SLOW_MODE":
+    case WsErrorCode.SLOW_MODE:
       return pollComposerText("createError.SLOW_MODE");
-    case "TIMED_OUT":
+    case WsErrorCode.TIMED_OUT:
       return pollComposerText("createError.TIMED_OUT");
     case "OFFLINE":
       return pollComposerText("createError.OFFLINE");
@@ -74,7 +75,7 @@ function createErrorText(code: string): string {
       return pollComposerText("createError.NETWORK");
     case "UNCONFIRMED":
       return pollComposerText("createError.UNCONFIRMED");
-    case "REQUEST_TIMEOUT":
+    case WsErrorCode.REQUEST_TIMEOUT:
       return pollComposerText("createError.REQUEST_TIMEOUT");
     default:
       return pollComposerText("createError.other");

@@ -20,18 +20,6 @@
 id = "GO-2026-5932"
 reason = "golang.org/x/crypto, module-level only: govulncheck reports it unreachable from our code"
 
-# --- npm: dev-only. Same class as the brace-expansion note in ci.yml's npm
-# audit step: these reach us only through stryker tooling, ship in no
-# artifact, and `npm audit --omit=dev --audit-level=high` already gates the
-# shipped tree. The fix is a devDependency bump for a dependency-owning PR.
-[[IgnoredVulns]]
-id = "GHSA-4mjr-xmp4-gh2g"
-reason = "qs dev-only via stryker's typed-rest-client; not shipped"
-
-[[IgnoredVulns]]
-id = "GHSA-x5fp-wj9c-mxmx"
-reason = "qs dev-only via stryker's typed-rest-client; not shipped"
-
 # --- Rust: the accepted advisories cargo-deny carries in
 # Client/src-tauri/deny.toml (the authoritative list with the reachability
 # argument), kept in step with it, plus glib's unsound advisory, which
@@ -76,24 +64,6 @@ reason = "zbus_names unmaintained (merged into zbus 6), reached only via zbus 4/
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0372"
 reason = "zvariant_derive unmaintained (merged into zbus 6), reached only via zbus 4/5 on Linux D-Bus paths (see deny.toml)"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0367"
-reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0368"
-reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
-
-[[IgnoredVulns]]
-id = "RUSTSEC-2026-0369"
-reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
-
-# Same two zip copies as above; fixed only in zip 9.0.5, which no dependent
-# accepts yet. Drop with the three above.
-[[IgnoredVulns]]
-id = "GHSA-m665-v7pm-7grj"
-reason = "zip: Windows updater extracts only signature-verified archives; build-time webrtc-sys-build path bypassed (see deny.toml)"
 
 # block-buffer 0.10.4 comes in through digest 0.10 (sha2 for tauri-codegen, wry
 # and the secret-service crates; sha1 for tungstenite and zbus 4; md-5; hkdf).

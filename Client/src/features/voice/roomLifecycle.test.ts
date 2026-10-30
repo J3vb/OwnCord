@@ -28,15 +28,15 @@ vi.mock("../../stores/voice.store", () => ({
   bumpLocalShareRev: vi.fn(),
   setVoiceStatus: vi.fn(),
 }));
-vi.mock("../../lib/preferences", () => ({
+vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
 }));
 vi.mock("../../lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("../../lib/deviceManager", () => ({ isMicPolicyGated: () => false }));
-vi.mock("../../lib/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
-vi.mock("../../lib/screenShare", () => ({
+vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
+vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
+vi.mock("../../lib/voice/screenShare", () => ({
   CAMERA_PRESETS: { high: {} },
   CAMERA_PUBLISH_BITRATES: { high: 1 },
   getCameraQuality: () => "high",
@@ -293,7 +293,8 @@ describe("RoomLifecycle on the Linux native backend", () => {
     );
     vi.doMock("./native/nativeRoom", () => ({ createNativeRoom }));
     const { RoomLifecycle: LinuxLifecycle } = await import("./roomLifecycle");
-    const { attachDiagnosticListeners: attach } = await import("../../lib/livekitDiagnostics");
+    const { attachDiagnosticListeners: attach } =
+      await import("../../lib/voice/livekitDiagnostics");
     const { Room: WebRoom } = await import("livekit-client");
     const webRoomsBefore = vi.mocked(WebRoom).mock.calls.length;
     const ctx = setup();

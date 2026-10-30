@@ -55,7 +55,6 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 // the participant-addressed chat_message. Sharing it is what makes a forward's
 // fan-out literally the send path's.
 func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, channelID int64, replyTo *int64, reply []byte, result *service.SendMessageResult) Result {
-	// Build attachment data for broadcast.
 	attData := make([]map[string]any, 0, len(result.Attachments))
 	for _, ai := range result.Attachments {
 		attData = append(attData, map[string]any{
@@ -94,7 +93,6 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		return channelSendResult(reply, broadcast, channelID, info.UserID, result)
 	}
 
-	// DM path: build dm_channel_open events + sequenced message.
 	var events []Event
 	if len(result.OpenedDMFor) > 0 {
 		// One payload per recipient, not one for all of them: `recipient` and
@@ -122,7 +120,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		}
 	}
 
-	// B5-6: one dm_request per recipient a first-contact request was just
+	// one dm_request per recipient a first-contact request was just
 	// created for. Skipped (not a fallback shape) when the sender lookup
 	// failed — SenderUser nil means the frame has no profile to carry, and
 	// the recipient still recovers the request from GET /api/v1/dm-requests.
@@ -143,7 +141,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 	return Result{Reply: reply, Events: events}
 }
 
-// handleChatForwardV2 processes a chat_forward command (WP 6.9a) via the
+// handleChatForwardV2 processes a chat_forward command via the
 // MessageService. The reply is chat_forward_ok; the events are the send path's.
 func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
@@ -166,7 +164,7 @@ func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	return sendResultEvents(d, info, fwd.ClientMessageID, fwd.ChannelID, nil, reply, result)
 }
 
-// handleForumPostCreateV2 processes a forum_post_create (WP 6.9d) via the
+// handleForumPostCreateV2 processes a forum_post_create via the
 // MessageService. The reply is forum_post_create_ok; the events are the send
 // path's, addressed to the new post's thread: its opening chat_message, and a
 // thread note that tells the forum's viewers (thread_changed, coalesced). A
@@ -222,25 +220,36 @@ func handleChatEditV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		return serviceErrorToResult(err)
 	}
 
-	editedPayload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
+	return Result{Events: chatEditedEvents(result)}
+}
+
+// chatEditedEvents is the fan-out of a committed edit: the sequenced chat_edited to
+// the channel or, for a DM, to its participants.
+func chatEditedEvents(result *service.EditMessageResult) []Event {
+	payload := buildChatEdited(result.MessageID, result.ChannelID, result.Content, result.EditedAt,
 		result.Mentions, result.MentionRoles, result.MentionsEveryone, result.MentionsHere)
-	if result.IsDM {
-		return Result{Events: []Event{dmEventOrFallback(
-			dmEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: editedPayload},
-			channelEvt{evType: MsgTypeChatEdited, channelID: result.ChannelID, payload: editedPayload},
-			result.ParticipantIDs)}}
+	return editedFrameEvents(payload, result.ChannelID, result.IsDM, result.ParticipantIDs, result.PostOpening)
+}
+
+// editedFrameEvents addresses one chat_edited payload: to a DM's participants
+// (the channel topic only when the list is empty), or to the channel with, for a
+// forum post's opening message, a coalesced thread note so the forum's viewers
+// hear the new preview. Edits and file removals share it, so both reach exactly
+// the same readers.
+func editedFrameEvents(payload []byte, channelID int64, isDM bool, participantIDs []int64, postOpening bool) []Event {
+	if isDM {
+		return []Event{dmEventOrFallback(
+			dmEvt{evType: MsgTypeChatEdited, channelID: channelID, participantIDs: participantIDs, payload: payload},
+			channelEvt{evType: MsgTypeChatEdited, channelID: channelID, payload: payload},
+			participantIDs)}
 	}
-	events := []Event{channelEvt{
-		evType:    MsgTypeChatEdited,
-		channelID: result.ChannelID,
-		payload:   editedPayload,
-	}}
-	if result.PostOpening {
+	events := []Event{channelEvt{evType: MsgTypeChatEdited, channelID: channelID, payload: payload}}
+	if postOpening {
 		// A forum post's opening message is the list's preview: the forum's
 		// viewers hear the new text as a thread_changed (coalesced).
-		events = append(events, threadNoteEvt{threadID: result.ChannelID})
+		events = append(events, threadNoteEvt{threadID: channelID})
 	}
-	return Result{Events: events}
+	return events
 }
 
 // handleChatDeleteV2 processes a chat_delete command via the MessageService.
@@ -253,31 +262,32 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 		return serviceErrorToResult(err)
 	}
 
-	deletedPayload := buildChatDeleted(result.MessageID, result.ChannelID)
+	return Result{Events: chatDeletedEvents(result)}
+}
+
+// chatDeletedEvents is the fan-out of a committed delete: the sequenced
+// chat_deleted to the channel or, for a DM, to its participants.
+func chatDeletedEvents(result *service.DeleteMessageResult) []Event {
+	payload := buildChatDeleted(result.MessageID, result.ChannelID)
 	if result.IsDM {
-		return Result{Events: []Event{dmEventOrFallback(
-			dmEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: deletedPayload},
-			channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: deletedPayload},
-			result.ParticipantIDs)}}
+		return []Event{dmEventOrFallback(
+			dmEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, participantIDs: result.ParticipantIDs, payload: payload},
+			channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: payload},
+			result.ParticipantIDs)}
 	}
-	events := []Event{channelEvt{
-		evType:    MsgTypeChatDeleted,
-		channelID: result.ChannelID,
-		payload:   deletedPayload,
-	}}
+	events := []Event{channelEvt{evType: MsgTypeChatDeleted, channelID: result.ChannelID, payload: payload}}
 	if result.IsThread {
 		// The delete moved the thread's count and last message: tell the
 		// parent's viewers (coalesced).
 		events = append(events, threadNoteEvt{threadID: result.ChannelID})
 	}
-	return Result{Events: events}
+	return events
 }
 
-// dmEventOrFallback returns the participant-targeted DM event, falling back
-// to the channel-topic broadcast when the participant list is empty — the
-// degraded shape a failed post-commit participant lookup leaves behind. A
-// sequenced frame addressed to nobody would consume a seq and reach no one;
-// the topic fallback still reaches whoever has the DM focused.
+// dmEventOrFallback returns the participant-targeted DM event, falling back to the
+// channel-topic broadcast when the participant list is empty (the shape a failed
+// post-commit participant lookup leaves). A sequenced frame addressed to nobody would
+// consume a seq and reach no one; the fallback still reaches whoever has the DM focused.
 func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {
 	if len(participantIDs) == 0 {
 		return fallback
@@ -309,7 +319,7 @@ func serviceErrorToResult(err error) Result {
 	case errors.Is(err, service.ErrCallNeedsAcceptance):
 		return Result{Error: ClientError{Code: ErrCodeCallRequiresAcceptance, Message: err.Error()}}
 	case errors.Is(err, permissions.ErrThreadLocked):
-		// A locked thread (WP 6.9c) refuses a post, reaction, pin or change
+		// A locked thread refuses a post, reaction, pin or change
 		// with its own code; it wraps ErrForbidden, so this precedes it.
 		return Result{Error: ClientError{Code: ErrCodeThreadLocked, Message: err.Error()}}
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):

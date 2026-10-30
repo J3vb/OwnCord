@@ -4,6 +4,7 @@ import {
   mockTauriFullSessionWithMessages,
   navigateToMainPageReady,
   openSettings,
+  openHome,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -11,7 +12,7 @@ import {
 //
 // Axe-style structural checks in the real app — dialog roles, focus
 // containment and restore, live regions — asserting the contract the DC-13
-// pass established (lib/a11y.ts + modalFactory + the hand-rolled overlays).
+// pass established (lib/ui/a11y.ts + modalFactory + the hand-rolled overlays).
 // Unit tests cover each component's semantics exhaustively; this smoke proves
 // the wiring holds end-to-end in the running app.
 // ---------------------------------------------------------------------------
@@ -74,8 +75,9 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
   });
 
   test("a factory modal (member picker) traps Tab inside the dialog", async ({ page }) => {
-    // Open the DM member picker via the "+" on the embedded DM section.
-    const newDmBtn = page.locator(".sidebar-dm-section .category-add-btn");
+    // Open the DM member picker via the "+" in the Home DM list.
+    await openHome(page);
+    const newDmBtn = page.locator(".dm-section-label .dm-add");
     await expect(newDmBtn).toBeVisible({ timeout: 5_000 });
     await newDmBtn.click();
 
@@ -98,7 +100,7 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
     await expect(modal).toHaveCount(0);
   });
 
-  test("the delete-confirm dialog is labelled, focuses Cancel, and Escape restores focus (P4-12)", async ({
+  test("the delete-confirm dialog is labelled, focuses Cancel, and Escape restores focus", async ({
     page,
   }) => {
     const row = page.locator("[data-testid='message-101']");

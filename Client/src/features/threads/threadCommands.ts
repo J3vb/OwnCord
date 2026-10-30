@@ -1,5 +1,5 @@
 /**
- * What the thread surfaces need to decide and to send (WP 6.9c): who may change
+ * What the thread surfaces need to decide and to send: who may change
  * a thread, why its composer is closed, and the `thread_*` frames. Loaded with
  * the lazy panel, dialog and popover, never at startup.
  *

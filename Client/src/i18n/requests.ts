@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Direct-message and member-interaction copy (B9-19): the DM sidebar, the DM
+ * Direct-message and member-interaction copy: the DM sidebar, the DM
  * profile panel, the user profile popup and the member picker. It loads with
  * the main page and its lazily loaded profile-popup chunk. The presence status
  * labels stay in `shell.ts`, which already owns them.

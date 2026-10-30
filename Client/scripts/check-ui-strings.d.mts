@@ -16,7 +16,8 @@ export function excludedReason(file: string): string | null;
 export function ownerOf(file: string): string;
 export function looksLikeProse(text: string): boolean;
 export function scanSource(file: string, source: string): { findings: Finding[]; errors: string[] };
-export function scanTree(): Scan;
+/** `instrumented`: files a Stryker sandbox rewrote, left out of `files`. */
+export function scanTree(): Scan & { instrumented: string[] };
 export function loadBaseline(): Baseline | null;
 export function compare(
   scan: Scan,

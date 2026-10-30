@@ -247,6 +247,12 @@ test("the web portal suite runs for the bundle, the portal and its harness only"
   }
 });
 
+test("the shared Playwright path helper runs the web portal suite", () => {
+  // Every moved Playwright config resolves its paths through clientRoot.ts, so
+  // a change there can break the portal suite without touching its config.
+  assert.equal(runs(`M\tClient/tests/e2e/config/clientRoot.ts`, "webclient"), true);
+});
+
 test("a native-voice interop spec runs the Rust suite", () => {
   // The only job that runs tests/e2e/native-voice is rust-tests (ci.yml's
   // `npm run test:e2e:native-voice` step). Client/ alone selects client/
@@ -256,7 +262,8 @@ test("a native-voice interop spec runs the Rust suite", () => {
   // toolchain installer above.
   for (const p of [
     "Client/tests/e2e/native-voice/interop.spec.ts",
-    "Client/playwright.config.native-voice.ts",
+    "Client/tests/e2e/config/playwright.config.native-voice.ts",
+    "Client/tests/e2e/config/clientRoot.ts",
   ]) {
     const sel = picked(`M\t${p}`);
     assert.equal(sel.rust, true, `${p} must run rust-tests, which executes it`);
@@ -292,7 +299,7 @@ test("a server change also runs the native job, which builds and drives that ser
 });
 
 test("the generated TypeScript protocol file selects the server job", () => {
-  // `make protocol-verify` regenerates Server/ws/message_types.go AND this file,
+  // `make protocol-verify` regenerates Server/ws/message_types.go, httperr/codes.go AND this file,
   // then fails on drift — so a change here has to run the server job even though
   // the path lives under Client/.
   const sel = picked("M\tClient/src/lib/protocolTypes.ts");
@@ -336,7 +343,7 @@ test("a workflow file selects every capability", () => {
 });
 
 test("a shared script selects every capability", () => {
-  const sel = picked("M\tscripts/check-tauri-versions.mjs");
+  const sel = picked("M\tscripts/checks/check-tauri-versions.mjs");
   for (const cap of CAPABILITIES) assert.equal(sel[cap], true);
 });
 
@@ -520,7 +527,7 @@ test("permissions.ts and the files that kill its mutants select the mutation hot
   for (const path of [
     "Client/src/lib/permissions.ts",
     "Client/tests/unit/permissions.test.ts",
-    "Client/stryker.ci.config.mjs",
+    "Client/tests/mutation/stryker.ci.config.mjs",
     "Client/stryker.config.mjs",
   ]) {
     assert.equal(runs(`M\t${path}`, "permissions"), true, path);

@@ -13,7 +13,7 @@ const { fetchMock, saveMock, writeFileMock } = vi.hoisted(() => ({
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));
@@ -29,7 +29,7 @@ import {
   setServerHost,
   type LightboxGallery,
 } from "../../src/components/message-list/attachments";
-import { closeImageMenu } from "../../src/components/message-list/image-menu";
+import { closeImageMenu } from "../../src/components/message-list/imageMenu";
 
 const BASE = "https://myserver.local:8443/api/v1/files";
 const items = ["a", "b", "c"].map((n) => ({

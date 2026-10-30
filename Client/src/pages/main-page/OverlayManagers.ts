@@ -3,33 +3,33 @@
  * Each factory returns an open/toggle + cleanup pair for use in MainPage.
  */
 
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { ApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setOwnedTimeout } from "@lib/dom";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import { canManageInvites } from "@lib/permissions";
 import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@components/lazyScreen";
 import type { InviteItem } from "@components/InviteManager";
-import type { InviteResponse } from "@lib/types";
+import type { ImportedAuthor, InviteResponse } from "@lib/types";
 import type { PinnedMessage } from "@components/PinnedMessages";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
 import { messagesStore, setMessagePinned } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
 import { dmStore, addDmToChannelsStore } from "@stores/dm.store";
-import { navigateToChannel } from "@lib/channel-navigation";
+import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { authStore } from "@stores/auth.store";
 import { errorText } from "@lib/api";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
-import { resolveAuthor } from "@lib/formatting";
-import { resolveDisplayName } from "@lib/avatar";
-import { formatInviteLink } from "@lib/deep-link";
+import { resolveAuthor } from "@lib/text/formatting";
+import { resolveDisplayName } from "@lib/ui/avatar";
+import { formatInviteLink } from "@lib/nav/deepLink";
 import { shellText } from "../../i18n/shell";
-import { dialogOpen } from "@lib/dialogOpen";
-import { copyThenToast } from "@lib/clipboard";
+import { dialogOpen } from "@lib/ui/dialogOpen";
+import { copyThenToast } from "@lib/ui/clipboard";
 
 const log = createLogger("overlays");
 
@@ -129,9 +129,11 @@ export function mapToPinnedMessage(msg: {
   readonly mentions?: readonly number[];
   readonly mentions_everyone?: boolean;
   readonly mention_roles?: readonly number[];
+  readonly imported_author?: ImportedAuthor;
 }): PinnedMessage {
   const author = resolveAuthor(msg.user);
   return {
+    ...(msg.imported_author !== undefined ? { importedAuthor: msg.imported_author } : {}),
     id: msg.id,
     author: resolveDisplayName(author),
     avatar: author.avatar,
@@ -339,7 +341,7 @@ function mountLoadError(
  * and `finally opening = false`. A close() during the fetch cancels that
  * open: its result is dropped rather than mounted.
  */
-function createAsyncOverlayController<T>(opts: {
+export function createAsyncOverlayController<T>(opts: {
   readonly getRoot: () => HTMLDivElement | null;
   /** Extra precondition (besides instance/root/opening) checked before the
    *  fetch starts; open() bails silently (no log, no toast) if it returns
@@ -568,7 +570,7 @@ export function createPinnedPanelController(opts: {
     getRoot: opts.getRoot,
     canOpen: () => {
       channelId = opts.getCurrentChannelId();
-      // A gated NSFW channel's pins are its content (B9-7): the gate already
+      // A gated NSFW channel's pins are its content: the gate already
       // says why nothing is shown, so the panel stays shut.
       return channelId !== null && !nsfwContentBlocked(channelId);
     },
@@ -743,7 +745,7 @@ export function createSearchOverlayController(opts: {
     root: HTMLDivElement,
   ): void {
     const current = opts.getCurrentChannelId();
-    // Behind the NSFW gate only a server-wide search is offered (B9-7).
+    // Behind the NSFW gate only a server-wide search is offered.
     const channelId = current !== null && nsfwContentBlocked(current) ? null : current;
 
     instance = screen.createSearchOverlay({

@@ -3,7 +3,7 @@
  * request goes out through the host's own client, so the app never has to
  * trust an unpinned TLS certificate itself.
  *
- * Lifted verbatim from `lib/api.ts` (B7-4). The host client already
+ * Lifted verbatim from `lib/api.ts`. The host client already
  * implements the Web-standard signature, so this is a pass-through and
  * nothing else: same URL, same init, same `Response` back.
  *

@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// Group DM membership mutations (WP 3B-10b). Each one is a single write
+// Group DM membership mutations. Each one is a single write
 // transaction on the one-connection writer pool, so every check made inside it
 // (caller still a member, caller is the owner, target still a member, member
 // count) is race-free: two callers on the same group run one after the other

@@ -1,4 +1,4 @@
-// The browser platform's HTTP client (6.13c): the page's own `fetch`. The page
+// The browser platform's HTTP client: the page's own `fetch`. The page
 // talks only to the server that served it, so a request needs no tunnel and
 // no translation — the contract already has the Web-standard shape.
 import type { HttpClient } from "../contracts/http";

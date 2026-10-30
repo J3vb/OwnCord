@@ -16,10 +16,10 @@ vi.mock("../../src/platform/desktop", () => ({
     },
   },
 }));
-vi.mock("../../src/lib/notificationSound", () => ({ playNotificationSound }));
+vi.mock("../../src/lib/media/notificationSound", () => ({ playNotificationSound }));
 
 import { buildNotificationsTab } from "@components/settings/NotificationsTab";
-import { setChannelMutesHost } from "../../src/lib/channel-mutes";
+import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 
 let container: HTMLDivElement;
 let ac: AbortController;

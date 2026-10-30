@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -35,7 +36,7 @@ func handleVerifyTOTP(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		partialToken, ok := auth.ExtractBearerToken(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid authorization header")
+			writeErr(w, http.StatusUnauthorized, httperr.CodeUnauthorized, "missing or invalid authorization header")
 			return
 		}
 
@@ -53,7 +54,6 @@ func handleVerifyTOTP(svc AuthService) http.HandlerFunc {
 	}
 }
 
-// handleEnableTOTP processes POST /api/v1/users/me/totp/enable.
 func handleEnableTOTP(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)
@@ -111,7 +111,6 @@ func handleRegenerateRecoveryCodes(svc AuthService) http.HandlerFunc {
 	}
 }
 
-// handleConfirmTOTP processes POST /api/v1/users/me/totp/confirm.
 func handleConfirmTOTP(svc AuthService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, ok := principal(r)

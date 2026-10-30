@@ -26,6 +26,7 @@ import {
   voiceJoinWithTokenHandlers,
   parkLiveKitSocket,
   connectVoiceSession,
+  openDmRow,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ const profileSidebar = (page: Page) => page.locator("[data-testid='dm-profile-si
 
 /** Open a DM from the channels-mode embedded DM list. */
 async function openDm(page: Page, index = 0): Promise<void> {
-  await page.locator("[data-testid='dm-entry']").nth(index).click();
+  await openDmRow(page, index);
   await expect(page.locator("[data-testid='call-btn']")).toBeVisible({ timeout: 5_000 });
 }
 
@@ -317,7 +318,7 @@ test.describe("User profile popup — member list", () => {
   // `onCall`, so the Call button was dead. The popup's Call action now opens
   // the 1:1 DM with that member and starts a call in it, the same DM call path
   // the chat header uses (dm-calls.spec.ts).
-  test("offers a Call action that opens the DM and rings it (BUG-05)", async ({ page }) => {
+  test("offers a Call action that opens the DM and rings it", async ({ page }) => {
     await page.locator("[data-testid='member-4']").click();
     await expect(popup(page)).toBeVisible();
     await expect(page.locator("[data-testid='upp-call-btn']")).toBeVisible();
@@ -348,7 +349,7 @@ test.describe("User profile popup — member list", () => {
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("newuser");
   });
 
-  test("Call on a member you already have a DM with reuses it (BUG-05)", async ({ page }) => {
+  test("Call on a member you already have a DM with reuses it", async ({ page }) => {
     // otheruser already has a DM (channel 100) in the fixture.
     await page.locator("[data-testid='member-2']").click();
     await expect(popup(page)).toBeVisible();

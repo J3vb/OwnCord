@@ -3,10 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const showToast = vi.fn();
-vi.mock("@lib/toast", () => ({ showToast: (...args: unknown[]) => showToast(...args) }));
+vi.mock("@lib/ui/toast", () => ({ showToast: (...args: unknown[]) => showToast(...args) }));
 
 import { ApiClientError, type FileReportRequest } from "@lib/api";
-import type { ModalInstance } from "@lib/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { openMessageReport, openUserReport } from "./openers";
 import { checkReportDetail, reportFailureText } from "./reportDialog";
 
@@ -265,5 +265,215 @@ describe("reportFailureText", () => {
     expect(reportFailureText(new ApiClientError(500, "INTERNAL_ERROR", "x"))).toContain(
       "Couldn't send the report",
     );
+  });
+});
+
+const attrsOf = (el: Element): Record<string, string> =>
+  Object.fromEntries(el.getAttributeNames().map((n) => [n, el.getAttribute(n) ?? ""]));
+const q = <T extends Element = HTMLElement>(sel: string): T => dialog()!.querySelector<T>(sel)!;
+const detailField = () => q<HTMLTextAreaElement>(".report-detail");
+const failureBox = () => q(".report-form .modal-body > .form-error");
+
+describe("report dialog markup", () => {
+  it("names its parts with ids from one per-dialog prefix, counting up per dialog", () => {
+    openMessage([{ id: "up-7", filename: "cat.png" }]);
+    const d = dialog()!;
+    const prefix = /^(report-\d+)-title$/.exec(q("h3").id)?.[1];
+    expect(prefix).toBeDefined();
+    expect(q("h3").textContent).toBe("Report message");
+    expect(attrsOf(q(".modal-header"))).toEqual({ class: "modal-header" });
+    expect(attrsOf(q(".modal-close"))).toEqual({
+      type: "button",
+      class: "modal-close",
+      "aria-label": "Close",
+    });
+    expect(attrsOf(q(".modal-body"))).toEqual({ class: "modal-body" });
+    expect(attrsOf(q(".modal-body > p"))).toEqual({ class: "report-note" });
+
+    const sets = [...d.querySelectorAll("fieldset")];
+    expect(sets.map((s) => attrsOf(s))).toEqual([
+      { class: "report-choice" },
+      { class: "report-choice" },
+    ]);
+    const legends = [...d.querySelectorAll("legend")];
+    expect(legends.map((l) => attrsOf(l))).toEqual([
+      { class: "form-label" },
+      { class: "form-label" },
+    ]);
+    expect(legends.map((l) => l.textContent)).toEqual(["What are you reporting?", "Reason"]);
+
+    const targets = [...sets[0]!.querySelectorAll("input")];
+    expect(targets.map((i) => i.name)).toEqual([`${prefix}-target`, `${prefix}-target`]);
+    expect(targets.map((i) => i.value)).toEqual(["0", "1"]);
+    // The first target starts chosen; the attachment only when picked.
+    expect(targets.map((i) => i.checked)).toEqual([true, false]);
+
+    const reasons = [...sets[1]!.querySelectorAll("input")];
+    expect(reasons.map((i) => i.name)).toEqual(reasons.map(() => `${prefix}-reason`));
+    expect(reasons.every((i) => !i.checked)).toBe(true);
+    const reasonError = sets[1]!.querySelector(".form-error")!;
+    expect(attrsOf(reasonError)).toEqual({
+      class: "form-error",
+      id: `${prefix}-reason-error`,
+      role: "alert",
+    });
+    expect(reasons.every((i) => i.getAttribute("aria-describedby") === reasonError.id)).toBe(true);
+
+    expect(attrsOf(q(".form-group"))).toEqual({ class: "form-group" });
+    expect(attrsOf(q(".form-group label"))).toEqual({
+      class: "form-label",
+      for: `${prefix}-detail`,
+    });
+    expect(q(".form-group label").textContent).toBe("Details (optional)");
+    expect(attrsOf(detailField())).toEqual({
+      class: "form-input report-detail",
+      id: `${prefix}-detail`,
+      rows: "3",
+      "aria-describedby": `${prefix}-detail-hint ${prefix}-detail-error`,
+    });
+    const hint = q(`#${prefix}-detail-hint`);
+    expect(attrsOf(hint)).toEqual({ class: "report-note", id: `${prefix}-detail-hint` });
+    expect(hint.textContent).toBe("Up to 2,000 characters.");
+    expect(attrsOf(q(`#${prefix}-detail-error`))).toEqual({
+      class: "form-error",
+      id: `${prefix}-detail-error`,
+      role: "alert",
+    });
+
+    expect(attrsOf(q(".modal-body > .form-status"))).toEqual({
+      class: "form-status",
+      role: "status",
+    });
+    expect(attrsOf(failureBox())).toEqual({ class: "form-error", role: "alert" });
+    expect(attrsOf(q(".modal-footer"))).toEqual({ class: "modal-footer" });
+    expect(attrsOf(q(".btn-modal-cancel"))).toEqual({
+      type: "button",
+      class: "btn-modal-cancel",
+    });
+    expect(attrsOf(submitBtn())).toEqual({ type: "submit", class: "btn-modal-save" });
+    expect(attrsOf(q("form"))).toEqual({ class: "report-form", novalidate: "" });
+
+    const firstSeq = Number(/\d+/.exec(prefix!)![0]);
+    modal!.close();
+    modal = null;
+    openMessage();
+    expect(q("h3").id).toBe(`report-${firstSeq + 1}-title`);
+  });
+
+  it("preselects only the first target", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked")!;
+    const sets: Array<[string, boolean]> = [];
+    vi.spyOn(HTMLInputElement.prototype, "checked", "set").mockImplementation(function (
+      this: HTMLInputElement,
+      value: boolean,
+    ) {
+      if (this.name.endsWith("-target")) sets.push([this.value, value]);
+      original.set!.call(this, value);
+    });
+    try {
+      openMessage([{ id: "up-7", filename: "cat.png" }]);
+      expect(sets).toEqual([
+        ["0", true],
+        ["1", false],
+      ]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("starts on the first target, or on the first reason when there is no choice", () => {
+    openMessage([{ id: "up-7", filename: "cat.png" }]);
+    expect(document.activeElement).toBe(radio("This message"));
+    modal!.close();
+    modal = null;
+    openMessage();
+    expect(document.activeElement).toBe(radio("Spam"));
+  });
+
+  it("closes from its X button", () => {
+    openMessage();
+    q<HTMLButtonElement>(".modal-close").click();
+    expect(dialog()).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe("report dialog feedback", () => {
+  it("marks and clears invalid fields as the answers change", async () => {
+    openMessage();
+    const detail = detailField();
+    detail.value = "a\u0007b";
+    const submitted = new Event("submit", { cancelable: true });
+    q("form").dispatchEvent(submitted);
+    // The browser's own submit is always cancelled.
+    expect(submitted.defaultPrevented).toBe(true);
+    const reasons = [...document.querySelectorAll<HTMLInputElement>(".report-option input")];
+    const reasonError = () =>
+      document.getElementById(reasons[0]!.getAttribute("aria-describedby")!)!;
+    const detailError = () => document.getElementById(`${detail.id}-error`)!;
+    expect(reasons.every((r) => r.getAttribute("aria-invalid") === "true")).toBe(true);
+    expect(detail.getAttribute("aria-invalid")).toBe("true");
+    expect(reasonError().textContent).toBe("Choose a reason.");
+    expect(detailError().textContent).toContain("characters that can't be sent");
+    expect(calls).toHaveLength(0);
+
+    // A reason alone: the detail is still refused and takes focus.
+    radio("Spam").checked = true;
+    submit();
+    expect(reasons.some((r) => r.hasAttribute("aria-invalid"))).toBe(false);
+    expect(reasonError().textContent).toBe("");
+    expect(detail.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(detail);
+    expect(calls).toHaveLength(0);
+
+    detail.value = "x".repeat(2001);
+    submit();
+    expect(detailError().textContent).toBe("Details can be at most 2,000 characters.");
+    expect(calls).toHaveLength(0);
+
+    detail.value = "fine";
+    submit();
+    expect(detail.hasAttribute("aria-invalid")).toBe(false);
+    expect(detailError().textContent).toBe("");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("clears the last failure when sending again and unlocks the button after one", async () => {
+    openMessage();
+    radio("Spam").checked = true;
+    submit();
+    pending[0]!.reject(new TypeError("offline"));
+    await flush();
+    expect(failureBox().textContent).toContain("Couldn't send the report");
+    expect(submitBtn().hasAttribute("aria-disabled")).toBe(false);
+    expect(document.querySelector(".report-form [role=status]")?.textContent).toBe("");
+
+    submit();
+    expect(failureBox().textContent).toBe("");
+    expect(submitBtn().getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("ignores a failure that lands after the dialog closed", async () => {
+    openMessage();
+    radio("Spam").checked = true;
+    submit();
+    const failure = failureBox();
+    const button = submitBtn();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    pending[0]!.reject(new TypeError("offline"));
+    await flush();
+    expect(failure.textContent).toBe("");
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(showToast).not.toHaveBeenCalled();
+  });
+
+  it("stops listening once closed: a late submit sends nothing", () => {
+    openMessage();
+    radio("Spam").checked = true;
+    const form = q("form");
+    modal!.close();
+    modal = null;
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+    expect(calls).toHaveLength(0);
   });
 });

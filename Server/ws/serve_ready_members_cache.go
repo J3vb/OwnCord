@@ -15,16 +15,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// memberCache is the ready payload's shared member-list read (DP-37). A
-// restart herd builds hundreds of ready payloads at once, and each used to
-// run its own ListMembers: the whole roster, joined and sorted, per socket.
+// memberCache is the ready payload's shared member-list read: a restart herd builds
+// hundreds of ready payloads at once, and each would otherwise run its own
+// ListMembers (the whole roster, joined and sorted, per socket).
 //
-// The cached list is tagged with the member generation it was read at, a
-// counter SQLite triggers bump in the same commit as every write that can
-// change ListMembers' result (migration 057). It is reused only while the
-// generation has not moved and no temporary ban it hides has lapsed. Never a
-// TTL: a client that registered after a join's broadcast would miss the
-// join for as long as a TTL let it be served a list from before it.
+// The cached list is tagged with the member generation it was read at, a counter
+// SQLite triggers bump in the same commit as every write that can change
+// ListMembers' result. It is reused only while the generation has not moved and no
+// temporary ban it hides has lapsed. Never a TTL: a client that registered after a
+// join's broadcast would miss the join for as long as a TTL served it an older list.
 //
 // users.status is outside the generation, since every connect writes it and
 // a herd would then never share a read. presentableMembers overlays each
@@ -39,9 +38,8 @@ type memberCache struct {
 	flight  singleflight.Group
 }
 
-// memberRoster is one generation's member list with each member's JSON
-// encoded once (P5-O01), so a ready writes it instead of re-encoding the
-// whole roster per viewer.
+// memberRoster is one generation's member list with each member's JSON encoded once,
+// so a ready writes it instead of re-encoding the whole roster per viewer.
 type memberRoster struct {
 	members []db.MemberSummary
 	enc     []memberJSON // enc[i] encodes members[i]

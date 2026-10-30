@@ -5,7 +5,7 @@
  * them. The banner itself is the main page's (main-page.test.ts).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RingState } from "../../src/lib/call-ring";
+import type { RingState } from "../../src/lib/voice/callRing";
 
 const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
@@ -15,8 +15,8 @@ const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoist
   showToast: vi.fn(),
 }));
 
-vi.mock("../../src/lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
+vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
@@ -24,13 +24,13 @@ vi.mock("../../src/lib/preferences", async (importOriginal) => ({
 vi.mock("../../src/platform/desktop", () => ({
   desktop: { notifier: { showCall, clearCall, requestAttention } },
 }));
-vi.mock("../../src/lib/toast", () => ({ showToast }));
+vi.mock("../../src/lib/ui/toast", () => ({ showToast }));
 
 const { alertIncomingCall, alertMissedCall, alertSupersededCall, clearIncomingCall } =
   await import("../../src/features/direct-messages/callAlerts");
 const { startRingChime, stopRingChime, playNotificationSound, startRingback, stopRingback } =
-  await import("../../src/lib/notificationSound");
-const { setChannelMutesHost } = await import("../../src/lib/channel-mutes");
+  await import("../../src/lib/media/notificationSound");
+const { setChannelMutesHost } = await import("../../src/lib/prefs/channelMutes");
 const { dmStore } = await import("../../src/stores/dm.store");
 
 /** Every frequency the app's audio graph was asked to play, in order. */

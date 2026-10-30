@@ -12,12 +12,13 @@ import type {
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
-import { normalizeHostForCertCompare } from "./hostNormalize";
+import { normalizeHostForCertCompare } from "./net/hostNormalize";
+import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("ws");
 
 /**
- * What this client can render, declared in every `auth` frame (WP 6.9d). The
+ * What this client can render, declared in every `auth` frame. The
  * server withholds the matching channels and frames from a socket that does not
  * declare them, so an older client never shows a broken forum.
  */
@@ -144,7 +145,7 @@ const IDENTITY_KEY_WAIT_MS = 1_500;
 const DEFAULT_MAX_RECONNECT_DELAY = 30_000;
 const DEFAULT_MAX_MESSAGE_SIZE = 1_048_576; // 1MB
 const HEARTBEAT_INTERVAL_MS = 30_000;
-// CLI-01: a half-open socket delivers nothing inbound while `transport.send`
+// A half-open socket delivers nothing inbound while `transport.send`
 // still resolves against the local buffer, so the state machine would sit on
 // "connected" forever. A server's RFC 6455 control ping is answered inside the
 // Rust proxy and never reaches JS, so for every server this app-side deadline
@@ -172,10 +173,10 @@ export const PREAUTH_CONNECT_TIMEOUT_MS = 20_000;
 // the pre-auth deadline, but never past this long after the first attempt: a
 // server that stays saturated still ends in an error.
 export const PREAUTH_BUSY_CAP_MS = 70_000;
-// DP-02: the least time between two wake-signal redials, so a flapping network
+// The least time between two wake-signal redials, so a flapping network
 // or a burst of focus changes cannot spin the reconnect loop.
 const WAKE_KICK_FLOOR_MS = 2_000;
-// WP 2A-5: a `cseq` gap means the server lost a frame meant for this socket
+// A `cseq` gap means the server lost a frame meant for this socket
 // and owes it a full ready. The resume waits a random 1-5 s so that, when one
 // server-side fault (a DB outage) marks every client at once, the herd does
 // not redial in one instant. Gap resumes close together (losses that keep
@@ -207,14 +208,14 @@ function uuid(): string {
  *  proxies always emit the normalized form, so an un-normalized comparison
  *  here would silently miss the match. Order matters and matches the Rust:
  *  ":443" comes off first, so "[::1]:443" unwraps too, while a non-default
- *  port keeps its brackets as its own distinct key (OC-0163).
+ *  port keeps its brackets as its own distinct key.
  *
  *  The ":443" strip only applies when what's left is unambiguously a host
  *  (no remaining colon) or a bracketed IPv6 literal (ends in "]", as in
  *  "[::1]:443"). Without this guard, a BARE IPv6 literal whose final hextet
  *  is "443" — e.g. "fd00::443" — would have that hextet eaten as if it were
  *  a port, truncating it to "fd00:" and missing the cert_store_key it's
- *  compared against (OC-0215/OC-0417). */
+ *  compared against. */
 export { normalizeHostForCertCompare };
 
 /**
@@ -225,7 +226,7 @@ export { normalizeHostForCertCompare };
  * separator instead), and RFC 3986 gives a bare IPv6 literal no way to carry
  * a port, so this never needs to split one off. A host that is already
  * bracketed (or is a DNS name / IPv4 literal, with or without a port) is
- * returned unchanged (OC-0163).
+ * returned unchanged.
  */
 export function bracketBareIPv6Host(host: string): string {
   if (
@@ -246,7 +247,7 @@ export function wsUrlFor(host: string): string {
 }
 
 // The native socket transport lives behind the `SocketConnection` contract, in
-// the desktop implementation (B7-4); this module takes one transport per client
+// the desktop implementation; this module takes one transport per client
 // from the registry. Everything above that seam stays here: the connection
 // state machine, the reconnect policy, the heartbeat, frame parsing and the
 // send-failure codes.
@@ -274,15 +275,15 @@ export function createWsClient({
   let reconnectAttempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-  // CLI-01: fires when no inbound frame has arrived for
+  // Fires when no inbound frame has arrived for
   // SERVER_SILENCE_RECONNECT_MS while the socket still reports open.
   let livenessTimer: ReturnType<typeof setTimeout> | null = null;
   let livenessDueAt = 0;
   // U7d: owns the visibilitychange / online wake-probe listeners.
-  // Armed on auth_ok; kept through the reconnect loop (DP-02) and released on
+  // Armed on auth_ok; kept through the reconnect loop and released on
   // an intentional or certificate-blocked close, or disconnect().
   let wakeOwner: Disposable | null = null;
-  // DP-02: when a wake signal last cut a reconnect backoff short.
+  // When a wake signal last cut a reconnect backoff short.
   let lastWakeKickAt = -Infinity;
   // U4: the last time the app could observe the clock running: a parsed
   // inbound frame (handleMessage), a heartbeat tick (handleWakeSignal), a dial
@@ -304,7 +305,7 @@ export function createWsClient({
   // accepted the dial), an explicit takeover ("Use here") or disconnect().
   let pendingWake = false;
   let certMismatchBlock = false; // blocks reconnect on TOFU mismatch
-  // DP-54 follow-up: the distinct failure code from the most recent rejected
+  // The distinct failure code from the most recent rejected
   // connect, when the transport could read one (a certificate failure carries
   // `TLS_CERT_UNVERIFIED`). Lets the pre-auth deadline name a certificate
   // failure instead of calling it unreachable. Cleared on each new dial and on
@@ -314,7 +315,7 @@ export function createWsClient({
   // send-failure codes below are decided on this side of the seam.
   let proxyOpen = false;
   let lastSeq = 0;
-  // WP 2A-5: the last `cseq` seen on the current socket (0 before the first),
+  // The last `cseq` seen on the current socket (0 before the first),
   // the socket it belongs to, and the pending gap resume, if any. A new
   // socket starts the count again and cancels a resume armed on the old one.
   let lastCseq = 0;
@@ -429,7 +430,7 @@ export function createWsClient({
     }
   }
 
-  // CLI-01: re-arm the silence deadline. Called after auth_ok and on every
+  // Re-arm the silence deadline. Called after auth_ok and on every
   // inbound frame, so any traffic — pong, chat, presence — proves the socket
   // is still delivering bytes. A half-open socket delivers nothing, so the
   // timer survives to fire. The wake probe arms the same timer with a shorter
@@ -459,7 +460,7 @@ export function createWsClient({
     setLivenessTimer(Math.max(0, Math.min(PONG_GRACE_MS, livenessDueAt - Date.now())));
   }
 
-  // DP-02: while the loop waits out a backoff, the network or the screen coming
+  // While the loop waits out a backoff, the network or the screen coming
   // back means the next dial is likely to work now, so dial at once instead of
   // after up to 30 s. It fires the pending timer's own callback, so the U4
   // wake check still runs, and it never dials past a close the loop itself
@@ -482,7 +483,7 @@ export function createWsClient({
     redial();
   }
 
-  // Armed on auth_ok and kept through the reconnect loop (DP-02); released on
+  // Armed on auth_ok and kept through the reconnect loop; released on
   // an intentional or certificate-blocked close, or disconnect(). The next
   // auth_ok re-arms them. A signal owns each listener so the lifecycle
   // inventory sees them as owned.
@@ -549,7 +550,7 @@ export function createWsClient({
     if (suspendGapExceeded()) {
       pendingWake = true;
     }
-    // One timer at a time: the CLI-01 silence deadline and an observed close
+    // One timer at a time: the silence deadline and an observed close
     // can race, and a second timer would redial twice.
     if (reconnectTimer !== null) return;
     const hint = retryAfterMs ?? busyRetryAfterMs;
@@ -571,7 +572,7 @@ export function createWsClient({
     reconnectTimer = clock.setTimeout(redial, delay);
   }
 
-  // The backoff timer's callback, and a wake signal's early redial (DP-02).
+  // The backoff timer's callback, and a wake signal's early redial.
   function redial(): void {
     reconnectTimer = null;
     reconnectAttempt++;
@@ -617,7 +618,7 @@ export function createWsClient({
     }
 
     // Any parsed inbound frame proves the socket is delivering bytes — refresh
-    // the CLI-01 silence deadline, even for a frame the size guard drops below.
+    // the silence deadline, even for a frame the size guard drops below.
     armLiveness();
     // U4: and that the clock was running, so a later gap is measured from
     // here. A frame is not proof the server still holds this session — it may
@@ -625,7 +626,7 @@ export function createWsClient({
     // arm the wake marker but never clears it; only auth_ok does.
     if (suspendGapExceeded()) pendingWake = true;
 
-    // WP 2A-5: counted before the size guard, so a frame this client drops
+    // Counted before the size guard, so a frame this client drops
     // itself is not read as one the server lost.
     if (typeof parsed.cseq === "number") noteCseq(parsed.cseq);
 
@@ -634,7 +635,7 @@ export function createWsClient({
     // frames: "ready" is the one server frame with no bound — it embeds every
     // member/channel/DM the server knows about — and, unlike a sequenced
     // frame, carries no seq, so nothing ever re-requests it. Dropping it
-    // (OC-0160) would leave a client that just flipped to "connected" sitting
+    // would leave a client that just flipped to "connected" sitting
     // on empty stores with no error and no recovery path. "auth_ok" gets the
     // same exemption since it can embed a long-username/motd payload and is
     // equally unrecoverable if dropped — the client never even reaches
@@ -678,7 +679,7 @@ export function createWsClient({
     // P5-S04: the server refused this connect while its ready builds are
     // saturated. Not a user-facing error: the close that follows redials no
     // sooner than the hint.
-    if (msg.type === "error" && msg.payload.code === "SERVER_BUSY") {
+    if (msg.type === "error" && msg.payload.code === WsErrorCode.SERVER_BUSY) {
       busyRetryAfterMs = msg.payload.retry_after_ms;
       log.info("Server busy, redialling later", { retryAfterMs: busyRetryAfterMs });
       for (const listener of serverBusyListeners) {
@@ -709,7 +710,7 @@ export function createWsClient({
       // request a range the server can silently satisfy as a complete resume
       // once its counter climbs back through it, dropping the events in
       // between. Reset so the next sequenced frame re-adopts the server's
-      // current epoch via the normal seq > lastSeq update (OC-0032).
+      // current epoch via the normal seq > lastSeq update.
       if (msg.payload.replay_source === "none") {
         lastSeq = 0;
       }
@@ -727,7 +728,7 @@ export function createWsClient({
     dispatch(msg);
   }
 
-  // WP 2A-5: a `cseq` other than last + 1 means the server skipped a frame it
+  // A `cseq` other than last + 1 means the server skipped a frame it
   // could not deliver and marked this connection for a full ready. One resume
   // per socket is enough: the next socket starts a fresh count.
   function noteCseq(cseq: number): void {
@@ -920,7 +921,7 @@ export function createWsClient({
       });
       stopHeartbeat();
       stopLiveness();
-      // DP-02: a close the loop will retry keeps the wake listeners, so the
+      // A close the loop will retry keeps the wake listeners, so the
       // network or the screen coming back can cut the backoff short.
       if (intentionalClose || certMismatchBlock) stopWakeListeners();
       if (!intentionalClose) {

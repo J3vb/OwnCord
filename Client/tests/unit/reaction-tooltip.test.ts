@@ -13,7 +13,7 @@ import {
   attachReactionTooltip,
   buildReactionTooltip,
   formatReactorNames,
-} from "../../src/components/message-list/reaction-tooltip";
+} from "../../src/components/message-list/reactionTooltip";
 import {
   clearReactionUsersCache,
   getCachedReactionUsers,

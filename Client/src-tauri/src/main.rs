@@ -14,7 +14,7 @@ fn main() {
     // call, and libwebrtc and device_query open and query their own X displays
     // from worker threads while GTK uses Xlib on the main one. Without this the
     // app aborted at sign-in with "[xcb] Too much data requested from _XRead"
-    // (B7-17 artifact smoke, Ubuntu 22.04 x64 and arm64: libwebrtc's audio
+    // (artifact smoke test, Ubuntu 22.04 x64 and arm64: libwebrtc's audio
     // device module, since replaced by our own cpal streams, did it from a
     // Tokio worker). It only enables Xlib's locking, so it is harmless where no
     // X display is ever opened.

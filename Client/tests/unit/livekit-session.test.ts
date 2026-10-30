@@ -184,8 +184,8 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/preferences")>()),
+vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/preferences")>()),
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -200,12 +200,12 @@ vi.mock("@lib/logger", () => ({
 }));
 
 const mockShowActionToast = vi.hoisted(() => vi.fn());
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
   showActionToast: mockShowActionToast,
 }));
 
-vi.mock("@lib/noise-suppression", () => ({
+vi.mock("@lib/voice/noiseSuppression", () => ({
   createRNNoiseProcessor: vi.fn(),
 }));
 
@@ -219,7 +219,7 @@ const mockIdentityKeyPair = vi.hoisted(() => ({
   privateKey: { type: "id-private" } as unknown as CryptoKey,
 }));
 
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => mockKeyPair),
   exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
   importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
@@ -238,7 +238,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
 }));
 
 // F3 TOFU: identity keyring + peer pin store (Tauri-backed; mocked here).
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
@@ -257,7 +257,7 @@ import {
   LiveKitSession,
   getRoomForStats,
   setPttPollingLive,
-} from "../../src/lib/livekitSession";
+} from "../../src/lib/voice/livekitSession";
 import {
   setLocalMuted,
   setLocalDeafened,
@@ -270,8 +270,8 @@ import {
   setPeerVerification,
   setEncryptionDegraded,
 } from "@stores/voice.store";
-import { getIdentityPin, storeIdentityPin } from "@lib/identity";
-import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
+import { getIdentityPin, storeIdentityPin } from "@lib/net/identity";
+import { verifyEphemeralKeySignature } from "@lib/net/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
@@ -279,13 +279,13 @@ import { keepDmForCall, resetKeptCallDms } from "../../src/features/direct-messa
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
-import { takeWatchRefusal } from "../../src/lib/watchRequest";
+import { takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import {
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
   setDeafened as boundSetDeafened,
   cleanupAll as boundCleanupAll,
-} from "../../src/lib/livekitSession";
+} from "../../src/lib/voice/livekitSession";
 
 function createDeferred<T>(): {
   promise: Promise<T>;
@@ -827,7 +827,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("voice_watch (6.6b)", () => {
+  describe("voice_watch", () => {
     const watchFrames = (ws: { send: ReturnType<typeof vi.fn> }) =>
       ws.send.mock.calls.filter(([m]) => m.type === "voice_watch").map(([m]) => m.payload.user_ids);
 
@@ -1085,7 +1085,7 @@ describe("LiveKitSession", () => {
       expect(info.currentChannelId).toBeNull();
     });
 
-    it("[OC-0360] reflects a setOutputVolume change instead of the app-startup value", async () => {
+    it("reflects a setOutputVolume change instead of the app-startup value", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
@@ -1096,7 +1096,7 @@ describe("LiveKitSession", () => {
       expect(info.outputVolumeMultiplier).toBe(0.4);
     });
 
-    it("[M-1] carries your share's sender stats while you share, and none after", async () => {
+    it("carries your share's sender stats while you share, and none after", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
@@ -1883,7 +1883,7 @@ describe("LiveKitSession", () => {
       expect(setVoiceStatus).toHaveBeenCalledWith("connected");
     });
 
-    it("[OC-0020] does not carry a stale key-holder promotion into a channel switch made while reconnecting", async () => {
+    it("does not carry a stale key-holder promotion into a channel switch made while reconnecting", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
 
@@ -1958,7 +1958,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  it("a camera's Stop watching survives a channel switch and ends on leave (WP 1B-3)", () => {
+  it("a camera's Stop watching survives a channel switch and ends on leave", () => {
     session.setRemoteVideoWatched(7, "camera", false);
     session.leaveVoice(false, true);
     expect((session as any)._remoteTracks.isWatched(7, "camera")).toBe(false);
@@ -1994,7 +1994,7 @@ describe("LiveKitSession", () => {
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
     });
 
-    it("RT-6: applies the saved input device before the reconnect re-captures the mic", async () => {
+    it("applies the saved input device before the reconnect re-captures the mic", async () => {
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
       mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
@@ -2127,7 +2127,7 @@ describe("LiveKitSession", () => {
       expect(onRemoteVideo).toHaveBeenCalledWith(7, null, false);
     });
 
-    it("sweeps an auto-played camera into the new room subscribed, with no Watch card (WP 1B-3)", async () => {
+    it("sweeps an auto-played camera into the new room subscribed, with no Watch card", async () => {
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
       (session as any)._state = {
@@ -2216,7 +2216,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("teardownForReconnect video track cleanup (BUG-098)", () => {
+  describe("teardownForReconnect video track cleanup", () => {
     it("stops manual camera and screen tracks on unexpected disconnect", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -2312,7 +2312,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("leaveVoice camera/screenshare generation guard (OC-0042)", () => {
+  describe("leaveVoice camera/screenshare generation guard", () => {
     it("discards a camera track whose device-acquisition await resolves after leaveVoice() ran", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -2343,7 +2343,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("teardownForReconnect camera/screenshare generation guard (OC-0080)", () => {
+  describe("teardownForReconnect camera/screenshare generation guard", () => {
     it("discards a camera track whose device-acquisition await resolves after an unexpected disconnect", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -2380,7 +2380,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("camera/screen share restored after a reconnect (WP 1A-4, 1C-6)", () => {
+  describe("camera/screen share restored after a reconnect", () => {
     let wsState: string;
     let secondDrop: ((reason?: number) => void) | undefined;
 
@@ -2571,7 +2571,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("a closed 1:1 kept for its call (WP 3B-5 D14)", () => {
+  describe("a closed 1:1 kept for its call", () => {
     // Channel 100 is neither a server channel nor an open DM, as after a local close.
     async function drop(): Promise<void> {
       mockVoiceState.currentChannelId = 100;
@@ -3068,7 +3068,7 @@ describe("LiveKitSession", () => {
     // audio, with no error and no Grant-Microphone affordance (that button is
     // gated on listenOnly, which stayed false). This pins the fix: a failed
     // re-enable must flip back into listen-only + muted and surface an error.
-    it("unmuting when the mic cannot be acquired enters listen-only, re-mutes, and reports an error (OC-0287)", async () => {
+    it("unmuting when the mic cannot be acquired enters listen-only, re-mutes, and reports an error", async () => {
       const errorCb = vi.fn();
       session.setOnError(errorCb);
       const domErr = new DOMException("Permission denied", "NotAllowedError");
@@ -3459,7 +3459,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("restoreLocalVoiceState supersession guard (OC-0008)", () => {
+  describe("restoreLocalVoiceState supersession guard", () => {
     it("does not apply a stale mute decision to a newer session's room", async () => {
       mockVoiceState.localMuted = true;
       mockVoiceState.localDeafened = false;
@@ -3878,7 +3878,7 @@ describe("LiveKitSession", () => {
       expect(result).toBe(true);
     });
 
-    it("RT-6: applies the saved input device before the mic is first captured", async () => {
+    it("applies the saved input device before the mic is first captured", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
       mockRoom.connect.mockResolvedValue(undefined);
@@ -4067,7 +4067,7 @@ describe("LiveKitSession", () => {
     // key exchange (ECDH/HKDF/AES-GCM, TOFU identity, key-holder rotation)
     // ran end-to-end but every media frame still reached the SFU in
     // plaintext — the local cryptor stayed disabled.
-    it("enables E2EE on the room created by createRoom (OC-0095)", async () => {
+    it("enables E2EE on the room created by createRoom", async () => {
       mockRoom.setE2EEEnabled.mockClear();
 
       await (session as any).createRoom();
@@ -4090,7 +4090,7 @@ describe("LiveKitSession", () => {
     // and voiceStatus already reached "connected" — livekit-client's own
     // signal for this is RoomEvent.EncryptionError (E2eeManager.onWorkerError).
     // Nothing subscribed to it, so the Secured badge had no way to ever know.
-    it("wires an EncryptionError listener onto the room so a dead worker cannot stay invisible (OC-0002)", async () => {
+    it("wires an EncryptionError listener onto the room so a dead worker cannot stay invisible", async () => {
       mockRoom.on.mockClear();
       (setEncryptionDegraded as ReturnType<typeof vi.fn>).mockClear();
 
@@ -4106,7 +4106,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("voice_config audio bitrate applied to publishDefaults (OC-0438)", () => {
+  describe("voice_config audio bitrate applied to publishDefaults", () => {
     // OC-0438: the server computes an audio bitrate from the channel's voice
     // quality (qualityBitrate) and delivers it via voice_config, stored in
     // voiceStore.voiceConfigs. The Room's publishDefaults must apply it to
@@ -4226,7 +4226,7 @@ describe("LiveKitSession", () => {
     // before the SFU was back and ejected every call. The loop must keep
     // retrying with backoff, so an SFU that returns on the third attempt
     // still resumes the call.
-    it("RT-9: keeps retrying with backoff so a companion LiveKit restart can land", async () => {
+    it("keeps retrying with backoff so a companion LiveKit restart can land", async () => {
       (session as any)._state = {
         type: "reconnecting",
         channelId: 5,
@@ -4627,7 +4627,7 @@ describe("LiveKitSession", () => {
       expect((session as any)._state.latestToken).toBe("fresh-token");
     });
 
-    it("cleans up reconnect room when signal aborts after connect resolves (BUG-070)", async () => {
+    it("cleans up reconnect room when signal aborts after connect resolves", async () => {
       (session as any)._state = {
         type: "reconnecting",
         channelId: 5,
@@ -4663,7 +4663,7 @@ describe("LiveKitSession", () => {
   // 15 s while the chat socket is up and the channel exists, until the D-4
   // five-minute ceiling — an SFU restart or a long Wi-Fi drop resumes the
   // call instead of ejecting the user after about 27 s.
-  describe("attemptAutoReconnect slow phase (D-4)", () => {
+  describe("attemptAutoReconnect slow phase", () => {
     let wsState: string;
     let sendSpy: ReturnType<typeof vi.fn<(msg: { type: string }) => string | undefined>>;
     let errorCb: ReturnType<typeof vi.fn<(message: string) => void>>;
@@ -5008,7 +5008,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("attemptAutoReconnect tail supersession guard (OC-0009)", () => {
+  describe("attemptAutoReconnect tail supersession guard", () => {
     // reconnectSuperseded() is only checked up through room.connect(); once
     // the success branch sets state to "connected" it stops being usable
     // (state is legitimately no longer "reconnecting" for a still-current
@@ -5084,7 +5084,7 @@ describe("LiveKitSession", () => {
     // (Server/ws/livekit.go tokenTTL). If the client's only periodic
     // refresh fires later than that, any reconnect attempt after the first
     // 5 minutes of a call presents an already-expired token and fails.
-    it("refreshes the token before the server's 5-minute TTL expires (OC-0014)", async () => {
+    it("refreshes the token before the server's 5-minute TTL expires", async () => {
       const mockWs = { send: vi.fn() } as any;
       session.setWsClient(mockWs);
       session.setServerHost("localhost:7880");
@@ -5173,7 +5173,7 @@ describe("LiveKitSession", () => {
     // fails (the exact OC-0014 failure mode the 4-minute cadence exists to
     // avoid). The post-timeout retry must use the server's rate-limit
     // cadence (60s), not the periodic one (240s).
-    it("re-arms at the 60s retry cadence, not the full 4-minute interval, after an unanswered refresh (OC-0429)", async () => {
+    it("re-arms at the 60s retry cadence, not the full 4-minute interval, after an unanswered refresh", async () => {
       const mockWs = { send: vi.fn() } as any;
       session.setWsClient(mockWs);
       session.setServerHost("localhost:7880");
@@ -5326,7 +5326,7 @@ describe("LiveKitSession", () => {
       expect(offerSends(ws)).toHaveLength(1);
     });
 
-    it("fails closed when the pin store cannot be read (DC-08): rejects, never re-pins", async () => {
+    it("fails closed when the pin store cannot be read: rejects, never re-pins", async () => {
       // A transient keyring error used to read as "no pin stored", sending the
       // peer down the first-sight path — verifying against and RE-PINNING the
       // server-delivered key. With the pin unknown, no trust decision is
@@ -5522,7 +5522,7 @@ describe("LiveKitSession", () => {
   // bughunt-fix wave 2: OC-0001, OC-0006, OC-0009, OC-0010, OC-0015, OC-0029
   // -----------------------------------------------------------------------
 
-  describe("[OC-0001] pending-join drain re-enters connectAndSetup without E2EE teardown", () => {
+  describe("pending-join drain re-enters connectAndSetup without E2EE teardown", () => {
     it("does not carry a stale key-holder promotion into a join drained while still 'connecting'", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -5579,7 +5579,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("[OC-0006] connectAndSetup supersession checkpoints re-sync module room wiring", () => {
+  describe("connectAndSetup supersession checkpoints re-sync module room wiring", () => {
     it("unwires DeviceManager/AudioPipeline/AudioElements when checkpoint 1 fires after a concurrent leaveVoice that landed during room creation", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -5620,7 +5620,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("[OC-0009] handleVoiceToken ignores a voice_token for a channel already left", () => {
+  describe("handleVoiceToken ignores a voice_token for a channel already left", () => {
     it("does not connect when the token arrives after the user left before connectAndSetup ever started", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -5659,7 +5659,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("[OC-0010] e2ee-timeout cleanup honors a queued pendingJoin", () => {
+  describe("e2ee-timeout cleanup honors a queued pendingJoin", () => {
     it("does not send voice_leave / leaveVoiceChannel and preserves the queued join when the key exchange times out with a join queued", async () => {
       const ws = { send: vi.fn() };
       session.setServerHost("localhost:7880");
@@ -5705,7 +5705,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("[OC-0015] token refresh survives livekit-client's own internal reconnect", () => {
+  describe("token refresh survives livekit-client's own internal reconnect", () => {
     it("takes the refresh fast path when Room.state is mid-internal-reconnect instead of tearing down the session", async () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
@@ -5731,7 +5731,7 @@ describe("LiveKitSession", () => {
     });
   });
 
-  describe("[OC-0029] requestTokenRefresh throttles to the server's 1-per-60s budget", () => {
+  describe("requestTokenRefresh throttles to the server's 1-per-60s budget", () => {
     it("does not resend voice_token_refresh within 60s of the previous one", async () => {
       const mockWs = { send: vi.fn() } as any;
       session.setWsClient(mockWs);
