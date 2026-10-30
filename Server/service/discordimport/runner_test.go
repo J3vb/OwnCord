@@ -1,9 +1,12 @@
 package discordimport
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"os"
 	"strings"
@@ -540,5 +543,80 @@ func TestRun_ImportsAJSONAttachmentFromTheMediaFolder(t *testing.T) {
 	}
 	if n := h.count(`SELECT COUNT(*) FROM attachments`); n != 1 {
 		t.Errorf("attachment rows = %d, want the json file", n)
+	}
+}
+
+func TestRunning_FindsAJobOnlyWhileItRuns(t *testing.T) {
+	h := newHarness(t, 2)
+	release := make(chan struct{})
+	reached := make(chan struct{})
+	var once sync.Once
+	h.runner.afterChunk = func(context.Context, int) {
+		once.Do(func() { close(reached) })
+		<-release
+	}
+	job, err := h.runner.Start(context.Background(), Request{Export: h.fixtureZip()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-reached
+	if h.runner.Running(job.ID) != job {
+		t.Error("a running job was not found by id")
+	}
+	st, err := h.runner.Status(context.Background(), job.ID)
+	if err != nil || st.Status != db.ImportRunning {
+		t.Errorf("status = %+v, %v", st, err)
+	}
+	if latest, err := h.runner.Latest(context.Background()); err != nil || latest.ID != job.ID {
+		t.Errorf("latest = %+v, %v", latest, err)
+	}
+	close(release)
+	job.Wait()
+	if h.runner.Running(job.ID) != nil {
+		t.Error("a finished job is still registered")
+	}
+	if _, err := h.runner.Status(context.Background(), job.ID+99); !errors.Is(err, db.ErrNotFound) {
+		t.Errorf("unknown id err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestRun_RecordsPNGSizeAndLeavesUnreadableImagesUnmeasured(t *testing.T) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewGray(image.Rect(0, 0, 7, 3))); err != nil {
+		t.Fatal(err)
+	}
+	h := newHarness(t, 2)
+	if _, res := h.run(h.fixtureZip(zipEntry{name: "channel.json_Files/pic one.png", body: buf.String()})); res.Err != nil {
+		t.Fatalf("result = %+v", res)
+	}
+	var w, hgt int
+	if err := h.database.QueryRowContext(context.Background(), `SELECT width, height FROM attachments WHERE filename = 'pic one.png'`).Scan(&w, &hgt); err != nil || w != 7 || hgt != 3 {
+		t.Errorf("png size = %dx%d (%v), want 7x3", w, hgt, err)
+	}
+
+	h = newHarness(t, 2)
+	if _, res := h.run(h.fixtureZip(zipEntry{name: "channel.json_Files/pic one.png", body: pngMagic + "data"})); res.Err != nil {
+		t.Fatalf("result = %+v", res)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM attachments WHERE filename = 'pic one.png' AND width IS NULL AND height IS NULL`); n != 1 {
+		t.Errorf("a broken png got a size: %d unmeasured rows, want 1", n)
+	}
+}
+
+func TestCategoryExists_ZeroIsFreeAndUnknownIsNo(t *testing.T) {
+	h := newHarness(t, 2)
+	ctx := context.Background()
+	if ok, err := h.runner.CategoryExists(ctx, 0); !ok || err != nil {
+		t.Errorf("id 0 = %v, %v, want true", ok, err)
+	}
+	if ok, err := h.runner.CategoryExists(ctx, 4242); ok || err != nil {
+		t.Errorf("unknown id = %v, %v, want false", ok, err)
+	}
+	cat, err := h.database.CreateChannelCategory(ctx, "Archive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := h.runner.CategoryExists(ctx, cat.ID); !ok || err != nil {
+		t.Errorf("real category = %v, %v, want true", ok, err)
 	}
 }

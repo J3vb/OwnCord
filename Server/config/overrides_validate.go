@@ -49,6 +49,7 @@ var editableRules = map[string]func(any) (any, error){
 	"server.pprof_block_profile_rate":           intRule(0, 1_000_000_000),
 	"server.pprof_mutex_profile_fraction":       intRule(0, 1_000_000),
 	"upload.max_size_mb":                        intRule(1, maxUploadSizeMB),
+	"upload.import_max_mb":                      intRule(1, maxMiB),
 	"upload.user_quota_mb":                      intRule(0, maxMiB),
 	"voice.udp_port":                            udpPortRule,
 

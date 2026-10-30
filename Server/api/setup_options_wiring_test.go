@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
@@ -14,7 +17,7 @@ func TestAdminSetupOptions_CarryBackgroundAndShutdown(t *testing.T) {
 	bg := syncutil.NewGroup(context.Background())
 	shutdown := make(chan struct{})
 	rt := Runtime{Background: bg, Shutdown: shutdown, SetupToken: "tok"}
-	got := adminSetupOptions(&config.Config{}, rt)
+	got := adminSetupOptions(&config.Config{}, rt, nil)
 	if got.Background != bg {
 		t.Error("SetupOptions.Background is not Runtime.Background")
 	}
@@ -23,5 +26,41 @@ func TestAdminSetupOptions_CarryBackgroundAndShutdown(t *testing.T) {
 	}
 	if got.SetupToken != "tok" {
 		t.Errorf("SetupToken = %q, want tok", got.SetupToken)
+	}
+}
+
+// The import routes get the configured cap, a long-transfer deadline and the
+// data-directory scratch folder.
+func TestAdminSetupOptions_CarryDiscordImportSettings(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Upload.ImportMaxMB = 7
+	cfg.Server.DataDir = t.TempDir()
+	got := adminSetupOptions(cfg, Runtime{}, nil)
+	if got.ImportMaxBytes != 7<<20 {
+		t.Errorf("ImportMaxBytes = %d, want %d", got.ImportMaxBytes, 7<<20)
+	}
+	if got.BeginTransfer == nil {
+		t.Error("BeginTransfer is not set")
+	}
+	if want := filepath.Join(cfg.Server.DataDir, admin.ImportDirName); got.ImportDir != want {
+		t.Errorf("ImportDir = %q, want %q", got.ImportDir, want)
+	}
+}
+
+// Leftovers of an earlier run are removed at start-up.
+func TestImportTempDir_ClearsLeftovers(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Server.DataDir = t.TempDir()
+	dir := filepath.Join(cfg.Server.DataDir, admin.ImportDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dir, "discord-import-1.zip")
+	if err := os.WriteFile(stale, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	importTempDir(cfg)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("stale upload survived start-up: %v", err)
 	}
 }

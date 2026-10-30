@@ -357,6 +357,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		mountRetentionRoutes(r, svc.Retention)
 
 		mountChannelActionRoutes(r, "/channels", channels, hub)
+		mountDiscordImportRoutes(r, newDiscordImportAPI(svc.Retention, setupOpts))
 		r.Group(func(r chi.Router) {
 			r.Use(requirePerm(permissions.ManageChannels))
 			r.Get("/channels", handleListChannels(channels))
@@ -410,6 +411,20 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 	})
 
 	return api
+}
+
+// mountDiscordImportRoutes registers the Discord import routes. Importing
+// creates a channel, so they sit behind MANAGE_CHANNELS like channel create.
+// "/discord-imports/latest" and ".../upload" are registered before the
+// "{id}" route so neither is read as an id.
+func mountDiscordImportRoutes(r chi.Router, imp *discordImportAPI) {
+	r.Group(func(r chi.Router) {
+		r.Use(requirePerm(permissions.ManageChannels))
+		r.Get("/discord-imports/latest", imp.handleLatest)
+		r.Post("/discord-imports/upload", imp.handleUpload)
+		r.Get("/discord-imports/{id}", imp.handleStatus)
+		r.Post("/discord-imports/{id}/cancel", imp.handleCancel)
+	})
 }
 
 // mountBackupRoutes registers the backup, restore and archive routes. Create
