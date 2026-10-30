@@ -334,7 +334,7 @@ export function parseKeybinds(
     const v = stored[a.id];
     if (v !== undefined && v !== null) level.set(a.id, 0);
   }
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const a of REBINDABLE_ACTIONS) {
       const lv = level.get(a.id);

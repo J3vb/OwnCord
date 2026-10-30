@@ -18,13 +18,7 @@ export const APP_SOUNDS_VOLUME_KEY = "appSoundsVolume";
 
 /** Every sound that has its own switch. */
 export type SoundSwitch =
-  | "message"
-  | "mention"
-  | "ring"
-  | "ringback"
-  | "joinLeave"
-  | "muteDeafen"
-  | "stream";
+  "message" | "mention" | "ring" | "ringback" | "joinLeave" | "muteDeafen" | "stream";
 
 /** The pref key behind each per-sound switch. */
 export const SOUND_SWITCH_KEYS: Readonly<Record<SoundSwitch, string>> = {
