@@ -184,6 +184,7 @@ func TestVoiceRemovedWatch_KeepsLiveMembership(t *testing.T) {
 // TestVoiceRemovedWatch_RunningHubRemovesWithoutManualTick: the running hub's
 // own watch loop removes a returning identity within a couple of intervals.
 func TestVoiceRemovedWatch_RunningHubRemovesWithoutManualTick(t *testing.T) {
+	t.Parallel()
 	h := newVMHarness(t, 1)
 	alice := h.members[0]
 	chID, identity := joinedIdentity(t, h, alice, "watch-loop")

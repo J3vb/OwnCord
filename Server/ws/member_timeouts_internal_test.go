@@ -211,6 +211,7 @@ func TestNotifyModAction_PublishesToModeratorsAndTargetOnly(t *testing.T) {
 }
 
 func TestTimeoutLiftAndExpiry_PublishRemoval(t *testing.T) {
+	t.Parallel()
 	f := newTimeoutViewFixture(t)
 	ctx := context.Background()
 	issueTimeout(t, f, f.targetID)
@@ -290,6 +291,7 @@ func (c *collector) finish() {
 // Two moderators issue and lift concurrently: whatever the interleaving, the
 // last frame a moderator holds is the newest mirror, and so is the target's.
 func TestMemberTimeouts_ConcurrentIssueLiftConverges(t *testing.T) {
+	t.Parallel()
 	f := newTimeoutViewFixture(t)
 	ctx := context.Background()
 	col := collect(t, f.sends[f.modID])
@@ -387,6 +389,7 @@ func TestRoleChange_RevokeSendsOwnOnly(t *testing.T) {
 // A moderator offline while a timeout is issued resumes onto a full ready
 // (the publish bumped the visibility watermark) that carries the list.
 func TestResume_AcrossTimeout_FullReadyCarriesMemberTimeouts(t *testing.T) {
+	t.Parallel()
 	database := newTeardownTestDB(t)
 	ctx := context.Background()
 	adminID, err := database.CreateUser(ctx, "rs-admin", "hash", 1)

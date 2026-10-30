@@ -28,6 +28,7 @@ func TestPayloadChannelID_ThreadChangedUsesTheParent(t *testing.T) {
 // other frame of a readable parent, and withheld under a labelled parent the
 // user has not acknowledged.
 func TestReconnect_ReplaysThreadChanged(t *testing.T) {
+	t.Parallel()
 	t.Run("readable parent", func(t *testing.T) {
 		if !resumeSeesThreadChanged(t, false) {
 			t.Fatal("resume dropped a thread_changed for a readable parent")

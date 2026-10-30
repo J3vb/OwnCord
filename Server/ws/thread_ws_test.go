@@ -102,6 +102,7 @@ func countType(frames [][]byte, typ string) int {
 // The security edge: a socket focused on a thread loses it, silently, when the
 // parent's override starts denying READ.
 func TestThreadFocus_ParentOverrideRevokes(t *testing.T) {
+	t.Parallel()
 	f := newThreadWSFixture(t)
 	c, send := f.connect(t, "reader")
 
@@ -271,6 +272,7 @@ func TestThread_ChannelListHasNoThreadRows(t *testing.T) {
 // A flush that read the thread before it was deleted must not announce it
 // afterwards: the frame is dropped unless its timer entry is still live.
 func TestThreadCoalescer_NoThreadChangedAfterDelete(t *testing.T) {
+	t.Parallel()
 	f := newThreadWSFixture(t)
 	c, send := f.connect(t, "watcher2")
 	f.hub.pubsub.Subscribe(c, ChannelTopic(f.parent))

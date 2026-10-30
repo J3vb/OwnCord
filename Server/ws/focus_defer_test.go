@@ -167,6 +167,7 @@ func TestChannelFocusBurst_FailedFocusSupersedesPending(t *testing.T) {
 // it subscribes without marking the channel read, while a deferred default
 // focus does mark it.
 func TestDeferredFocus_KeepsReadFlag(t *testing.T) {
+	t.Parallel()
 	hub, c, chans, _ := newFocusHub(t, 2)
 	ctx := context.Background()
 	if _, err := hub.db.CreateMessage(ctx, chans[0], c.userID, "unread", nil); err != nil {

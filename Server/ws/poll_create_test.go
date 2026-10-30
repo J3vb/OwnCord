@@ -96,6 +96,7 @@ func (h *forwardHarness) sendPoll(cmid, reqID string, channelID int64, mutate fu
 }
 
 func TestPollCreate_ChannelAndDMFanout(t *testing.T) {
+	t.Parallel()
 	h := newForwardHarness(t)
 
 	// Channel target: bob, who has it focused, gets one sequenced chat_message
