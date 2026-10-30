@@ -140,6 +140,11 @@ saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
 and none applies while the DM call panel hosts the grid. A control bar at the
 bottom of the call view, in grid and focus view, has mute, deafen, camera,
 share and disconnect; camera and share are inert until the join has connected.
+On a phone with a front and a back camera, **Flip camera** sits beside Camera
+while the camera is on and moves it to the camera facing the other way; a tap
+while a flip is still switching does nothing. Share is left out where the
+device cannot capture its screen (the Android app, a phone browser): those can
+still watch a share.
 **Pop out call**, last in the header, moves the whole call view (tiles,
 toggles and control bar) into a pop-out window of its own and returns the app
 window to the chat; opening the call again from the app raises that window.
