@@ -38,6 +38,7 @@ import { highlightMatches, normalizeQuery, tabMatches } from "./settings/setting
 import { confirmLogout } from "../features/settings/logoutConfirm";
 import { readAppVersion } from "../features/whats-new/appVersion";
 import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
+import { isAndroidApp } from "../features/voice/native/platform";
 
 const log = createLogger("SettingsOverlay");
 
@@ -150,6 +151,8 @@ const TAB_ICONS: Record<TabName, IconName> = {
 const SAFETY = "Safety" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.myUploads")
 const MY_UPLOADS = "My uploads" satisfies TabName;
+// i18n-exempt: TabName key; its label is settingsText("tabs.keybinds")
+const KEYBINDS = "Keybinds" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.account")
 const ACCOUNT = "Account" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.about")
@@ -717,7 +720,7 @@ export function createSettingsOverlay(
         });
         uploadsBtn.prepend(createIcon(TAB_ICONS[MY_UPLOADS], 18));
         uploadsBtn.appendChild(document.createTextNode(tabLabel(MY_UPLOADS)));
-        uploadsBtn.addEventListener("click", () => setActiveTab(MY_UPLOADS), {
+        uploadsBtn.addEventListener("click", () => openSection(MY_UPLOADS), {
           signal: disposable.signal,
         });
         tabButtons.set(MY_UPLOADS, uploadsBtn);
@@ -733,8 +736,13 @@ export function createSettingsOverlay(
     );
     sidebar.appendChild(appSettingsCat);
 
+    // The Android app has no keyboard shortcuts or push-to-talk key to set.
     const appTabs = (Object.keys(TAB_LABEL_KEYS) as TabName[]).filter(
-      (name) => name !== ACCOUNT && name !== SAFETY && name !== MY_UPLOADS,
+      (name) =>
+        name !== ACCOUNT &&
+        name !== SAFETY &&
+        name !== MY_UPLOADS &&
+        !(name === KEYBINDS && isAndroidApp()),
     );
     for (const name of appTabs) {
       const btn = createElement("button", {

@@ -73,6 +73,7 @@ export const settingsText = defineCatalog("settings", {
   "appearance.fontSize": "Font Size",
   "appearance.fontSize.value": "{size}px",
   "appearance.theme.system": "Sync with computer",
+  "appearance.theme.system.android": "Sync with system",
   "appearance.compactMode": "Compact Mode",
   "appearance.zoom": "Zoom Level",
   "appearance.zoom.value": "{percent}%",
@@ -93,6 +94,8 @@ export const settingsText = defineCatalog("settings", {
   "appearance.customThemes": "Custom Themes",
   "appearance.customThemes.desc":
     "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed. Ctrl+Shift+Backspace turns a custom theme off.",
+  "appearance.customThemes.desc.android":
+    "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed.",
   "appearance.customThemes.empty": "No custom themes yet.",
   "appearance.customThemes.new": "New theme",
   "appearance.customThemes.import": "Import .css",
@@ -134,6 +137,8 @@ export const settingsText = defineCatalog("settings", {
 
   "notifications.desktop.label": "Desktop Notifications",
   "notifications.desktop.desc": "Show desktop notifications for messages",
+  "notifications.desktop.label.android": "Notifications",
+  "notifications.desktop.desc.android": "Show notifications for messages",
   "notifications.permission.label": "System Notification Permission",
   "notifications.permission.allowed": "Allowed",
   "notifications.permission.blocked": "Blocked",
@@ -219,10 +224,12 @@ export const settingsText = defineCatalog("settings", {
   "images.chatBar.emoji.label": "Show emoji button",
   "images.chatBar.emoji.desc":
     "Show the emoji button in the chat bar. Ctrl+E still opens the picker",
+  "images.chatBar.emoji.desc.android": "Show the emoji button in the chat bar",
   "images.chatBar.sticker.label": "Show sticker button",
   "images.chatBar.sticker.desc": "Show the sticker button in the chat bar",
   "images.chatBar.gif.label": "Show GIF button",
   "images.chatBar.gif.desc": "Show the GIF button in the chat bar. Ctrl+G still opens the picker",
+  "images.chatBar.gif.desc.android": "Show the GIF button in the chat bar",
   "images.chatBar.poll.label": "Show Poll button",
   "images.chatBar.poll.desc": "Show the Poll button in the chat bar",
   "images.chatBar.voice.label": "Show voice message button",
@@ -529,6 +536,7 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.card.microphone": "Microphone",
   "voiceAudio.card.speakers": "Speakers",
   "voiceAudio.card.camera": "Camera & screen share",
+  "voiceAudio.card.camera.android": "Camera",
   "voiceAudio.card.processing": "Voice processing",
   "voiceAudio.mic.hearing": "Hearing you",
   "voiceAudio.mic.noInput": "No input",

@@ -1,6 +1,7 @@
 // The running game (`src-tauri/src/game_activity.rs`), polled by the game
 // activity loop while the sharing setting is on.
 import { invoke } from "@tauri-apps/api/core";
+import { isAndroidHost } from "@lib/hostPlatform";
 import type {
   DetectedGame,
   DetectPrefs,
@@ -43,7 +44,10 @@ function parsePrograms(raw: unknown): RunningProgram[] {
 }
 
 export const gameDetector: GameDetector = {
-  available: true,
+  // A phone has no desktop games to detect.
+  get available(): boolean {
+    return !isAndroidHost();
+  },
   async detect(prefs?: DetectPrefs): Promise<DetectedGame | null> {
     try {
       const raw =

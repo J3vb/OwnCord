@@ -24,7 +24,7 @@ import {
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
-import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { isAndroidApp, isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
 import { copyThenRelabel } from "@lib/ui/clipboard";
 
@@ -219,9 +219,9 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       },
       { signal: buildSignal },
     );
-    // A page has no log folder (the browser keeps logs in memory), so the web
-    // build offers only the bundle.
-    if (__OWNCORD_WEB__) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
+    // A page has no log folder (the browser keeps logs in memory), and the
+    // Android app cannot open one, so both offer only the bundle.
+    if (__OWNCORD_WEB__ || isAndroidApp()) appendChildren(helpHead, helpTitle, diagCopy, bundleBtn);
     else appendChildren(helpHead, helpTitle, diagCopy, openLogsBtn, bundleBtn);
     appendChildren(helpCard, helpHead, bundleNote, bundleStatus);
     section.appendChild(helpCard);
@@ -431,7 +431,8 @@ export function createLogsTab(getActiveTab: () => TabName, signal: AbortSignal):
       appendChildren(modeRow, modeInfo, modeSelect);
       shareCard.appendChild(modeRow);
     }
-    section.appendChild(shareCard);
+    // Screen sharing does not exist on the Android app, so there is nothing to test.
+    if (!isAndroidApp()) section.appendChild(shareCard);
 
     // Live update: subscribe to new log entries
     unsubLogListener?.();

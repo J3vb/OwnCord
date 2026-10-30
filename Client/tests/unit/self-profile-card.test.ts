@@ -15,6 +15,7 @@ import { savePref } from "@lib/prefs/preferences";
 import { createPresenceSender } from "@lib/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
+import { clearHost, hostAndroidApp } from "../helpers/androidHost";
 
 function setUser(custom: string | null = null): void {
   authStore.setState(() => ({
@@ -113,6 +114,19 @@ describe("SelfProfileCard from the user bar", () => {
     );
     expect(q("[data-testid='spc-note-invisible']")?.textContent).toBe("You will appear offline");
     expect(q("[data-testid='spc-note-online']")).toBeNull();
+  });
+
+  it('words the Do Not Disturb note without "desktop" in the Android app', () => {
+    hostAndroidApp();
+    try {
+      trigger().click();
+      expect(q("[data-testid='spc-note-dnd']")?.textContent).toBe(
+        "You will not receive notifications",
+      );
+      expect(q("[data-testid='spc-note-invisible']")?.textContent).toBe("You will appear offline");
+    } finally {
+      clearHost();
+    }
   });
 
   it("choosing a status saves and sends it, closes the card and refocuses the button", () => {

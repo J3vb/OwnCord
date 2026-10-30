@@ -4,6 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/prefs/preferences";
+import { isAndroidApp } from "../../features/voice/native/platform";
 
 // Preference persistence lives in `@lib/prefs/preferences` so `lib/` and `features/`
 // modules can use it without importing the component layer.
@@ -11,6 +12,12 @@ import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib
 // critically, so both layers share one implementation (they used to be
 // copy-pasted and had drifted).
 export { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref };
+
+/** The Android app's own wording where the desktop text would mention a
+ *  desktop, a taskbar or a keyboard shortcut. */
+export function platformText(desktop: string, android: string): string {
+  return isAndroidApp() ? android : desktop;
+}
 
 // ---------------------------------------------------------------------------
 // Accessible toggle creation
