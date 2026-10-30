@@ -41,7 +41,7 @@ test.describe("Connect Page", () => {
     await expect(usernameInput).toBeVisible();
     await expect(passwordInput).toBeVisible();
 
-    await expect(hostInput).toHaveAttribute("placeholder", "localhost:8443");
+    await expect(hostInput).toHaveAttribute("placeholder", "e.g. chat.example.com:8443");
     await expect(passwordInput).toHaveAttribute("type", "password");
   });
 

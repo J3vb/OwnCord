@@ -98,6 +98,7 @@ export const connectText = defineCatalog("connect", {
   "login.title": "Login",
   "login.registerTitle": "Register",
   "login.hostLabel": "Server Address",
+  "login.hostPlaceholder": "e.g. chat.example.com:8443",
   "login.usernameLabel": "Username",
   "login.passwordLabel": "Password",
   "login.rememberPassword": "Remember password",
@@ -122,6 +123,8 @@ export const connectText = defineCatalog("connect", {
     "Registration received. An admin has to approve your account before you can sign in.",
 
   "validation.hostRequired": "Server address is required.",
+  "validation.hostInvalid":
+    "That is not a server address. Use a name or IP address with an optional port, like chat.example.com:8443.",
   "validation.usernameRequired": "Username is required.",
   "limits.usernameHint":
     "{min}–{max} characters: letters, digits, _ . and -. Start with a letter or digit.",
