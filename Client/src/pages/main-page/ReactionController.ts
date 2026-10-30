@@ -4,6 +4,7 @@
  */
 
 import { createElement } from "@lib/dom";
+import { isPhoneLayout, openBottomSheet } from "@lib/ui/bottomSheet";
 import { createLazyScreen } from "@components/lazyScreen";
 import {
   atReactionLimit,
@@ -15,6 +16,7 @@ import { listCustomEmoji } from "@stores/emoji.store";
 import type { WsClient } from "@lib/ws";
 import { shellText } from "../../i18n/shell";
 import { connectText } from "../../i18n/connect";
+import { messagingText } from "../../i18n/messaging";
 
 // The picker loads on its first open, so its code stays out of the main-page chunk.
 const emojiPickerScreen = createLazyScreen("emoji-picker", () => import("@components/EmojiPicker"));
@@ -73,6 +75,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
   }
 
   let activePickerDestroy: (() => void) | null = null;
+  let activeSheetClose: (() => void) | null = null;
 
   // Set while the picker's code loads. A click on the same message's react
   // button cancels it (the button toggles), as does any close or destroy().
@@ -82,13 +85,17 @@ export function createReactionController(opts: ReactionControllerOptions): React
     pendingPicker = null;
     activePickerDestroy?.();
     activePickerDestroy = null;
+    const sheetClose = activeSheetClose;
+    activeSheetClose = null;
+    sheetClose?.();
     const wrap = document.querySelector(".reaction-picker-wrap");
     if (wrap !== null) wrap.remove();
   }
 
   function openPicker(msgId: number): void {
+    // A phone opens the picker in a sheet, so it needs no hover-bar button to sit by.
     const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
-    if (reactBtn === null) return;
+    if (reactBtn === null && !isPhoneLayout()) return;
 
     // Close any existing reaction picker (including proper cleanup). A picker
     // on the SAME message toggles closed and returns; one on a DIFFERENT
@@ -98,6 +105,7 @@ export function createReactionController(opts: ReactionControllerOptions): React
       pendingPicker = null;
       if (sameMessage) return;
     }
+    if (activeSheetClose !== null) closePicker();
     const existingWrap = document.querySelector(".reaction-picker-wrap");
     if (existingWrap !== null) {
       const sameMessage = existingWrap.getAttribute("data-message-id") === String(msgId);
@@ -122,7 +130,40 @@ export function createReactionController(opts: ReactionControllerOptions): React
       });
   }
 
+  function mountPickerSheet(screen: typeof import("@components/EmojiPicker"), msgId: number): void {
+    const picker = screen.createEmojiPicker({
+      customEmoji: listCustomEmoji(),
+      onSelect: (selectedEmoji: string, select) => {
+        if (select?.keepOpen !== true) closePicker();
+        sendReaction(msgId, selectedEmoji);
+      },
+      onClose: () => {
+        closePicker();
+      },
+    });
+    activePickerDestroy = picker.destroy;
+    picker.element.classList.add("in-sheet");
+    const sheet = openBottomSheet({
+      label: messagingText("action.react"),
+      content: picker.element,
+      size: "tall",
+      className: "picker-sheet",
+      testId: "reaction-picker-sheet",
+      focusFirst: false,
+      onClosed: () => {
+        if (activeSheetClose !== sheet.close) return;
+        activeSheetClose = null;
+        closePicker();
+      },
+    });
+    activeSheetClose = sheet.close;
+  }
+
   function mountPicker(screen: typeof import("@components/EmojiPicker"), msgId: number): void {
+    if (isPhoneLayout()) {
+      mountPickerSheet(screen, msgId);
+      return;
+    }
     // The row may have re-rendered or gone while the code loaded.
     const reactBtn = document.querySelector(`[data-testid="msg-react-${msgId}"]`);
     if (reactBtn === null) return;
