@@ -1,5 +1,5 @@
 {
-  "nextId": 533,
+  "nextId": 535,
   "findings": [
     {
       "id": "OC-0001",
@@ -12307,6 +12307,52 @@
       "found": "2026-10-30",
       "hunt": "bug-hunt-2026-10-30",
       "lens": "server-api",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0533",
+      "title": "A message near the 4,000-character limit with picked mentions passed the composer check and was then refused",
+      "file": "Client/src/components/MessageInput.ts",
+      "line": 1066,
+      "severity": "medium",
+      "why": "The composer, the inline edit box and the character counter measured the text as typed, but a picked @name is sent as the longer <@id> token. A draft under the limit could be over it once sent; the box was already cleared and Retry failed the same way.",
+      "repro": "Pick two mentions, fill the draft to 3,999 characters and press Enter: the send is refused by the server after the box was cleared.",
+      "evidence": "Client/tests/unit/mention-autocomplete.test.ts, message-list-edit-lifecycle.test.ts and src/features/messaging/inlineEdit.test.ts.",
+      "suggestedFix": "Measure the expanded content in code points before clearing the box, in the edit box and in the counter.",
+      "fix": {
+        "commit": "pending",
+        "test": "mention-autocomplete.test.ts (composer id tokens), message-list-edit-lifecycle.test.ts, inlineEdit.test.ts",
+        "revertProof": "fail (reverting the length check on the expanded content fails the composer, counter and edit tests)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "client-ui",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0534",
+      "title": "Turning Role Colors on or off did not recolour usernames already on screen",
+      "file": "Client/src/components/MessageList.ts",
+      "line": 2845,
+      "severity": "low",
+      "why": "The role colour flag is cached in formatting.ts and refreshed on the preference change, but the rendered rows were only repainted by a later member update.",
+      "repro": "Open a channel with coloured names, turn Role Colors off in Settings > Accessibility: the names keep their colour until the rows are redrawn.",
+      "evidence": "Client/tests/unit/message-list.test.ts (recolours rendered names when the Role Colors preference is toggled).",
+      "suggestedFix": "Repaint the rendered author rows from the existing preference-change listener.",
+      "fix": {
+        "commit": "pending",
+        "test": "message-list.test.ts recolours rendered names when the Role Colors preference is toggled",
+        "revertProof": "fail (removing the roleColors listener fails the test)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "client-ui",
       "finder": "claude",
       "fixedDate": "2026-10-30"
     }

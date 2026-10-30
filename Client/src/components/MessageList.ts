@@ -889,6 +889,10 @@ export function createMessageList(options: MessageListOptions): MessageListCompo
     // place, the same way midnight does. Owned by disposable.signal, so the
     // listener dies with the component.
     onPrefChange(["timeFormat"], api.relabelRenderedTimes, st.disposable.signal);
+    // Role Colors on/off recolours the names already drawn. formatting.ts
+    // refreshes its cached flag from the same event first (it registered
+    // earlier), so the rows are repainted from the new value.
+    onPrefChange(["roleColors"], api.refreshAuthorRows, st.disposable.signal);
   }
 
   function destroy(): void {

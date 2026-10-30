@@ -135,11 +135,12 @@ export function createInputSend(st: InputState, api: InputApi) {
     const hasAttachments = st.pendingAttachments.length > 0;
     if (content.length === 0 && !hasAttachments) return;
 
-    // The spread counts code points, which is what the server counts. A
-    // `.length` check here would count UTF-16 units and refuse ~2000 astral
-    // emoji the server accepts. Checked before the debounce stamp below so a
-    // refused send does not suppress the next one.
-    if ([...typed].length > MAX_MESSAGE_LEN) {
+    // The expanded content is what the server counts: a picked `@name` is sent
+    // as a longer `<@id>`. The spread counts code points, as the server does;
+    // a `.length` check would count UTF-16 units and refuse ~2000 astral emoji
+    // the server accepts. Checked before the debounce stamp below so a refused
+    // send does not suppress the next one.
+    if ([...content].length > MAX_MESSAGE_LEN) {
       showUploadError(
         messagingText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }),
         canAttachLongText(st.textarea.value.trim())

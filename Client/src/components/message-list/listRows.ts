@@ -249,16 +249,18 @@ export function createListRows(st: ListState, api: ListApi) {
     // A restored edit draft (failed save) is converted the same way.
     const restored = text === undefined ? shown : tokensToPickedText(text, names);
     const startText = restored.text;
+    // Without the capability the box showed the raw text; save it as is.
+    const expandPicks = (content: string): string =>
+      applyPickedMentions(content, idMentionsEnabled() ? [...shown.picks, ...restored.picks] : []);
     withInlineEdit(
       (m) => {
         if (st.edit === null || st.edit.gen !== gen || st.disposable.signal.aborted) return;
         const session = m.createInlineEdit({
           messageId,
           text: startText,
+          expand: expandPicks,
           onSave: (content) => {
-            // Without the capability the box showed the raw text; save it as is.
-            const picks = idMentionsEnabled() ? [...shown.picks, ...restored.picks] : [];
-            if (st.options.onEditSave(messageId, applyPickedMentions(content, picks))) {
+            if (st.options.onEditSave(messageId, expandPicks(content))) {
               closeEdit(true);
             }
           },

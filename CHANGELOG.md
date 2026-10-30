@@ -105,6 +105,14 @@ and only when it changes something a contributor or fork holder must do
 - On phones the keyboard popped up over the saved servers as soon as the login page opened — the page no longer focuses the address box on a touch screen.
 - Password managers offered the saved password when creating an account — Register now asks for a new one, and phone keyboards no longer capitalise the username or invite code.
 
+**Messages & files**
+
+- A message near the 4,000-character limit with picked @mentions was counted before the mentions grew into their longer form, so the box was cleared and the send then failed. The limit, the counter and the edit box now count what is actually sent, and the draft stays when it is too long.
+
+**Desktop UI**
+
+- Turning Role Colors on or off in Settings > Accessibility now recolours the usernames already in the chat, without reopening the channel.
+
 **Phones and touch screens**
 
 - Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
