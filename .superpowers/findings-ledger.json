@@ -3957,7 +3957,7 @@
       "confidence": "high",
       "fix": {
         "commit": "e391caeb",
-        "test": "Client/tests/unit/ptt.test.ts",
+        "test": "Client/tests/unit/ptt/keyAndGating.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "In updatePttKey, after the `await initPtt()` succeeds, arm the gate if a call is already up \u2014 mirroring the join-time computation: if `voiceStore.getState().currentChannelId !== null && isPttPollingLive() && voiceStore.getState().pttGated !== true`, call `setPttGated(true)`, and if the user is not already self-muted/deafened, `setMuted(true)` and set `pttOwnsMute = true` so the next press may lift it. Putting it in updatePttKey (not initPtt) keeps the startup path, which has no call in progress, unchanged.",
