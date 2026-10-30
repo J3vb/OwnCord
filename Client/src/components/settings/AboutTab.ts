@@ -13,8 +13,8 @@ import { buildUpdateCheckRow, installInProgressText } from "../../features/updat
 import { subscribeAvailableUpdate } from "../../features/updates/availableUpdate";
 import type { AvailableUpdate } from "../../features/updates/availableUpdate";
 import { desktop } from "../../platform/desktop";
-import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/updater";
-import type { UpdateInstallState } from "@lib/updater";
+import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/net/updater";
+import type { UpdateInstallState } from "@lib/net/updater";
 import {
   REPO_URL,
   findVersion,

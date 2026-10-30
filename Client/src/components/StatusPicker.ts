@@ -5,13 +5,13 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import { MAX_CUSTOM_STATUS_LEN } from "@lib/userStatus";
-import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/nameLimits";
+import { MAX_CUSTOM_STATUS_LEN } from "@lib/presence/userStatus";
+import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/text/nameLimits";
 import { shellText } from "../i18n/shell";
 import { connectText } from "../i18n/connect";
 import { STATUS_DEFS, colorForStatus, type StatusDef } from "@components/statusDefs";
@@ -341,7 +341,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     // Skip the overwrite while the user is mid-edit (input focused) — an
     // unrelated store push (e.g. a role change) would otherwise clobber
     // in-progress typed text *and* reset the commit watermark, so the
-    // pending blur/Enter commit silently no-ops (OC-0369).
+    // pending blur/Enter commit silently no-ops.
     if (customInputEl !== null && document.activeElement === customInputEl) return;
     lastCommittedCustom = text;
     if (customInputEl !== null) customInputEl.value = text;

@@ -6,8 +6,8 @@
 import { createStore } from "@lib/store";
 import type { UploadPolicy, UserWithRole } from "@lib/types";
 import { createLogger } from "@lib/logger";
-import { registerSessionReset, runSessionResets } from "@lib/sessionRegistry";
-import type { SessionResetReason } from "@lib/sessionRegistry";
+import { registerSessionReset, runSessionResets } from "@lib/net/sessionRegistry";
+import type { SessionResetReason } from "@lib/net/sessionRegistry";
 
 const log = createLogger("auth.store");
 
@@ -18,7 +18,7 @@ const log = createLogger("auth.store");
  * wire epoch — the token is still valid, so main.ts keeps the stored
  * credential and the update it offers relaunches into auto-login.
  * "server_switch": the user quick-switched to another server — main.ts keeps
- * the departed server's credential so switching back resumes it (B7-13).
+ * the departed server's credential so switching back resumes it.
  */
 export type LogoutReason = SessionResetReason;
 
@@ -95,7 +95,7 @@ export function setAuth(
     token,
     // auth_ok's user never carries totp_enabled — only GET /auth/me does —
     // so a reconnect must not wipe the value the profile fetch established
-    // for the same account (OC-0354).
+    // for the same account.
     user:
       user.totp_enabled === undefined &&
       prev.user?.id === user.id &&
@@ -158,7 +158,7 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   // ahead of the `session` phase too; no session entry writes voiceStore.
   const wasInVoice = voice !== undefined && voice.currentChannelId !== null;
   if (voice !== undefined && voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
-    void import("@lib/livekitSession")
+    void import("@lib/voice/livekitSession")
       .then(({ leaveVoice }) => leaveVoice(false))
       .catch((e) => log.warn("Failed to leave voice session during clearAuth", e));
   }

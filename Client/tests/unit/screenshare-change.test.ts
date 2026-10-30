@@ -24,18 +24,18 @@ vi.mock("livekit-client", async (importOriginal) => {
 });
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
   h264GpuPublish: (codec: string) => codec === "h264",
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: (...args: unknown[]) => savePref(...args) as unknown,
 }));
 
-const { watchScreenEnded } = await import("@lib/screenShare");
+const { watchScreenEnded } = await import("@lib/voice/screenShare");
 const { changeScreenshareSource, setScreenshareQuality } =
   await import("../../src/features/voice/screenshareChange");
 const { voiceStore } = await import("@stores/voice.store");
@@ -63,6 +63,8 @@ function mst(id: string): FakeMst {
     },
     removeEventListener: (type: string, cb: EventListener) => listeners.get(type)?.delete(cb),
     fire: (type: string) => {
+      // Copy first: a listener that removes itself must not skip the next one.
+      // oxlint-disable-next-line unicorn/no-useless-spread
       for (const cb of [...(listeners.get(type) ?? [])]) cb(new Event(type));
     },
   };
@@ -229,7 +231,7 @@ describe("changeScreenshareSource", () => {
       }),
     );
     const changing = changeScreenshareSource(rig.state, rig.deps);
-    const { disableScreenshare } = await import("@lib/screenShare");
+    const { disableScreenshare } = await import("@lib/voice/screenShare");
     await disableScreenshare(rig.state, rig.deps);
     const fresh = track(Track.Kind.Video, "window-b");
     resolvePick([fresh]);
@@ -417,7 +419,7 @@ describe("setScreenshareQuality", () => {
     });
   });
 
-  it("a quality change on a 120 fps share keeps balanced degradation (M-2)", async () => {
+  it("a quality change on a 120 fps share keeps balanced degradation", async () => {
     const rig = setup(false);
     rig.state.fps = 120;
     rig.video.publishOptions = { ...rig.video.publishOptions, degradationPreference: "balanced" };

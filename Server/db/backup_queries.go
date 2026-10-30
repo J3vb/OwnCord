@@ -1,9 +1,8 @@
 package db
 
-// Backup and restore support: creating an online copy of the database with
-// SQLite's VACUUM INTO, validating a candidate file before it is offered or
-// restored, and the strict path gate both rely on. Split out of
-// admin_queries.go, which sits at its grandfathered file-size ceiling.
+// Backup and restore support: an online copy via VACUUM INTO, validation of a
+// candidate file before it is offered or restored, and the strict path gate
+// both rely on. Split out of admin_queries.go at its file-size ceiling.
 
 import (
 	"context"
@@ -21,63 +20,49 @@ import (
 
 // BackupVACUUMPreExecHook runs once inside BackupToSafe when non-nil, after it
 // has checked out the connection the VACUUM runs on and before the VACUUM
-// executes. Test-only (always nil in production; exported so both proofs that
-// a write is not blocked by a backup, SRV-02/PERF-10 — the db-level
+// executes. Test-only (exported so the db-level
 // TestBackupToSafe_ConcurrentWriteIsNotDelayed and the service-level
-// TestReserve_NotBlockedByAConcurrentBackup — park the backup on it rather
-// than sleeping): it parks the backup at a known point while it provably owns
-// its pool's connection, so a test can assert a concurrent write completes
-// without a wall-clock ratio. It guards the writer only while it sits between
-// the pinned Conn checkout and the Exec on that same conn: moving that pinned
-// conn to the writer makes the write block here, but an unpinned
-// d.writer.ExecContext after the hook would not. Neither test overlaps a write
-// with a running VACUUM; both prove the backup does not hold the writer.
+// TestReserve_NotBlockedByAConcurrentBackup can park the backup on it instead
+// of sleeping): it holds the backup at a known point while it owns its pool's
+// connection, so a test can assert a concurrent write completes. It guards the
+// writer only between the pinned Conn checkout and the Exec on that conn; an
+// unpinned d.writer.ExecContext after the hook would not be caught.
 var BackupVACUUMPreExecHook func()
 
-// backupPublishMu serializes the final "destination still free? → rename" step
-// across every BackupToSafe call in the process. The rename itself is atomic,
-// but the pre-check and the rename are not one operation: two backups started
-// in the same second derive the same final name, both pass the check, and both
-// call os.Rename onto that one path. On Linux the second silently replaces the
-// first; on Windows os.Rename is MoveFileEx(REPLACE_EXISTING), which returns
-// "Access is denied" when two renames share a destination — the losing backup
-// then failed on a rename error instead of the "already exists" it should
-// report. The VACUUM still runs concurrently outside the lock; only the
-// publish needs serializing, and the re-check inside it keeps the second caller
-// reporting the collision rather than overwriting.
+// backupPublishMu serializes the final "destination still free? then rename"
+// step across BackupToSafe calls. Two backups started in the same second derive
+// the same name and both pass the check; on Linux the second rename silently
+// replaces the first, and on Windows MoveFileEx returns "Access is denied",
+// failing instead of reporting "already exists". The VACUUM still runs
+// concurrently; only the publish is serialized, and the re-check inside keeps
+// the second caller reporting the collision.
 //
 // ponytail: process-global rather than keyed by destination; a stat+rename is
 // microseconds and backups are ~daily, so use a per-file lock only if publish
 // contention ever shows up.
 var backupPublishMu syncutil.Mutex
 
-// BackupTo creates an online backup of the database using SQLite's VACUUM INTO.
-// The destination path must not already exist.
+// BackupTo creates an online backup using SQLite's VACUUM INTO; the
+// destination must not already exist.
 //
-// Security: VACUUM INTO does not support bind parameters, so the path is
-// interpolated into SQL. To prevent injection we enforce two structural guards:
-//  1. The path must resolve to a location under safeRoot (after filepath.Clean
-//     and filepath.Abs).
-//  2. After structural validation, any single-quote, semicolon, double-dash,
-//     or null byte in the cleaned path causes rejection as defence-in-depth.
-//
-// The caller in handleBackup constructs the path from a hardcoded directory
-// and a timestamp — no user input reaches this function.
+// VACUUM INTO takes no bind parameters, so the path is interpolated into SQL
+// and guarded two ways: it must resolve under safeRoot (after filepath.Clean
+// and filepath.Abs), and a single-quote, semicolon, double-dash or null byte
+// in the cleaned path is rejected as defence-in-depth. The caller in
+// handleBackup builds the path from a hardcoded directory and a timestamp.
 func (d *DB) BackupTo(ctx context.Context, path string) error {
 	return d.BackupToSafe(ctx, path, filepath.Join("data", "backups"))
 }
 
-// BackupToSafe is the internal implementation that accepts an explicit safe
-// root directory. Exported for testing with isolated directories.
+// BackupToSafe is BackupTo with an explicit safe root directory, exported for
+// testing with isolated directories.
 //
-// It runs on the READER pool, not the single writer: VACUUM INTO only reads,
-// and holding the writer for its whole duration stalled every other write —
-// measured at 0.4-1.3 s, once a day, with users seeing sends hang. It writes
-// to a unique sibling ".tmp" file and renames it into place only after the
-// VACUUM succeeds, so a backup killed mid-copy (ENOSPC, EIO, a canceled ctx, the
-// process dying) leaves a ".tmp" file the backup listing and retention scans
-// never offer as restorable, rather than a truncated ".db" (OC-0212). The
-// rename is atomic on the same filesystem, which the temp path guarantees.
+// It runs on the reader pool: VACUUM INTO only reads, and holding the writer
+// for its whole duration stalled every write (0.4-1.3 s daily, sends hanging).
+// It writes to a unique sibling ".tmp" file and renames it into place only
+// after the VACUUM succeeds, so a backup killed mid-copy leaves a ".tmp" the
+// listing and retention scans never offer, not a truncated ".db". The rename
+// is atomic because the temp path is on the same filesystem.
 func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 	started := time.Now()
 	clean := filepath.Clean(path)
@@ -91,7 +76,7 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return fmt.Errorf("BackupToSafe: resolving path: %w", err)
 	}
 
-	// Structural guard: path must be under the safe root directory.
+	// Structural guard: path must be under the safe root.
 	if !strings.HasPrefix(absClean, absRoot+string(filepath.Separator)) {
 		return fmt.Errorf("BackupToSafe: path %q is not under safe root %q", absClean, absRoot)
 	}
@@ -100,21 +85,19 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return err
 	}
 
-	// Refuse an existing destination up front, before the VACUUM runs, so an
-	// operator-chosen name or a same-second timestamp collision is reported
-	// without ever writing a byte — and never overwrites a file this call did
-	// not create.
+	// Refuse an existing destination before the VACUUM, so an operator-chosen name
+	// or same-second collision is reported without writing a byte, and a file this
+	// call did not create is never overwritten.
 	if _, statErr := os.Stat(absClean); statErr == nil {
 		return fmt.Errorf("BackupToSafe: destination %q already exists", absClean)
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return fmt.Errorf("BackupToSafe: checking destination %q: %w", absClean, statErr)
 	}
 
-	// A unique temp beside the destination: the same directory keeps the
-	// rename atomic and the path under safeRoot, the ".tmp" suffix keeps it
-	// out of every "*.db" scan, and the unique name keeps two backups started
-	// in the same second from writing into one file. VACUUM INTO accepts an
-	// existing empty file as its destination.
+	// A unique temp beside the destination: the same directory keeps the rename
+	// atomic and the path under safeRoot, ".tmp" keeps it out of "*.db" scans, and
+	// the unique name keeps same-second backups from sharing a file. VACUUM INTO
+	// accepts an existing empty file.
 	tmp, err := os.CreateTemp(filepath.Dir(absClean), filepath.Base(absClean)+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("BackupToSafe: creating temp: %w", err)
@@ -129,11 +112,9 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 		return err
 	}
 
-	// Read on the reader pool: under WAL it runs concurrently with writers, so
-	// the VACUUM's whole duration no longer queues behind — or blocks — the
-	// single writer. Pin one reader connection for the whole call so the
-	// test hook below (BackupVACUUMPreExecHook) can hold the very connection
-	// the VACUUM uses.
+	// Read on the reader pool: under WAL it runs concurrently with writers instead
+	// of queueing behind the single writer. Pin one reader connection for the whole
+	// call so the test hook below can hold the connection the VACUUM uses.
 	conn, err := d.reader.Conn(ctx)
 	if err != nil {
 		_ = os.Remove(absTemp)
@@ -146,16 +127,15 @@ func (d *DB) BackupToSafe(ctx context.Context, path, safeRoot string) error {
 	}
 
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("VACUUM INTO '%s'", absTemp)); err != nil {
-		// Nothing to clean up beyond the temp VACUUM may have partially
-		// written; the final path was never touched.
+		// Nothing to clean up beyond the temp VACUUM may have partly written; the
+		// final path was never touched.
 		_ = os.Remove(absTemp)
 		return fmt.Errorf("BackupToSafe: %w", err)
 	}
 
-	// Publish under a lock with the destination re-check: a same-name backup
-	// that reached its VACUUM after this call's pre-check must be told the
-	// destination exists, not overwrite it (Linux) or fail the rename with
-	// "Access is denied" (Windows).
+	// Publish under a lock with the destination re-check: a same-name backup that
+	// reached its VACUUM after the pre-check must be told the destination exists,
+	// not overwrite it (Linux) or fail with "Access is denied" (Windows).
 	if err := publishBackup(absTemp, absClean); err != nil {
 		_ = os.Remove(absTemp)
 		return err
@@ -183,13 +163,12 @@ func publishBackup(absTemp, absClean string) error {
 }
 
 // validateBackupPathChars is the strict character gate BackupToSafe applies to
-// the destination before it is interpolated into VACUUM INTO. It is a separate
-// function only so the allowlist loop's branch count does not dominate its
-// caller; the rules and the messages are unchanged.
+// the destination before it is interpolated into VACUUM INTO, split out only
+// to keep the allowlist loop's branch count down.
 func validateBackupPathChars(absClean string) error {
-	// Defence-in-depth: only allow safe characters (alphanumeric, path separators,
-	// hyphen, underscore, dot, space, colon, tilde). This is a strict allowlist —
-	// anything else is rejected to prevent SQL injection via the interpolated path.
+	// Defence-in-depth strict allowlist: alphanumerics, path separators, hyphen,
+	// underscore, dot, space, colon and tilde; anything else could inject SQL via
+	// the interpolated path.
 	for _, ch := range absClean {
 		switch {
 		case ch >= 'a' && ch <= 'z',
@@ -202,22 +181,20 @@ func validateBackupPathChars(absClean string) error {
 		}
 	}
 
-	// Reject SQL comment sequences that could break the VACUUM INTO statement,
-	// even though individual hyphens are allowed for filenames.
+	// Reject SQL comment sequences that could break VACUUM INTO, though single
+	// hyphens are allowed in filenames.
 	if strings.Contains(absClean, "--") {
 		return fmt.Errorf("BackupToSafe: path contains forbidden sequence %q", "--")
 	}
 	return nil
 }
 
-// CheckBackupIntegrity opens the SQLite file at path read-only and runs
-// PRAGMA integrity_check against it. It returns nil only when SQLite reports
-// "ok". Use it to verify a backup right after it is written and again before
-// it is restored over the live database — a truncated or corrupt file must
-// never be presented (or accepted) as restorable.
-//
-// The path is escaped into its file: URI by readOnlyURI, so an operator-named
-// file (the restore CLI) is the file that gets checked.
+// CheckBackupIntegrity opens the SQLite file at path read-only and runs PRAGMA
+// integrity_check, returning nil only when SQLite reports "ok". Use it right
+// after a backup is written and again before it is restored, so a truncated or
+// corrupt file is never presented or accepted as restorable. The path is
+// escaped into its file: URI by readOnlyURI, so an operator-named file is the
+// file that gets checked.
 func CheckBackupIntegrity(ctx context.Context, path string) error {
 	abs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
@@ -246,8 +223,8 @@ func CheckBackupIntegrity(ctx context.Context, path string) error {
 // such as "backup#2.db" opens (and creates) "backup" instead.
 var uriPathEscaper = strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23")
 
-// readOnlyURI is the read-only file: URI for the absolute path abs, used by
-// the checks that verify a file before it is restored.
+// readOnlyURI is the read-only file: URI for the absolute path abs, used to
+// verify a file before it is restored.
 func readOnlyURI(abs string) string {
 	return "file:" + uriPathEscaper.Replace(filepath.ToSlash(abs)) + "?mode=ro&_pragma=busy_timeout(2000)"
 }

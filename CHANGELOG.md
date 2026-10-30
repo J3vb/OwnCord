@@ -47,15 +47,34 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Added
+
+**Desktop UI**
+
+- Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
+  **Voice**
+
+- A voice channel can have a password. Members enter it once the first time they join, and are asked again only if an admin changes it. Administrators and people who manage channels join without it. The desktop app asks for the password the first time you join; other apps get the prompt in a later release.
+
+**Desktop UI**
+
+- Voice channels with a password show a lock in the sidebar, and joining one for the first time asks for the password in a small dialog (a wrong password or too many tries says so). Admins who manage channels can set, change or remove the password in Edit Channel; it is never shown back.
+
 ### Changed
 
 **Server (operators)**
 
+- With "Host a browser client" (`server.browser_client_enabled`) on, the server now fetches the link previews, GIFs and outside images web users open (new login-only routes `/api/v1/external/preview` and `/api/v1/external/image`). Those sites see the server's address instead of the viewer's. Off by default, like the browser client; desktop users are unchanged.
 - Every error the server answers is now in the standard JSON shape (`{"error": "...", "message": "..."}`); the plugin admin API, the client update check, the admin log stream, plugin asset files, the LiveKit webhook and the WebSocket "server full" refusal used plain text. The "server full" refusal is `503 SERVER_BUSY`. A plugin upload over 16 MiB now answers `413 PAYLOAD_TOO_LARGE` even when the size cap trips mid-upload.
+- The bundled LiveKit voice server moves from 1.13.10 to 1.13.11 (a patch release, no configuration change). Its new options for retransmit caps and upstream FlexFEC stay off unless you turn them on in your own `livekit.yaml`.
   **Desktop UI**
 
 - Yes/no confirm dialogs (delete, leave, block, end poll, log out, invite join and others) now all behave the same: Cancel has focus when they open, and a double click or a held Enter can never run the action twice.
 - The emoji picker's category buttons (Recent, Smileys, People...) were squashed under a sideways scrollbar in the GIFs/Stickers/Emoji popup. Categories now sit in an icon column on the left, like Discord, and the current one lights up as you scroll.
+
+**Voice (Linux)**
+
+- Linux voice and video move to LiveKit's Rust SDK 0.10.0 and its newer WebRTC build: a full reconnect brings your published microphone, camera and share back, hardware video encoding no longer leaks memory per frame, and a crash path in sending audio is closed. Stereo screen-share audio keeps working.
 
 ### Fixed
 
@@ -66,9 +85,19 @@ and only when it changes something a contributor or fork holder must do
 - A picture in chat whose file is damaged or unreadable showed a broken-image icon; it now shows the download card.
 - Hovering a reaction squeezed the names into a narrow box and split them mid-word ("LordJ / ebus"); the box now fits the names on one line and wraps only between words.
 
+**Web client**
+
+- Clicking Join on another server's invite signed you out and failed; it now opens that server's page in a new tab and keeps you signed in.
+- Settings > About showed no version, and "What's new" never appeared; both now use the version the web client was built from.
+- Settings > Logs showed an "Open Log Folder" button that always failed; the web client keeps logs in memory, so the button is gone there.
+- GIFs in the picker and in chat, link previews, YouTube thumbnails and pictures from other sites never showed on the web client; they now load through the server, so the viewer's browser never contacts the linked site.
+
 ### Under the hood
 
+- The release's Docker smoke test now also checks that the image serves the web client (`docker-smoke.sh --browser-client`), as the standalone server smoke already did.
 - Every error code the server can send is now listed once in the protocol schema and generated into server constants and a client type. A fork that adds a code adds it there and regenerates.
+- Desktop client moves to Tauri 2.12.5 and the latest patch releases of its plugins (updater, notification, dialog, opener, single-instance, deep-link).
+- The desktop app's Rust code locks shared state through one helper, and clippy rejects a lock taken any other way. On Linux, the native voice session no longer stops when an earlier error left the camera or screen-share slot locked.
 
 ## v2.5.0
 

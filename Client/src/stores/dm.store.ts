@@ -4,7 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { channelsStore, removeChannel } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { DmChannelPayload } from "@lib/types";
@@ -17,10 +17,10 @@ export interface DmUser {
   readonly status: string;
   /** Nickname to render instead of `username`. "" = unset. */
   readonly displayName?: string;
-  /** The game this person is playing (WP 8.3), copied from presence like
+  /** The game this person is playing, copied from presence like
    *  `status`. Null or undefined = none. */
   readonly activity?: { readonly name: string; readonly startedAt: number } | null;
-  /** The song this person is listening to (WP 8.10), copied from presence like
+  /** The song this person is listening to, copied from presence like
    *  `activity`. Null or undefined = none. */
   readonly listening?: {
     readonly title: string;
@@ -48,11 +48,11 @@ export interface DmChannel {
   readonly isGroup: boolean;
   /**
    * The group's owner (user id). Present only for a group on a server with
-   * member management (WP 3B-10); its absence is the feature-detection signal
+   * member management; its absence is the feature-detection signal
    * that hides Add People, Remove and Make Group Owner.
    */
   readonly ownerId?: number;
-  /** The group's icon file path; "" or absent for none (WP 3B-11b). */
+  /** The group's icon file path; "" or absent for none. */
   readonly icon?: string;
   readonly lastMessageId: number | null;
   /**
@@ -84,7 +84,7 @@ export function setDmChannels(channels: readonly DmChannel[]): void {
   dmStore.setState(() => ({ channels }));
 }
 
-/** Where a DM learns the game presence already gave someone (WP 8.3). Set by
+/** Where a DM learns the game presence already gave someone. Set by
  *  the channels' ws handlers, which own the members store; unset = unknown. */
 let knownActivity: (userId: number) => DmUser["activity"] = () => undefined;
 
@@ -92,7 +92,7 @@ export function setDmActivityLookup(lookup: (userId: number) => DmUser["activity
   knownActivity = lookup;
 }
 
-/** The same for the song (WP 8.10). */
+/** The same for the song. */
 let knownListening: (userId: number) => DmUser["listening"] = () => undefined;
 
 export function setDmListeningLookup(lookup: (userId: number) => DmUser["listening"]): void {
@@ -100,7 +100,7 @@ export function setDmListeningLookup(lookup: (userId: number) => DmUser["listeni
 }
 
 /**
- * A DM summary carries no game (WP 8.3) or song (WP 8.10), so a person the
+ * A DM summary carries no game or song, so a person the
  * payload left without one keeps the one this DM already showed, else the one
  * presence gave them. A DM opened after `ready` then shows a partner who is
  * already playing or listening.
@@ -190,9 +190,9 @@ export function removeDmChannel(channelId: number): void {
 
 /**
  * Ensure a DM channel exists in channelsStore so ChannelController can switch
- * to it. Moved down from `pages/main-page/SidebarDmHelpers` (ARCH-06): it is
+ * to it. Moved down from `pages/main-page/SidebarDmHelpers`: it is
  * the only place the DM → channelsStore mirror row is synthesized, and every
- * caller — the sidebar, `lib/channel-navigation`, the DM and message-request
+ * caller — the sidebar, `lib/nav/channelNavigation`, the DM and message-request
  * handlers — needs the same behaviour, so it lives with the store it writes.
  */
 export function addDmToChannelsStore(dmChannel: DmChannel): void {
@@ -242,7 +242,7 @@ export function addDmToChannelsStore(dmChannel: DmChannel): void {
  * The dispatcher has its own copy of this for the WS path; this one exists so
  * the REST responses land in exactly the same shape without importing the
  * dispatcher's internals into the sidebar. Moved down from SidebarDmHelpers
- * (ARCH-06) so feature and lib callers can share it without a page import.
+ * so feature and lib callers can share it without a page import.
  */
 export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
   const participants: DmUser[] = (p.recipients ?? [p.recipient]).map((u) => ({
@@ -303,7 +303,7 @@ export function closeDmLocally(channelId: number, fallback: () => void): void {
  *  and — when `isMention` is set — the mention count too, both behind the same
  *  message-id monotonicity guard.
  *
- *  OC-0242: a DM message delivered between the server's registerNow and
+ *  A DM message delivered between the server's registerNow and
  *  buildReady is both counted in `ready`'s snapshot (lastMessageId already
  *  advanced to its id) AND redelivered as a queued chat_message once the
  *  socket drains. The unread guard below exists precisely for that replay;
@@ -346,7 +346,7 @@ export function updateDmLastMessage(
  *  Used for own messages and messages in the currently focused DM.
  *  Moves the channel to the top of the list so active conversations stay visible.
  *
- *  OC-0301: guarded by the same message-id monotonicity check as its sibling
+ *  Guarded by the same message-id monotonicity check as its sibling
  *  `updateDmLastMessage`. A queued chat_message frame can be redelivered for
  *  an id already behind the channel's current `lastMessageId` (e.g. a `ready`
  *  snapshot lands mid-burst and advances the watermark past a message that

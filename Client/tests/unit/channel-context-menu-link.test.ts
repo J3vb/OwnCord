@@ -3,8 +3,8 @@ import { attachChannelContextMenu } from "@components/channel-sidebar/context-me
 import { authStore } from "@stores/auth.store";
 import { channelsStore, type Channel } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
-import { setChannelMutesHost } from "@lib/channel-mutes";
-import { parseChannelLink } from "@lib/deep-link";
+import { setChannelMutesHost } from "@lib/prefs/channelMutes";
+import { parseChannelLink } from "@lib/nav/deepLink";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 
 const channel: Channel = {

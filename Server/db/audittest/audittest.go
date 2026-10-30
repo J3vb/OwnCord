@@ -1,6 +1,6 @@
 // Package audittest captures audit entries through a fake db.AuditStore so a
 // test can assert which actions a mutation emitted and what its detail
-// carried (B2-6). Install swaps the DB's audit path for an in-memory writer
+// carried. Install swaps the DB's audit path for an in-memory writer
 // for the test's lifetime; every db.WriteAudit routed through that *DB —
 // from api, admin, service or ws — lands in the recorder.
 package audittest
@@ -78,7 +78,7 @@ func (r *Recorder) Wait(t testing.TB, action string) db.AuditEntry {
 	}
 }
 
-// detailDenylist is the shape half of the B2-6 denylist: patterns that a
+// detailDenylist is the shape half of the denylist: patterns that a
 // safe detail string never contains regardless of the fixture's values.
 var detailDenylist = []*regexp.Regexp{
 	regexp.MustCompile(`\$2[aby]\$\d\d\$`), // bcrypt hash

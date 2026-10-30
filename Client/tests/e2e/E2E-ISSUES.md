@@ -43,15 +43,15 @@ by file. This run had neither.
 
 - **Web (mocked Tauri):** 40 spec files under `tests/e2e/`, 291 tests. Runs
   against the Vite dev server (`playwright.config.ts`) or the production
-  bundle (`playwright.config.prod.ts`). Fifteen tests across
+  bundle (`tests/e2e/config/playwright.config.prod.ts`). Fifteen tests across
   `emoji-voicemod.parity.spec.ts`, `gating-badges.parity.spec.ts` and
   `social.parity.spec.ts` carry the `@parity` tag and gate CI.
 - **Native (real Tauri binary via CDP):** 11 spec files under
-  `tests/e2e/native/`, run by `playwright.config.native.ts` on Windows
+  `tests/e2e/native/`, run by `tests/e2e/config/playwright.config.native.ts` on Windows
   (WebView2) — all 11 matched by a project since 2026-08-04.
   **Deliberately not wired to CI.**
 - **Admin panel (real server, no mocks):** 1 spec / 6 tests under
-  `tests/e2e/admin/`, run by `playwright.config.admin.ts` — a serial
+  `tests/e2e/admin/`, run by `tests/e2e/config/playwright.config.admin.ts` — a serial
   journey (first-run wizard → dashboard → channel CRUD → audit log →
   re-login) against a real Go server booted by
   `tests/e2e/admin/start-server.sh`. Needs the Go toolchain
@@ -109,6 +109,6 @@ historical only:
 - `CI=1` gives the bounded CI profile (1 worker, `maxFailures: 20`, global
   timeout 20 min) — useful to keep a broken run from burning time.
 - The native suite needs a Windows machine with the built Tauri exe and
-  drives it over CDP; see `playwright.config.native.ts` for the two-project
+  drives it over CDP; see `tests/e2e/config/playwright.config.native.ts` for the two-project
   layout (fresh exe per test for auth flows, one shared exe + login for the
   rest, designed around the server's 5-logins/minute rate limit).

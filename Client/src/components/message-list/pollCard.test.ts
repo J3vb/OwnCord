@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderMessage } from "@components/message-list/renderers";
-import { runSessionResets } from "@lib/sessionRegistry";
+import { runSessionResets } from "@lib/net/sessionRegistry";
 import type { PollInfo, PollView } from "@lib/types";
 import { setConnectionStatus } from "@stores/ui.store";
 import type { Message } from "@stores/messages.store";

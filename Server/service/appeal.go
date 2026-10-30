@@ -13,68 +13,50 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// AppealService is the B5-10 rate-limited appeal against a moderation
-// action (BPR-073, plan decision 8). It owns submission, the appellant's
-// own status view, withdrawal, and the moderation queue's assignment and
-// decision — the deciding-moderator self-review rule in particular.
-//
-// Appeal ids returned and accepted by this type's methods are the opaque
-// public id (the Codex-review deviation from the HP-5 draft recorded in
-// migration 050's header): the sequential internal id is used only inside
-// this package and never reaches a response, a route parameter or the
-// mod_queue frame, for the identical reason reports adopted one (P2-9).
+// AppealService is the rate-limited appeal against a moderation action: submission,
+// the appellant's status view, withdrawal, and the queue's assignment and decision
+// (notably the deciding-moderator self-review rule). Appeal ids on its methods are
+// the opaque public id; the sequential internal id never reaches a response, route
+// parameter or mod_queue frame, for the same reason reports adopted one.
 type AppealService struct {
 	st    Store
 	perms *PermissionService
-	// moderation is used for requireOverturnAuthority (the outrank check and,
-	// for a ban, BAN_MEMBERS) and, since round 4/5, FinalizeTimeoutLift — the
-	// overturn effects themselves (LiftTimeoutByActionID, UnbanUser's ledger
-	// half, warning acknowledged) run at the DB layer, inside DecideAppealTx's
-	// own transaction (F1 review), never through a second ModerationService
-	// call.
+	// moderation serves requireOverturnAuthority (outrank check and, for a ban,
+	// BAN_MEMBERS) and FinalizeTimeoutLift. The overturn effects themselves run at
+	// the DB layer inside DecideAppealTx's transaction, never through a second
+	// ModerationService call.
 	moderation *ModerationService
 	limiter    *auth.RateLimiter
 	notifier   AppealStatusNotifier
 	queue      AppealQueueBroadcaster
-	// unban broadcasts the member_join a lifted ban needs, exactly as the
-	// admin unban path does (OC-0058): member_ban hard-deletes the row on
-	// every connected client, so flipping users.banned back to 0 without a
-	// frame leaves those clients missing the user until a full resync
-	// (OC-0486). Optional, like the other two.
+	// unban broadcasts the member_join a lifted ban needs, as the admin unban path
+	// does: member_ban hard-deletes the row on every client, so flipping
+	// users.banned back without a frame leaves clients missing the user until a full
+	// resync. Optional, like the other two.
 	unban AppealUnbanBroadcaster
 	locks *appealLocker
 }
 
-// appealLocker is F4's per-appeal serialization: a transition's guarded
-// write and its live notifies (appeal_status, mod_queue) must behave as one
-// atomic unit from that appeal's own point of view, or a delayed transition
-// can notify AFTER a later one already has — a stale Assign's "assigned"
-// frame trailing behind a Decide's "overturned" one that the appellant
-// already received. Submit, Assign, Decide and Withdraw all hold the
-// appeal's own lock from just before touching the database through their
-// own notify call, so no two transitions on the SAME appeal can ever have
-// their notifies race each other out of commit order.
+// appealLocker serializes transitions per appeal: a transition's guarded write
+// and its live notifies (appeal_status, mod_queue) must act as one unit, or a
+// delayed transition notifies AFTER a later one (a stale Assign's "assigned"
+// frame trailing a Decide's "overturned"). Submit, Assign, Decide and Withdraw
+// hold the appeal's lock from just before the database through their notify.
 //
-// Entries are reference-counted and evicted once nobody holds or is
-// waiting on them (round 4 review, the same shape ws/user_locks.go's
-// own round 5 took for the identical reason): every caller acquires the
-// lock only AFTER the appeal is confirmed to exist and the caller is
-// authorized to touch it (Submit: after its own insert commits; Withdraw:
-// after resolveOwn confirms ownership; Assign/Decide: after the public id
-// resolves to a real row), so an invented public id — reachable by any
-// authenticated member calling withdraw in a loop, without ever touching
-// decision 8's submission quota — never allocates an entry at all, and a
-// real one does not linger once its writer is done with it.
+// Entries are reference-counted and evicted once unused (as ws/user_locks.go
+// does). Every caller locks only AFTER the appeal is confirmed to exist and the
+// caller is authorized (Submit: after its insert), so an invented public id,
+// reachable by any member looping withdraw without touching the quota, never
+// allocates an entry.
 type appealLocker struct {
 	mu    syncutil.Mutex
 	locks map[string]*appealLockEntry
 }
 
-// appealLockEntry is one appeal's lock plus how many callers currently
-// hold it or are waiting to. refs is guarded by appealLocker.mu, not the
-// entry's own lock — it must be adjusted at the same time as the map
-// lookup so a concurrent lock() and the unlocking eviction check can never
-// race each other into deleting an entry someone is about to wait on.
+// appealLockEntry is one appeal's lock plus its holder/waiter count. refs is
+// guarded by appealLocker.mu, not the entry's own lock, so it changes together
+// with the map lookup and eviction can never delete an entry someone is about to
+// wait on.
 type appealLockEntry struct {
 	mu   syncutil.Mutex
 	refs int
@@ -84,8 +66,7 @@ func newAppealLocker() *appealLocker {
 	return &appealLocker{locks: make(map[string]*appealLockEntry)}
 }
 
-// lock acquires publicID's own lock, blocking until held, and returns the
-// func that releases it — `defer s.locks.lock(publicID)()`.
+// lock acquires publicID's lock and returns its release: `defer s.locks.lock(id)()`.
 func (l *appealLocker) lock(publicID string) func() {
 	l.mu.Lock()
 	e, ok := l.locks[publicID]
@@ -108,20 +89,16 @@ func (l *appealLocker) lock(publicID string) func() {
 	}
 }
 
-// AppealStatusNotifier delivers a live appeal_status frame to the
-// appellant. *ws.Hub implements it.
+// AppealStatusNotifier delivers a live appeal_status frame to the appellant.
+// *ws.Hub implements it.
 type AppealStatusNotifier interface {
 	NotifyAppealStatus(userID int64, publicID, state string, decisionNote *string)
 }
 
-// AppealQueueBroadcaster delivers a live mod_queue frame for an appeal
-// state change. *ws.Hub implements it (the same method the API handler used
-// to call after Assign/Decide/Withdraw returned). F4 review: moved to run
-// from INSIDE the service, under the SAME per-appeal lock the appeal_status
-// notify holds, so the two can never race each other out of commit order —
-// the handler calling it separately, after the lock had already been
-// released, is exactly what let a delayed transition's frame arrive after a
-// later one's.
+// AppealQueueBroadcaster delivers a live mod_queue frame for an appeal state
+// change (*ws.Hub). It runs from INSIDE the service under the same per-appeal lock
+// as the appeal_status notify, so the two cannot race out of commit order, which
+// a handler calling it after the lock was released allowed.
 type AppealQueueBroadcaster interface {
 	BroadcastAppealQueue(ctx context.Context, appealID int64, state string)
 }
@@ -143,73 +120,57 @@ func (s *AppealService) notify(userID int64, publicID, state string, decisionNot
 	}
 }
 
-// notifyQueue broadcasts a mod_queue frame. round 4 review: detaches the
-// caller's context (context.WithoutCancel) the same way the old
-// handler-level broadcast did before F4 moved it here — the write already
-// committed, so a client disconnecting right after must not cancel the
-// moderator queue's own broadcast.
+// notifyQueue broadcasts a mod_queue frame on a detached context: the write
+// already committed, so a client disconnecting must not cancel it.
 func (s *AppealService) notifyQueue(ctx context.Context, appealID int64, state string) {
 	if s.queue != nil {
 		s.queue.BroadcastAppealQueue(context.WithoutCancel(ctx), appealID, state)
 	}
 }
 
-// appealPostWriteHookForTest, when non-nil, runs after a transition's
-// guarded write has committed but BEFORE its notifies — while this appeal's
-// lock is still held (F4's revert-proof seam, export_test.go). Test-only,
-// nil in production.
+// appealPostWriteHookForTest runs after a transition's guarded write commits but
+// BEFORE its notifies, with the appeal's lock held (the seam in export_test.go).
+// Test-only; nil in production.
 var appealPostWriteHookForTest func(publicID string)
 
-// appealBodyMaxRunes and appealNoteMaxRunes bound the two free-text fields
-// (S6 storage exhaustion, the same shape reports' maxDetailRunes/
-// maxNoteRunes apply). decisionNote is shown to the appellant, so it is
-// held to the same audit-detail denylist as reason on moderation_actions.
+// appealBodyMaxRunes and appealNoteMaxRunes bound the free-text fields against
+// storage exhaustion (as reports do). decisionNote is shown to the appellant, so
+// it meets the same audit-detail denylist as moderation_actions.reason.
 const (
 	appealBodyMaxRunes = 4000
 	appealNoteMaxRunes = 2000
 )
 
-// appealRateLimit and AppealRateWindow are decision 8's per-user rolling
-// cap: 3 submissions per 24 hours. The key is "appeal:<user id>" — a
-// dedicated prefix, never shared with "report" (Server/auth/ratelimit.go's
-// Key), so a reporter's quota is never consumed by an appellant or vice
-// versa. AppealRateWindow is exported (item 6, round 3 review) so
-// auth's own rate-limiter tests assert against the real production value
-// instead of a local literal that could silently drift from it.
+// appealRateLimit and AppealRateWindow are the per-user cap: 3 submissions per
+// 24 hours under "appeal:<user id>", a prefix never shared with "report"
+// (auth.Key) so the two quotas cannot consume each other. AppealRateWindow is
+// exported so auth's rate-limiter tests assert the real production value.
 const (
 	appealRateLimit  = 3
 	AppealRateWindow = 24 * time.Hour
 )
 
-// appealableKinds are the moderation-action kinds decision 8 allows an
-// appeal against: warning, timeout and removal always. "kick" is excluded
-// deliberately — a force-logout persists nothing to appeal, the target
-// simply signs back in. "ban" is included, but is reachable only when the
-// target CAN authenticate: AuthMiddleware rejects every currently
-// effectively-banned caller on every route (api/middleware.go), including
-// this one, so a "ban"-kind submission can only ever arrive from a target
-// whose ban has since lapsed or been reversed — a currently-banned target
-// cannot reach this endpoint at all. A ban appeal from a target who is
-// STILL banned has no path in beta; docs/api.md records that it must
-// arrive out of band (the operator's contact).
+// appealableKinds are the action kinds that can be appealed. "kick" is excluded:
+// a force-logout persists nothing to appeal. "ban" is included but reachable only
+// by a target who can authenticate: AuthMiddleware rejects every effectively
+// banned caller (api/middleware.go), so a ban appeal arrives only after the ban
+// lapsed or was reversed. A still-banned target has no path in beta
+// (docs/api.md: it arrives out of band).
 var appealableKinds = map[string]bool{"warning": true, "timeout": true, "removal": true, "ban": true}
 
-// ErrAlreadyAppealed is a 409: an appeal against this action already
-// exists, in ANY state (decision 8 — a decided appeal cannot be
-// re-appealed, and the UNIQUE(action_id) constraint is the memory that
-// enforces it).
+// ErrAlreadyAppealed is a 409: an appeal against this action already exists in
+// ANY state. A decided appeal cannot be re-appealed; UNIQUE(action_id) enforces it.
 var ErrAlreadyAppealed = fmt.Errorf("%w: an appeal against this action already exists", ErrConflict)
 
-// errAppealActionNotFound is Submit's one refusal for both an unknown
-// action id and one whose target is not the caller (P2-5's rule, applied
-// here): a distinguishable message would itself be an existence oracle.
+// errAppealActionNotFound is Submit's one refusal for both an unknown action and
+// one not targeting the caller (as report.go's errTargetNotFound): distinguishable
+// messages would be an existence oracle.
 var errAppealActionNotFound = fmt.Errorf("%w: action not found", ErrNotFound)
 
-// Submit files an appeal against actionID. Rules, in order (decision 8):
-// the caller must be the action's target (else 404, no oracle); the
-// action's kind must be appealable; the rate limit (429); no existing
-// appeal against this action in any state (409 ALREADY_APPEALED). Returns
-// the new appeal's public id.
+// Submit files an appeal against actionID. Rules, in order: caller must be the
+// action's target (else 404, no oracle); the kind must be appealable; the rate
+// limit (429); no existing appeal in any state (409 ALREADY_APPEALED). Returns
+// the appeal's public id.
 func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64, body string) (string, error) {
 	if actionID <= 0 {
 		return "", fmt.Errorf("%w: action_id must be positive", ErrBadRequest)
@@ -225,8 +186,8 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 	if err != nil || action.TargetID == 0 || action.TargetID != appellantID {
 		return "", errAppealActionNotFound
 	}
-	// A self-targeted row (a moderator's own channel purge) is not a
-	// sanction, matching ListOwnModerationActions' read-side rule.
+	// A self-targeted row (a moderator's own channel purge) is not a sanction,
+	// matching ListOwnModerationActions.
 	if action.ActorID != 0 && action.ActorID == action.TargetID {
 		return "", errAppealActionNotFound
 	}
@@ -248,26 +209,22 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInternal, err)
 	}
-	// The "open" mod_queue broadcast must precede any assign/withdraw frame
-	// for the SAME appeal. Take this appeal's own lock BEFORE the insert
-	// commits, so a moderator polling the queue cannot Assign the fresh row
-	// until Submit has notified. Locking an id with no row yet is harmless:
-	// the locker is an in-memory refcounted map and evicts on unlock.
+	// The "open" mod_queue broadcast must precede any assign/withdraw frame for the
+	// SAME appeal, so lock BEFORE the insert commits: a moderator polling the queue
+	// cannot Assign the fresh row until Submit has notified. Locking an id with no
+	// row is harmless (in-memory refcounted map, evicted on unlock).
 	unlock := s.locks.lock(publicID)
 	defer unlock()
 	appealID, err := s.st.InsertAppeal(ctx, publicID, actionID, appellantID, body)
 	if err != nil {
 		switch {
 		case errors.Is(err, db.ErrConflict):
-			// The UNIQUE(action_id) race-proof half of decision 8: a second
-			// submission landed between FindAppealForAction's pre-check and
-			// this insert.
+			// The UNIQUE(action_id) race-proof half: a second submission landed between the
+			// FindAppealForAction pre-check and this insert.
 			return "", ErrAlreadyAppealed
 		case errors.Is(err, db.ErrNotFound):
-			// N4 review: the action was erased (its target's account erasure
-			// cascades) between the GetModerationAction lookup above and this
-			// insert. Same refusal as an action that never existed — no
-			// existence oracle either way.
+			// The action was erased (its target's account erasure cascades) after the lookup
+			// above. Same refusal as an unknown action: no existence oracle.
 			return "", errAppealActionNotFound
 		default:
 			return "", fmt.Errorf("%w: %w", ErrInternal, err)
@@ -278,8 +235,8 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 		appealPostWriteHookForTest(publicID)
 	}
 
-	// Audit rows must survive a request canceled after the appeal committed.
-	// The detail is the action kind word only, never the appeal body.
+	// Audit rows must survive a request canceled after the commit. The detail is the
+	// kind word only, never the appeal body.
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, appellantID, "appeal_submit", "moderation_action", actionID, action.Kind)
 
 	slog.Info("appeal submitted", "appellant_id", appellantID, "action_id", actionID, "kind", action.Kind)
@@ -287,9 +244,9 @@ func (s *AppealService) Submit(ctx context.Context, appellantID, actionID int64,
 	return publicID, nil
 }
 
-// AppealMineRow is one row of the appellant's own view (GET
-// /api/v1/appeals/mine): the appeal plus the appealed action's kind,
-// reason and created_at — never the assignee, never who decided it.
+// AppealMineRow is one row of the appellant's own view (GET /api/v1/appeals/mine):
+// the appeal plus the action's kind, reason and created_at; never the assignee or
+// who decided it.
 type AppealMineRow struct {
 	PublicID        string
 	ActionKind      string
@@ -301,8 +258,7 @@ type AppealMineRow struct {
 	DecidedAt       *string
 }
 
-// Mine returns the caller's own appeals, resolving each row's action kind/
-// reason/created_at for display.
+// Mine returns the caller's own appeals with each row's action details for display.
 func (s *AppealService) Mine(ctx context.Context, appellantID int64) ([]AppealMineRow, error) {
 	rows, err := s.st.ListAppealsMine(ctx, appellantID)
 	if err != nil {
@@ -328,9 +284,8 @@ func (s *AppealService) Mine(ctx context.Context, appellantID int64) ([]AppealMi
 	return out, nil
 }
 
-// resolveOwn resolves publicID to the caller's own appeal row, or
-// ErrNotFound — indistinguishable whether the id is unknown or belongs to
-// someone else, the same no-oracle rule Submit's own refusal follows.
+// resolveOwn resolves publicID to the caller's own appeal, or ErrNotFound for
+// both an unknown id and someone else's (no oracle, as in Submit).
 func (s *AppealService) resolveOwn(ctx context.Context, appellantID int64, publicID string) (*db.Appeal, error) {
 	a, err := s.st.GetAppealByPublicID(ctx, publicID)
 	if err != nil || a.AppellantID != appellantID {
@@ -339,16 +294,11 @@ func (s *AppealService) resolveOwn(ctx context.Context, appellantID int64, publi
 	return a, nil
 }
 
-// Withdraw withdraws the caller's own appeal — the appellant only, open or
-// assigned states only. Nothing leaves a decided or already-withdrawn
-// state. F4 review: the write and both live notifies (appeal_status,
-// mod_queue) run under this appeal's own lock, so a withdrawal racing an
-// in-flight Assign or Decide can never have its notify land out of order
-// relative to theirs. round 4 review: the lock is acquired AFTER resolveOwn
-// confirms the appeal exists and belongs to the caller — locking on the raw
-// publicID first let any authenticated member pin unbounded memory by
-// calling withdraw with invented ids in a loop, never touching decision 8's
-// submission quota (which only Submit enforces).
+// Withdraw withdraws the caller's own appeal (appellant only, open or assigned
+// states only). The write and both live notifies run under the appeal's lock so
+// a racing Assign or Decide cannot notify out of order. The lock is taken AFTER
+// resolveOwn: locking the raw publicID first let any member pin unbounded memory
+// with invented ids, since only Submit enforces the quota.
 func (s *AppealService) Withdraw(ctx context.Context, appellantID int64, publicID string) error {
 	a, err := s.resolveOwn(ctx, appellantID, publicID)
 	if err != nil {
@@ -373,13 +323,9 @@ func (s *AppealService) Withdraw(ctx context.Context, appellantID int64, publicI
 }
 
 // Queue lists appeals for the moderator view: state is "open", "assigned",
-// "decided" (both terminal decision states together), or "" for the
-// default open+assigned view. F5 review: an appeal whose appellant is the
-// CALLER is omitted even when it would otherwise match — the same
-// confidentiality rule reports' Queue applies to reporter/subject, applied
-// here to the appellant: a moderator must not learn who is assigned to, or
-// how the queue is filling up around, their OWN appeal through the surface
-// built for reviewing OTHER people's.
+// "decided" (both terminal states) or "" for open+assigned. An appeal whose
+// appellant is the CALLER is omitted, as reports' Queue does: a moderator must
+// not learn who is assigned to, or how the queue fills around, their OWN appeal.
 func (s *AppealService) Queue(ctx context.Context, actorID int64, state string) ([]db.AppealQueueRow, error) {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
@@ -402,24 +348,19 @@ func (s *AppealService) Queue(ctx context.Context, actorID int64, state string) 
 	return out, nil
 }
 
-// AppealDetail is GET .../appeals/{id}'s payload: the appeal, the appealed
-// action, and the action's linked report id (internal — the handler
-// resolves it to a public id through ReportService.PublicIDFor), when one
-// exists.
+// AppealDetail is the payload of GET .../appeals/{id}: the appeal and the
+// appealed action.
 type AppealDetail struct {
 	Appeal db.Appeal
 	Action db.ModerationAction
 }
 
-// Get returns one appeal with its appealed action. 404 for an unknown id.
-// F5 review: a moderator-appellant is refused their OWN appeal here with
-// 403 SELF_REVIEW — unlike a report's subject (who must never learn the
-// report exists at all, hence NotFound), an appellant already knows their
-// own appeal exists (it is in their own GET /api/v1/appeals/mine view), so
-// there is no existence oracle to protect against, only the same
-// conflict-of-interest guardAppellantSelfReview already refuses on the
-// write side, applied here to the read that would otherwise show them who
-// is assigned, who decided, and the acting moderator's identity.
+// Get returns one appeal with its appealed action; 404 for an unknown id. A
+// moderator-appellant is refused their OWN appeal with 403 SELF_REVIEW. Unlike a
+// report's subject (NotFound, who must not learn the report exists), an appellant
+// already knows their appeal exists, so there is no oracle; the refusal is the
+// guardAppellantSelfReview conflict-of-interest rule applied to the read that
+// would show who is assigned and who decided.
 func (s *AppealService) Get(ctx context.Context, actorID int64, publicID string) (*AppealDetail, error) {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return nil, err
@@ -438,17 +379,12 @@ func (s *AppealService) Get(ctx context.Context, actorID int64, publicID string)
 	return &AppealDetail{Appeal: *appeal, Action: *action}, nil
 }
 
-// guardAppellantSelfReview refuses a moderator acting on their own filed
-// appeal — the mirror of report.go's GuardSelfReviewFor, and a DIFFERENT rule
-// from the deciding-moderator's own eligibility test (the in-transaction
-// EligibleModeratorExists check DecideAppealTx/AssignAppealTx/
-// AssignAppealForced all run): an appellant who happens to also hold
-// MODERATE_MEMBERS must never assign or decide the very appeal they filed,
-// with NO sole-moderator escape (unlike the acting-moderator's own check,
-// there is no honest "forced to judge your own case" argument for the
-// appellant — on a one-moderator install their appeal simply waits for a
-// second moderator to exist, which is a governance gap, not a bug this
-// service papers over).
+// guardAppellantSelfReview refuses a moderator acting on their own filed appeal
+// (the mirror of report.go's GuardSelfReviewFor). It differs from the
+// deciding-moderator eligibility check inside DecideAppealTx/AssignAppealTx/
+// AssignAppealForced and has NO sole-moderator escape: on a one-moderator install
+// the appeal waits for a second moderator, a governance gap this service does not
+// paper over.
 func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appeal) error {
 	if appeal.AppellantID != 0 && appeal.AppellantID == actorID {
 		return ErrSelfReview
@@ -456,17 +392,13 @@ func (s *AppealService) guardAppellantSelfReview(actorID int64, appeal *db.Appea
 	return nil
 }
 
-// Assign assigns appeal publicID to actorID. 409 if it is already assigned
-// to someone else, unless force is set and the caller outranks the current
-// assignee (the same rule ban/kick/timeout and the report queue use).
-// Claim 6 review: symmetric with Decide's self-review rule — the moderator
-// who took the appealed action may not assign it to themself either, where
-// another eligible reviewer exists. round 4 review: this eligibility test
-// now runs INSIDE both assignment transactions (plain and forced,
-// AssignAppealTx/AssignAppealForced), the same way Decide's already does —
-// it used to run once, non-transactionally, before either transaction
-// opened, so a second eligible moderator appearing in the gap between that
-// check and the write went uncaught.
+// Assign assigns appeal publicID to actorID. 409 if already assigned to someone
+// else, unless force is set and the caller outranks the current assignee (as
+// ban/kick/timeout and the report queue). Symmetric with Decide's self-review
+// rule: the moderator who took the appealed action may not assign it to
+// themself where another eligible reviewer exists. That test runs INSIDE both
+// assignment transactions, so a second eligible moderator appearing between a
+// pre-check and the write cannot go uncaught.
 func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID string, force bool) error {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
 		return err
@@ -507,23 +439,17 @@ func (s *AppealService) Assign(ctx context.Context, actorID int64, publicID stri
 	return nil
 }
 
-// assignAppealFn is the store write assignAppeal drives: AssignAppealForced
-// for the force-reassign branch, AssignAppealTx for the ordinary one. The two
-// share a signature and differ only in the forced semantics documented on
-// each store method.
+// assignAppealFn is the store write assignAppeal drives: AssignAppealForced for
+// force-reassign, AssignAppealTx otherwise.
 type assignAppealFn func(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
 	checkSelfReview bool, appellantID, permBit, adminBit int64,
 	checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
 
-// assignAppeal is Assign's single write branch. The forced path requires
-// actorID to outrank the observed assignee's fresh position, read inside the
-// write's own transaction (see forceReassignGuarded); the plain path has no
-// current assignee, or the caller re-assigning to themselves, and runs in its
-// own transaction with a fresh authority re-check — the same property
-// Decide's own transaction already has. checkSelfReview (round 4 review) runs
-// decision 8's deciding-moderator eligibility test inside that SAME
-// transaction — it used to run once, before either assignment branch,
-// non-transactionally.
+// assignAppeal is Assign's single write branch. The forced path requires actorID
+// to outrank the observed assignee's fresh position, read inside the write's
+// transaction (see forceReassignGuarded); the plain path (no current assignee, or
+// re-assigning to oneself) re-checks authority freshly in its own transaction, as
+// Decide does. checkSelfReview runs inside that same transaction.
 func (s *AppealService) assignAppeal(ctx context.Context, assign assignAppealFn, appealID, actorID, observed int64, checkSelfReview bool, appellantID int64) error {
 	ok, err := assign(ctx, appealID, actorID, observed, actorID, checkSelfReview, appellantID,
 		permissions.ModerateMembers, permissions.Administrator, s.checkModeratorAuthority)
@@ -542,24 +468,20 @@ func (s *AppealService) assignAppeal(ctx context.Context, assign assignAppealFn,
 	return nil
 }
 
-// validAppealOutcomes is Decide's outcome enum.
 var validAppealOutcomes = map[string]bool{"upheld": true, "overturned": true}
 
-// ErrReversalFailed is a 409: overturning an appeal committed to a
-// reversal that a genuine error prevented from applying (F1 review) — the
-// whole decision was rolled back with it, so the appellant was never told
-// "overturned" while the sanction it named stayed in effect.
+// ErrReversalFailed is a 409: the overturn's reversal hit a genuine error, so the
+// whole decision rolled back and the appellant was never told "overturned" while
+// the sanction stayed in effect.
 var ErrReversalFailed = fmt.Errorf("%w: could not apply the decision's effect", ErrConflict)
 
-// Decide records outcome ("upheld" or "overturned") against appeal
-// publicID. An overturn first passes requireOverturnAuthority — the decider
-// must outrank the sanctioned target and, for a ban, hold BAN_MEMBERS, the
-// same authority the direct reversal path enforces. The self-review
-// eligibility count, the guarded write (on the OBSERVED state/assignee,
-// Claim 5), and — for an overturn — the kind-specific reversal all run in ONE
-// transaction (db.DecideAppealTx, F1/F2/F3/N1 review): a moderator banned or
-// erased between the count and the write, or a reversal that genuinely fails,
-// cannot land a decision the data no longer supports. Upholding changes
+// Decide records outcome ("upheld" or "overturned") against appeal publicID. An
+// overturn first passes requireOverturnAuthority: the decider must outrank the
+// sanctioned target and, for a ban, hold BAN_MEMBERS, as the direct reversal path
+// enforces. The self-review count, the guarded write (on the OBSERVED
+// state/assignee) and the overturn's reversal run in ONE transaction
+// (db.DecideAppealTx), so a moderator banned or erased in between, or a failing
+// reversal, cannot land a decision the data no longer supports. Upholding changes
 // nothing further. Both audit appeal_decide with the outcome word.
 func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, outcome, note string) error {
 	if err := requireModerate(ctx, s.perms, actorID); err != nil {
@@ -604,14 +526,12 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	}
 	switch result {
 	case db.AppealWriteOK:
-		// fall through to the audit/notify below.
 	case db.AppealWriteSelfReview:
 		return ErrSelfReview
 	case db.AppealWriteReversalFailed:
 		return ErrReversalFailed
 	case db.AppealWriteForbidden:
-		// P2 review: the decider's own bit was revoked, or a ban landed,
-		// between requireModerate above and this write's own fresh read.
+		// The decider's own bit was revoked, or a ban landed, after requireModerate.
 		return fmt.Errorf("%w: missing MODERATE_MEMBERS permission", ErrForbidden)
 	default: // db.AppealWriteConflict, including the plain Go error case above.
 		return fmt.Errorf("%w: appeal already decided or withdrawn", ErrConflict)
@@ -634,45 +554,30 @@ func (s *AppealService) Decide(ctx context.Context, actorID int64, publicID, out
 	return nil
 }
 
-// applyOverturnReversalEffects runs Decide's two post-commit, best-effort
-// consequences of an overturn (D8 policy — both survive a request canceled
-// after the decision committed, via context.WithoutCancel), split out of
-// Decide itself to keep it under the cyclop budget:
+// applyOverturnReversalEffects runs Decide's post-commit, best-effort overturn
+// consequences on a detached context (the decision already committed):
 //
-//   - item 4's reversal audit row, actor 0 (a mechanical consequence of the
-//     decision, not a second moderation action by a human — the same
-//     convention LiftTimeoutByActionID's lifted_by=0 already uses), detail
-//     naming the appeal that caused it. Written only when reversalApplied
-//     (N1: a superseded/already-lifted action reverses to a no-op, which is
-//     not itself an event worth auditing). "timeout" is excluded here — its
-//     audit row (also "user_untimeout") is FinalizeTimeoutLift's own below,
-//     so this generic write never runs twice for the same event.
-//   - B5-10 round 4/5's voice reconcile, now that B5-9's own post-commit
-//     method (ModerationService.FinalizeTimeoutLift) exists. Called
-//     unconditionally for every overturned timeout — not gated on
-//     reversalApplied — because FinalizeTimeoutLift's own doc comment
-//     anticipates exactly this caller and does its own staleness check
-//     (HasActiveTimeout): a newer timeout that has since superseded this one
-//     still gets its voice half repaired (clearing only what THIS action id
-//     owns, a no-op if it owns nothing) but is not announced or audited
-//     again, since the newer timeout's own issue already published the
-//     target's current state. actorID 0: the reversal is a system
-//     consequence, not a second moderation action by the human decider, who
-//     is already on the appeal_decide row Decide wrote.
+//   - the reversal audit row, actor 0 (a mechanical consequence, not a second
+//     human action; the convention of LiftTimeoutByActionID's lifted_by=0),
+//     naming the appeal. Written only when reversalApplied, since a
+//     superseded/already-lifted action reverses to a no-op not worth auditing.
+//     "timeout" is excluded: FinalizeTimeoutLift writes its own user_untimeout
+//     row, so this generic write never runs twice for one event.
+//   - the overturned timeout's voice reconcile via FinalizeTimeoutLift, called
+//     unconditionally (not gated on reversalApplied) because that method does its
+//     own staleness check: a newer timeout still gets its voice half repaired
+//     (only what THIS action id owns) but is not announced or audited again.
+//     actorID 0 since the human decider is already on the appeal_decide row.
 func (s *AppealService) applyOverturnReversalEffects(ctx context.Context, appeal *db.Appeal, action *db.ModerationAction, outcome string, reversalApplied bool) {
 	if reversalApplied {
 		if auditAction, ok := db.ReversalAuditActionFor(action.Kind); ok && action.Kind != "timeout" {
 			db.WriteAudit(context.WithoutCancel(ctx), s.st, 0, auditAction, "user", action.TargetID, "overturned appeal "+appeal.PublicID)
 		}
 		if action.Kind == "ban" {
-			// The reversal actually lifted a live ban (reversalApplied is
-			// only true when the guarded UPDATE changed a row: the target
-			// was banned and no newer ban superseded this action). Every
-			// connected client hard-deleted the row on the ban's own
-			// member_ban, so it must be re-added exactly as the admin unban
-			// path does (OC-0058/OC-0486), or those clients keep the user
-			// missing until they reconnect onto a full ready. Detached like
-			// the audit above: the decision already committed.
+			// The reversal actually lifted a live ban (reversalApplied is true only when
+			// the guarded UPDATE changed a row). Clients hard-deleted the row on the ban's
+			// member_ban, so re-add it as the admin unban path does, or they keep the user
+			// missing until a full ready.
 			s.broadcastUnban(action.TargetID)
 		}
 	}
@@ -682,14 +587,11 @@ func (s *AppealService) applyOverturnReversalEffects(ctx context.Context, appeal
 }
 
 // checkModeratorAuthority is DecideAppealTx's and AssignAppealTx's fresh
-// (P2 review): rolePerms/banned/banExpires are read live, inside the SAME
-// transaction as the guarded write, and passed here rather than trusted
-// from requireModerate's earlier (now possibly stale) check. permissions.
-// CanModerate is the canonical predicate; auth.IsEffectivelyBanned is reused
-// via a throwaway *db.User so the ban-lapse parsing stays in exactly one
-// place. A revoked bit or a ban that landed before this transaction began
-// refuses (db.AppealWriteForbidden), never a decision the data no longer
-// supports.
+// authority check: rolePerms/banned/banExpires are read live inside the same
+// transaction as the guarded write, not trusted from requireModerate's earlier,
+// possibly stale check. permissions.CanModerate is the canonical predicate;
+// auth.IsEffectivelyBanned keeps ban-lapse parsing in one place. A revoked bit or
+// a ban that landed first refuses (db.AppealWriteForbidden).
 func (s *AppealService) checkModeratorAuthority(rolePerms int64, banned bool, banExpires *string) error {
 	if auth.IsEffectivelyBanned(&db.User{Banned: banned, BanExpires: banExpires}) {
 		return ErrForbidden

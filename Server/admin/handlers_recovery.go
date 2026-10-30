@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// POST /admin/api/users/{id}/recovery-credential (B4-6, BPR-045): the server
+// POST /admin/api/users/{id}/recovery-credential: the server
 // owner, having verified the person out of band, receives a 15-minute,
 // single-use recovery credential for the account, shown once. The route is
 // owner-only (ownerOnlyMiddleware) and the service checks the role again.

@@ -6,7 +6,7 @@ import (
 )
 
 // overrideKey returns the channel id whose overrides govern channelID: a
-// thread's parent (6.9c), the channel itself otherwise. The per-user override
+// thread's parent, the channel itself otherwise. The per-user override
 // map is keyed by parent channels only, so a thread id must be resolved here
 // before it is looked up; an unresolved thread id would find no entry and get
 // the role's base bits, which is wrong whenever the parent narrows them.

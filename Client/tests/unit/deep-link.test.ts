@@ -6,7 +6,7 @@ import {
   formatMessageLink,
   formatChannelLink,
   normaliseInviteCode,
-} from "@lib/deep-link";
+} from "@lib/nav/deepLink";
 
 describe("normaliseInviteCode", () => {
   it("trims and lower-cases a typed code", () => {

@@ -1,12 +1,12 @@
 // `savePref` announces each write on one window event, and `onPrefChange` in
-// lib/preferences.ts is the only way to listen for it. A hand-written listener
+// lib/prefs/preferences.ts is the only way to listen for it. A hand-written listener
 // repeats the event name and digs the key out of the event itself; a typo in
 // either is silent, because the listener just never fires. This test pins that
 // no other module names the event.
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { onPrefChange, PREF_CHANGE_EVENT, savePref } from "../lib/preferences";
+import { onPrefChange, PREF_CHANGE_EVENT, savePref } from "../lib/prefs/preferences";
 
 const srcDir = path.resolve(__dirname, "..");
 
@@ -27,8 +27,8 @@ describe("the pref-change door", () => {
     localStorage.clear();
   });
 
-  it("only lib/preferences.ts names the event", () => {
-    expect(naming).toEqual(["lib/preferences.ts"]);
+  it("only lib/prefs/preferences.ts names the event", () => {
+    expect(naming).toEqual(["lib/prefs/preferences.ts"]);
   });
 
   it("runs the handler for a listed key only", () => {

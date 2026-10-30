@@ -5,8 +5,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// ─── SetupOptions ────────────────────────────────────────────────────────────
-
 // SetupOptions wires the first-run setup wizard to the running server. The
 // zero value disables everything beyond legacy owner-account creation, which
 // keeps every existing NewAdminAPI/NewHandler call site behaving as before.
@@ -27,7 +25,7 @@ type SetupOptions struct {
 	// not just an address inside admin_allowed_cidrs. Empty = not required
 	// (the direct-construction test path).
 	SetupToken string
-	// LogLevel, when non-nil, backs GET/PATCH /logs/level (SRE-07): the
+	// LogLevel, when non-nil, backs GET/PATCH /logs/level: the
 	// running log level and a timed debug boost that reverts on its own. Nil
 	// leaves the endpoints answering 503, which is the direct-construction
 	// test path and the one place no *slog.LevelVar exists to retune.
@@ -41,7 +39,7 @@ type SetupOptions struct {
 	// the real path, a server with a non-default database.path would report a
 	// restore staged while its live database is never replaced.
 	DatabasePath string
-	// Background is the app's request-path job group (ARCH-034). The update
+	// Background is the app's request-path job group. The update
 	// apply tail runs on it, so a shutdown aborts the countdown and joins the
 	// tail before the database closes. Nil runs the tail on an unowned group
 	// (tests, direct construction).

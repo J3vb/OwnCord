@@ -52,7 +52,7 @@ const IDLE_MIN = Number(process.env.OWNCORD_SOAK_IDLE_MIN ?? 0);
  * soak found, so it is empty and every metric holds the plan's 0.05 per cycle.
  */
 const PENDING_METRICS: SlopeCeilings = {};
-/** src/lib/autoIdle.ts's AUTO_IDLE_DELAY_MS. */
+/** src/lib/presence/autoIdle.ts's AUTO_IDLE_DELAY_MS. */
 const AUTO_IDLE_MS = 10 * 60_000;
 /** Phases of the 10-cycle page (`cycle % 10`) sampled for the within-page pair. */
 const WITHIN_PAGE_PHASES = new Set([6, 9]);
@@ -339,7 +339,7 @@ test("a long session does not grow its lifecycle footprint after warm-up", async
     // tick (health, connection stats, presence, heartbeat) shows up here. The PR
     // soak does not run it (OWNCORD_SOAK_IDLE_MIN defaults to 0); the long run
     // does. After ten quiet minutes the app flips the user to Idle
-    // (AUTO_IDLE_DELAY_MS, src/lib/autoIdle.ts), a designed one-time change, so
+    // (AUTO_IDLE_DELAY_MS, src/lib/presence/autoIdle.ts), a designed one-time change, so
     // samples before that transition (plus a minute) are kept as -2 and only the
     // later ones must be equal.
     if (IDLE_MIN > 0) {

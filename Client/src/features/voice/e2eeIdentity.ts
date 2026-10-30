@@ -3,8 +3,8 @@
 // keyring, cached per host+user scope, used to sign ephemeral announces) and
 // holds the session's ephemeral ECDH keypair. E2EEManager decides when the
 // ephemeral keypair is published or cleared; this module is where it lives.
-import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/e2eeCrypto";
-import { getOrCreateIdentityKeyPair } from "../../lib/identity";
+import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/net/e2eeCrypto";
+import { getOrCreateIdentityKeyPair } from "../../lib/net/identity";
 import { authStore } from "../../stores/auth.store";
 import { createLogger } from "../../lib/logger";
 import { localVideoDecode } from "./decodeCaps";
@@ -36,7 +36,7 @@ export class E2EEIdentity {
   /** Load (once per session) this client's long-term identity keypair from the
    *  OS keyring so we can sign ephemeral announces. Returns null when there is
    *  no server host (identity is host-scoped) OR no authenticated user id yet
-   *  (identity is host+user scoped, B3-3) — the announce then goes out
+   *  (identity is host+user scoped) — the announce then goes out
    *  unsigned and peers treat us as a legacy/unverified client. A missing user
    *  id must never fall back to a placeholder scope like `?? 0`:
    *  `getOrCreateIdentityKeyPair` would mint (or migrate-and-DELETE the real

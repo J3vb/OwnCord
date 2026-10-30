@@ -1,7 +1,7 @@
 /**
- * Pure builders for the voice row models (5.4c): a state snapshot in, the
+ * Pure builders for the voice row models: a state snapshot in, the
  * drawn values out. No builder reads a store; the sidebar's one `select`
- * hands them a `VoiceRowInputs` snapshot (5.4c-2), and
+ * hands them a `VoiceRowInputs` snapshot, and
  * `tests/unit/voice-row-model.test.ts` runs them under the store-read guard.
  *
  * Rule kept from the renderer these replace: an unverified peer is never
@@ -16,7 +16,7 @@ import { memberDisplayName } from "../../stores/members.store";
 import type { UiState } from "../../stores/ui.store";
 import type { PeerVerification, VoiceState, VoiceUser } from "../../stores/voice.store";
 import type { SafetyState } from "../safety/store";
-import { resolveDisplayName } from "../../lib/avatar";
+import { resolveDisplayName } from "../../lib/ui/avatar";
 import { shellText } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { ownIdentityTitle, verifyPresentation } from "../voice/peerVerification";
@@ -134,7 +134,7 @@ export function voiceChannelChrome(
   inputs: VoiceRowInputs,
 ): VoiceChannelChromeModel {
   const joined = inputs.currentChannelId === channel.id;
-  // A timeout refuses a join (TIMED_OUT) but never a leave (B9-15, Q4).
+  // A timeout refuses a join (TIMED_OUT) but never a leave.
   const timeoutReason =
     joined || inputs.timeout === null
       ? null
@@ -154,6 +154,7 @@ export function voiceChannelChrome(
     name: channel.name,
     nsfw: channel.nsfw,
     private: channel.isPrivate,
+    passwordProtected: channel.passwordProtected === true,
     afk: channel.afk === true,
     joined,
     frozenReason,

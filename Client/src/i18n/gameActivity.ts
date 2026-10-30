@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** The "Playing <game>" lines (WP 8.3): member row, DM row, profile card and
+/** The "Playing <game>" lines: member row, DM row, profile card and
  *  the Settings > Advanced > Activity section. */
 export const gameActivityText = defineCatalog("gameActivity", {
   playing: "Playing {game}",

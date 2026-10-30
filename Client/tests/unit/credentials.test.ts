@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/credentials.ts.
+ * Tests for src/lib/net/credentials.ts.
  *
  * This module was excluded from coverage in vitest.config.ts and only ever
  * `vi.mock`ed by other suites, so none of it had ever been executed under test.
@@ -37,8 +37,11 @@ const {
   createUserUpdateCredentialSaver,
   parseRelayedLogin,
   loginWithSavedPassword,
-} = await import("@lib/credentials");
+} = await import("@lib/net/credentials");
 const { ApiClientError, TransportError } = await import("@lib/api");
+
+// Logger names are taken when the module loads, before the per-test mock clear.
+const loggerCallsAtLoad = [...createLoggerMock.mock.calls];
 
 // saveCredential (called from createUserUpdateCredentialSaver's listener) is
 // fire-and-forget: `void saveCredential(...)`. Its own body has no `await`
@@ -121,7 +124,7 @@ describe("saveCredential", () => {
   });
 
   it("names its logger 'credentials' so these messages are filterable", () => {
-    expect(createLoggerMock).toHaveBeenCalledWith("credentials");
+    expect(loggerCallsAtLoad).toContainEqual(["credentials"]);
   });
 });
 
@@ -138,7 +141,7 @@ describe("createUserUpdateCredentialSaver", () => {
     }));
   });
 
-  it("does not save when the session declined to remember the password (BUG-135)", async () => {
+  it("does not save when the session declined to remember the password", async () => {
     const listener = createUserUpdateCredentialSaver("h.example", false);
 
     listener({ user_id: 1, username: "alice2" });
@@ -380,10 +383,10 @@ describe("outside Tauri", () => {
    * The branch matters because the connect screen calls loadCredential
    * unconditionally on mount: it must return null, not reject.
    */
-  async function importWithoutInvoke(): Promise<typeof import("@lib/credentials")> {
+  async function importWithoutInvoke(): Promise<typeof import("@lib/net/credentials")> {
     vi.resetModules();
     vi.doMock("@tauri-apps/api/core", () => ({}));
-    return import("@lib/credentials");
+    return import("@lib/net/credentials");
   }
 
   afterEach(() => {

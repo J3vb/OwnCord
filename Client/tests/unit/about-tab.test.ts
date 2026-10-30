@@ -14,8 +14,8 @@ const { mockInstall, mockSubscribeInstall } = vi.hoisted(() => ({
   mockInstall: vi.fn<(serverUrl: string) => Promise<void>>(),
   mockSubscribeInstall: vi.fn(),
 }));
-vi.mock("@lib/updater", async (importOriginal) => {
-  const real = await importOriginal<typeof import("../../src/lib/updater")>();
+vi.mock("@lib/net/updater", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/lib/net/updater")>();
   return {
     ...real,
     downloadAndInstallUpdate: mockInstall,
@@ -25,7 +25,7 @@ vi.mock("@lib/updater", async (importOriginal) => {
 
 import { buildAboutTab } from "../../src/components/settings/AboutTab";
 import { setAvailableUpdate } from "../../src/features/updates/availableUpdate";
-import type { UpdateInstallState } from "../../src/lib/updater";
+import type { UpdateInstallState } from "../../src/lib/net/updater";
 import { expectConsole } from "../helpers/console";
 
 const VERSIONS = [

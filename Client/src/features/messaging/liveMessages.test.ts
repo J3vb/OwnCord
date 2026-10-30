@@ -128,7 +128,7 @@ describe("reduceAddOptimisticMessage", () => {
   });
 });
 
-describe("an uploading row (WP 3A-9)", () => {
+describe("an uploading row", () => {
   const uploading = row({ status: "uploading", correlationId: "u-1", content: "files" });
   const uploading2 = row({ status: "uploading", correlationId: "u-2", content: "more files" });
 

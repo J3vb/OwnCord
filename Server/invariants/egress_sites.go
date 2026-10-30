@@ -11,7 +11,7 @@ import (
 // egressSitesID is the rule's stable id.
 const egressSitesID = "egress-sites"
 
-// EgressEntry is one row of the B4-8 egress inventory (BPR-055): why a
+// EgressEntry is one row of the egress inventory: why a
 // production file — or the cmd/smoke CI harness, which the syntactic rule
 // sees like any other — may open an outbound network connection, what
 // triggers it, where it goes, and the configuration that gates it.
@@ -62,19 +62,21 @@ var EgressAllow = map[string]EgressEntry{
 	"updater/assets.go": {"manual", "api.github.com and github.com release assets (github.owner/github.repo)", "an admin's update check or apply, or a client asking /api/v1/client-update",
 		"release metadata and asset fetches for the two rows above; refuses a URL that is not https on a GitHub host, on every redirect hop too",
 		[]string{"(*Updater).fetchBody"}},
-	// B5-1 moved the dialing out of api/gif_handler.go and
+	// The dialing moved out of api/gif_handler.go and
 	// plugin/host_http.go and into Server/safefetch, so both of those rows
 	// are gone and these two carry what they used to. Neither file chooses a
 	// destination: safefetch has no configuration and no call sites of its
 	// own, and its gate is whichever caller asked. The callers' own gates are
 	// unchanged — gif.api_key (default empty = the route is not mounted) for
 	// the GIF proxy, plugins.http_allowlist (default empty = every host
-	// denied) for the plugin http capability — so the compiled defaults still
-	// reach nowhere.
-	"safefetch/policy.go": {"config", "only a destination a caller passed in, and only an address ClassifyAddr accepted", "the caller's gate: gif.api_key, or plugins.http_allowlist",
+	// denied) for the plugin http capability, server.browser_client_enabled
+	// (default false = the routes are not mounted) for the browser client's
+	// external-content broker (externalcontent/) — so the compiled defaults
+	// still reach nowhere.
+	"safefetch/policy.go": {"config", "only a destination a caller passed in, and only an address ClassifyAddr accepted", "the caller's gate: gif.api_key, plugins.http_allowlist, or server.browser_client_enabled (the browser client's link previews and images)",
 		"the shared client, transport and dialer; Fetcher.dial connects to the addresses the destination check vetted and to nothing else",
 		[]string{"New", "defaultDial"}},
-	"safefetch/fetch.go": {"config", "the same, one redirect hop at a time", "the caller's gate: gif.api_key, or plugins.http_allowlist",
+	"safefetch/fetch.go": {"config", "the same, one redirect hop at a time", "the caller's gate: gif.api_key, plugins.http_allowlist, or server.browser_client_enabled (the browser client's link previews and images)",
 		"one bounded request per hop, under the deadline, byte ceilings and content-type allowlist in docs/trust-model.md's C-09 contract",
 		[]string{"(*Fetcher).roundTrip"}},
 	"internal/app/healthcheck.go": {"loopback", "this server's /health", "the --healthcheck CLI flag",
@@ -86,7 +88,7 @@ var EgressAllow = map[string]EgressEntry{
 	"cmd/smoke/docker.go": {"loopback", "the same address, published on 127.0.0.1 by the container under test", "someone invoking cmd/smoke",
 		"one /health probe confirming the drained container stopped answering; the destination is a server this harness launched moments earlier on loopback, and this binary is a CI harness that ships in no release",
 		[]string{"serving"}},
-	// B6-11's recovery drills (phases R, C and D): six probes against the same
+	// The recovery drills (phases R, C and D): six probes against the same
 	// loopback server — health while the disk is full, an authenticated read, a
 	// WebSocket dial, a read taken while a restore runs underneath it, and the
 	// upload and backup routes the rehearsals drive. Same row shape as the two

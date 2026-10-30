@@ -218,6 +218,11 @@ thread. Erasure deletes the subject's rows explicitly (class 18d), and a deleted
 takes its rows with it. A follow carries no content, only who follows which thread, and
 is never read as permission.
 
+**Voice channel password grants (migration 086).** `channel_password_grants` rows are keyed by
+channel and user and only record that the user entered a voice channel's password. Erasure
+deletes the subject's rows explicitly (class 18e), and a deleted channel takes its rows with
+it. The password itself is a bcrypt hash on the channel and is not personal data.
+
 **Forums (WP 6.9d, migration 075).** A forum holds no messages; its posts are threads,
 so the erased user's messages in a post go as in any thread, and a post they opened
 stays for its other participants (`thread_owner_id` goes `NULL`). The opening-message

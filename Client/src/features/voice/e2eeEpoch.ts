@@ -1,10 +1,10 @@
 // Voice E2EE epoch and key rotation — extracted from livekitE2EE.ts.
 // Owns the room key, the monotonic epoch that stamps every rotation, the
-// per-sender offer high-water marks (OC-0001), and the periodic rotation loop
+// per-sender offer high-water marks, and the periodic rotation loop
 // with its timer and in-flight/deferred flags. The session generation, the
 // key-holder role, the ECDH keypair and the peer set stay owned by
 // E2EEManager; this module reads them only through E2EEEpochHost.
-import { generateRoomKey } from "../../lib/e2eeCrypto";
+import { generateRoomKey } from "../../lib/net/e2eeCrypto";
 import { createLogger } from "../../lib/logger";
 
 // Same logger tag as before the extraction, so the E2EE log lines are unchanged.
@@ -33,7 +33,7 @@ export class E2EEEpoch {
   /** The 256-bit symmetric room key (plaintext). Only held by the key holder
    *  initially; other participants receive it via ECDH-wrapped offers. */
   private _roomKey: Uint8Array | null = null;
-  /** Highest offer epoch applied per sender (OC-0001). The holder binds its
+  /** Highest offer epoch applied per sender. The holder binds its
    *  epoch into every wrapped room key; an offer below this mark is a
    *  superseded key and is discarded. Per sender because each client's epoch
    *  counter is local; reset when that sender's ephemeral key is replaced. */

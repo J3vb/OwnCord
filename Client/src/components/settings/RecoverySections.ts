@@ -14,11 +14,11 @@ import type { RecoveryKitStatus } from "@lib/api";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
 import { createStatusRow, setStatusIcon, type StatusKind } from "../../features/settings/status";
-import { copyText } from "@lib/clipboard";
+import { copyText } from "@lib/ui/clipboard";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";
 // --text-danger is the qualified error-text token; --red (the fill) reads
-// 3.35:1 on --bg-primary, below Q1's 4.5:1 (B9-2 UI contract).
+// 3.35:1 on --bg-primary, below the 4.5:1 minimum.
 const ERROR = "color:var(--text-danger);font-size:13px;margin-bottom:8px";
 
 export interface ShownOnce {
@@ -63,7 +63,7 @@ export function buildShownOnce(
     { class: "ac-btn", style: "margin-bottom:12px", "data-testid": opts.copyTestId },
     opts.copyLabel,
   );
-  // The copy result is announced once, without moving focus (B9-23): the
+  // The copy result is announced once, without moving focus: the
   // button's own label change is a repaint a screen reader may miss on a
   // control that is still the focus. The region holds no secret.
   const copyStatus = createElement("div", { class: "sr-only", role: "status" });
@@ -148,8 +148,8 @@ function buildPasswordConfirm(
 
   const close = (): void => {
     // The submit button that was focused is inside `area`, which is about to
-    // hide; focus the trigger that replaces it so focus never falls to <body>
-    // (B9-23). Only reclaim focus if the user has not moved it elsewhere.
+    // hide; focus the trigger that replaces it so focus never falls to <body>.
+    // Only reclaim focus if the user has not moved it elsewhere.
     area.style.display = "none";
     trigger.style.display = "";
     pwInput.value = "";
@@ -314,7 +314,7 @@ export function buildRecoveryKitSection(
 
   function paint(status: RecoveryKitStatus | null): void {
     const { text, enrolled } = statusLabel(status);
-    // The word carries the state; the icon only repeats it (B9-23).
+    // The word carries the state; the icon only repeats it.
     setText(badge, text);
     missingHint.hidden = status === null || enrolled;
     const state: StatusKind = status === null ? "pending" : enrolled ? "ok" : "warn";

@@ -28,7 +28,7 @@ const mockIdentityKeyPair = vi.hoisted(() => ({
   privateKey: { type: "id-private" } as unknown as CryptoKey,
 }));
 
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => mockKeyPair),
   exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
   importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
@@ -45,7 +45,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
   computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
 }));
 
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => "stored"),
@@ -84,14 +84,14 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/voiceJoinTrace", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/voiceJoinTrace")>()),
+vi.mock("@lib/voice/voiceJoinTrace", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/voice/voiceJoinTrace")>()),
   markJoinMilestone: vi.fn(),
 }));
 
 // Now import
-import { E2EEManager } from "../../src/lib/livekitE2EE";
-import { markJoinMilestone } from "@lib/voiceJoinTrace";
+import { E2EEManager } from "../../src/lib/voice/livekitE2EE";
+import { markJoinMilestone } from "@lib/voice/voiceJoinTrace";
 import {
   setPeerVerification,
   clearPeerVerification,
@@ -110,8 +110,8 @@ import {
   computeKeyFingerprint,
   signEphemeralKey,
   verifyEphemeralKeySignature,
-} from "@lib/e2eeCrypto";
-import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/identity";
+} from "@lib/net/e2eeCrypto";
+import { getOrCreateIdentityKeyPair, getIdentityPin, storeIdentityPin } from "@lib/net/identity";
 import { authStore } from "@stores/auth.store";
 
 const PEER_ID = 42;
@@ -458,7 +458,7 @@ describe("E2EEManager", () => {
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
-  it("[OC-0352] skips the keypair swap and send when the WS is not connected, so the published key can't diverge from the local one", async () => {
+  it("skips the keypair swap and send when the WS is not connected, so the published key can't diverge from the local one", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
@@ -489,7 +489,7 @@ describe("E2EEManager", () => {
 
   // ── Batch C3 findings ───────────────────────────────────────────────────
 
-  it("[finding 1] resumes as key holder when re-elected while a prior rotation is still in flight", async () => {
+  it("resumes as key holder when re-elected while a prior rotation is still in flight", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]])); // we (uid 1) are always lowest
@@ -531,7 +531,7 @@ describe("E2EEManager", () => {
     expect(mgr.rotatingKey).toBe(false);
   });
 
-  it("[finding 2] marks a first-sight peer 'unverified' (not 'verified') when the identity-pin write fails", async () => {
+  it("marks a first-sight peer 'unverified' (not 'verified') when the identity-pin write fails", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair
@@ -552,7 +552,7 @@ describe("E2EEManager", () => {
     );
   });
 
-  it("[finding 3] discards a stale offer even when epoch is unchanged, because the keypair belongs to a cleared session", async () => {
+  it("discards a stale offer even when epoch is unchanged, because the keypair belongs to a cleared session", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -595,7 +595,7 @@ describe("E2EEManager", () => {
     expect(mockSetKey).not.toHaveBeenCalled();
   });
 
-  it("[finding 4] discards a stale announce-offer if the room key rotates while wrapRoomKey is in flight", async () => {
+  it("discards a stale announce-offer if the room key rotates while wrapRoomKey is in flight", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder, epoch 1
@@ -623,7 +623,7 @@ describe("E2EEManager", () => {
     expect(sendsOfType(ws, "voice_e2ee_offer")).toHaveLength(0);
   });
 
-  it("[finding 5] retries with a fresh promise after a decrypt failure, so a second good offer still completes setup", async () => {
+  it("retries with a fresh promise after a decrypt failure, so a second good offer still completes setup", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -649,7 +649,7 @@ describe("E2EEManager", () => {
     await expect(setupPromise).resolves.toBe(true);
   });
 
-  it("[finding 6] queues (does not drop) a live announce that arrives during setup, before isKeyHolder/roomKey are ready", async () => {
+  it("queues (does not drop) a live announce that arrives during setup, before isKeyHolder/roomKey are ready", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -951,7 +951,7 @@ describe("E2EEManager", () => {
 
   // ── Batch B3 findings ───────────────────────────────────────────────────
 
-  it("[B3-2] preserves a key-holder promotion that lands during setupKeyExchange's pre-publish awaits, instead of clobbering it with the stale server value", async () => {
+  it("preserves a key-holder promotion that lands during setupKeyExchange's pre-publish awaits, instead of clobbering it with the stale server value", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // After the real holder (PEER_ID) leaves, we (uid 1) are the only
@@ -994,7 +994,7 @@ describe("E2EEManager", () => {
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
-  it("[B3-7] does not resurrect peer key/verification state into a torn-down session when clearState() runs during verifyPeerAnnounce's pin lookup", async () => {
+  it("does not resurrect peer key/verification state into a torn-down session when clearState() runs during verifyPeerAnnounce's pin lookup", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair
@@ -1045,7 +1045,7 @@ describe("E2EEManager", () => {
 
   // ── Ledger findings OC-0098 / OC-0004 / OC-0006 / OC-0005 / OC-0007 ──
 
-  it("[OC-0098] sends its own announce before offering the room key to a drained peer", async () => {
+  it("sends its own announce before offering the room key to a drained peer", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -1069,7 +1069,7 @@ describe("E2EEManager", () => {
     expect(announceIndex).toBeLessThan(offerIndex);
   });
 
-  it("[OC-0004] elects us key holder on a participant-left even when our own voice_state hasn't landed in the roster yet", async () => {
+  it("elects us key holder on a participant-left even when our own voice_state hasn't landed in the roster yet", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws); // getCurrentChannelId() => 1
     // mockVoiceState.voiceUsers has NO entry for channel 1: our own
@@ -1088,7 +1088,7 @@ describe("E2EEManager", () => {
     expect(mockSetKey).toHaveBeenCalledWith("mock-room-key-base64");
   });
 
-  it("[OC-0006] serializes a new session's key after an unfinished rotation", async () => {
+  it("serializes a new session's key after an unfinished rotation", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
@@ -1130,7 +1130,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0005] paces room-key offers so a large channel's rotation stays under the server's per-second rate limit", async () => {
+  it("paces room-key offers so a large channel's rotation stays under the server's per-second rate limit", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
@@ -1162,7 +1162,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0155] shares the offer-pacing budget across back-to-back rotations instead of resetting it per call", async () => {
+  it("shares the offer-pacing budget across back-to-back rotations instead of resetting it per call", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockVoiceState.voiceUsers.set(1, new Map([[1, {}]]));
@@ -1205,7 +1205,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0167] paces announce-driven offers through the same shared budget as rotation offers", async () => {
+  it("paces announce-driven offers through the same shared budget as rotation offers", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -1246,7 +1246,7 @@ describe("E2EEManager", () => {
 
   // ── Ledger findings OC-0010 / OC-0011 ─────────────────────────────────
 
-  it("[OC-0010] does not stand down a new session's key-holder role when a stale offer's setKey resolves after teardown+rejoin", async () => {
+  it("does not stand down a new session's key-holder role when a stale offer's setKey resolves after teardown+rejoin", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -1288,7 +1288,7 @@ describe("E2EEManager", () => {
     expect((mgr as unknown as { _isKeyHolder: boolean })._isKeyHolder).toBe(true);
   });
 
-  it("[OC-0010] does not write a stale peer key into a new session's map when clearState()+rejoin lands during the announce's key-import await", async () => {
+  it("does not write a stale peer key into a new session's map when clearState()+rejoin lands during the announce's key-import await", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -1319,7 +1319,7 @@ describe("E2EEManager", () => {
     expect(mgr.peerPublicKeys.has(PEER_ID)).toBe(false);
   });
 
-  it("[OC-0011] rejects a replayed announce carrying a previously-retired peer key instead of overwriting the live key", async () => {
+  it("rejects a replayed announce carrying a previously-retired peer key instead of overwriting the live key", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair
@@ -1365,7 +1365,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0007] confirms the room key after a reconnect re-announce instead of declaring it fresh unconditionally", async () => {
+  it("confirms the room key after a reconnect re-announce instead of declaring it fresh unconditionally", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // Non-key-holder session with an already-established room key from
@@ -1392,7 +1392,7 @@ describe("E2EEManager", () => {
 
   // ── Ledger findings OC-0002 / OC-0020 ─────────────────────────────────
 
-  it("[OC-0002] applies an offer that arrives while its sender's own announce is still verifying, instead of dropping it as an unknown peer", async () => {
+  it("applies an offer that arrives while its sender's own announce is still verifying, instead of dropping it as an unknown peer", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // We were previously key holder (mirrors B in the repro): own keypair +
@@ -1461,7 +1461,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0020] retires a departed peer's key on leave, so a replay of it after they rejoin with a fresh key cannot resurrect it", async () => {
+  it("retires a departed peer's key on leave, so a replay of it after they rejoin with a fresh key cannot resurrect it", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair, holder
@@ -1528,7 +1528,7 @@ describe("E2EEManager", () => {
     return { ws, mgr };
   }
 
-  it("[OC-0001] wraps each offer with the sender's current epoch", async () => {
+  it("wraps each offer with the sender's current epoch", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
@@ -1549,7 +1549,7 @@ describe("E2EEManager", () => {
     );
   });
 
-  it("[OC-0001] discards an offer carrying an older epoch than one already applied from that sender", async () => {
+  it("discards an offer carrying an older epoch than one already applied from that sender", async () => {
     const { mgr } = await holderWithPeer();
     try {
       unwrapAt(3, 3);
@@ -1565,7 +1565,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0001] applies an offer at the same epoch as the last applied one (holder re-sends the current key)", async () => {
+  it("applies an offer at the same epoch as the last applied one (holder re-sends the current key)", async () => {
     const { mgr } = await holderWithPeer();
     try {
       unwrapAt(3, 3);
@@ -1578,7 +1578,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0001] resets the sender's high-water mark when they announce a fresh ephemeral key", async () => {
+  it("resets the sender's high-water mark when they announce a fresh ephemeral key", async () => {
     const { mgr } = await holderWithPeer();
     vi.mocked(importPublicKey).mockImplementation(
       async (b64: string) => ({ type: `peer-key-${b64}` }) as unknown as CryptoKey,
@@ -1605,7 +1605,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0001] still applies a legacy offer (no epoch) from a holder on the old build", async () => {
+  it("still applies a legacy offer (no epoch) from a holder on the old build", async () => {
     const { mgr } = await holderWithPeer();
     try {
       unwrapAt(null, 7);
@@ -1618,7 +1618,7 @@ describe("E2EEManager", () => {
 
   // ── OC-0003: per-session fingerprint for every peer ───────────────────────
 
-  it("[OC-0003] publishes a session fingerprint of the ephemeral key for a legacy (unverified) peer while safetyNumber stays null", async () => {
+  it("publishes a session fingerprint of the ephemeral key for a legacy (unverified) peer while safetyNumber stays null", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     mockMembers.set(PEER_ID, { identityPublicKey: null });
@@ -1634,7 +1634,7 @@ describe("E2EEManager", () => {
     });
   });
 
-  it("[OC-0003] publishes the session fingerprint alongside the safety number for a verified peer", async () => {
+  it("publishes the session fingerprint alongside the safety number for a verified peer", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
@@ -1649,7 +1649,7 @@ describe("E2EEManager", () => {
     });
   });
 
-  it("[OC-0003] publishes the local session fingerprint on setup and clears it on teardown", async () => {
+  it("publishes the local session fingerprint on setup and clears it on teardown", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -1660,7 +1660,7 @@ describe("E2EEManager", () => {
     expect(setLocalSessionFingerprint).toHaveBeenLastCalledWith(null);
   });
 
-  it("[F-11] publishes the local user's own safety number on setup and clears it on teardown", async () => {
+  it("publishes the local user's own safety number on setup and clears it on teardown", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -1674,7 +1674,7 @@ describe("E2EEManager", () => {
     expect(setLocalSafetyNumber).toHaveBeenLastCalledWith(null);
   });
 
-  it("[F-11] an unsigned announce publishes no own safety number", async () => {
+  it("an unsigned announce publishes no own safety number", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     vi.mocked(signEphemeralKey).mockRejectedValueOnce(new Error("keyring down"));
@@ -1688,7 +1688,7 @@ describe("E2EEManager", () => {
 
   // ── Guards the suite reached but never pinned (mutation audit T-2026-08-19-47) ──
 
-  it("[T-47] aborts setup when a teardown lands during the key holder's keyProvider.setKey", async () => {
+  it("aborts setup when a teardown lands during the key holder's keyProvider.setKey", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
 
@@ -1719,7 +1719,7 @@ describe("E2EEManager", () => {
     await expect(setupPromise).resolves.toBe(false);
   });
 
-  it("[T-47] a superseded reconnect re-announce publishes neither its fingerprint nor a stray announce", async () => {
+  it("a superseded reconnect re-announce publishes neither its fingerprint nor a stray announce", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
@@ -1758,7 +1758,7 @@ describe("E2EEManager", () => {
     expect(sendsOfType(ws, "voice_e2ee_announce")).toHaveLength(1);
   });
 
-  it("[T-47] does not arm a reconnect-confirmation retry when there was no room key to go stale", async () => {
+  it("does not arm a reconnect-confirmation retry when there was no room key to go stale", async () => {
     vi.useFakeTimers();
     try {
       const ws = { send: vi.fn(), getState: () => "connected" };
@@ -1776,7 +1776,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[T-47] skips the reconnect-confirmation retry once a fresh offer replaced the room key", async () => {
+  it("skips the reconnect-confirmation retry once a fresh offer replaced the room key", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
@@ -1801,7 +1801,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[T-47] a duplicate announce does not reset the sender's offer high-water mark", async () => {
+  it("a duplicate announce does not reset the sender's offer high-water mark", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1);
@@ -1829,7 +1829,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[T-47] does not promote itself on a leave while a lower-id participant remains", async () => {
+  it("does not promote itself on a leave while a lower-id participant remains", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // We are uid 50; uid 10 stays behind, so the election must pick them.
@@ -1848,7 +1848,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[T-47] arms the periodic rotation timer for the key holder so forward secrecy actually fires", async () => {
+  it("arms the periodic rotation timer for the key holder so forward secrecy actually fires", async () => {
     vi.useFakeTimers();
     try {
       const ws = { send: vi.fn(), getState: () => "connected" };
@@ -1868,7 +1868,7 @@ describe("E2EEManager", () => {
 
   // ── Ledger findings OC-0209 / OC-0212 / OC-0213 ───────────────────────────
 
-  it("[OC-0209] rejects a replayed retired-key announce before it overwrites the peer's verification badge", async () => {
+  it("rejects a replayed retired-key announce before it overwrites the peer's verification badge", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // establishes our keypair, holder
@@ -1912,7 +1912,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0212] replays the blocked announce after a successful re-pin, restoring the peer instead of leaving them un-keyed with the badge cleared", async () => {
+  it("replays the blocked announce after a successful re-pin, restoring the peer instead of leaving them un-keyed with the badge cleared", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
@@ -1950,7 +1950,7 @@ describe("E2EEManager", () => {
     );
   });
 
-  it("[OC-0213] does not permanently retire a peer's key on a stale voice_leave when the peer is still listed as present in the channel roster", async () => {
+  it("does not permanently retire a peer's key on a stale voice_leave when the peer is still listed as present in the channel roster", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
@@ -2009,7 +2009,7 @@ describe("E2EEManager", () => {
   // corrected behavior: a genuine departure retires the key even though the
   // roster looked "still present" right up until this event, matching what
   // production's real (post-mutation) roster read looks like.
-  it("[OC-0283] retires a departed peer's key even though the roster listed them as present right up until this event", async () => {
+  it("retires a departed peer's key even though the roster listed them as present right up until this event", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     await mgr.setupKeyExchange(true, 1); // holder in channel 1
@@ -2048,7 +2048,7 @@ describe("E2EEManager", () => {
     }
   });
 
-  it("[OC-0257] a stale (demoted) key holder must not send a doomed voice_e2ee_offer to a peer with a lower user id", async () => {
+  it("a stale (demoted) key holder must not send a doomed voice_e2ee_offer to a peer with a lower user id", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     // We are uid 10 and became holder while we were the lowest connected id.
@@ -2081,7 +2081,7 @@ describe("E2EEManager", () => {
 // encrypted" that had no dedicated test before HP-2, or records a known gap
 // so the fix has a RED waiting for it.
 
-describe("E2EEManager — HP-2 adversarial membership and key-change rules", () => {
+describe("E2EEManager — adversarial membership and key-change rules", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMembers.clear();
@@ -2091,7 +2091,7 @@ describe("E2EEManager — HP-2 adversarial membership and key-change rules", () 
     vi.mocked(storeIdentityPin).mockResolvedValue("stored");
   });
 
-  it("[HP-2 known gap] a modified server that adds an unknown member at first contact gets the room key wrapped to it", async () => {
+  it("known gap] a modified server that adds an unknown member at first contact gets the room key wrapped to it", async () => {
     // Membership is server-controlled and the client accepts any first-sight
     // identity (verifyPeerAnnounce). A server that inserts a member row it
     // holds the identity key for, then relays a well-signed announce for it,
@@ -2129,7 +2129,7 @@ describe("E2EEManager — HP-2 adversarial membership and key-change rules", () 
     );
   });
 
-  it("[HP-2] a second device's key overwrites the account pin automatically, and so does the first device's when it returns", async () => {
+  it("a second device's key overwrites the account pin automatically, and so does the first device's when it returns", async () => {
     // Pins are one per account ({host}:{userId}) while identity keys are per
     // install (identity.ts; migration 017 holds one identity_public_key per
     // user). A changed key whose announce verifies is accepted and re-pinned
@@ -2182,7 +2182,7 @@ describe("E2EEManager — HP-2 adversarial membership and key-change rules", () 
     expect(storeIdentityPin).toHaveBeenCalledTimes(2);
   });
 
-  it("[HP-2 / OC-0316] a peer whose socket dropped across a rotation is re-keyed with the rotated key when the server replays its announce", async () => {
+  it("a peer whose socket dropped across a rotation is re-keyed with the rotated key when the server replays its announce", async () => {
     // Server side: hub.go re-relays the resumed client's stored announce to
     // the channel (TestRegisterNow_ReannouncesOwnKeyOnResume). Holder side,
     // pinned here: that replay is a duplicate announce, and the offer it
@@ -2600,7 +2600,7 @@ describe("E2EE operation ownership", () => {
     }
   });
 
-  it("[OC-0416] still rotates the room key when a second voice_leave for the same peer lands mid-retirement", async () => {
+  it("still rotates the room key when a second voice_leave for the same peer lands mid-retirement", async () => {
     const ws = { send: vi.fn(), getState: () => "connected" };
     const mgr = createManager(ws);
     try {
@@ -2645,7 +2645,7 @@ describe("E2EE operation ownership", () => {
     }
   });
 
-  it("[OC-0442] abandons the whole handler when the SESSION is torn down mid-retirement", async () => {
+  it("abandons the whole handler when the SESSION is torn down mid-retirement", async () => {
     // The companion to OC-0416. peerAttemptIsCurrent() conflates two very
     // different reasons to go stale: a duplicate leave for the same peer
     // (harmless — this invocation's own captures stay correct, so only the

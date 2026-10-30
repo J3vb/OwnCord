@@ -1,6 +1,6 @@
 /**
  * What a voice channel row and its participant rows draw, from plain-data
- * models and nothing else (5.4c).
+ * models and nothing else.
  *
  * A model is the drawn values after formatting: the resolved name, each
  * tooltip with its fingerprint or safety number already in it, the capacity
@@ -10,7 +10,7 @@
  * models from a state snapshot and the sidebar binds the handlers.
  *
  * The DOM is the one `ChannelSidebar.ts`'s `renderVoiceChannelItem` drew
- * before 5.4c, class for class and attribute for attribute: sidebar.css, the
+ * before the row models were split out, class for class and attribute for attribute: sidebar.css, the
  * sidebar unit suite and the voice e2e specs select on it.
  */
 
@@ -18,7 +18,12 @@ import { createElement, appendChildren, setText } from "../../lib/dom";
 import { createIcon, type IconName } from "../../lib/icons";
 import { shellText } from "../../i18n/shell";
 import type { createAvatarElement } from "../../components/message-list/avatar";
-import { mentionBadge, nsfwIndicator, privateIndicator } from "./channelRow.view";
+import {
+  mentionBadge,
+  nsfwIndicator,
+  passwordIndicator,
+  privateIndicator,
+} from "./channelRow.view";
 
 /** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
 export type CreateAvatar = typeof createAvatarElement;
@@ -78,6 +83,8 @@ export type VoiceChannelChromeModel = {
   readonly name: string;
   readonly nsfw: boolean;
   readonly private: boolean;
+  /** Joining asks for a password: drawn as a lock beside the name. */
+  readonly passwordProtected: boolean;
   /** The server's AFK channel: marked with a moon and an "AFK" label. */
   readonly afk: boolean;
   /** The local user is in this channel: drawn as `active`. */
@@ -97,6 +104,7 @@ export const VOICE_USER_PATCH_FIELDS = ["speaking"] as const;
 
 /** The fields `patchVoiceChannelChrome` changes in place. */
 export const VOICE_CHROME_PATCH_FIELDS = [
+  "passwordProtected",
   "afk",
   "joined",
   "frozenReason",
@@ -163,7 +171,7 @@ export function drawVoiceUserRow(
     row.appendChild(local);
   }
 
-  // The local user's own session fingerprint (OC-0003): what a peer who sees
+  // The local user's own session fingerprint: what a peer who sees
   // us as unverified compares against.
   if (model.ownFingerprintTitle !== null) {
     const own = createElement("span", { class: "vu-verify vu-session-fp" });
@@ -247,7 +255,7 @@ export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivE
   const item = createElement("div", {
     class: chromeClasses(model).join(" "),
     "data-testid": `channel-${model.channelId}`,
-    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    // Roving list item: reachable by Tab once, then arrow-stepped.
     role: "button",
     tabindex: "-1",
   });
@@ -262,6 +270,7 @@ export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivE
   appendChildren(item, prefix, createElement("span", { class: "ch-name" }, model.name));
   if (model.nsfw) item.appendChild(nsfwIndicator(model.channelId));
   if (model.private) item.appendChild(privateIndicator(model.channelId));
+  if (model.passwordProtected) item.appendChild(passwordIndicator(model.channelId));
   if (model.afk) item.appendChild(drawAfk(model.channelId));
   if (model.capacity !== null) item.appendChild(drawCapacity(model.channelId, model.capacity));
   if (model.mentionCount > 0) item.appendChild(mentionBadge(model.channelId, model.mentionCount));
@@ -293,6 +302,19 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
   } else {
     item.title = next.frozenReason;
     item.setAttribute("aria-disabled", "true");
+  }
+
+  const lockBadge = item.querySelector(":scope > .ch-password");
+  if (!next.passwordProtected) {
+    lockBadge?.remove();
+  } else if (lockBadge === null) {
+    const drawn = passwordIndicator(next.channelId);
+    // Before the afk, capacity and mention badges, as a fresh draw orders them.
+    const later = item.querySelector(
+      ":scope > .ch-afk, :scope > .ch-capacity, :scope > .mention-badge",
+    );
+    if (later === null) item.appendChild(drawn);
+    else later.before(drawn);
   }
 
   const afkBadge = item.querySelector(":scope > .ch-afk");

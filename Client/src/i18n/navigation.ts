@@ -1,6 +1,6 @@
 import { defineCatalog } from "./format";
 
-/** Shared navigation copy (B9-4): the Q2 destination entries and the content-view frame. */
+/** Shared navigation copy: the destination entries and the content-view frame. */
 export const navigationText = defineCatalog("navigation", {
   "requests.title": "Message Requests",
   "requests.entry": "Message Requests ({count})",

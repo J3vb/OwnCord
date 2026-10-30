@@ -11,12 +11,12 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { createModal } from "@lib/modalFactory";
-import { showToast } from "@lib/toast";
-import type { ModalInstance } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
+import { showToast } from "@lib/ui/toast";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import { Disposable } from "@lib/disposable";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
-import type { MountableComponent } from "@lib/safe-render";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { createAvatarElement, pickAvatarColor } from "../../components/message-list/avatar";
@@ -31,7 +31,7 @@ import {
   lineHintText,
   runeCount,
   MAX_GROUP_DM_NAME_LEN,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,7 +48,7 @@ export interface MemberPickerOptions {
   /** Called when the modal is dismissed (cancel or overlay click). */
   readonly onClose: () => void;
   /**
-   * Add mode (WP 3B-11a): pick people to add to an existing group. Setting
+   * Add mode: pick people to add to an existing group. Setting
    * `onAdd` makes the picker multi-select with an "Add" button and no group
    * name; `onSelect` and `onSelectGroup` are not called. `onAdd` resolves to
    * null on success (the picker closes) or the error text to show in the

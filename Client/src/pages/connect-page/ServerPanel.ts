@@ -2,13 +2,13 @@
 // Pure extraction from ConnectPage.ts. No behavior changes.
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
-import type { Compatibility, HealthStatus, ServerProfile } from "@lib/profiles";
-import { loadCredential } from "@lib/credentials";
-import { isValidHost } from "@lib/hostValidation";
+import { createModal } from "@lib/ui/modalFactory";
+import type { Compatibility, HealthStatus, ServerProfile } from "@lib/presence/profiles";
+import { loadCredential } from "@lib/net/credentials";
+import { isValidHost } from "@lib/net/hostValidation";
 import { createLogger } from "@lib/logger";
 import { connectText } from "../../i18n/connect";
 
@@ -81,7 +81,7 @@ export interface ServerPanelApi {
   updateHealthStatus(host: string, status: HealthStatus): void;
   /**
    * Advisory epoch-compatibility badge. It NEVER disables Connect — the
-   * WebSocket auth_error stays authoritative (Decision 1).
+   * WebSocket auth_error stays authoritative.
    */
   updateCompatibility(host: string, compatibility: Compatibility): void;
   destroy(): void;
@@ -129,7 +129,7 @@ export function createServerPanel(
   // page-lifetime `signal`, which only aborts once, at page teardown --
   // addEventListener({ signal }) keeps a detached row reachable via that
   // signal's own retained abort-listener list until it fires, so every
-  // re-render would otherwise leak the previous generation's rows (OC-0336),
+  // re-render would otherwise leak the previous generation's rows,
   // the same defect already fixed in MemberList/ChannelSidebar/MessageList.
   // renderOwner is aborted and replaced at the top of every render, so only the
   // CURRENT render's rows stay reachable.
@@ -139,14 +139,39 @@ export function createServerPanel(
   // DOM construction
   // ---------------------------------------------------------------------------
 
+  let toggleBtn: HTMLButtonElement;
+  let listOpen = false;
+
+  function setListOpen(open: boolean): void {
+    listOpen = open;
+    panelEl.classList.toggle("server-panel--collapsed", !open);
+    toggleBtn.setAttribute("aria-expanded", String(open));
+    toggleBtn.setAttribute(
+      "aria-label",
+      connectText(open ? "servers.hideList" : "servers.showList"),
+    );
+  }
+
   function buildPanel(): HTMLDivElement {
     const panel = createElement("div", { class: "server-panel" });
 
+    // On a phone the panel stacks above the form and folds down to the
+    // selected server; the toggle is hidden on wider screens (login.css).
+    panel.classList.add("server-panel--collapsed");
     const header = createElement("div", { class: "server-panel-header" });
     const heading = createElement("h2", {}, connectText("servers.heading"));
-    header.appendChild(heading);
+    toggleBtn = createElement("button", {
+      class: "server-panel-toggle",
+      type: "button",
+      "aria-expanded": "false",
+      "aria-controls": "server-list",
+      "aria-label": connectText("servers.showList"),
+      "data-testid": "server-panel-toggle",
+    });
+    toggleBtn.addEventListener("click", () => setListOpen(!listOpen), { signal });
+    appendChildren(header, heading, toggleBtn);
 
-    serverListEl = createElement("div", { class: "server-list" });
+    serverListEl = createElement("div", { class: "server-list", id: "server-list" });
 
     renderServerProfiles(initialProfiles);
 
@@ -209,7 +234,7 @@ export function createServerPanel(
       const host = createElement("span", { class: "srv-host" }, profile.host);
       const latency = createElement("span", { class: "srv-latency" });
       const onlineUsersEl = createElement("span", { class: "srv-online-users" });
-      // Advisory epoch badge (B7-12): text + modifier class set by
+      // Advisory epoch badge: text + modifier class set by
       // updateCompatibility; empty and inert until then.
       const compatEl = createElement("span", { class: "srv-compat-badge" });
       appendChildren(meta, host, latency, onlineUsersEl, compatEl);
@@ -290,6 +315,7 @@ export function createServerPanel(
         for (const row of serverListEl.querySelectorAll(".server-item")) {
           row.classList.toggle("active", row === item);
         }
+        if (listOpen) setListOpen(false);
         // Immediately fill host + username from profile
         const saved = profile.synthetic !== true;
         onServerClick(
@@ -500,7 +526,7 @@ export function createServerPanel(
     // release its own button listeners; registering them on the
     // page-lifetime `signal` instead (which only aborts once, at page
     // teardown) would keep every discarded modal subtree reachable until
-    // then (OC-0335). Chained to the page signal so an open modal is also
+    // then. Chained to the page signal so an open modal is also
     // torn down on page teardown.
     const modalOwner = new Disposable();
     signal.addEventListener("abort", () => modalOwner.destroy(), {
@@ -538,7 +564,7 @@ export function createServerPanel(
       // Validate address: must be a valid host or host:port (DNS name, IPv4,
       // bracketed/bare IPv6) — no paths, no special chars. Shared with
       // api.ts's setConfig so an address accepted here is also accepted by
-      // the actual connection path, and vice versa (OC-0187).
+      // the actual connection path, and vice versa.
       if (!isValidHost(addr)) {
         // Show inline validation error via the host input
         hostAddrInput.setCustomValidity(connectText("servers.add.invalidHost"));

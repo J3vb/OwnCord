@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { channelsStore, type Channel } from "../../stores/channels.store";
 import { dmStore, type DmChannel } from "../../stores/dm.store";
-import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "../../lib/channel-mutes";
-import { savePref } from "../../lib/preferences";
+import {
+  invalidateMuteCache,
+  muteChannel,
+  setChannelMutesHost,
+} from "../../lib/prefs/channelMutes";
+import { savePref } from "../../lib/prefs/preferences";
 import {
   setChannelNotificationLevel,
   setGlobalNotificationLevel,
-} from "../../lib/notificationLevel";
+} from "../../lib/prefs/notificationLevel";
 import { startUnreadBadge, unreadBadgeCount } from "./unreadBadge";
 import { followedThreadsStore } from "../../stores/followedThreads.store";
 import { adoptReadyThreads, resetThreadsStore } from "../../stores/threads.store";
@@ -265,7 +269,7 @@ describe("unread badge", () => {
     stop();
   });
 
-  describe("followed threads (WP 6.9c)", () => {
+  describe("followed threads", () => {
     afterEach(() => resetThreadsStore());
 
     it("counts a followed thread's mentions with the channels' and DMs'", () => {

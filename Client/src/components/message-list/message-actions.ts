@@ -6,10 +6,10 @@
 
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
-import { threadsEnabled } from "@lib/serverCapabilities";
+import { threadsEnabled } from "@lib/net/serverCapabilities";
 import { authorityChannelId, threadOfMessage } from "@stores/threads.store";
-import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/messageKind";
-import { formatMessageLink } from "@lib/deep-link";
+import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
+import { formatMessageLink } from "@lib/nav/deepLink";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { getChannelMessages, type Message } from "@stores/messages.store";
@@ -100,7 +100,7 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
       on && own && msg.forward === undefined && msg.poll === undefined && msg.sticker === undefined,
     ),
     // A forward would copy only the poll's fallback text and drop the voting, so the server refuses it.
-    // A sticker message cannot be forwarded either (WP 8.8).
+    // A sticker message cannot be forwarded either.
     forward: gate(
       on &&
         opts.onForwardClick !== undefined &&
@@ -114,7 +114,10 @@ export function messageActionGates(msg: Message, opts: MessageListOptions): Mess
     ),
     pin: gate(on && canPin),
     delete: gate(canDelete, canDelete ? deleteLockReason() : null),
-    report: gate(on && opts.onReportClick !== undefined && !own),
+    // An imported message has no account behind it to report.
+    report: gate(
+      on && opts.onReportClick !== undefined && !own && msg.importedAuthor === undefined,
+    ),
     copyId: gate(sent && isDeveloperMode()),
   };
 }

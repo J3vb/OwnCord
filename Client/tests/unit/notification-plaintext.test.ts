@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import { markdownToPlainText } from "../../src/lib/markdown";
+import { markdownToPlainText } from "../../src/lib/text/markdown";
 import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -14,14 +14,14 @@ import { dmStore } from "../../src/stores/dm.store";
 
 const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
 
-vi.mock("../../src/lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
+vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
 
-vi.mock("../../src/lib/livekitSession", () => ({
+vi.mock("../../src/lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),

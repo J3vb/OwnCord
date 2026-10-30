@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::sync::lock;
 use base64::Engine;
 use livekit::webrtc::desktop_capturer::{
     CaptureError, CaptureSource, DesktopCaptureSourceType, DesktopCapturer, DesktopCapturerOptions,
@@ -362,6 +363,220 @@ mod x11_refresh {
     }
 }
 
+/// The process that owns a capture target, so its share audio can be that
+/// application's sound only. X11 windows carry it as `_NET_WM_PID`; a screen,
+/// the portal (Wayland hides which app a window is) or a window without the
+/// property has none. So does a pid that is not one of our own processes:
+/// a sandboxed (Flatpak, Snap) or remote app reports a pid from another
+/// namespace or host, which here names an unrelated process.
+pub fn target_pid(target: Target) -> Option<u32> {
+    match target {
+        Target::Window(xid) if !under_wayland() => {
+            x11_window_pid::read(xid).filter(|&pid| owned_by_us(pid))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `/proc/<pid>` exists and belongs to our user.
+fn owned_by_us(pid: u32) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    // SAFETY: getuid has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    std::fs::metadata(format!("/proc/{pid}")).is_ok_and(|m| m.uid() == uid)
+}
+
+/// `_NET_WM_PID` of an X11 window, read over its own XCB connection. Not
+/// Xlib: an Xlib error (the window closed since the picker listed it) goes
+/// to the process-wide error handler, which hands an unknown display's error
+/// to Xlib's default, and that exits. XCB returns errors as values. libxcb is
+/// loaded at runtime, like the Xlib in `x11_refresh`; any failure is `None`.
+mod x11_window_pid {
+    use std::ffi::c_void;
+    use std::os::raw::{c_char, c_int, c_uint};
+    use std::ptr;
+
+    const XA_CARDINAL: u32 = 6;
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct Cookie {
+        sequence: c_uint,
+    }
+
+    // The reply layouts mirror libxcb's; only some fields are read.
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct InternAtomReply {
+        response_type: u8,
+        pad0: u8,
+        sequence: u16,
+        length: u32,
+        atom: u32,
+    }
+
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct GetPropertyReply {
+        response_type: u8,
+        format: u8,
+        sequence: u16,
+        length: u32,
+        kind: u32,
+        bytes_after: u32,
+        value_len: u32,
+        pad0: [u8; 12],
+    }
+
+    type Connect = unsafe extern "C" fn(*const c_char, *mut c_int) -> *mut c_void;
+    type HasError = unsafe extern "C" fn(*mut c_void) -> c_int;
+    type Disconnect = unsafe extern "C" fn(*mut c_void);
+    type InternAtom = unsafe extern "C" fn(*mut c_void, u8, u16, *const c_char) -> Cookie;
+    type InternAtomReplyFn =
+        unsafe extern "C" fn(*mut c_void, Cookie, *mut *mut c_void) -> *mut InternAtomReply;
+    type GetProperty = unsafe extern "C" fn(*mut c_void, u8, u32, u32, u32, u32, u32) -> Cookie;
+    type GetPropertyReplyFn =
+        unsafe extern "C" fn(*mut c_void, Cookie, *mut *mut c_void) -> *mut GetPropertyReply;
+    type GetPropertyValue = unsafe extern "C" fn(*const GetPropertyReply) -> *mut c_void;
+
+    struct Xcb {
+        lib: *mut c_void,
+        connect: Connect,
+        has_error: HasError,
+        disconnect: Disconnect,
+        intern_atom: InternAtom,
+        intern_atom_reply: InternAtomReplyFn,
+        get_property: GetProperty,
+        get_property_reply: GetPropertyReplyFn,
+        get_property_value: GetPropertyValue,
+    }
+
+    impl Xcb {
+        fn open() -> Option<Self> {
+            // SAFETY: dlopen with a NUL-terminated name.
+            let lib =
+                unsafe { libc::dlopen(c"libxcb.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+            if lib.is_null() {
+                return None;
+            }
+            // SAFETY: lib came from dlopen just above.
+            let loaded = unsafe { Self::load(lib) };
+            if loaded.is_none() {
+                // SAFETY: lib came from dlopen and nothing from it is kept.
+                unsafe { libc::dlclose(lib) };
+            }
+            loaded
+        }
+
+        /// # Safety
+        /// `lib` must be a live handle from `dlopen` of libxcb.
+        unsafe fn load(lib: *mut c_void) -> Option<Self> {
+            let sym = |name: &std::ffi::CStr| {
+                // SAFETY: the caller guarantees lib; name is NUL-terminated.
+                let f = unsafe { libc::dlsym(lib, name.as_ptr()) };
+                (!f.is_null()).then_some(f)
+            };
+            // SAFETY: each symbol is libxcb's public function with the
+            // signature declared above.
+            unsafe {
+                Some(Self {
+                    lib,
+                    connect: std::mem::transmute::<*mut c_void, Connect>(sym(c"xcb_connect")?),
+                    has_error: std::mem::transmute::<*mut c_void, HasError>(sym(
+                        c"xcb_connection_has_error",
+                    )?),
+                    disconnect: std::mem::transmute::<*mut c_void, Disconnect>(sym(
+                        c"xcb_disconnect",
+                    )?),
+                    intern_atom: std::mem::transmute::<*mut c_void, InternAtom>(sym(
+                        c"xcb_intern_atom",
+                    )?),
+                    intern_atom_reply: std::mem::transmute::<*mut c_void, InternAtomReplyFn>(sym(
+                        c"xcb_intern_atom_reply",
+                    )?),
+                    get_property: std::mem::transmute::<*mut c_void, GetProperty>(sym(
+                        c"xcb_get_property",
+                    )?),
+                    get_property_reply: std::mem::transmute::<*mut c_void, GetPropertyReplyFn>(
+                        sym(c"xcb_get_property_reply")?,
+                    ),
+                    get_property_value: std::mem::transmute::<*mut c_void, GetPropertyValue>(sym(
+                        c"xcb_get_property_value",
+                    )?),
+                })
+            }
+        }
+    }
+
+    impl Drop for Xcb {
+        fn drop(&mut self) {
+            // SAFETY: lib came from dlopen and nothing from it outlives self.
+            unsafe { libc::dlclose(self.lib) };
+        }
+    }
+
+    pub(super) fn read(xid: u64) -> Option<u32> {
+        let window = u32::try_from(xid).ok()?;
+        let xcb = Xcb::open()?;
+        // SAFETY: a null name connects to $DISPLAY. The connection is only
+        // used until the disconnect below, even when it reports an error.
+        let conn = unsafe { (xcb.connect)(ptr::null(), ptr::null_mut()) };
+        if conn.is_null() {
+            return None;
+        }
+        // SAFETY: conn is live; every reply and error is freed with free(),
+        // as libxcb requires; the value is read within the reply's length.
+        let pid = unsafe {
+            if (xcb.has_error)(conn) != 0 {
+                None
+            } else {
+                read_pid(&xcb, conn, window)
+            }
+        };
+        // SAFETY: conn came from xcb_connect and is disconnected once.
+        unsafe { (xcb.disconnect)(conn) };
+        pid
+    }
+
+    /// # Safety
+    /// `conn` must be a live connection from `xcb`.
+    unsafe fn read_pid(xcb: &Xcb, conn: *mut c_void, window: u32) -> Option<u32> {
+        let name = c"_NET_WM_PID";
+        let len = u16::try_from(name.to_bytes().len()).ok()?;
+        // SAFETY: the caller guarantees conn; replies and errors are freed.
+        unsafe {
+            let mut err: *mut c_void = ptr::null_mut();
+            let cookie = (xcb.intern_atom)(conn, 1, len, name.as_ptr());
+            let reply = (xcb.intern_atom_reply)(conn, cookie, &mut err);
+            libc::free(err);
+            if reply.is_null() {
+                return None;
+            }
+            let atom = (*reply).atom;
+            libc::free(reply.cast());
+            if atom == 0 {
+                return None;
+            }
+            let mut err: *mut c_void = ptr::null_mut();
+            let cookie = (xcb.get_property)(conn, 0, window, atom, XA_CARDINAL, 0, 1);
+            let reply = (xcb.get_property_reply)(conn, cookie, &mut err);
+            // A closed window answers BadWindow here, as a value.
+            libc::free(err);
+            if reply.is_null() {
+                return None;
+            }
+            let r = &*reply;
+            let pid = (r.kind == XA_CARDINAL && r.format == 32 && r.value_len == 1)
+                .then(|| (xcb.get_property_value)(reply).cast::<u32>())
+                .filter(|v| !v.is_null())
+                .map(|v| v.read_unaligned())
+                .filter(|&v| v > 1);
+            libc::free(reply.cast());
+            pid
+        }
+    }
+}
+
 fn thumbnail(ty: DesktopCaptureSourceType, source: CaptureSource) -> Option<String> {
     let mut capturer = capturer(ty)?;
     let slot = Arc::new(Mutex::new(None));
@@ -369,11 +584,11 @@ fn thumbnail(ty: DesktopCaptureSourceType, source: CaptureSource) -> Option<Stri
     // X11 capturers call back synchronously inside `capture_frame`.
     capturer.start_capture(Some(source), move |result| {
         if let Ok(frame) = result {
-            *out.lock().unwrap_or_else(|p| p.into_inner()) = thumbnail_url(&frame);
+            *lock(&out) = thumbnail_url(&frame);
         }
     });
     capturer.capture_frame();
-    let url = slot.lock().unwrap_or_else(|p| p.into_inner()).take();
+    let url = lock(&slot).take();
     url
 }
 
@@ -457,6 +672,7 @@ struct Shared {
 }
 
 pub struct ScreenCapture {
+    target: Target,
     shared: Arc<Shared>,
     stop: Option<mpsc::Sender<()>>,
     thread: Option<JoinHandle<()>>,
@@ -504,6 +720,7 @@ impl ScreenCapture {
             .map_err(|e| format!("screen capture thread: {e}"))?;
         Ok((
             Self {
+                target,
                 shared,
                 stop: Some(stop),
                 thread: Some(thread),
@@ -512,12 +729,13 @@ impl ScreenCapture {
         ))
     }
 
+    /// What this capture was started on.
+    pub fn target(&self) -> Target {
+        self.target
+    }
+
     pub fn preview(&self) -> Arc<Preview> {
-        self.shared
-            .preview
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone()
+        lock(&self.shared.preview).clone()
     }
 
     /// Re-pace and re-cap the running capture. The size applies from the
@@ -526,34 +744,21 @@ impl ScreenCapture {
     /// frames will have (`fit` of the latest raw frame, or that frame's own
     /// size), `None` before the first frame.
     pub fn set_options(&self, options: CaptureOptions) -> Option<(u32, u32)> {
-        *self
-            .shared
-            .options
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = options;
-        let raw = (*self.shared.raw.lock().unwrap_or_else(|p| p.into_inner()))?;
+        *lock(&self.shared.options) = options;
+        let raw = (*lock(&self.shared.raw))?;
         Some(sized(raw, options))
     }
 
     pub fn set_source(&self, source: Option<NativeVideoSource>) {
-        *self.shared.source.lock().unwrap_or_else(|p| p.into_inner()) = source;
+        *lock(&self.shared.source) = source;
     }
 
     /// Carry `from`'s published source and preview over to this capture, so
     /// the publication and the preview socket keep going on this capture's
     /// frames once `from` is dropped (a Change source).
     pub fn take_over(&self, from: &ScreenCapture) {
-        *self
-            .shared
-            .preview
-            .lock()
-            .unwrap_or_else(|p| p.into_inner()) = from.preview();
-        let source = from
-            .shared
-            .source
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take();
+        *lock(&self.shared.preview) = from.preview();
+        let source = lock(&from.shared.source).take();
         self.set_source(source);
     }
 }
@@ -622,7 +827,7 @@ impl Producer {
                 Err(CaptureError::Temporary) => Grab::Pending,
                 Err(CaptureError::Permanent) => Grab::Failed,
             };
-            *out.lock().unwrap_or_else(|p| p.into_inner()) = Some(grab);
+            *lock(&out) = Some(grab);
         });
         Ok(Self::Desktop { capturer, slot })
     }
@@ -632,10 +837,7 @@ impl Producer {
             Self::Desktop { capturer, slot } => {
                 // Both the X11 and the PipeWire capturer call back inside.
                 capturer.capture_frame();
-                slot.lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .take()
-                    .unwrap_or(Grab::Pending)
+                lock(slot).take().unwrap_or(Grab::Pending)
             }
             Self::Synthetic { width, height, n } => {
                 *n += 1;
@@ -740,7 +942,7 @@ fn run_loop(
     let mut due = started;
     let mut last_fps = f64::NAN;
     loop {
-        let options = *shared.options.lock().unwrap_or_else(|p| p.into_inner());
+        let options = *lock(&shared.options);
         // A rate change re-anchors the grid, so frames are not owed (or
         // withheld) against the old rate.
         if options.fps != last_fps {
@@ -762,7 +964,7 @@ fn run_loop(
         match grab() {
             Grab::Frame(mut buffer) => {
                 let raw = (buffer.width(), buffer.height());
-                *shared.raw.lock().unwrap_or_else(|p| p.into_inner()) = Some(raw);
+                *lock(&shared.raw) = Some(raw);
                 let (w, h) = sized(raw, options);
                 if (w, h) != raw {
                     buffer = buffer.scale(w as i32, h as i32);
@@ -803,19 +1005,11 @@ fn deliver(shared: &Shared, buffer: I420Buffer, started: Instant) {
         frame_metadata: None,
         buffer,
     };
-    let source = shared
-        .source
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
+    let source = lock(&shared.source).clone();
     if let Some(source) = source {
         source.capture_frame(&frame);
     }
-    let preview = shared
-        .preview
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .clone();
+    let preview = lock(&shared.preview).clone();
     if preview.receiver_count() > 0 {
         preview.send_replace(Some(Arc::new(frame.buffer)));
     }
@@ -1037,7 +1231,7 @@ mod tests {
 
     #[test]
     fn a_synthetic_capture_starts_previews_and_stops_cleanly() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
@@ -1069,6 +1263,7 @@ mod tests {
 
     fn idle_capture() -> ScreenCapture {
         ScreenCapture {
+            target: Target::Screen(0),
             shared: Arc::new(Shared {
                 options: Mutex::new(CaptureOptions {
                     fps: 30.0,
@@ -1094,7 +1289,7 @@ mod tests {
         };
         assert_eq!(capture.set_options(options), None);
         // The loop still picks the options up on its first tick.
-        let held = *capture.shared.options.lock().unwrap();
+        let held = *lock(&capture.shared.options);
         assert_eq!(
             (held.fps, held.max_width, held.max_height),
             (15.0, 1280, 720)
@@ -1104,7 +1299,7 @@ mod tests {
     #[test]
     fn set_options_sizes_the_latest_raw_frame_under_the_new_cap() {
         let capture = idle_capture();
-        *capture.shared.raw.lock().unwrap() = Some((1920, 1080));
+        *lock(&capture.shared.raw) = Some((1920, 1080));
         let capped = |w, h| CaptureOptions {
             fps: 30.0,
             max_width: w,
@@ -1118,7 +1313,7 @@ mod tests {
 
     #[test]
     fn set_options_changes_size_and_pace_of_a_running_capture() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -1178,7 +1373,7 @@ mod tests {
 
     #[test]
     fn a_taken_over_preview_keeps_playing_the_new_capture() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
@@ -1226,7 +1421,7 @@ mod tests {
     #[test]
     #[ignore = "needs an X display"]
     fn x11_lists_sources_with_thumbnails_and_captures_one() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let fds = || std::fs::read_dir("/proc/self/fd").unwrap().count();
         let before = fds();
         let sources = list_sources();
@@ -1273,7 +1468,7 @@ mod tests {
 
     #[test]
     fn a_capture_that_cannot_start_reports_why() {
-        let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+        let _serial = lock(&SERIAL);
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();

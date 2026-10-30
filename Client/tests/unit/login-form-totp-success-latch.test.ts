@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
 
-vi.mock("../../src/lib/credentials", () => ({
+vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 

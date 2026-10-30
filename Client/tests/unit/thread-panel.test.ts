@@ -27,7 +27,7 @@ import { createThreadPanel } from "@components/ThreadPanel";
 import { createMessageList } from "@components/MessageList";
 import { resumeThreadFocus, withThreadsStore } from "../../src/stores/threadsLoader";
 import { createThreadPanelHost } from "../../src/pages/main-page/ThreadPanelHost";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import {
@@ -232,7 +232,7 @@ describe("ThreadPanel", () => {
   });
 });
 
-describe("stickers in a thread (WP 8.8)", () => {
+describe("stickers in a thread", () => {
   const SET = [{ id: 7, name: "Wave", emoji: null, url: "/api/v1/stickers/7/image" }];
 
   async function pickSticker(): Promise<void> {
@@ -628,7 +628,7 @@ describe("a thread created after its starter row rendered", () => {
   });
 });
 
-describe("a forum post in the panel (WP 6.9d)", () => {
+describe("a forum post in the panel", () => {
   const POST = 95;
   const TAGGED = {
     tag_ids: [2],
@@ -770,7 +770,7 @@ describe("a forum post in the panel (WP 6.9d)", () => {
   });
 });
 
-describe("ThreadPanel follow toggle (WP 6.9c-c2)", () => {
+describe("ThreadPanel follow toggle", () => {
   const follow = (): HTMLButtonElement => q<HTMLButtonElement>('[data-testid="thread-follow"]');
 
   it("is hidden when the server has no thread_follows capability", () => {

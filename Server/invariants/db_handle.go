@@ -9,7 +9,7 @@ import (
 
 // The *db.DB receiver analysis, in one place. db-import-boundary checks a
 // single file with it and Server/cmd/dbinventory measures the whole tree with
-// it; until B6-14 the command carried its own copy, so a shape the inventory
+// it; the command used to carry its own copy, so a shape the inventory
 // could see was not necessarily a shape the guard could, and neither of them
 // said so.
 //

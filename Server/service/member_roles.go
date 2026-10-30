@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Several roles per member (WP 6.3c) ──────────────────────────────────────
+// Several roles per member.
 
 // ErrLastRole is returned by RemoveUserRole when the role is the member's
 // only one: a member always keeps at least one role. It is a conflict (409).
@@ -32,11 +32,11 @@ func (s *ModerationService) memberRoleStore() (MemberRoleStore, error) {
 	return rs, nil
 }
 
-// AddUserRole grants roleID to the target next to the roles they already hold.
-// The checks are ChangeUserRole's (authorizeRoleAssignment): MANAGE_ROLES, the actor
+// AddUserRole grants roleID to the target next to their other roles, under
+// ChangeUserRole's checks (authorizeRoleAssignment): MANAGE_ROLES, the actor
 // outranks the target's top role, and the role sits below the actor's top role.
-// Granting a role the target already holds is a no-op: no write, audit row or
-// fan-out. The cached permissions are dropped before the live clients are told.
+// Granting a held role is a no-op: no write, audit row or fan-out. Cached
+// permissions are dropped before live clients are told.
 func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, roleID int64) (*db.Role, error) {
 	_, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
 	if err != nil {
@@ -64,11 +64,10 @@ func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, 
 	return role, nil
 }
 
-// RemoveUserRole revokes roleID from the target under the same checks as
-// AddUserRole. Removing the member's only role answers ErrLastRole and changes
-// nothing; the count and the delete share one write transaction, so two
-// concurrent removals of a member's last two roles cannot both succeed.
-// Removing a role the target does not hold is a no-op.
+// RemoveUserRole revokes roleID under AddUserRole's checks. Removing the member's
+// only role answers ErrLastRole and changes nothing; the count and the delete share
+// one write transaction, so two concurrent removals of a member's last two roles
+// cannot both succeed. Removing a role the target does not hold is a no-op.
 func (s *ModerationService) RemoveUserRole(ctx context.Context, actorID, targetID, roleID int64) (*db.Role, error) {
 	_, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
 	if err != nil {

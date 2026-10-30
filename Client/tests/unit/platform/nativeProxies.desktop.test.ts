@@ -1,6 +1,6 @@
 // Desktop binding for the NativeProxies (ensureHttpProxy) suite:
 // `platform/desktop`'s tunnel. B7-5 runs the same suite file here and in
-// `nativeProxies.legacy.test.ts`, whose `lib/httpProxy.ts` export still
+// `nativeProxies.legacy.test.ts`, whose `lib/net/httpProxy.ts` export still
 // exists; green in both is the evidence the move changed nothing.
 //
 // The module keeps a module-level `pending` map to de-duplicate concurrent

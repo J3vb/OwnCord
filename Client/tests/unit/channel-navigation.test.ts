@@ -5,15 +5,15 @@ import {
   findChannelById,
   findChannelByName,
   stepChannel,
-} from "../../src/lib/channel-navigation";
+} from "../../src/lib/nav/channelNavigation";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { Channel } from "../../src/stores/channels.store";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
-import { muteChannel, invalidateMuteCache } from "../../src/lib/channel-mutes";
-import { setHideMutedChannels } from "../../src/lib/hide-muted-channels";
+import { muteChannel, invalidateMuteCache } from "../../src/lib/prefs/channelMutes";
+import { setHideMutedChannels } from "../../src/lib/prefs/hideMutedChannels";
 
 function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {

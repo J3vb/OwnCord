@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import type { ChannelType } from "@lib/types";
 import { messagingText } from "../../i18n/messaging";
 import { requestsText } from "../../i18n/requests";
@@ -33,11 +33,11 @@ export interface ChatHeaderRefs {
    *  guild channel in the right-hand layout; `MemberColumn` is the only writer
    *  of its `hidden` and `aria-pressed`. */
   readonly memberListBtn: HTMLButtonElement;
-  /** The "Hide chat"/"Show chat" toggle of the call view (WP 6.1c). Hidden
+  /** The "Hide chat"/"Show chat" toggle of the call view. Hidden
    *  unless the active channel is the joined voice channel with the grid open;
    *  `setChatHeaderCallChat` is its only writer and the page wires the click. */
   readonly callChatBtn: HTMLButtonElement;
-  /** The channel's Threads list (WP 6.9c). Shown only for a text channel on a
+  /** The channel's Threads list. Shown only for a text channel on a
    *  server with threads; `setChatHeaderThreads` is its only writer. */
   readonly threadsBtn?: HTMLButtonElement;
   /** Holds the DM partner's avatar (or a group's stack) in place of the "@". */

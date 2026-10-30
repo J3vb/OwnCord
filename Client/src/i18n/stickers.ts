@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Custom stickers (WP 8.8): the composer's sticker button, the tabbed
+ * Custom stickers: the composer's sticker button, the tabbed
  * expression popup, the sticker picker, a sticker message in the list, and the
  * send errors. Its own catalog so the copy stays out of the shared messaging one.
  */

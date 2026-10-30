@@ -18,7 +18,7 @@
 # reason nightly-docker-smoke.yml's header spells out: a `schedule:` only ever
 # runs from the default branch and its check runs land on that branch's tip, so
 # a scheduled job under a required name leaves a `skipped` (or a red) context
-# there, and scripts/verify-gate-evidence.mjs — which does not count `skipped`
+# there, and scripts/release/verify-gate-evidence.mjs — which does not count `skipped`
 # as success — would then refuse to let release.yml tag that commit.
 #
 # ci.yml runs the STANDALONE leg on every PR, inside server-build-test, so a
@@ -80,7 +80,7 @@ env:
   # (ws.DefaultLiveKitVersion), same value and same reason as
   # load-baseline.yml's: phase S kills what the product would have started, so
   # measuring a different SFU release would measure something no owner runs.
-  LIVEKIT_VERSION: "1.13.10"
+  LIVEKIT_VERSION: "1.13.11"
 
 jobs:
   upgrade-rehearsal:

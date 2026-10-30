@@ -1,5 +1,5 @@
 /**
- * The Message Requests inbox view (B9-5, Q2): text only, with the B9-6
+ * The Message Requests inbox view: text only, with the
  * decisions on each request.
  *
  * A request is from someone the reader has not accepted, so opening the inbox
@@ -18,8 +18,8 @@
 
 import type { DmRequestDecision } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
-import type { ModalInstance } from "@lib/modalFactory";
-import { parseTimestamp } from "@lib/formatting";
+import type { ModalInstance } from "@lib/ui/modalFactory";
+import { parseTimestamp } from "@lib/text/formatting";
 import { uiStore } from "@stores/ui.store";
 import { formatDate } from "../../i18n/format";
 import { messageRequestsText as t } from "../../i18n/messageRequests";

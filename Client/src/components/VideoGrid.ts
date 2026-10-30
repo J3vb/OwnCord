@@ -3,14 +3,14 @@
  * Replaces the chat area when cameras are active.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { openMenuOnKeyboard } from "@lib/context-menu";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import {
   getScreenshareAudioMuted,
   getScreenshareAudioVolume,
@@ -20,18 +20,19 @@ import {
   setScreenshareAudioVolume,
   setUserLocalMute,
   setUserVolume,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
-import { loadPref, savePref } from "@lib/preferences";
-import { syncVideoSurface, videoSurfaceOf } from "@lib/videoSurface";
-import { bindVideoZoom } from "@lib/zoomPan";
-import type { ZoomPan } from "@lib/zoomPan";
-import type { MountableComponent } from "@lib/safe-render";
+import { loadPref, savePref } from "@lib/prefs/preferences";
+import { syncVideoSurface, videoSurfaceOf } from "@lib/voice/videoSurface";
+import { bindVideoZoom } from "@lib/ui/zoomPan";
+import type { ZoomPan } from "@lib/ui/zoomPan";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceText } from "../i18n/voice";
 import { viewersLabel } from "./video-grid/viewers";
 import type { StreamInfo } from "./video-grid/stream-info";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import type { StreamSample, VideoView } from "../features/voice/remoteTracks";
+import { canPublishScreen } from "../features/voice/native/platform";
 import type { ShareSenderSample } from "../features/voice/shareSenderStats";
 import {
   openPopout,
@@ -92,6 +93,12 @@ export interface VideoGridCallbacks {
     /** Pick the camera from a menu at `anchor`, closed with the grid
      *  (`signal`): the arrow beside Camera. */
     readonly onCameraDevice?: (anchor: HTMLElement, signal: AbortSignal) => void;
+    /** Front to back camera and back: shown while the camera is on, once
+     *  `available` says this device has both. */
+    readonly cameraFlip?: {
+      readonly available: () => Promise<boolean>;
+      readonly flip: () => Promise<void>;
+    };
     readonly onScreenshareToggle?: () => void;
   };
   /** One receiver sample for a remote tile's quality chip, or null. */
@@ -116,8 +123,8 @@ export interface VideoGridCallbacks {
   /** A tile left later than the removeStream call that ended it. */
   readonly onStreamRemoved?: () => void;
   /** Whether this user's voice state still says their screen share (or
-   *  camera) is on. A codec switch unpublishes and publishes the same track
-   *  (WP M-5b), so a watched stream whose owner still has it on gets a moment
+   *  camera) is on. A codec switch unpublishes and publishes the same track,
+   *  so a watched stream whose owner still has it on gets a moment
    *  to come back, keeping its watch, before its tile ends. */
   readonly isStreamLive?: (userId: number, screenshare: boolean) => boolean;
   /** Back to the full stream view of `tileId`, from its mini-player. */
@@ -413,7 +420,7 @@ function buildVolumeControls(config: TileConfig): {
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
-  // reads, instead of hardcoding "unmuted at 100%" (B3-5). Stream audio
+  // reads, instead of hardcoding "unmuted at 100%". Stream audio
   // plays on an element (volume caps at 1.0); voice has a gain node.
   const savedVolume = config.isScreenshare
     ? Math.round(getScreenshareAudioVolume(config.audioUserId) * 100)
@@ -460,7 +467,7 @@ function buildVolumeControls(config: TileConfig): {
 
   function commit(): void {
     if (config.isScreenshare) {
-      // BUG-102: Set actual volume, not just mute toggle. Slider 100 maps
+      // Set actual volume, not just mute toggle. Slider 100 maps
       // to element volume 1.0 (the attach-time default).
       muteScreenshareAudio(config.audioUserId, muted);
       if (!muted) setScreenshareAudioVolume(config.audioUserId, currentVolume / 100);
@@ -546,6 +553,9 @@ export function createVideoGrid(): VideoGridComponent {
   let fullscreenTile: number | null = null;
   let theatreTile: number | null = null;
   let callState: CallState = { muted: false, deafened: false, listenOnly: false };
+  /** Whether the flip button may show: asked once per camera-on. */
+  let flipCheck: "idle" | "checking" | "yes" | "no" = "idle";
+  let flipping = false;
   let exitBtn: HTMLButtonElement | null = null;
   /** The call view (setExitVisible): header toggles, control bar, filters. */
   let callView = false;
@@ -1019,9 +1029,31 @@ export function createVideoGrid(): VideoGridComponent {
         pick.setAttribute("aria-haspopup", "menu");
         bar.appendChild(pick);
       }
+      const flip = cc.cameraFlip;
+      if (flip !== undefined) {
+        const flipBtn = callButton(
+          voiceText("call.flipCamera"),
+          "switch-camera",
+          "camera-flip",
+          () => {
+            if (flipping) return;
+            flipping = true;
+            redrawCallBars();
+            void flip
+              .flip()
+              .catch((err: unknown) => log.warn("Camera flip failed", err))
+              .finally(() => {
+                flipping = false;
+                redrawCallBars();
+              });
+          },
+        );
+        flipBtn.hidden = true;
+        bar.appendChild(flipBtn);
+      }
     }
-    if (__OWNCORD_WEB__ && typeof navigator.mediaDevices?.getDisplayMedia !== "function") {
-      // No getDisplayMedia (phones): the call bar offers no screen share.
+    if (!canPublishScreen()) {
+      // A phone can watch a share but not start one: no share button.
     } else if (cc.onScreenshareToggle !== undefined) {
       const toggle = cc.onScreenshareToggle;
       // Starting a share opens its picker in the app window: the call comes
@@ -1087,6 +1119,12 @@ export function createVideoGrid(): VideoGridComponent {
       // Its menu opens in the app window.
       pick.style.display = callPop === null ? "" : "none";
     }
+    const flip = bar.querySelector<HTMLButtonElement>("[data-call-control='camera-flip']");
+    if (flip !== null) {
+      syncFlipCheck();
+      flip.hidden = callState.camera !== true || flipCheck !== "yes";
+      flip.disabled = flipping || mediaLockReason() !== null;
+    }
     const share = bar.querySelector<HTMLButtonElement>("[data-call-control='share']");
     if (share !== null) {
       const on = callState.screenshare === true;
@@ -1096,6 +1134,32 @@ export function createVideoGrid(): VideoGridComponent {
       share.title = mediaLockReason() ?? callState.shareBlock ?? label;
       if (callState.shareBlock !== undefined) share.disabled = true;
     }
+  }
+
+  function redrawCallBars(): void {
+    for (const bar of root?.querySelectorAll(".video-fs-calls") ?? []) drawCallState(bar);
+  }
+
+  /** Ask whether the flip can show when the camera comes on; forget the
+   *  answer when it goes off, since a "no" before the camera permission was
+   *  granted may be a "yes" now. */
+  function syncFlipCheck(): void {
+    const flip = callbacks.callControls?.cameraFlip;
+    if (callState.camera !== true) {
+      if (flipCheck !== "checking") flipCheck = "idle";
+      return;
+    }
+    if (flip === undefined || flipCheck !== "idle") return;
+    flipCheck = "checking";
+    void flip.available().then(
+      (ok) => {
+        flipCheck = ok ? "yes" : "no";
+        redrawCallBars();
+      },
+      () => {
+        flipCheck = "no";
+      },
+    );
   }
 
   /** Why camera and share are inert now, or null: the chat socket is down,
@@ -1398,7 +1462,7 @@ export function createVideoGrid(): VideoGridComponent {
     pop.focus();
   }
 
-  // --- Video layers (P3-07) -------------------------------------------------------
+  // --- Video layers -------------------------------------------------------
 
   /** Nothing while no one can see the tile (grid closed, app hidden or
    *  minimised, stopped); the top layer for the stream you are watching
@@ -1433,7 +1497,7 @@ export function createVideoGrid(): VideoGridComponent {
   }
 
   /** Report each remote tile's view when it changes. adaptiveStream is off
-   *  (it froze tiles, OC-0455), so this is what keeps hidden and small tiles
+   *  (it froze tiles), so this is what keeps hidden and small tiles
    *  from pulling the top layer. */
   function syncViews(): void {
     for (const [id, entry] of cells) {
@@ -1697,7 +1761,7 @@ export function createVideoGrid(): VideoGridComponent {
       detail.textContent = parts.join(" · ");
     };
     renderDetail(null);
-    // Why the share sends what it does (M-1): the capture rate, what limits
+    // Why the share sends what it does: the capture rate, what limits
     // the encoder, and which encoder. Filled once the first poll is back.
     const senderLine = createElement("div", { class: "video-self-stats" });
     senderLine.hidden = true;

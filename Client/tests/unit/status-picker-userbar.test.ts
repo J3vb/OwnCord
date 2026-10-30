@@ -5,9 +5,9 @@ import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 
 import { createUserBar } from "@components/UserBar";
-import { loadUserStatus, saveUserStatus, saveCustomStatus } from "@lib/userStatus";
-import { createPresenceSender } from "@lib/presence";
-import { createPresenceLimiter } from "@lib/rate-limiter";
+import { loadUserStatus, saveUserStatus, saveCustomStatus } from "@lib/presence/userStatus";
+import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 
 function setAuthState(
@@ -246,7 +246,7 @@ describe("StatusPicker wired to UserBar", () => {
     expect(loadUserStatus()).toBe("idle");
   });
 
-  it("tracks the stored status on the trigger dot with a design token, never a literal hex (P4-19)", () => {
+  it("tracks the stored status on the trigger dot with a design token, never a literal hex", () => {
     setAuthState({ username: "alice" }, true);
     saveUserStatus("idle");
     const ws = createMockWs("connected");

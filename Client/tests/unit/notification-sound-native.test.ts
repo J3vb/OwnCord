@@ -30,9 +30,9 @@ import {
   stopRingback,
   stopRingChime,
   type VoiceSound,
-} from "@lib/notificationSound";
-import { savePref } from "@lib/preferences";
-import { setVoiceDeafened, setVoiceInSession } from "@lib/voiceDeafened";
+} from "@lib/media/notificationSound";
+import { savePref } from "@lib/prefs/preferences";
+import { setVoiceDeafened, setVoiceInSession } from "@lib/voice/voiceDeafened";
 import type { NativeToneNote } from "../../src/platform/contracts/nativeVoice";
 
 /** One Web Audio note as the oscillator and gain nodes saw it. */

@@ -1,12 +1,12 @@
 /**
- * The way startup code reaches threadsStore (WP 6.9c). Most sessions never see
+ * The way startup code reaches threadsStore. Most sessions never see
  * a thread, so the store loads on first need (a thread frame, or a history row
  * carrying one) instead of weighing on the startup chunk. Work handed to
  * `withThreadsStore` runs in call order: queued while the chunk loads, then
  * immediately once it has.
  */
 
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { ApiClient } from "@lib/api";
 import type { ThreadInfo } from "@lib/types";
 import type { WsClient } from "@lib/ws";

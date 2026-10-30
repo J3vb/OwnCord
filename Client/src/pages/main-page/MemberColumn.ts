@@ -21,9 +21,9 @@
  * `aria-pressed`.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
-import { loadPref, onPrefChange, savePref } from "@lib/preferences";
+import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { MemberPanel } from "../../features/members/memberPanel";

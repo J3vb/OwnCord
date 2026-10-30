@@ -73,3 +73,61 @@ func TestChatSend_ReplayCopyOmitsReferencedSnippet(t *testing.T) {
 	}
 	t.Fatal("reply frame never reached the replay buffer")
 }
+
+// A reply to an imported message carries the parent's imported author in the
+// live frame, so the reply preview can show the Discord name.
+func TestChatSend_BroadcastCarriesImportedAuthorOfParent(t *testing.T) {
+	hub, database := newHandlerHub(t)
+	user := seedOwnerUser(t, database, "send-impref1")
+	chID := seedTestChannel(t, database, "send-impref-chan")
+	ctx := context.Background()
+	parentID, err := database.CreateMessage(ctx, chID, user.ID, "imported parent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO message_import_authors (message_id, discord_user_id, name, color) VALUES (?, '42', 'Ann', NULL)`, parentID); err != nil {
+		t.Fatal(err)
+	}
+	send := make(chan []byte, 32)
+	c := ws.NewTestClientWithUser(hub, user, chID, send)
+	hub.Register(c)
+	waitRegistered(t, hub, c)
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "chat_send",
+		"payload": map[string]any{"channel_id": chID, "content": "reply", "reply_to": parentID},
+	})
+	hub.HandleMessageForTest(c, raw)
+
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case msg := <-send:
+			var env struct {
+				Type    string `json:"type"`
+				Payload struct {
+					ReferencedMessage *struct {
+						ImportedAuthor *struct {
+							Name string `json:"name"`
+						} `json:"imported_author"`
+					} `json:"referenced_message"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(msg, &env) != nil || env.Type != "chat_message" {
+				continue
+			}
+			ref := env.Payload.ReferencedMessage
+			if ref == nil || ref.ImportedAuthor == nil || ref.ImportedAuthor.Name != "Ann" {
+				t.Fatalf("referenced_message = %+v", ref)
+			}
+			if bytes.Contains(msg, []byte(`"discord_user_id"`)) {
+				t.Fatal("frame leaks the Discord user id")
+			}
+			return
+		case <-timer.C:
+			t.Fatal("no chat_message broadcast")
+		}
+	}
+}

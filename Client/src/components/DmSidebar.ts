@@ -14,13 +14,13 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/formatting";
-import { reconcileChildren } from "@lib/reconcile";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
+import { reconcileChildren } from "@lib/net/reconcile";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { createIcon, type IconName } from "@lib/icons";
-import type { ModalInstance } from "@lib/modalFactory";
-import { openMenuOnKeyboard } from "@lib/context-menu";
-import type { MountableComponent } from "@lib/safe-render";
+import type { ModalInstance } from "@lib/ui/modalFactory";
+import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
 import {
   fetchImageAsObjectUrl,
@@ -29,9 +29,9 @@ import {
 } from "./message-list/attachments";
 import { requestsText } from "../i18n/requests";
 import { voiceText } from "../i18n/voice";
-import { getChannelMute } from "@lib/channel-mutes";
+import { getChannelMute } from "@lib/prefs/channelMutes";
 import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
-import { onPrefChange } from "@lib/preferences";
+import { onPrefChange } from "@lib/prefs/preferences";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -50,17 +50,17 @@ export interface DmConversation {
   readonly avatar: string | null;
   readonly avatarColor?: string;
   readonly status?: "online" | "idle" | "dnd" | "offline";
-  /** The game the other party of a 1:1 DM is playing (WP 8.3), or else the
-   *  music they listen to (WP 8.10); never set for a group. Drawn as "Playing
+  /** The game the other party of a 1:1 DM is playing, or else the
+   *  music they listen to; never set for a group. Drawn as "Playing
    *  <game>" or "Listening to <player>" under the name. */
   readonly activity?: string | null;
   /** The icon for `activity`; the controller when absent. */
   readonly activityIcon?: IconName;
   /** True for a group DM: draws stacked avatars and a participant count. */
   readonly isGroup?: boolean;
-  /** A group whose server reports an owner (WP 3B-10); drives the leave copy. */
+  /** A group whose server reports an owner; drives the leave copy. */
   readonly hasOwner?: boolean;
-  /** The group's uploaded icon (WP 3B-11b): a server file path; absent for none. */
+  /** The group's uploaded icon: a server file path; absent for none. */
   readonly icon?: string;
   /** Everyone but the current user. Drives the stack and the count. */
   readonly participants?: readonly DmParticipant[];
@@ -152,7 +152,7 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
  * The two overlapping faces of a group DM. Shared by the DM row and the chat
  * header so a group looks the same in both.
  *
- * A group with an uploaded icon (WP 3B-11b) shows that picture instead of the
+ * A group with an uploaded icon shows that picture instead of the
  * faces. The faces are drawn first, so a group is never an empty circle; the
  * icon is fetched like any avatar and replaces them when it arrives, even if
  * the stack has been detached meanwhile (the image cache owns the object URL,
@@ -268,7 +268,7 @@ function renderDmItem(
 ): HTMLDivElement {
   const item = createElement("div", {
     class: "dm-item",
-    // Roving list item: reachable by Tab once, then arrow-stepped (B9-21).
+    // Roving list item: reachable by Tab once, then arrow-stepped.
     role: "button",
     tabindex: "-1",
   });
@@ -352,7 +352,7 @@ function renderDmItem(
       e.stopPropagation();
       const close = options.onCloseDm;
       if (close === undefined) return;
-      // A group leave is destructive and asks first (DP-34). Shift-click skips
+      // A group leave is destructive and asks first. Shift-click skips
       // the prompt, as Discord's delete confirm does. A 1:1 close is only a
       // hide, so it stays one click.
       if (convo.isGroup === true && !(e instanceof MouseEvent && e.shiftKey)) {
@@ -443,8 +443,7 @@ function renderDmItem(
  * SidebarArea refreshes the DM list on every dmStore change (a presence flip,
  * a message, an unread clear). Rebuilding the whole subtree would lose the
  * "Find a conversation" filter, its focus and the scroll position; the keyed
- * list keeps every unchanged row, so those all survive an unrelated update
- * (B9-21).
+ * list keeps every unchanged row, so those all survive an unrelated update.
  */
 export interface DmSidebar extends MountableComponent {
   /** Re-render the conversation rows from a fresh list, in place. */
@@ -458,7 +457,7 @@ const VISIBLE_ROW = ".dm-item:not([hidden])";
  * The order the conversation list renders in: pure recency, which is the order
  * the store already carries (the server lists DMs by last message time, and
  * every store mutator moves a touched DM to the front). The old unread-first
- * sort contradicted this component's own header (DP-42) — and unread is not
+ * sort contradicted this component's own header — and unread is not
  * what a DM list is for; the badge already marks what is unread.
  */
 function sortConversations(conversations: readonly DmConversation[]): DmConversation[] {
@@ -497,7 +496,7 @@ export function createDmSidebar(options: DmSidebarOptions): DmSidebar {
   let rendered: readonly DmConversation[] = [];
   // Rows the search filter has hidden, so a later update can re-apply it.
   let query = "";
-  // Each row's listeners die with the row, not with the sidebar (OC-0229).
+  // Each row's listeners die with the row, not with the sidebar.
   const rowOwners = new Map<Element, Disposable>();
   let leavePrompt: { channelId: number; modal: ModalInstance } | null = null;
 

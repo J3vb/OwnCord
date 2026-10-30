@@ -161,3 +161,19 @@ func TestResolveTokenHash(t *testing.T) {
 		})
 	}
 }
+
+// A session or API token row that somehow names the hidden import account must
+// not resolve to a principal.
+func TestResolveTokenHash_RefusesTheHiddenImportAccount(t *testing.T) {
+	system := &db.User{ID: 9, RoleID: 4, RegistrationStatus: db.RegistrationSystem}
+	role := &db.Role{ID: 4}
+	for name, store := range map[string]*fakeStore{
+		"session":   {sess: &db.Session{UserID: 9, ExpiresAt: future()}, user: system, role: role},
+		"api token": {apiTok: &db.APIToken{UserID: 9}, user: system, role: role},
+	} {
+		u, r, _, err := auth.ResolveTokenHash(context.Background(), store, "hash")
+		if !errors.Is(err, auth.ErrUserNotFound) || u != nil || r != nil {
+			t.Errorf("%s: got user=%v role=%v err=%v, want ErrUserNotFound", name, u, r, err)
+		}
+	}
+}

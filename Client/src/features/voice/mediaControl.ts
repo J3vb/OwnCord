@@ -15,15 +15,15 @@ import {
   bumpLocalCameraRev,
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
-import type { AudioPipeline } from "../../lib/audioPipeline";
-import type { AudioElements } from "../../lib/audioElements";
-import { type DeviceManager, isMicPolicyGated } from "../../lib/deviceManager";
+import type { AudioPipeline } from "../../lib/voice/audioPipeline";
+import type { AudioElements } from "../../lib/voice/audioElements";
+import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
-import { setH264GpuProfiles } from "../../lib/h264Profile";
+import { setH264GpuProfiles } from "../../lib/voice/h264Profile";
 import { h264GpuPublish } from "./videoCodec";
-import { savePref } from "../../lib/preferences";
+import { savePref } from "../../lib/prefs/preferences";
 import {
   type VideoTrackDeps,
   type CameraTrackState,
@@ -36,7 +36,7 @@ import {
   reconcileVideoFlags as doReconcileVideoFlags,
   inPlaceSourceChange,
   getLocalScreenshareStats,
-} from "../../lib/screenShare";
+} from "../../lib/voice/screenShare";
 
 // Same logger tag as before the extraction, so the media log lines are unchanged.
 const log = createLogger("livekitSession");
@@ -67,7 +67,7 @@ export class MediaControl {
   /** Camera switches run one at a time; a queued one that is no longer the
    *  latest pick is skipped, so the last pick wins. */
   private videoSwitch: Promise<void> = Promise.resolve();
-  /** Keeps a live camera or share on a codec every viewer plays (WP M-5b). */
+  /** Keeps a live camera or share on a codec every viewer plays. */
   private readonly codecSwitch = new CodecSwitchController({
     getCameraState: () => this._cameraState,
     getScreenState: () => this._screenState,
@@ -142,7 +142,7 @@ export class MediaControl {
       await this.enableMicrophone(room, true);
       if (this._room !== room) return;
       setListenOnly(false);
-      // BUG-103: Honor deafened state — keep mic muted if user is deafened.
+      // Honor deafened state — keep mic muted if user is deafened.
       // Also honor a moderator's server-mute and a genuine self-mute the
       // same way: a listen-only join publishes no audio track, so none of
       // these have anything to act on and persist silently — republishing
@@ -201,7 +201,7 @@ export class MediaControl {
   }
 
   /** Enable or disable the microphone, carrying the channel's configured
-   *  audio bitrate on any publish (OC-0441). Disabling publishes nothing, and
+   *  audio bitrate on any publish. Disabling publishes nothing, and
    *  a channel with no voice_config keeps LiveKit's own default, so both leave
    *  the call shaped exactly as it was before. On the web path the room's
    *  track creation attaches the mic processor before the publish
@@ -265,7 +265,7 @@ export class MediaControl {
       // propagate silently: without recovery, setLocalMuted(false) and the
       // outbound voice_mute{muted:false} frame have already gone out by the
       // time this runs, leaving the client reporting itself unmuted to the
-      // server and every peer while publishing no audio at all (OC-0287).
+      // server and every peer while publishing no audio at all.
       // Fall back into listen-only + muted so the state matches reality and
       // the existing "Grant Microphone" affordance (gated on listenOnly)
       // reappears as the recovery path.

@@ -16,9 +16,9 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
   serverSupportsGameActivity,
-} from "@lib/serverCapabilities";
-import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
-import { loadPref } from "@lib/preferences";
+} from "@lib/net/serverCapabilities";
+import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/presence/gameActivityBridge";
+import { loadPref } from "@lib/prefs/preferences";
 import {
   EMPTY_GAME_PREFS,
   loadGamePrefs,
@@ -27,7 +27,7 @@ import {
   withHidden,
   withManual,
   withRename,
-} from "@lib/gameActivityPrefs";
+} from "@lib/prefs/gameActivityPrefs";
 import { desktop } from "../../src/platform/desktop";
 import { buildDmConversations } from "../../src/pages/main-page/SidebarDmHelpers";
 import { dmStore } from "../../src/stores/dm.store";

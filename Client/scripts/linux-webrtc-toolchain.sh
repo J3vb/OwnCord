@@ -10,7 +10,7 @@
 # refused outright (it ignores the trivial_abi annotations the archive's
 # std::unique_ptr/shared_ptr calling convention depends on) and so is a clang
 # older than the floor the archive states in its own headers (clang 21 for
-# libwebrtc webrtc-89d790b). This script finds or installs a suitable clang,
+# libwebrtc webrtc-a545de4). This script finds or installs a suitable clang,
 # fetches the archive, and writes the environment the build needs: CC/CXX and
 # LK_CUSTOM_WEBRTC (so webrtc-sys uses our verified copy instead of
 # downloading its own).
@@ -62,23 +62,23 @@ exec 3>&1 1>&2
 CUDA_WHEEL_VERSION="12.8.90"
 
 # libwebrtc tag: must match webrtc-sys-build's WEBRTC_TAG for the webrtc-sys
-# version livekit 0.9.5 resolves to (0.3.49, whose webrtc-sys-build 0.3.19 still
-# pins webrtc-89d790b; libwebrtc crate 0.3.52). A crate bump that moves the tag
+# version livekit 0.10.0 resolves to (0.3.52, whose webrtc-sys-build 0.3.21 pins
+# webrtc-a545de4; libwebrtc crate 0.3.55). A crate bump that moves the tag
 # moves this and the digests below together.
-WEBRTC_TAG="webrtc-89d790b"
+WEBRTC_TAG="webrtc-a545de4"
 # apt.llvm.org's repository signing key, pinned by full fingerprint.
 LLVM_KEY_FPR="6084F3CF814B57C1CF12EFD515CF4D18AF4F7421"
 
 case "$(uname -m)" in
   x86_64)
     WEBRTC_TRIPLE="linux-x64-release"
-    WEBRTC_SHA256="b167adad5291cea0e4d66a0454d9d52d2ad714e6b0ed70f4410317d3ebde70c5"
+    WEBRTC_SHA256="2ece73b9a72a2cacd73d0c62ac3a414e202f37885c3c8f49dddb43c1443ac0bd"
     CUDA_WHEEL_URL="https://files.pythonhosted.org/packages/0d/9b/a997b638fcd068ad6e4d53b8551a7d30fe8b404d6f1804abf1df69838932/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl"
     CUDA_WHEEL_SHA256="adade8dcbd0edf427b7204d480d6066d33902cab2a4707dcfc48a2d0fd44ab90"
     ;;
   aarch64)
     WEBRTC_TRIPLE="linux-arm64-release"
-    WEBRTC_SHA256="f716b10eade18dd11b03b9f93b50cee2ca2eec73b975a63f2ae9ea2a35706420"
+    WEBRTC_SHA256="e87dff71422c5cb1470f6cf00ecc4ad6964e746c5039831b7206b946b5d13c5f"
     CUDA_WHEEL_URL="https://files.pythonhosted.org/packages/7c/75/f865a3b236e4647605ea34cc450900854ba123834a5f1598e160b9530c3a/nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
     CUDA_WHEEL_SHA256="52bf7bbee900262ffefe5e9d5a2a69a30d97e2bc5bb6cc866688caa976966e3d"
     ;;

@@ -1,11 +1,11 @@
 /**
- * The right-click menu of a followed thread's sidebar row (WP 6.9c): Mark as
+ * The right-click menu of a followed thread's sidebar row: Mark as
  * Read and Unfollow. Opened by right-click or Shift+F10 / the Menu key, like the
  * channel menu; `lifetimeSignal` owns the menu itself so an unrelated re-render
- * does not close it (OC-0282).
+ * does not close it.
  */
 
-import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/context-menu";
+import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
 import { shellText } from "../../i18n/shell";
 
 export interface ThreadMenuActions {

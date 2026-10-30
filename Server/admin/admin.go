@@ -20,10 +20,10 @@ var staticFiles embed.FS
 
 // servedCert reports the TLS certificate being served now, and tlsMode the
 // configured tls.mode, both set once at startup via SetServedCertificate. The
-// fingerprint is not a secret — it is printed in the start-up banner for
-// users to compare out of band. The admin dashboard and the setup wizard's
-// finish step surface it so the operator does not have to watch stderr; in
-// acme mode it is learned on the first handshake and follows every renewal.
+// fingerprint is not a secret (it is printed in the start-up banner for users
+// to compare out of band); the dashboard and setup finish step surface it so
+// the operator need not watch stderr. In acme mode it is learned on the first
+// handshake and follows every renewal.
 var (
 	servedCert = func() auth.ServedCert { return auth.ServedCert{} }
 	tlsMode    string
@@ -69,9 +69,9 @@ func NewHandler(database *db.DB, version string, hub HubBroadcaster, u *updater.
 		panic("admin: failed to create static sub-FS: " + err.Error())
 	}
 
-	// Serve index.html directly for the root path. We read it once at
-	// startup instead of using http.FileServer, which has redirect
-	// behaviour that conflicts with chi's Mount prefix stripping.
+	// Serve index.html directly for the root path, read once at startup:
+	// http.FileServer's redirect behaviour conflicts with chi's Mount prefix
+	// stripping.
 	indexHTML, err := fs.ReadFile(staticFS, "index.html")
 	if err != nil {
 		panic("admin: failed to read index.html: " + err.Error())

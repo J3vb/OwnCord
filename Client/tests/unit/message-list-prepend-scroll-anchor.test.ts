@@ -79,7 +79,7 @@ function setHasMore(value: boolean): void {
   });
 }
 
-describe("MessageList — history prepend keeps the reading position (OC-0248)", () => {
+describe("MessageList — history prepend keeps the reading position", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;

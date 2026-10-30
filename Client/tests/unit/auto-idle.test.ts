@@ -6,9 +6,9 @@ import {
   SYSTEM_IDLE_POLL_MS,
   startAutoIdle,
   type AutoIdleController,
-} from "@lib/autoIdle";
+} from "@lib/presence/autoIdle";
 import { joinVoiceChannel, leaveVoiceChannel } from "@stores/voice.store";
-import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "@lib/userStatus";
+import { loadUserStatus, loadUserStatusOrigin, saveUserStatus } from "@lib/presence/userStatus";
 
 /**
  * Auto-idle. The rule worth locking down is the narrow one: the timer may only

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockFetch } = vi.hoisted(() => ({ mockFetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
-vi.mock("../../lib/httpProxy", () => ({
+vi.mock("../../lib/net/httpProxy", () => ({
   ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
   stopHttpProxy: () => Promise.resolve(),
 }));
@@ -189,7 +189,7 @@ describe("content admission at the API client", () => {
     expectConsole("warn", /\[api\] API error/);
   });
 
-  it("acknowledges and revokes through the B5-7 route", async () => {
+  it("acknowledges and revokes through the NSFW acknowledgement route", async () => {
     mockFetch.mockResolvedValue(json(undefined, 204));
     await api.acknowledgeNsfw(SPICY);
     await api.revokeNsfw(SPICY);

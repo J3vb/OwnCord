@@ -17,17 +17,17 @@ import {
   type CameraTrackState,
   type ScreenTrackState,
   type VideoTrackDeps,
-} from "@lib/screenShare";
+} from "@lib/voice/screenShare";
 import { voiceStore } from "@stores/voice.store";
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
   h264GpuPublish: (codec: string) => codec === "h264",
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: vi.fn(),
 }));
@@ -188,6 +188,7 @@ describe("republishVideo", () => {
       source: Track.Source.ScreenShare,
       videoCodec: "vp8",
       simulcast: true,
+      degradationPreference: "maintain-framerate",
     });
     expect(audio.stop).not.toHaveBeenCalled();
     expect(state.published).toBe("vp8");

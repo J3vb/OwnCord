@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -20,14 +20,14 @@ import {
   renderMessageContent,
   resyncMentions,
 } from "../../src/components/message-list/content-parser";
-import { setChannelMutesHost } from "../../src/lib/channel-mutes";
-import { setInviteJoinHandler } from "../../src/lib/invite-navigation";
+import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
+import { setInviteJoinHandler } from "../../src/lib/nav/inviteNavigation";
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {
   highlightsCurrentUser,
   mentionsCurrentUser,
   resolveMentionUserId,
-} from "../../src/lib/mentions";
+} from "../../src/lib/text/mentions";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
@@ -154,7 +154,7 @@ describe("@mention rendering", () => {
     expect(el.querySelector(".mention")?.getAttribute("data-user-id")).toBe("20");
   });
 
-  it("does not fall back to the member list when the server sent a mentions list that omits the token (OC-0228)", () => {
+  it("does not fall back to the member list when the server sent a mentions list that omits the token", () => {
     // The server resolved this message's mentions to [10] (alice) only, not
     // the signed-in user (id 12, username "me"). The inline pill must agree
     // with the row-level gate and stay unresolved for "@me" here — a token
@@ -535,7 +535,7 @@ describe("invite link chip (P29)", () => {
   });
 });
 
-describe("id mention rendering (WP 6.3e)", () => {
+describe("id mention rendering", () => {
   function seedRoles(): void {
     setRoles([
       { id: 5, name: "Mods", color: "#ff8800", permissions: 0 },

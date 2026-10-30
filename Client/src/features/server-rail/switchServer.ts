@@ -4,7 +4,11 @@
  */
 
 import { clearAuth } from "@stores/auth.store";
-import { createProfileManager, createTauriBackend, type ServerProfile } from "@lib/profiles";
+import {
+  createProfileManager,
+  createTauriBackend,
+  type ServerProfile,
+} from "@lib/presence/profiles";
 import { createLogger } from "@lib/logger";
 
 const log = createLogger("server-switch");
@@ -14,7 +18,7 @@ export const QUICK_SWITCH_TARGET_KEY = "owncord:quick-switch-target";
 /**
  * Switch to the saved server at `host`. Stores the target for the connect flow
  * to resume, then tears the session down (clears auth -> ws disconnect ->
- * navigate to connect) while keeping this server's saved sign-in (B7-13).
+ * navigate to connect) while keeping this server's saved sign-in.
  */
 export function switchToServer(host: string): void {
   try {

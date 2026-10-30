@@ -1,5 +1,5 @@
 /**
- * The New Post dialog (WP 6.9d): the forum's guidelines, a title (required,
+ * The New Post dialog: the forum's guidelines, a title (required,
  * with a counter), the tag picker (a required marker when the forum asks for a
  * tag), the opening message and its attachments. Loaded on first use, never at
  * startup.
@@ -18,7 +18,7 @@
 import { createElement, setOwnedTimeout, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import { errorText, type ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { newClientMessageId, pendingMessageRetryFloor } from "@lib/pendingMessages";
@@ -27,7 +27,7 @@ import type { ThreadInfo } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { claimForwardRequest, releaseForwardRequest } from "../messaging/forwardRequests";
 import { forumsText } from "../../i18n/forums";
 import { MAX_POST_TAGS, POST_TITLE_MAX, cleanPostTitle } from "./forumModel";

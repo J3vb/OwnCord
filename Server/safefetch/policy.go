@@ -12,9 +12,8 @@ import (
 	"time"
 )
 
-// maxRedirectBudget is the largest hop count a policy may ask for. "A small
-// fixed number" is the C-09 contract's wording; anything past this is a
-// caller confusing a redirect chain with a crawl.
+// maxRedirectBudget is the largest hop count a policy may ask for; past it a
+// caller is confusing a redirect chain with a crawl.
 const maxRedirectBudget = 10
 
 // maxConcurrencyBudget bounds a single Fetcher's cap. The process gate below
@@ -22,11 +21,8 @@ const maxRedirectBudget = 10
 const maxConcurrencyBudget = 256
 
 // processConcurrency bounds fetches in flight across every Fetcher in the
-// process, so a caller cannot buy more of the server's sockets by
-// constructing more Fetchers.
-//
-// This is also where B5 decision 2's deferred aggregate byte budget goes: it
-// is the one admission point every fetch already passes.
+// process, so a caller cannot buy more of the server's sockets by constructing
+// more Fetchers. It is also the one admission point every fetch passes.
 const processConcurrency = 32
 
 // processGate is a var only so TestFetch_ProcessGateBoundsEveryFetcher can
@@ -79,12 +75,22 @@ type Policy struct {
 	// the cap waits for a slot until its context expires.
 	MaxConcurrent int
 
+	// Truncate keeps the first MaxDecompressedBytes of a longer body and
+	// returns them, instead of refusing the response. It is for a caller
+	// that only ever parses a prefix (the link-preview broker reads a page's
+	// <head>). The read stops at that prefix, so an endless stream costs no
+	// more than it; MaxBytes still bounds the wire bytes a gzip prefix takes,
+	// and the content type is judged on the prefix that is kept. A truncated
+	// JSON document no longer parses, so its caller sees a type failure, not
+	// a size one.
+	Truncate bool
+
 	// Classify decides whether one resolved address may be dialled. nil
 	// selects ClassifyAddr, which is the policy in docs/trust-model.md.
 	//
-	// It is a seam for tests that must reach a loopback stub, and for B7 to
-	// layer its own classification on top. No production call site in this
-	// repository sets it, and TestNoProductionOverrideOfSeams proves that.
+	// It is a seam for tests that must reach a loopback stub. No production
+	// call site in this repository sets it, and TestNoProductionOverrideOfSeams
+	// proves that.
 	Classify func(netip.Addr) error
 
 	// Resolve returns every address a host resolves to. nil selects the
@@ -124,9 +130,8 @@ func New(p Policy) (*Fetcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The caller keeps its own Policy value, and its slice fields alias the
-	// same backing arrays. Copy them, or a later append or index write on the
-	// caller's side silently changes what this Fetcher allows.
+	// Copy the caller's slices: they alias its Policy, and a later write on its
+	// side would silently change what this Fetcher allows.
 	p.Schemes = slices.Clone(p.Schemes)
 	p.ContentTypes = slices.Clone(p.ContentTypes)
 	p.Ports = slices.Clone(p.Ports)

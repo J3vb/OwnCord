@@ -396,18 +396,32 @@ export function scanSource(file, source) {
   return { findings, errors };
 }
 
-/** Scan src/. Returns { files: { [file]: finding[] }, errors }. */
+/** Stryker's instrumentation marker: the file on disk is not the source we ship. */
+const INSTRUMENTED = /\bstryMutAct_[0-9a-f]+\(/;
+
+/**
+ * Scan src/. Returns { files: { [file]: finding[] }, errors, instrumented }.
+ * Inside a Stryker sandbox the mutated files are rewritten, which moves their
+ * literals into new syntax positions; they are listed in `instrumented` and
+ * left out, since only the original source says what the UI shows.
+ */
 export function scanTree() {
   const files = {};
   const errors = [];
+  const instrumented = [];
   for (const path of walk(SRC).sort()) {
     const file = posix(relative(CLIENT, path));
     if (excludedReason(file) !== null) continue;
-    const result = scanSource(file, readFileSync(path, "utf8"));
+    const source = readFileSync(path, "utf8");
+    if (INSTRUMENTED.test(source)) {
+      instrumented.push(file);
+      continue;
+    }
+    const result = scanSource(file, source);
     errors.push(...result.errors);
     if (result.findings.length > 0) files[file] = result.findings;
   }
-  return { files, errors };
+  return { files, errors, instrumented };
 }
 
 function counts(findings) {

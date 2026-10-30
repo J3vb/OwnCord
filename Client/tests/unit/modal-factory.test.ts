@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createModal, createPromptModal } from "../../src/lib/modalFactory";
+import { createModal, createPromptModal } from "../../src/lib/ui/modalFactory";
 
 describe("createModal", () => {
   let container: HTMLDivElement;

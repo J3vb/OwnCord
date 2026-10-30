@@ -45,7 +45,7 @@ vi.mock("@components/SearchOverlay", async () => {
   }
   return { createSearchOverlay: h.createSearchOverlay };
 });
-vi.mock("@lib/toast", () => ({ showToast: h.showToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast: h.showToast }));
 
 import {
   createQuickSwitcherManager,

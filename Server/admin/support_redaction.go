@@ -74,7 +74,7 @@ type supportEvent struct {
 	Detail    map[string]any `json:"detail,omitempty"`
 }
 
-// supportEventsMax bounds events.json. SRE-03: the bundle used to keep the
+// supportEventsMax bounds events.json. The bundle used to keep the
 // last 200 records at ANY level, so an INFO/DEBUG burst pushed the
 // Warn-and-above records an operator needs out of the bundle. supportEvents
 // keeps Warn/Error first and fills the rest with the most recent lower-level
@@ -86,7 +86,7 @@ const supportEventsMax = 200
 // contribute their timestamp and normalized level. Attributes survive only as
 // redacted detail (support_event_detail.go).
 //
-// Selection (SRE-03): the last supportEventsMax records that are WARN or above
+// Selection: the last supportEventsMax records that are WARN or above
 // are kept, and any remaining slots are filled with the most recent
 // lower-level records, so a routine INFO burst can never evict a failure. The
 // result is returned in chronological order.

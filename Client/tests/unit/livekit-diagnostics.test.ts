@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/livekitDiagnostics.ts (was 30.4% statements, no test file).
+ * Tests for src/lib/voice/livekitDiagnostics.ts (was 30.4% statements, no test file).
  *
  * This module is what an operator reads when a voice call fails to connect, so
  * a diagnostic that silently returns nothing — or worse, throws while poking at
@@ -20,10 +20,10 @@ import {
   buildSessionDebugInfo,
   getIceConnectionState,
   logIceConnectionInfo,
-} from "@lib/livekitDiagnostics";
-import type { SessionDebugDeps } from "@lib/livekitDiagnostics";
-import type { AudioPipeline } from "@lib/audioPipeline";
-import type { AudioElements } from "@lib/audioElements";
+} from "@lib/voice/livekitDiagnostics";
+import type { SessionDebugDeps } from "@lib/voice/livekitDiagnostics";
+import type { AudioPipeline } from "@lib/voice/audioPipeline";
+import type { AudioElements } from "@lib/voice/audioElements";
 import { expectConsole } from "../helpers/console";
 import { captureLogs } from "../helpers/log-capture";
 
@@ -186,7 +186,7 @@ describe("logIceConnectionInfo", () => {
   // directly on engine — see PCTransportManager.d.ts. This pins the real
   // Room shape explicitly (rather than through the `withEngine` helper) so a
   // future rewrite of that helper can't quietly resurrect the old bug.
-  it("OC-0437: reads stats from the real engine.pcManager.publisher/subscriber shape", () => {
+  it("reads stats from the real engine.pcManager.publisher/subscriber shape", () => {
     const subGetStats = vi.fn().mockResolvedValue(new Map());
     const pubGetStats = vi.fn().mockResolvedValue(new Map());
     const room = {
@@ -308,7 +308,7 @@ describe("getIceConnectionState", () => {
   });
 
   // OC-0437: same real-shape check as above, for the debug-panel summary path.
-  it("OC-0437: reports transports from the real engine.pcManager.publisher/subscriber shape", () => {
+  it("reports transports from the real engine.pcManager.publisher/subscriber shape", () => {
     const room = {
       engine: {
         pcManager: {

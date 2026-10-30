@@ -5,7 +5,7 @@ import (
 	"log/slog"
 )
 
-// keepSessionID is the session a 2FA state change keeps alive. BUG-108: an
+// keepSessionID is the session a 2FA state change keeps alive. An
 // API-token principal has a nil session; keep=0 matches no row, so every
 // login session is revoked — same semantics as change-password.
 func keepSessionID(p Principal) int64 {

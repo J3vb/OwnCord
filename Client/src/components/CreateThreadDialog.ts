@@ -1,5 +1,5 @@
 /**
- * The Create Thread dialog (WP 6.9c): a name (prefilled from the message, 1 to
+ * The Create Thread dialog: a name (prefilled from the message, 1 to
  * 100 characters) and how long the thread may sit idle before it is archived.
  *
  * Sends `thread_create` and settles on its own reply, matched by envelope id:
@@ -11,7 +11,7 @@
 
 import { createElement, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { createModal } from "@lib/modalFactory";
+import { createModal } from "@lib/ui/modalFactory";
 import type { WsClient } from "@lib/ws";
 import type { ThreadAutoArchiveMinutes, ThreadInfo } from "@lib/types";
 import { getChannelMessages } from "@stores/messages.store";

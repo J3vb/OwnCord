@@ -9,37 +9,29 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// UploadService owns what happens to an uploaded file once its bytes are on
-// disk: the attachment row that records it, and the two questions asked before
-// those bytes are served back — is this file still servable at all, and may
-// this caller read it.
-//
-// The bytes themselves stay with the transport: the handler parses the
-// multipart body, sniffs the type, measures the image and writes through the
-// FileStore, because all of that is HTTP and filesystem work with no domain
-// decision in it. What crosses into this service is every decision that
-// outlives one request — who owns a file, when a file stops existing for
-// readers, and who may read one.
+// UploadService owns what happens to an uploaded file once its bytes are on disk:
+// the attachment row, and the questions before serving it back (is it still
+// servable, may this caller read it). The bytes stay with the transport (multipart
+// parsing, type sniffing, image measuring, FileStore writes are HTTP and
+// filesystem work); every decision that outlives a request lives here.
 type UploadService struct {
 	st    Store
 	perms *PermissionService
-	// banners answers whether a file is some user's live profile banner. It is
-	// a slice interface and not part of Store (the Store method ratchet); nil
-	// means no banner is ever readable through the grant, which fails closed.
+	// banners answers whether a file is some user's live profile banner. A slice
+	// interface, not Store (the method ratchet); nil means no banner is readable via
+	// the grant (fails closed).
 	banners BannerFileStore
-	// quota is the per-user byte counter's in-process half (B5-2); see
-	// storage_quota.go.
+	// quota is the per-user byte counter's in-process half (storage_quota.go).
 	quota storageQuota
-	// cloner is the storage a forward clones files in (WP 6.9a); guarded by
-	// quota.mu. nil until the composition root installs it.
+	// cloner is the storage a forward clones files in; guarded by quota.mu, nil until
+	// the composition root installs it.
 	cloner FileCloner
 }
 
 var _ BannerFileStore = (*db.DB)(nil)
 
-// BannerFileStore is the one question the file route asks about profile
-// banners: is this attachment named by some user's banner_id right now.
-// *db.DB satisfies it.
+// BannerFileStore answers whether an attachment is named by some user's banner_id
+// right now. *db.DB satisfies it.
 type BannerFileStore interface {
 	IsBannerFile(ctx context.Context, fileID string) (bool, error)
 }
@@ -49,42 +41,29 @@ func NewUploadService(st Store, perms *PermissionService) *UploadService {
 	return &UploadService{st: st, perms: perms}
 }
 
-// AttachmentRecord is the metadata of one already-stored file. The caller is
-// responsible for having validated the bytes and written them through its
-// store; this is the row that records the result.
+// AttachmentRecord is the metadata of one stored file, whose bytes the caller has
+// validated and written.
 type AttachmentRecord struct {
-	// ID is both the attachment id and the name the bytes are stored under.
-	ID string
-	// UploaderID is who may read the file back while it is unlinked.
+	ID         string
 	UploaderID int64
-	// Filename is the sanitized display name, not a path.
-	Filename string
-	// MimeType is the type sniffed from the file's own bytes, never the
-	// client's Content-Type.
-	MimeType string
-	// Size is the byte count actually written to storage.
-	Size int64
-	// Width and Height are the image dimensions, nil for a non-image.
+	Filename   string
+	// MimeType is sniffed from the file's own bytes, never the client's Content-Type.
+	MimeType      string
+	Size          int64
 	Width, Height *int
-	// DurationMs and Waveform are set only for a voice message (WP 8.9): the
-	// clip length in milliseconds and the canonical base64url (unpadded)
-	// encoding of its amplitude bytes. Both nil, or both set.
+	// DurationMs and Waveform are set only for a voice message: clip length in ms and
+	// the unpadded base64url amplitude bytes. Both nil, or both set.
 	DurationMs *int
 	Waveform   *string
 }
 
-// Record inserts the attachment row for a stored file. The row is unlinked
-// (message_id NULL) until a message claims it, which is what makes it private
-// to its uploader in the meantime (see Authorize).
-//
-// res is the reservation the bytes were written under (B5-2). The row insert
-// and the reservation's commit share one critical section, so a recount can
-// never see the file both in the rows and in flight and double-count it;
-// on failure the reservation is left for the caller's Settle to release.
-//
-// A failure here leaves the caller holding orphaned bytes; every caller
-// deletes them from its store before reporting the error, because nothing
-// else will — the orphan sweep only reclaims rows, and there is no row.
+// Record inserts the attachment row for a stored file. It stays unlinked
+// (message_id NULL) until a message claims it, private to its uploader meanwhile
+// (see Authorize). res is the reservation the bytes were written under: the insert
+// and the reservation's commit share one critical section so a recount never sees
+// the file both in rows and in flight; on failure the caller's Settle releases it.
+// A failure leaves orphaned bytes the caller must delete, since the orphan sweep
+// reclaims only rows.
 func (s *UploadService) Record(ctx context.Context, rec AttachmentRecord, res *StorageReservation) error {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
@@ -98,10 +77,9 @@ func (s *UploadService) Record(ctx context.Context, rec AttachmentRecord, res *S
 	return nil
 }
 
-// Unrecord undoes Record for a file that never got used: it deletes the
-// still-unlinked row and recounts the user's counter, so the row's charge is
-// returned now instead of at the next orphan sweep. The caller deletes the
-// stored bytes.
+// Unrecord undoes Record for an unused file: it deletes the unlinked row and
+// recounts the user's counter so the charge returns now, not at the orphan sweep.
+// The caller deletes the bytes.
 func (s *UploadService) Unrecord(ctx context.Context, fileID string, userID int64) error {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
@@ -111,12 +89,10 @@ func (s *UploadService) Unrecord(ctx context.Context, fileID string, userID int6
 	return s.recountLocked(ctx, userID)
 }
 
-// Discard withdraws a file userID uploaded and never sent: it deletes the
-// unlinked row (never a live avatar) and recounts the user's counter, so the
-// quota is free for the next upload at once instead of at the orphan sweep.
-// It returns the stored file name for the caller to delete, or ErrNotFound
-// when there is no such file, it is someone else's, or a message already
-// holds it.
+// Discard withdraws a file userID uploaded and never sent: it deletes the unlinked
+// row (never a live avatar) and recounts so the quota frees at once. It returns
+// the stored name for the caller to delete, or ErrNotFound when there is no such
+// file, it is someone else's, or a message holds it.
 func (s *UploadService) Discard(ctx context.Context, fileID string, userID int64) (string, error) {
 	s.quota.mu.Lock()
 	defer s.quota.mu.Unlock()
@@ -133,18 +109,12 @@ func (s *UploadService) Discard(ctx context.Context, fileID string, userID int64
 	return storedAs, nil
 }
 
-// Resolve looks up the attachment behind fileID and applies the checks that
-// make a file unservable regardless of who is asking.
-//
-// A soft-deleted message's attachments stop being servable the moment the
-// message is deleted — the client shows a tombstone, but without this check the
-// file stays reachable by URL forever (no sweep can ever reclaim a linked row
-// either, since the only reaper requires message_id IS NULL). It is checked
-// here rather than in Authorize so it also covers administrators, matching the
-// tombstone applying to everyone.
-//
-// A linked attachment whose message row is gone entirely is left to Authorize,
-// which by then sees it as unlinked-shaped.
+// Resolve looks up the attachment behind fileID and applies the checks that make
+// it unservable for everyone. A soft-deleted message's attachments stop being
+// servable at once: without this the file stays reachable by URL forever, as no
+// sweep reclaims a linked row. It is here, not in Authorize, so it covers
+// administrators too. A linked attachment whose message row is gone is left to
+// Authorize, which sees it as unlinked-shaped.
 func (s *UploadService) Resolve(ctx context.Context, fileID string) (*db.AttachmentAccess, error) {
 	aa, err := s.st.GetAttachmentWithChannel(ctx, fileID)
 	if err != nil {
@@ -165,33 +135,25 @@ func (s *UploadService) Resolve(ctx context.Context, fileID string) (*db.Attachm
 	return aa, nil
 }
 
-// Authorize decides whether actor may read aa. actor and role are the caller's
-// resolved identity; both may be nil, which denies everything an unauthenticated
-// caller could otherwise reach.
+// Authorize decides whether actor may read aa; actor and role may be nil, which
+// denies everything an unauthenticated caller could reach. Rules in order:
 //
-// The rules, in the order they are applied:
+//   - DM participation is required of everyone, administrators included (as
+//     requireChannelRead and checkSendPermission), checked ahead of the admin
+//     branch so it cannot skip it.
+//   - A linked attachment in a guild channel needs READ_MESSAGES, which
+//     administrators are exempt from.
+//   - An unlinked attachment is private to its uploader, administrators included
+//     (once its message or channel is gone there is no label to check consent
+//     against), except while some user's avatar column points at exactly its URL:
+//     an avatar must be visible to people seeing its messages, and the exact-URL
+//     check makes the file stop being public the instant the avatar is replaced.
+//     A legacy row with NULL uploader_id is denied.
+//   - A labelled channel's attachment needs the caller's own NSFW acknowledgement,
+//     administrators included (checkNSFWConsent).
 //
-//   - DM participation is required of everyone, administrators included. This
-//     matches every other DM read gate in the codebase (requireChannelRead,
-//     checkSendPermission), none of which have an admin bypass, and it is
-//     checked ahead of the admin branch so that branch cannot skip it.
-//   - A linked attachment in a guild channel needs READ_MESSAGES there, which
-//     an administrator is exempt from.
-//   - An unlinked attachment is private to its uploader, administrators
-//     included (decision 13: once its message or channel is deleted there is
-//     no label left to check consent against), except while some
-//     user's avatar column points at exactly its URL: an avatar has to be
-//     visible to the people who see the messages it sits next to, and the check
-//     being by exact URL is what makes the file stop being public the instant
-//     the avatar is replaced. A legacy row with no uploader (NULL uploader_id)
-//     is denied rather than served to any authenticated caller (M-2).
-//   - A labelled channel's attachment needs the caller's own NSFW
-//     acknowledgement, administrators included (checkNSFWConsent).
-//
-// Refusals stay distinguishable, so a caller can tell "not yours" from "not
-// there": a missing attachment answers 404, a permission failure 403, and an
-// unacknowledged NSFW label 403 with its own NSFW_ACKNOWLEDGEMENT_REQUIRED
-// code (api/upload_handler.go).
+// Refusals stay distinguishable: missing is 404, a permission failure 403, an
+// unacknowledged label 403 NSFW_ACKNOWLEDGEMENT_REQUIRED (api/upload_handler.go).
 func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, actor *db.User, role *db.Role) error {
 	if aa == nil {
 		return fmt.Errorf("attachment not found%.0w", ErrNotFound)
@@ -207,16 +169,17 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 		}
 	}
 
+	// A channel a Discord import is still building does not exist for anyone yet.
+	if aa.ChannelPending {
+		return fmt.Errorf("attachment not found%.0w", ErrNotFound)
+	}
+
 	isAdmin := role != nil && permissions.HasAdmin(role.Permissions)
 
-	// P2-6: ordinary channel visibility runs BEFORE the NSFW consent check
-	// (previously reversed). A non-viewer without READ_MESSAGES must get the
-	// exact same refusal (FORBIDDEN, via errFileForbidden) whether or not the
-	// channel happens to be labelled — checking consent first would answer a
-	// non-viewer with a DIFFERENT code (NSFW_ACKNOWLEDGEMENT_REQUIRED) only
-	// for a labelled channel, disclosing the label's existence to someone who
-	// cannot see the channel at all. Same admin exemption this gate always
-	// had; decision 13's admin-refusing consent check still runs next.
+	// Channel visibility runs BEFORE the NSFW consent check: a non-viewer without
+	// READ_MESSAGES must get the same FORBIDDEN whether or not the channel is
+	// labelled, or a different code only for labelled channels would disclose the
+	// label to someone who cannot see the channel. The admin exemption is unchanged.
 	if aa.ChannelID != nil && aa.ChannelType != "dm" && !isAdmin {
 		if actor == nil || !s.perms.HasChannelPerm(ctx, actor.ID, *aa.ChannelID, permissions.ReadMessages) {
 			return errFileForbidden()
@@ -229,10 +192,9 @@ func (s *UploadService) Authorize(ctx context.Context, aa *db.AttachmentAccess, 
 	return s.checkNSFWConsent(ctx, aa, actor)
 }
 
-// checkNSFWConsent is Authorize's B5-7 decision 13 gate: an administrator
-// without a row is refused exactly like anyone else — no bit and no admin
-// bypass skips this. DMs cannot be labelled, so this only ever applies to a
-// non-DM linked channel.
+// checkNSFWConsent is Authorize's consent gate: an administrator without a row is
+// refused like anyone else. DMs cannot be labelled, so it applies only to a linked
+// non-DM channel.
 func (s *UploadService) checkNSFWConsent(ctx context.Context, aa *db.AttachmentAccess, actor *db.User) error {
 	if aa.ChannelID == nil || aa.ChannelType == "dm" || !aa.ChannelNSFW {
 		return nil
@@ -252,12 +214,11 @@ func (s *UploadService) checkNSFWConsent(ctx context.Context, aa *db.AttachmentA
 }
 
 // authorizeUnlinked is Authorize's branch for an attachment no message claims:
-// the uploader may read it, everyone may while it is somebody's avatar or profile banner, and the
-// members of a group DM may while it is that group's live icon.
+// the uploader may read it; everyone may while it is somebody's avatar or profile
+// banner; group DM members may while it is the group's live icon.
 func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.AttachmentAccess, actor *db.User) error {
-	// A failed lookup is not a grant and not a refusal: it falls through to
-	// the ownership check below, which is the answer this file would have had
-	// before any avatar pointed at it.
+	// A failed lookup is neither grant nor refusal: it falls through to the ownership
+	// check.
 	isAvatar, avatarErr := s.st.IsAvatarFileURL(ctx, AvatarFileURL(aa.ID))
 	if avatarErr != nil {
 		slog.Error("failed to check avatar file", "id", aa.ID, "error", avatarErr)
@@ -281,10 +242,9 @@ func (s *UploadService) authorizeUnlinked(ctx context.Context, aa *db.Attachment
 	return nil
 }
 
-// isLiveBanner reports whether the attachment is some user's current profile
-// banner. Like the avatar rule, the grant lasts exactly while banner_id names
-// the file; a replaced or cleared banner is refused. A failed lookup is not a
-// grant: it falls through to the uploader check.
+// isLiveBanner reports whether the attachment is some user's current banner. Like
+// the avatar rule, the grant lasts exactly while banner_id names the file. A
+// failed lookup is not a grant.
 func (s *UploadService) isLiveBanner(ctx context.Context, fileID string) bool {
 	if s.banners == nil {
 		return false
@@ -298,8 +258,7 @@ func (s *UploadService) isLiveBanner(ctx context.Context, fileID string) bool {
 }
 
 // isGroupIconFor reports whether the attachment is the live icon of a group the
-// actor is a member of. A failed lookup is not a grant: it falls through to the
-// uploader check.
+// actor belongs to. A failed lookup is not a grant.
 func (s *UploadService) isGroupIconFor(ctx context.Context, fileID string, actor *db.User) bool {
 	if actor == nil {
 		return false
@@ -312,8 +271,8 @@ func (s *UploadService) isGroupIconFor(ctx context.Context, fileID string, actor
 	return ok
 }
 
-// errFileForbidden is the single refusal every access check answers with, so
-// no branch can leak which rule refused it.
+// errFileForbidden is the single refusal every access check answers with, so no
+// branch leaks which rule refused.
 func errFileForbidden() error {
 	return fmt.Errorf("you do not have access to this file%.0w", ErrForbidden)
 }

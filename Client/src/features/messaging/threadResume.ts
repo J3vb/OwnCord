@@ -1,4 +1,4 @@
-// Re-focusing the open thread after a reconnect (WP 6.9c). The thread panel's
+// Re-focusing the open thread after a reconnect. The thread panel's
 // host registers this with the dispatcher's hook (stores/threadsLoader) while
 // it is mounted, so none of it weighs on startup.
 import { removeThread, setFocusedThread, threadsStore } from "@stores/threads.store";

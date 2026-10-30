@@ -25,12 +25,12 @@ var pathIDSites = map[string]map[string]bool{
 	"api/path_id.go":   {"pathID": true},
 }
 
-// replyHelpers enforces MX-7: a REST handler answers an error through
+// replyHelpers enforces the reply-helper rule: a REST handler answers an error through
 // writeErr and reads a JSON body through decodeJSON (or its optional and
 // strict forms), so the same bad input gets the same code and message on
 // every route and a body past its cap answers 413. An errorResponse literal
 // or a json.NewDecoder call outside the helpers is a violation. It also
-// enforces MX-10: a strconv.ParseInt, ParseUint or Atoi of a chi.URLParam
+// enforces the id-parsing rule: a strconv.ParseInt, ParseUint or Atoi of a chi.URLParam
 // (directly, or through a local variable assigned from one) is a violation
 // outside pathInt64 and pathID, which refuse an id of 0 or below, so a route
 // cannot take an id the others reject.

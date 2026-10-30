@@ -23,7 +23,7 @@ export function adminPanelUrl(host: string, section?: string): string {
   // A bare (unbracketed) IPv6 host is a valid, accepted server address
   // (hostValidation.ts, livekitSession.ts's ensureLiveKitProxy) but RFC 3986
   // requires brackets around an IPv6 literal authority — without them this
-  // isn't a valid absolute URL at all (OC-0190). Reuse the same bracketing
+  // isn't a valid absolute URL at all. Reuse the same bracketing
   // convention ws.ts's wss:// URL builder already uses.
   const authority = bracketBareIPv6Host(host);
   const base = `https://${authority}/admin`;
@@ -33,7 +33,7 @@ export function adminPanelUrl(host: string, section?: string): string {
 /**
  * Open the admin panel in the user's default browser.
  *
- * The native shell opener is `platform/desktop`'s `urlOpener` (B7-5).
+ * The native shell opener is `platform/desktop`'s `urlOpener`.
  */
 export async function openAdminPanel(host: string, section?: string): Promise<void> {
   await desktop.urlOpener.open(adminPanelUrl(host, section));

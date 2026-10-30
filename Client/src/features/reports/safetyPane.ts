@@ -1,15 +1,14 @@
 import type { ApiClient } from "@lib/api";
 import { createElement } from "@lib/dom";
-import { dmPrivacyEnabled } from "@lib/serverCapabilities";
+import { dmPrivacyEnabled } from "@lib/net/serverCapabilities";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { buildSafetyTab } from "../safety/Notices";
 
 /**
- * The Settings Safety tab's pane (Q2): B9-15's restrictions and history with
- * B9-16's appeals, then B9-10's My reports. 3B-7's Blocked users sits above
- * them all, under WP 6.8f's Direct messages switches. The sections load on
- * first open, keeping them out of the main bundle; a section that cannot load
- * says so.
+ * The Settings Safety tab's pane: the restrictions and history, with the
+ * appeals, then My reports. Blocked users sits above them all, under the
+ * Direct messages switches. The sections load on first open, keeping them out of
+ * the main bundle; a section that cannot load says so.
  */
 export function buildSafetyPane(
   signal: AbortSignal,

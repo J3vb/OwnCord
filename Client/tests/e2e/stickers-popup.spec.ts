@@ -10,7 +10,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, navigateToMainPageReady } from "./helpers";
-import { Q1, findUnnamedControls, focusIndicator } from "./support/b9-accessibility";
+import { Q1, findUnnamedControls, focusIndicator } from "./support/accessibility";
 
 /** A 1x1 transparent PNG, as the sticker image bytes. */
 const PNG_1X1 = [
@@ -73,7 +73,7 @@ async function start(page: Page): Promise<void> {
   await navigateToMainPageReady(page);
 }
 
-test.describe("WP 8.8 stickers and the expression popup", () => {
+test.describe("stickers and the expression popup", () => {
   test.beforeEach(async ({ page }) => {
     await start(page);
   });
@@ -90,6 +90,9 @@ test.describe("WP 8.8 stickers and the expression popup", () => {
     await expect(popup.locator(".sp-item")).toHaveCount(2);
 
     // The tablist is a proper one: arrows move and select, the tab keeps focus.
+    // The picker focuses its search box a frame after it mounts; focusing the
+    // tab before that lands would lose the arrow keys to the search box.
+    await expect(popup.locator("[data-testid='sticker-search']")).toBeFocused();
     const stickersTab = page.locator("[data-testid='xp-tab-sticker']");
     await stickersTab.focus();
     await page.keyboard.press("ArrowRight");

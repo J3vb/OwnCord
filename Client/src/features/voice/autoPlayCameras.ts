@@ -1,5 +1,5 @@
 // The "Automatically play cameras" preference (Voice & Video settings).
-import { loadPref } from "../../lib/preferences";
+import { loadPref } from "../../lib/prefs/preferences";
 
 export const AUTO_PLAY_CAMERAS_PREF = "autoPlayCameras";
 

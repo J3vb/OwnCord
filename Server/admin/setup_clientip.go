@@ -10,7 +10,7 @@ import (
 // The first-run setup endpoint resolves its client IP (the rate-limit bucket
 // key and the session IP recorded for the new Owner account) through the
 // shared clientip.Resolve, the same proxy-aware resolver api's middleware and
-// the WebSocket handshake use (OC-0274).
+// the WebSocket handshake use.
 
 // setupParseCIDRList parses CIDR strings into networks, skipping invalid
 // entries with a warning — a misconfigured entry must not take the server

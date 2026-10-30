@@ -4,7 +4,7 @@ import { messagingText } from "../../src/i18n/messaging";
 import { gifFavoritesText } from "../../src/i18n/gifFavorites";
 import { ApiClientError } from "@lib/api";
 import type { GifPickerOptions } from "@components/GifPicker";
-import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/gifProvider";
+import type { GifApi, GifFavoritesApi, GifPage, GifResult } from "@lib/media/gifProvider";
 import {
   bindGifFavoritesApi,
   resetGifFavorites,
@@ -28,7 +28,7 @@ vi.mock("../../src/features/content-consent/external", async (importOriginal) =>
   },
 }));
 
-vi.mock("@lib/gifProvider", () => ({
+vi.mock("@lib/media/gifProvider", () => ({
   searchGifs: vi.fn(),
   getTrendingGifs: vi.fn(),
 }));
@@ -43,7 +43,7 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
 }));
 
 // Import the mocks so tests can control their return values
-import { searchGifs, getTrendingGifs } from "@lib/gifProvider";
+import { searchGifs, getTrendingGifs } from "@lib/media/gifProvider";
 import { clearExternalImageCache } from "@components/message-list/attachments";
 
 let blobCounter = 0;
@@ -434,7 +434,7 @@ describe("GifPicker", () => {
     // only aborts once, at destroy()) would keep every discarded cell from
     // a prior search reachable — and its click handler still live — for the
     // rest of the picker's life.
-    it("does not fire onSelect for a cell discarded by a later search (OC-0365)", async () => {
+    it("does not fire onSelect for a cell discarded by a later search", async () => {
       const onSelect = vi.fn();
       const { picker } = makePicker({ onSelect });
       container.appendChild(picker.element);

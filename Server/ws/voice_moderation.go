@@ -13,18 +13,15 @@ import (
 
 // Voice moderation handlers: server mute, server deafen, move, disconnect.
 //
-// Mute, deafen and disconnect share one authorization contract, enforced by
-// voiceModTarget: MUTE_MEMBERS on the actor's role (Administrator bypasses),
-// the actor must strictly outrank the target by role position (mirroring
-// ModerationService.requireOutranks), and the target must currently be in a
-// voice channel. Move has its own bit: MOVE_MEMBERS (WP 8.4a) lets the actor
-// move a member of any rank, with no rank rule, and is the only way to move
-// (MUTE_MEMBERS and Administrator do not open one); the owner is skipped while the
-// owner-only voice_owner_movable setting is off. Effects that reach past the acting connection — the SFU and
-// the target's own socket — go through VoiceDeps.Mod.
+// Mute, deafen and disconnect share one contract (voiceModTarget): MUTE_MEMBERS on
+// the actor's role (Administrator bypasses), the actor must strictly outrank the
+// target by role position (as ModerationService.requireOutranks), and the target
+// must be in a voice channel. Move has its own bit, MOVE_MEMBERS, with no rank
+// rule, and is the only way to move; the owner is skipped while the owner-only
+// voice_owner_movable setting is off. Effects beyond the acting connection (the
+// SFU, the target's socket) go through VoiceDeps.Mod.
 
 // registerVoiceModerationV2 registers the four moderator voice commands.
-// Called from registerVoiceControlsV2 so the deps struct is built once.
 func registerVoiceModerationV2(r *HandlerRegistry, deps VoiceDeps) {
 	r.RegisterV2(MsgTypeVoiceModMute, handleVoiceModMuteV2, deps)
 	r.RegisterV2(MsgTypeVoiceModDeafen, handleVoiceModDeafenV2, deps)
@@ -32,9 +29,9 @@ func registerVoiceModerationV2(r *HandlerRegistry, deps VoiceDeps) {
 	r.RegisterV2(MsgTypeVoiceModKick, handleVoiceModKickV2, deps)
 }
 
-// voiceModRole loads the member's effective role (top role identity, OR of every held mask) through the permission cache when one is wired and
-// falls back to the live DB otherwise. Every failure is a denial: an
-// unresolvable role must never authorize a moderation action.
+// voiceModRole loads the member's effective role (top identity, OR of every held
+// mask) through the permission cache when wired, else the live DB. Every failure
+// is a denial: an unresolvable role must never authorize a moderation action.
 func voiceModRole(ctx context.Context, d VoiceDeps, userID int64) (*db.Role, bool) {
 	if d.PermSvc != nil {
 		role, err := d.PermSvc.GetRoleForUser(ctx, userID)
@@ -50,13 +47,11 @@ func voiceModRole(ctx context.Context, d VoiceDeps, userID int64) (*db.Role, boo
 	if err != nil || role == nil {
 		return nil, false
 	}
-	// Top role identity (rank) with the OR of every held mask.
 	return role.Effective(), true
 }
 
-// voiceModRateLimited applies the shared per-action rate limit. Each of these
-// commands fans a voice_state broadcast out to every client that can see the
-// channel, so a moderator must not be able to drive them in a tight loop.
+// voiceModRateLimited applies the shared per-action rate limit: each command fans
+// a voice_state broadcast out to every client that can see the channel.
 func voiceModRateLimited(d VoiceDeps, action string, userID int64) *Result {
 	if d.Limiter == nil {
 		return nil
@@ -67,8 +62,8 @@ func voiceModRateLimited(d VoiceDeps, action string, userID int64) *Result {
 	return &Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many voice moderation actions"}}
 }
 
-// requireTargetInChannel refuses when the target has moved on since the
-// moderator's client rendered the row that produced this command.
+// requireTargetInChannel refuses when the target has moved on since the moderator's
+// client rendered the row.
 func requireTargetInChannel(state *db.VoiceState, channelID int64) *Result {
 	if state.ChannelID == channelID {
 		return nil
@@ -77,44 +72,34 @@ func requireTargetInChannel(state *db.VoiceState, channelID int64) *Result {
 }
 
 // voiceChannelDisconnector is the channel-scoped form of
-// VoiceModerator.DisconnectFromVoice. The bare interface method takes no
-// channel, so it evicts the target from whatever channel their live connection
-// is in at that instant — not the channel voiceModTarget authorized against.
-// A channel switch on the target's own read-pump goroutine, concurrent with
-// the moderator's DB round trips, therefore redirects a kick or a move onto a
-// channel that was never checked, up to and including a DM call the actor is
-// not a participant of (the case voiceModTarget's IsDMParticipant guard
-// exists to refuse).
-//
-// Widening VoiceModerator itself lives in deps.go; until then *Hub also
-// satisfies this optional extension and disconnectFromVoiceIn prefers it,
-// falling back to the unscoped method for any other implementation.
+// VoiceModerator.DisconnectFromVoice. The bare method takes no channel and evicts
+// the target from whatever channel their connection is in at that instant, so a
+// channel switch on the target's read-pump racing the moderator's DB round trips
+// could redirect a kick or move onto a channel that was never checked, even a DM
+// call the actor is not part of (what voiceModTarget's IsDMParticipant guard
+// refuses). *Hub satisfies this optional extension and disconnectFromVoiceIn
+// prefers it, falling back to the unscoped method for other implementations.
 type voiceChannelDisconnector interface {
 	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool
 }
 
-// The production moderator must keep satisfying it: a type assertion that
-// silently stops matching would fall back to the unscoped DisconnectFromVoice
-// this extension exists to avoid, with nothing failing to say so.
+// The production moderator must keep satisfying it: a silently failing type
+// assertion would fall back to the unscoped method with nothing failing.
 var _ voiceChannelDisconnector = (*Hub)(nil)
 
-// voiceServerMuteLocker is the manual voice_mod_mute command's route onto
-// the same per-user lock the timeout voice half uses (round 4, Codex review
-// Part B). Widening VoiceModerator itself lives in deps.go; until then
-// *Hub also satisfies this optional extension, mirroring
-// voiceChannelDisconnector — a Mod without it (only ever a hand-built test
-// double) falls back to handleVoiceModMuteV2's pre-round-4, unlocked write.
+// voiceServerMuteLocker routes the manual voice_mod_mute onto the same per-user
+// lock the timeout voice half uses. *Hub satisfies this optional extension; a Mod
+// without it (a hand-built test double) falls back to an unlocked write.
 type voiceServerMuteLocker interface {
 	SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error)
 }
 
-// The production moderator must keep satisfying it: a type assertion that
-// silently stops matching would fall back to the pre-round-4 unlocked write
-// for a manual mute, with nothing failing to say so.
+// The production moderator must keep satisfying it, or a manual mute would
+// silently fall back to the unlocked write.
 var _ voiceServerMuteLocker = (*Hub)(nil)
 
-// disconnectFromVoiceIn evicts targetID from channelID, reporting false when
-// the target has no connection on this node or has already left that channel.
+// disconnectFromVoiceIn evicts targetID from channelID, reporting false when the
+// target has no connection on this node or already left that channel.
 func disconnectFromVoiceIn(ctx context.Context, mod VoiceModerator, targetID, channelID int64) bool {
 	if scoped, ok := mod.(voiceChannelDisconnector); ok {
 		return scoped.DisconnectFromVoiceInChannel(ctx, targetID, channelID, voiceLeaveReasonModerator)
@@ -122,33 +107,24 @@ func disconnectFromVoiceIn(ctx context.Context, mod VoiceModerator, targetID, ch
 	return mod.DisconnectFromVoice(ctx, targetID)
 }
 
-// voicePendingModFlagsSetter lets a server-driven leave (voice_mod_move)
-// stash a moderator-imposed mute/deafen on the target's in-memory connection
-// before the delete below erases the voice_states row those flags normally
-// live in. handleVoiceJoin's shared join helper (voiceJoinLeaveCurrent, in
-// voice_join.go) takes the stash back out when there is no row left to read
-// (currentChID == 0) and re-applies it exactly as it already does for a
-// self-initiated channel switch — one guard in the shared consumer instead of
-// a second, divergent restore path here.
-//
-// Widening VoiceModerator itself lives in deps.go; until then *Hub also
-// satisfies this optional extension, mirroring voiceChannelDisconnector.
+// voicePendingModFlagsSetter lets a server-driven leave (voice_mod_move) stash a
+// moderator-imposed mute/deafen on the target's in-memory connection before the
+// delete erases the voice_states row they normally live in. voiceJoinLeaveCurrent
+// takes the stash back out when no row is left (currentChID == 0) and re-applies it
+// as for a self-initiated switch: one guard in the shared consumer instead of a
+// divergent restore path here. *Hub satisfies this optional extension.
 type voicePendingModFlagsSetter interface {
 	SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool
 }
 
-// The production moderator must keep satisfying it: a type assertion that
-// silently stops matching would drop the stashed mute/deafen flags on a
-// server-driven move, with nothing failing to say so.
+// The production moderator must keep satisfying it, or a server-driven move would
+// silently drop the stashed flags.
 var _ voicePendingModFlagsSetter = (*Hub)(nil)
 
-// stashPendingModFlags is a best-effort no-op when mod does not support the
-// optional extension or the target has no connection on this node — the
-// eviction that follows still proceeds either way, exactly as it did before
-// this stash existed, so a missing implementation only loses the
-// preservation, never blocks the move. serverMutedBy (round 5, Codex review
-// P2) carries a timeout's ownership through the stash the same way
-// voiceJoinLeaveCurrent's own snapshot does for a self-initiated switch.
+// stashPendingModFlags is a best-effort no-op when mod lacks the extension or the
+// target has no connection on this node; the eviction proceeds either way, so a
+// missing implementation loses only the preservation. serverMutedBy carries a
+// timeout's ownership through the stash as voiceJoinLeaveCurrent's snapshot does.
 func stashPendingModFlags(mod VoiceModerator, targetID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) {
 	if !serverMuted && !serverDeafened {
 		return
@@ -158,24 +134,21 @@ func stashPendingModFlags(mod VoiceModerator, targetID int64, serverMuted, serve
 	}
 }
 
-// clearPendingModFlags unconditionally wipes any stash left by
-// stashPendingModFlags. Unlike stashPendingModFlags it cannot early-return on
-// "both false" — false/false IS the clear — so it calls the setter directly.
-// Used when a move that stashed flags in anticipation of an eviction turns
-// out not to have evicted anyone (OC-0278): without this, a refused move
-// leaves an unbound, unexpiring stash that the target's next unrelated
-// voice_join (taken with no live row to read the real flags from) would
-// re-apply as a server mute/deafen nobody currently ordered.
+// clearPendingModFlags unconditionally wipes any stash. It cannot early-return on
+// "both false" (false/false is the clear), so it calls the setter directly. Used
+// when a move that stashed flags turns out not to have evicted anyone: otherwise a
+// refused move leaves an unexpiring stash that the target's next unrelated
+// voice_join would re-apply as a mute/deafen nobody ordered.
 func clearPendingModFlags(mod VoiceModerator, targetID int64) {
 	if setter, ok := mod.(voicePendingModFlagsSetter); ok {
 		setter.SetPendingVoiceModFlags(targetID, false, false, nil)
 	}
 }
 
-// handleVoiceModMuteV2 processes a voice_mod_mute command. The DB row is the
-// authority for the UI; SFU permissions enforce the microphone restriction.
-// A failed media update leaves the desired state available for reconciliation
-// and tells the moderator that enforcement has not completed.
+// handleVoiceModMuteV2 processes voice_mod_mute. The DB row is the authority for
+// the UI; SFU permissions enforce the microphone restriction. A failed media
+// update leaves the desired state for reconciliation and tells the moderator
+// enforcement has not completed.
 func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	c := cmd.(VoiceModMuteCmd)
@@ -191,10 +164,9 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return *r
 	}
 
-	// The DB write and its paired SFU call run under the timeout path's same
-	// per-user lock when a locking Mod is wired (round 4, Codex review Part
-	// B) -- production always wires one (NewHub's Mod: h); a Mod-less test
-	// deps falls back to the unlocked, SFU-less write it always had.
+	// The DB write and its paired SFU call run under the timeout path's per-user lock
+	// when a locking Mod is wired (production always wires one); Mod-less test deps
+	// fall back to the unlocked, SFU-less write.
 	var matched bool
 	var err error
 	if locker, ok := d.Mod.(voiceServerMuteLocker); ok {
@@ -213,9 +185,8 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	}
 	if !matched {
 		// The target's row moved off state.ChannelID between requireTargetInChannel's
-		// snapshot and this write (OC-0005) -- same refusal requireTargetInChannel
-		// itself gives for the non-racing case, so the write never follows the
-		// target onto a channel (including a DM call) nobody authorized it against.
+		// snapshot and this write: same refusal, so the write never follows the target
+		// onto a channel (including a DM call) nobody authorized it against.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 
@@ -227,18 +198,14 @@ func handleVoiceModMuteV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	return voiceStateBroadcast(ctx, d, c.TargetID)
 }
 
-// voiceModDeafenPreMuteRaceHook, when non-nil, runs immediately after the
-// deafen write matches and before the implied-mute write that follows it —
-// the one-statement-wide window a concurrent channel switch would need to
-// land in for OC-0034. Test-only (nil in production), mirroring the
-// voiceJoinPostTokenRaceHook / cleanupVoiceRaceClearHook pattern used to pin
-// the analogous races elsewhere.
+// voiceModDeafenPreMuteRaceHook, when non-nil, runs right after the deafen write
+// matches and before the implied-mute write: the one-statement window a concurrent
+// channel switch would need. Test-only.
 var voiceModDeafenPreMuteRaceHook func(ctx context.Context, d VoiceDeps, targetID int64)
 
-// handleVoiceModDeafenV2 processes a voice_mod_deafen command. Deafen has no
-// SFU equivalent (it is about what the target plays back), so it is enforced by
-// the target's client honoring server_deafened plus the server refusing their
-// own undeafen while it is set.
+// handleVoiceModDeafenV2 processes voice_mod_deafen. Deafen has no SFU equivalent
+// (it is about playback), so it is enforced by the target's client honoring
+// server_deafened plus the server refusing their own undeafen while set.
 func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	c := cmd.(VoiceModDeafenCmd)
@@ -260,28 +227,22 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "failed to update server deafen"}}
 	}
 	if !deafenMatched {
-		// The target's row moved off state.ChannelID between requireTargetInChannel's
-		// snapshot and this write (OC-0005) -- refuse exactly as requireTargetInChannel
-		// itself does for the non-racing case, before the implied mute below can
-		// touch a channel nobody authorized it against.
+		// The target's row moved off state.ChannelID since requireTargetInChannel: refuse
+		// before the implied mute below can touch a channel nobody authorized.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not in that voice channel"}}
 	}
 	if voiceModDeafenPreMuteRaceHook != nil {
 		voiceModDeafenPreMuteRaceHook(ctx, d, c.TargetID)
 	}
-	// A server deafen implies a server mute at the SFU: a deafened user must
-	// not keep talking into a room they cannot hear. Lifting the deafen must
-	// lift that implied mute too, or the target stays SFU-muted and refused
-	// their own unmute even after the deafen is gone. server_muted is a
-	// single bool with no way to tell "explicit" from "deafen-implied" apart,
-	// so an explicit-mute-then-deafen sequence has both lifted together by an
-	// undeafen — accepted as the simplest correct behavior given the schema.
-	// The implied mute's DB write and its paired SFU call run under the same
-	// per-user lock SetServerMuteLocked uses for the manual mute endpoint
-	// (round 5, Codex review: this pair used to bypass the lock entirely),
-	// so it cannot interleave with a timeout's mute/unmute for the same
-	// target either. Falls back to the unlocked write only for a Mod-less
-	// test deps, exactly like handleVoiceModMuteV2.
+	// A server deafen implies a server mute at the SFU: a deafened user must not keep
+	// talking into a room they cannot hear. Lifting the deafen must lift that mute
+	// too, or the target stays SFU-muted and refused their own unmute. server_muted is
+	// a single bool that cannot tell explicit from deafen-implied, so an
+	// explicit-mute-then-deafen sequence has both lifted by an undeafen (accepted given
+	// the schema). The implied mute's DB write and SFU call run under the same
+	// per-user lock as the manual mute (SetServerMuteLocked), so it cannot interleave
+	// with a timeout's mute/unmute for the same target. Unlocked fallback only for
+	// Mod-less test deps.
 	var muteMatched bool
 	if locker, ok := d.Mod.(voiceServerMuteLocker); ok {
 		muteMatched, _, err = locker.SetServerMuteLocked(ctx, c.TargetID, state.ChannelID, c.Deafened)
@@ -293,8 +254,8 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 			slog.Error("ws handleVoiceModDeafenV2 SetServerMute", "err", err, "target_id", c.TargetID)
 		}
 		if errors.Is(err, errVoiceMediaPending) {
-			// Both desired flags were saved. Keep them together so a retry or
-			// periodic reconciliation can finish the media update.
+			// Both desired flags were saved; keep them together so a retry or periodic
+			// reconciliation can finish the media update.
 			writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_deafen", c.TargetID,
 				fmt.Sprintf("server deafen %s in channel %d; media update pending", onOff(c.Deafened), state.ChannelID))
 			return Result{Error: ClientError{Code: ErrCodeInternal, Message: "server deafen saved, but the media update failed; please retry"}}
@@ -314,16 +275,15 @@ func handleVoiceModDeafenV2(ctx context.Context, cmd Command, info ClientInfo, d
 	return voiceStateBroadcast(ctx, d, c.TargetID)
 }
 
-// handleVoiceModMoveV2 processes a voice_mod_move command.
+// handleVoiceModMoveV2 processes voice_mod_move.
 //
-// The move is a server-driven leave followed by a client-driven re-join: the
-// hub runs its voice-leave routine for the target (DB row, LiveKit participant,
-// voice_leave broadcast) and then sends voice_moved, which the target's client
-// answers with an ordinary voice_join for the destination. That keeps one
-// implementation of the join sequence — capacity, token minting, key-holder
-// election, existing-state fan-out — instead of a second, divergent copy here.
-// The checks below are the pre-flight: they refuse a move the re-join would
-// only bounce, so the target is never dropped from voice for nothing.
+// The move is a server-driven leave followed by a client-driven re-join: the hub
+// runs its voice-leave routine for the target (DB row, LiveKit participant,
+// voice_leave broadcast), then sends voice_moved and the target's client answers
+// with an ordinary voice_join. That keeps one implementation of the join sequence
+// (capacity, token, key-holder election, state fan-out). The checks below are
+// pre-flight, refusing a move the re-join would only bounce so the target is never
+// dropped from voice for nothing.
 func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	c := cmd.(VoiceModMoveCmd)
@@ -353,11 +313,10 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if dest.Type != "voice" {
 		return Result{Error: ClientError{Code: ErrCodeBadRequest, Message: "destination is not a voice channel"}}
 	}
-	// The destination is gated on the TARGET's access with the same predicate
-	// the re-join this move hands off to (handleVoiceJoin) will apply —
-	// permissions.CanJoinVoice — so a move can neither place someone in a
-	// channel they could not join themselves nor commit the destructive half
-	// of the move for a re-join guaranteed to bounce (an archived channel).
+	// Gate the destination on the target's access with the same predicate the
+	// re-join (handleVoiceJoin) applies, permissions.CanJoinVoice, so a move can
+	// neither place someone in a channel they could not join nor commit the
+	// destructive half for a re-join guaranteed to bounce (an archived channel).
 	targetSub, subErr := channelSubject(ctx, d.Reader, d.Permissions, d.PermSvc, c.TargetID, dest, false)
 	if subErr != nil {
 		slog.Error("ws handleVoiceModMoveV2 channelSubject", "err", subErr, "channel_id", c.ToChannelID)
@@ -372,11 +331,10 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 			Message: "user cannot connect to that voice channel",
 		}}
 	}
-	// Advisory capacity check with JoinVoiceChannelIfCapacity's semantics. The
-	// atomic one still runs on the re-join; this one keeps the common case from
-	// dropping the target into a channel that is already full. The cap is the
-	// one the target's own re-join is held to, so a target who moderates voice
-	// there is not refused a move their join would be admitted to.
+	// Advisory capacity check with JoinVoiceChannelIfCapacity's semantics; the atomic
+	// one still runs on the re-join. This keeps the common case from dropping the
+	// target into a full channel. The cap is the one the target's own re-join is held
+	// to, so a target who moderates voice there is not refused.
 	if destCap := voiceJoinCapacity(targetSub, dest.VoiceMaxUsers); destCap > 0 {
 		count, cErr := d.Voice.CountInChannel(ctx, c.ToChannelID)
 		if cErr != nil {
@@ -395,25 +353,24 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return *r
 	}
 	// Evict the target and, in the same membership transaction, stash their
-	// server_muted/server_deafened (already loaded by voiceModTarget above) on
-	// their live connection: the disconnect deletes the voice_states row those
-	// flags live in — see voiceMoveEvictor. The target's own re-join
-	// (handleVoiceJoin, via voiceJoinLeaveCurrent in voice_join.go) has no row
-	// left to read (currentChID == 0 by then) and takes this stash back out
-	// instead.
+	// server_muted/server_deafened (loaded by voiceModTarget) on their live connection:
+	// the disconnect deletes the voice_states row those flags live in
+	// (voiceMoveEvictor). The target's re-join has no row left to read and takes the
+	// stash back out.
 	if !evictForMove(ctx, d.Mod, c.TargetID, state.ChannelID, state.ServerMuted, state.ServerDeafened, state.ServerMutedBy) {
-		// No live connection on this node — the voice_states row is a ghost the
-		// sweeper owns, and there is nobody to send voice_moved to — or the
-		// target left the checked channel while this handler was deciding, in
-		// which case the move must not follow them. Either way nobody was
-		// evicted, and evictForMove has left no stash behind (OC-0278): a
-		// stash with no expiry and no binding to this move would be consumed by
-		// the target's next unrelated voice_join as if a moderator had just
-		// muted them.
+		// Nobody was evicted: no live connection on this node (the row is a ghost the
+		// sweeper owns), or the target left the checked channel meanwhile and the move
+		// must not follow them. evictForMove left no stash behind; one with no expiry
+		// would be consumed by the target's next unrelated voice_join as if a moderator
+		// had just muted them.
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
 	blockVoiceRejoin(d.Mod, c.TargetID, state.ChannelID)
-	if !d.Mod.SendToVoiceDevice(c.TargetID, buildVoiceMoved(c.ToChannelID, "", info.UserID)) {
+	// The target's re-join would ask a password-protected destination for its
+	// password, which a move never does: the grant is stored now that the
+	// target is evicted, and a failure takes the same branch as a failed send.
+	if !moveGrantStored(ctx, d.Reader, dest.JoinLocked, c.ToChannelID, c.TargetID) ||
+		!d.Mod.SendToVoiceDevice(c.TargetID, buildVoiceMoved(c.ToChannelID, "", info.UserID)) {
 		clearPendingModFlags(d.Mod, c.TargetID)
 		writeVoiceModAudit(ctx, d, info.UserID, "voice_mod_kick", c.TargetID,
 			fmt.Sprintf("disconnected from channel %d (reconnecting, not moved to channel %d)", state.ChannelID, c.ToChannelID))
@@ -425,15 +382,14 @@ func handleVoiceModMoveV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	slog.Info("voice moderator move", "actor_id", info.UserID, "target_id", c.TargetID,
 		"from_channel_id", state.ChannelID, "to_channel_id", c.ToChannelID)
 
-	// handleVoiceLeave already broadcast voice_leave for the old channel; the
-	// re-join broadcasts voice_state for the new one.
+	// handleVoiceLeave already broadcast voice_leave for the old channel; the re-join
+	// broadcasts voice_state for the new one.
 	return Result{}
 }
 
-// handleVoiceModKickV2 processes a voice_mod_kick command: the target is
-// removed from the LiveKit room, their voice_states row is deleted and
-// voice_leave is broadcast (all by the hub's voice-leave routine), then they
-// are told why.
+// handleVoiceModKickV2 processes voice_mod_kick: the hub's voice-leave routine
+// removes the target from the LiveKit room, deletes the row and broadcasts
+// voice_leave; then the target is told why.
 func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	c := cmd.(VoiceModKickCmd)
@@ -449,8 +405,8 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 	if d.Mod == nil {
 		return Result{Error: ClientError{Code: ErrCodeInternal, Message: "voice moderation unavailable"}}
 	}
-	// Scoped to the channel the gate above authorized: a target who switched
-	// channels mid-decision must not be kicked out of the new one.
+	// Scoped to the channel the gate authorized: a target who switched channels
+	// mid-decision must not be kicked out of the new one.
 	if !disconnectFromVoiceIn(ctx, d.Mod, c.TargetID, state.ChannelID) {
 		return Result{Error: ClientError{Code: ErrCodeVoiceError, Message: "user is not connected"}}
 	}
@@ -467,8 +423,8 @@ func handleVoiceModKickV2(ctx context.Context, cmd Command, info ClientInfo, dep
 }
 
 // writeVoiceModAudit records a moderation action. The row must survive a
-// connection that dies right after the effect landed, so the write is detached
-// from the dispatching context.
+// connection dying right after the effect landed, so it is written detached from
+// the dispatching context.
 func writeVoiceModAudit(ctx context.Context, d VoiceDeps, actorID int64, action string, targetID int64, detail string) {
 	if d.Voice == nil {
 		return
@@ -484,21 +440,15 @@ func onOff(v bool) string {
 	return "off"
 }
 
-// ── Hub-side effects ────────────────────────────────────────────────────────
-
-// muteParticipantHookForTest, when non-nil, replaces the real LiveKit call
-// entirely. Test-only (nil in production): the per-user voice-mod lock's
-// concurrency tests (round 4, Codex 12) need a working "SFU" to prove a
-// real mute survives a racing unmute, and h.livekit is nil (or points at no
-// real server) in every other ws unit test — MuteParticipant would
-// otherwise fail unconditionally, making "muted" an unreachable end state
-// to assert against.
+// muteParticipantHookForTest, when non-nil, replaces the real LiveKit call.
+// Test-only: the voice-mod lock's concurrency tests need a working SFU to prove a
+// real mute survives a racing unmute, and h.livekit is nil in other ws tests, which
+// would make "muted" unreachable.
 var muteParticipantHookForTest func(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error
 
 // MuteParticipant reconciles the target's publication permissions at the SFU.
-// Satisfies VoiceModerator; reads h.livekit at call time so SetLiveKit's late
-// wiring is picked up (same reason as GenerateToken). Callers hold voiceMod
-// across their state write and this permission update.
+// Reads h.livekit at call time so SetLiveKit's late wiring is picked up. Callers
+// hold voiceMod across their state write and this permission update.
 func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voiceJoinToken string, muted bool) error {
 	if muteParticipantHookForTest != nil {
 		return muteParticipantHookForTest(ctx, channelID, userID, voiceJoinToken, muted)
@@ -506,17 +456,15 @@ func (h *Hub) MuteParticipant(ctx context.Context, channelID, userID int64, voic
 	return h.updateVoiceParticipantPermissions(ctx, userID, channelID, voiceJoinToken)
 }
 
-// SetServerMuteLocked applies or clears the manual moderator mute
-// (voice_mod_mute), running the DB write and its paired LiveKit call under
-// the SAME per-user lock the timeout voice half uses (MuteForTimeout /
-// UnmuteForTimeout, round 4, Codex review Part B) — a lock only one of the
-// two paths took would serialize nothing. Reports matched, with the same
-// meaning as VoiceStore.SetServerMute's own result (false: the target's row
-// moved off channelID between authorization and this call, OC-0005), and
-// the session's join token for the caller's SFU/broadcast use.
+// SetServerMuteLocked applies or clears the manual moderator mute, running the DB
+// write and its paired LiveKit call under the same per-user lock the timeout
+// voice half uses (MuteForTimeout / UnmuteForTimeout); a lock only one path took
+// would serialize nothing. matched means as VoiceStore.SetServerMute's result
+// (false: the row moved off channelID since authorization); joinedAt is the
+// session's join token for the caller's SFU/broadcast use.
 //
-// An SFU failure is returned as errVoiceMediaPending. The persisted desired
-// state is retained for retry and periodic reconciliation.
+// An SFU failure is returned as errVoiceMediaPending; the persisted desired state
+// is retained for retry and periodic reconciliation.
 func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, muted bool) (matched bool, joinedAt string, err error) {
 	unlock := h.voiceMod.lock(userID)
 	defer unlock()
@@ -530,9 +478,9 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 	}
 	if mpErr := h.MuteParticipant(ctx, channelID, userID, joinedAt, muted); mpErr != nil {
 		slog.Warn("ws SetServerMuteLocked MuteParticipant failed", "err", mpErr, "user_id", userID, "channel_id", channelID)
-		// Publish the saved desired state even though the caller returns an
-		// error. Error results short-circuit ordinary handler events, and the
-		// client must know these flags while the SFU update awaits retry.
+		// Publish the saved desired state even though the caller returns an error: error
+		// results short-circuit ordinary handler events and the client must know these
+		// flags while the SFU update awaits retry.
 		h.broadcastVoiceMuteState(ctx, userID, channelID, joinedAt, muted)
 		return matched, joinedAt, fmt.Errorf("%w: %w", errVoiceMediaPending, mpErr)
 	}
@@ -540,16 +488,14 @@ func (h *Hub) SetServerMuteLocked(ctx context.Context, userID, channelID int64, 
 }
 
 // DisconnectFromVoice runs the hub's voice-leave routine for another user's
-// connection, which is what a moderator move or disconnect needs: DB row,
-// LiveKit participant, topic unsubscribe, key-holder re-election and the
-// voice_leave broadcast, in the one implementation that also serves the
-// disconnect and channel-switch paths. Reports false when the user has no
-// connection on this node.
+// connection (DB row, LiveKit participant, topic unsubscribe, key-holder
+// re-election, voice_leave), the one implementation shared with disconnect and
+// channel-switch. Reports false when the user has no connection on this node.
 func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
-	// The call is on one device: that connection is the one that leaves. With
-	// no connection holding a call the only membership left may be a parked one.
+	// The call is on one device: that connection leaves. With none holding a call the
+	// only membership left may be a parked one.
 	c := h.voiceClient(userID)
 	if c == nil {
 		h.noteModeratorExit(userID, nil)
@@ -561,15 +507,13 @@ func (h *Hub) DisconnectFromVoice(ctx context.Context, userID int64) bool {
 	return true
 }
 
-// DisconnectFromVoiceInChannel is DisconnectFromVoice conditioned on the
-// channel the caller authorized against, satisfying voiceChannelDisconnector.
-// The comparison and the clear happen together under the client's voiceMu
-// (handleVoiceLeaveIfStillIn -> voiceTxn.clearIfChannel), so a channel switch
-// committed on the target's own goroutine after the moderator's checks either
-// loses the race outright or is left untouched — never evicted in place of the
-// channel that was checked. Reports false in both of those cases, which the
-// callers already treat as "user is not connected". reason is the caller's
-// voiceLeaveReason* / VoiceLeaveReason* constant for the "voice leave" line.
+// DisconnectFromVoiceInChannel is DisconnectFromVoice conditioned on the channel
+// the caller authorized against (voiceChannelDisconnector). The comparison and
+// clear happen together under the client's voiceMu (handleVoiceLeaveIfStillIn ->
+// voiceTxn.clearIfChannel), so a channel switch committed on the target's goroutine
+// after the moderator's checks either loses the race or is left untouched, never
+// evicted in place of the checked channel. False in both cases, which callers
+// treat as not connected. reason is the voiceLeaveReason* constant for the log line.
 func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool {
 	txn := h.begin(userID)
 	defer txn.end()
@@ -585,22 +529,19 @@ func (h *Hub) DisconnectFromVoiceInChannel(ctx context.Context, userID, channelI
 	return left
 }
 
-// SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on
-// userID's voice connection, satisfying voicePendingModFlagsSetter, under the
-// member lock. Reports false when the user has no connection on this node —
-// the same "nothing to do here" case DisconnectFromVoiceInChannel reports,
-// since without a live *Client there is nowhere to stash the flags and no
-// re-join on this node to consume them.
+// SetPendingVoiceModFlags stashes a moderator-imposed mute/deafen on userID's voice
+// connection under the member lock (voicePendingModFlagsSetter). Reports false
+// when the user has no connection on this node: nowhere to stash, and no re-join
+// here to consume it.
 func (h *Hub) SetPendingVoiceModFlags(userID int64, serverMuted, serverDeafened bool, serverMutedBy *int64) bool {
 	txn := h.begin(userID)
 	defer txn.end()
-	// The stash rides the connection that holds the call: its eviction and the
-	// target's own re-join are what consume it.
+	// The stash rides the connection holding the call: its eviction and the target's
+	// re-join consume it.
 	c := h.voiceClient(userID)
 	if c == nil {
-		// No device holds a call: the newest connection takes the stash, as
-		// the single connection did; the next voice_join from any device
-		// collects it (voiceJoinMoveCall / voiceJoinLeaveCurrent).
+		// No device holds a call: the newest connection takes the stash; the next
+		// voice_join from any device collects it (voiceJoinMoveCall / voiceJoinLeaveCurrent).
 		conns := h.clientsOf(userID)
 		if len(conns) == 0 {
 			return false

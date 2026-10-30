@@ -1,5 +1,5 @@
 /**
- * Profile banner painting (WP 6.11d), shared by the profile popup, the DM
+ * Profile banner painting, shared by the profile popup, the DM
  * side panel and the Account settings card.
  *
  * - An image: the strip grows to 120 px (5:2 on the popup's 300 px card) and
@@ -17,12 +17,12 @@
  * fetch that resolves after the surface closed is simply not applied.
  */
 
-import { bindAnimatedImage } from "@lib/animatedStill";
+import { bindAnimatedImage } from "@lib/ui/animatedStill";
 import { createElement } from "@lib/dom";
 
 /**
  * How a banner picture is loaded. The helpers live in `components/`, which a
- * feature may not import (ARCH-06), so each surface passes them in from
+ * feature may not import, so each surface passes them in from
  * `components/bannerImages.ts`.
  */
 export interface BannerImages {
@@ -32,7 +32,7 @@ export interface BannerImages {
   readonly resolve: (path: string) => string;
   /** Reload `img` if its `blob:` URL was evicted from the cache. */
   readonly recover: (img: HTMLImageElement, url: string) => void;
-  /** The first frame of a fetched picture when it is animated (WP 8.7), else
+  /** The first frame of a fetched picture when it is animated, else
    *  null. An animated banner plays, except under reduced motion. */
   readonly still: (objectUrl: string) => Promise<string | null>;
 }

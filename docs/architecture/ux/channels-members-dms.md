@@ -37,7 +37,7 @@ Each channel type gets a distinct icon and interaction:
 ### 1.1a Per-channel notification mutes
 
 The channel context menu offers "Mute Channel" / "Unmute Channel"
-(the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/context-menu.ts`, backed by `lib/channel-mutes.ts`).
+(the Mute Channel item in `attachChannelContextMenu()`, `components/channel-sidebar/context-menu.ts`, backed by `lib/prefs/channelMutes.ts`).
 Discord semantics, deliberately: a mute silences the channel's _noise_ — no
 desktop notification, no chime — while the unread badge still counts but
 renders dimmed, and a message that mentions you still notifies and shows the
@@ -47,7 +47,7 @@ settings table, and "which of my devices bothers me" is a property of the
 device, not the account.
 
 The mute sits under the **notification level** (Settings › Notifications,
-`lib/notificationLevel.ts`): All, Mentions only (a DM counts as addressed to
+`lib/prefs/notificationLevel.ts`): All, Mentions only (a DM counts as addressed to
 you) or Nothing, a device-wide default with a per-server override keyed by
 host like the mutes. The level is checked first, so Nothing silences even a
 mention, which a mute never does. A new install starts at Mentions only; an
@@ -71,7 +71,7 @@ sequenceDiagram
 ```
 
 > **✓ UX-8 (2026-09).** A launch restores the last channel viewed for that
-> server (`lib/last-channel.ts`, host-scoped like `channel-mutes.ts`) instead of
+> server (`lib/prefs/lastChannel.ts`, host-scoped like `channel-mutes.ts`) instead of
 > always jumping to the first text channel, and the ready-time auto-select no
 > longer zeroes a badge the user never looked at: the restore selects with
 > `clearUnread: false`, and `mountChannel` — the channel actually on screen —
@@ -127,7 +127,7 @@ its 24 px row while empty so typing start/stop never shifts the message list.
 Right-click / long-press a member, or Shift+F10 / the Menu key on a focused
 row → context menu (roles, kick, ban). Every context menu (member, channel, DM,
 voice participant) shares one keyboard model — `enableMenuKeyboard()` in
-`lib/context-menu.ts`. Moderation affordances are covered in [settings-and-admin.md §3](settings-and-admin.md). Actions
+`lib/ui/contextMenu.ts`. Moderation affordances are covered in [settings-and-admin.md §3](settings-and-admin.md). Actions
 the user lacks permission for are **not shown** (menu items gated by the actor's
 role), consistent with the affordance principle.
 

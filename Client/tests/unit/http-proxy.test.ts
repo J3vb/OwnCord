@@ -7,7 +7,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import { ensureHttpProxy } from "../../src/lib/httpProxy";
+import { ensureHttpProxy } from "../../src/lib/net/httpProxy";
 
 describe("ensureHttpProxy", () => {
   beforeEach(() => {

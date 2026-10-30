@@ -77,7 +77,7 @@ describe("handleDmChannelOpen", () => {
   });
 });
 
-describe("group owner_id (WP 3B-11a)", () => {
+describe("group owner_id", () => {
   const carol = { id: 8, username: "carol", avatar: "", status: "online" };
   const dave = { id: 9, username: "dave", avatar: "", status: "offline" };
   const group = (over: Record<string, unknown> = {}): Payload<"dm_channel_open"> => ({

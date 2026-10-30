@@ -1,6 +1,6 @@
 // Opens the webview's developer tools. Lifted verbatim from the two inline
 // call sites, `main.ts`'s dev-build shortcut and `settings/AdvancedTab.ts`'s
-// button (B7-5).
+// button.
 import { invokeOrThrow } from "./nativeInvoke";
 import type { DevTools } from "../contracts/devTools";
 

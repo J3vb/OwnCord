@@ -21,13 +21,13 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { shellText } from "../../src/i18n/shell";
-import { formatClockTime, userRoleColorVar } from "../../src/lib/formatting";
+import { formatClockTime, userRoleColorVar } from "../../src/lib/text/formatting";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearReactionUsersCache,
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 import { restoreTZ, tzPinHonored } from "../helpers/tz-pin";
 import { expectConsole } from "../helpers/console";
 import {
@@ -359,7 +359,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("keeps Report off the hover bar: it lives in the message menu (WP 3A-7)", () => {
+    it("keeps Report off the hover bar: it lives in the message menu", () => {
       const ac = new AbortController();
       const theirs = renderMessage(
         makeMessage({ id: 5, user: { id: 11, username: "Bob", avatar: null } }),
@@ -395,7 +395,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("explains a REQUEST_TIMEOUT failure as a busy server and keeps Retry (WP 4.1b)", () => {
+    it("explains a REQUEST_TIMEOUT failure as a busy server and keeps Retry", () => {
       const msg = makeMessage({
         status: "failed",
         correlationId: "c-busy",
@@ -594,7 +594,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("says a refused pre-restore retry was caused by the restore (OC-0476)", () => {
+    it("says a refused pre-restore retry was caused by the restore", () => {
       const msg = makeMessage({
         status: "failed",
         correlationId: "c4",
@@ -1412,7 +1412,7 @@ describe("renderers", () => {
   // ---------------------------------------------------------------------------
 
   describe("developer mode — Copy ID", () => {
-    it("is not a hover-bar button in either mode; the message menu offers it (WP 3A-7)", () => {
+    it("is not a hover-bar button in either mode; the message menu offers it", () => {
       for (const mode of ["true", "false"]) {
         localStorage.setItem("owncord:settings:developerMode", mode);
         window.dispatchEvent(
@@ -1557,7 +1557,7 @@ describe("renderers", () => {
       ac.abort();
     });
 
-    it("passes the shift state through to onDeleteClick (P4-12)", () => {
+    it("passes the shift state through to onDeleteClick", () => {
       const opts = makeOpts();
       const msg = makeMessage();
       const ac = new AbortController();

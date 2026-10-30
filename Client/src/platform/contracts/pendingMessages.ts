@@ -1,11 +1,11 @@
 /**
  * No-seam: `nativePersistence` (`lib/pendingMessages.ts`) is a private
  * module-level object, not an exported function — there is nothing to bind a
- * legacy suite against yet. The suite lands with the seam in B7-4.
+ * legacy suite against yet. The suite lands with the seam.
  *
  * Member for member the same shape as `PendingMessagePersistence`
- * (`lib/pendingMessages.ts`) — rule 4: B7-4 deletes that local interface and
- * imports this one instead.
+ * (`lib/pendingMessages.ts`) — rule 4: the seam replaces that local interface
+ * and imports this one instead.
  */
 
 /** Re-declared, structurally identical to `PendingMessageOwner`

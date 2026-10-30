@@ -7,7 +7,7 @@ vi.mock("../../../lib/logger", () => ({
 
 import { NativeVideoRenderer, parseI420 } from "./videoRenderer";
 import { nativeCounters } from "./counters";
-import { syncVideoSurface, videoSurfaceOf } from "../../../lib/videoSurface";
+import { syncVideoSurface, videoSurfaceOf } from "../../../lib/voice/videoSurface";
 
 /** One frame-socket message, as `video.rs`'s `pack_i420` writes it. */
 function message(width: number, height: number, fill = 0): ArrayBuffer {

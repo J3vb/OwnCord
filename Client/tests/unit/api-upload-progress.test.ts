@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/event", () => ({
     return Promise.resolve(() => set.delete(handler));
   },
 }));
-vi.mock("../../src/lib/httpProxy", () => ({
+vi.mock("../../src/lib/net/httpProxy", () => ({
   ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
 }));
 

@@ -1,4 +1,4 @@
-//! Connection stats for the webview (WP LP-5): ping, quality bars, the tile
+//! Connection stats for the webview: ping, quality bars, the tile
 //! chip and the Go Live readout.
 //!
 //! libwebrtc's stats reports are large (about 60 fields per entry, plus
@@ -205,14 +205,14 @@ mod tests {
 
     /// libwebrtc parses each stats report with an `unwrap()` inside a cxx
     /// callback, so a report type or enum value its `RtcStats` does not know
-    /// aborts the app. The parse was checked against this exact pair (0.3.52 /
-    /// 0.3.49 add only `PeerConnection::set_bitrate`; `RtcStats` is unchanged and
-    /// the prebuilt libwebrtc tag is still webrtc-89d790b); a bump must re-check
+    /// aborts the app. The parse was checked against this exact pair (0.3.55 /
+    /// 0.3.52 leave `RtcStats` unchanged; the prebuilt libwebrtc tag moves to
+    /// webrtc-a545de4, the same m150 branch with refreshed TLS roots); a bump must re-check
     /// `RtcStats` against the new WebRTC stats before landing.
     #[test]
     fn the_stats_parser_is_the_reviewed_libwebrtc() {
         let lock = include_str!("../../Cargo.lock");
-        for (name, version) in [("libwebrtc", "0.3.52"), ("webrtc-sys", "0.3.49")] {
+        for (name, version) in [("libwebrtc", "0.3.55"), ("webrtc-sys", "0.3.52")] {
             let entry = format!("name = \"{name}\"\nversion = \"{version}\"\n");
             assert!(
                 lock.contains(&entry),

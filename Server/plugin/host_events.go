@@ -1,9 +1,8 @@
-// Phase C Step 9 — `events` host capability.
+// `events` host capability.
 //
-// Plugins that subscribe to events declare topic names in their manifest.
-// At activation time the wazero-tagged build wires each subscription into
-// the WS pub/sub hub via Hub.Subscribe; the default build records the
-// subscription in-memory only.
+// Plugins that subscribe to events declare topic names in their manifest. The
+// wazero-tagged build wires each subscription into the WS pub/sub hub via
+// Hub.Subscribe; the default build records it in memory only.
 
 package plugin
 
@@ -13,10 +12,9 @@ import (
 	"sync/atomic"
 )
 
-// Broadcaster is a function that sends a raw JSON payload to a WS channel.
-// channelID=0 broadcasts to all connected clients. It is set by the WS
-// wiring code (api/router.go) so the wazero-tagged build can emit events to
-// clients without importing the ws package (avoids an import cycle).
+// Broadcaster sends a raw JSON payload to a WS channel (channelID=0 broadcasts
+// to all clients). The WS wiring code (api/router.go) sets it so the
+// wazero-tagged build can emit events without importing ws (an import cycle).
 type Broadcaster func(channelID int64, payload []byte)
 
 // EventSink is the channel a subscribed plugin reads from. The wazero-tagged
@@ -25,31 +23,31 @@ type EventSink struct {
 	mu          sync.Mutex
 	subs        map[string][]*Instance
 	broadcaster Broadcaster // set via SetBroadcaster; nil = no WS delivery
-	// DispatchCount counts every Dispatch call, delivered or not (subs is
-	// empty in every build today — see Dispatch's doc). Lets a test assert
-	// the hub actually withheld a call for a labelled channel's content
-	// (B5-7 decision 13) rather than only checking the gate's own verdict.
+	// DispatchCount counts every Dispatch call, delivered or not (subs is empty
+	// in every build today, see Dispatch). A test uses it to assert the hub
+	// withheld a call for a labelled channel's content, not only the gate's
+	// verdict.
 	DispatchCount atomic.Int64
 }
 
-// NewEventSink returns a fresh sink. Used by the registry as the central
-// fan-out for plugin event delivery.
+// NewEventSink returns a fresh sink, the registry's central fan-out for plugin
+// event delivery.
 func NewEventSink() *EventSink {
 	return &EventSink{subs: make(map[string][]*Instance)}
 }
 
-// SetBroadcaster wires a WS-layer delivery function into the sink so that
-// the wazero-tagged build can push plugin-generated events to WS clients.
-// Safe to call from any goroutine; subsequent Emit calls use the new value.
+// SetBroadcaster wires a WS-layer delivery function into the sink so the
+// wazero-tagged build can push plugin-generated events to WS clients. Safe from
+// any goroutine; later Emit calls use the new value.
 func (s *EventSink) SetBroadcaster(b Broadcaster) {
 	s.mu.Lock()
 	s.broadcaster = b
 	s.mu.Unlock()
 }
 
-// Emit delivers payload to all WS clients subscribed to channelID (or every
-// client when channelID==0). It is a no-op when no broadcaster has been set.
-// Called by the wazero-tagged build's host-function implementation.
+// Emit delivers payload to all WS clients subscribed to channelID (every client
+// when channelID==0); a no-op when no broadcaster has been set. Called by the
+// wazero-tagged build's host-function implementation.
 func (s *EventSink) Emit(channelID int64, payload []byte) {
 	if s == nil {
 		return
@@ -62,13 +60,11 @@ func (s *EventSink) Emit(channelID int64, payload []byte) {
 	}
 }
 
-// Subscribe binds inst to topic. Multiple plugins may subscribe to the same
-// topic — events fan out to every subscriber.
-//
-// No production code calls Subscribe today (only this package's tests), so
-// subs is always empty at runtime and Dispatch's loop never iterates. The
-// first caller added here turns Dispatch's loop live on the hub's broadcast
-// path — see the SECURITY GATE comment on Dispatch before adding one.
+// Subscribe binds inst to topic; multiple plugins may subscribe to a topic and
+// events fan out to every subscriber. No production code calls it today (only
+// this package's tests), so subs is empty and Dispatch's loop never iterates;
+// the first caller makes it live on the hub's broadcast path, so read the
+// SECURITY GATE comment on Dispatch first.
 func (s *EventSink) Subscribe(topic string, inst *Instance) error {
 	if !inst.Manifest.HasCapability(CapEvents) {
 		return ErrCapabilityNotGranted
@@ -100,24 +96,20 @@ func (s *EventSink) UnsubscribeAll(inst *Instance) {
 
 // Dispatch invokes every subscriber's on_event for topic.
 //
-// SECURITY GATE (audit 2026-04-07 finding #4 — "no rate limit on event
-// delivery to plugins"). Read this before adding anything to the loop below.
+// SECURITY GATE: no rate limit exists on event delivery to plugins. Read this
+// before adding anything to the loop below.
 //
-// Dispatch already has a production caller: ws/hub.go calls it on every
-// broadcast message when an operator has enabled plugins (api/router.go wires
-// h.pluginSink whenever the registry is non-nil). That call site runs on the
-// hub's dispatch goroutine after seqMu is released, so it no longer extends
-// the seqMu hold, but anything this function does is still on the dispatch
-// path and must not block or re-enter the hub.
+// ws/hub.go calls Dispatch on every broadcast message when an operator has
+// enabled plugins (api/router.go wires h.pluginSink whenever the registry is
+// non-nil), on the hub's dispatch goroutine after seqMu is released. Anything
+// here is on that path and must not block or re-enter the hub.
 //
-// Guest delivery is nonetheless NOT implemented in either build: the loop
-// below touches no module, and no production code calls Subscribe (only this
-// package's tests), so subs is empty and the loop never iterates. No guest
-// code executes on the event path today — that, not an absent call site, is
-// why a plugin cannot currently slow the hub by handling events slowly.
+// Guest delivery is not implemented in either build: the loop touches no
+// module, and with no production Subscribe caller subs is empty, so no guest
+// code runs on the event path and a plugin cannot slow the hub by handling
+// events slowly.
 //
-// Wiring guest delivery is what makes the finding real, so whoever does it
-// must land, in the same change:
+// Wiring guest delivery makes the finding real, so the same change must land:
 //
 //   - a per-plugin delivery rate limit (drop, never block the caller), and
 //   - the same per-call CPU-budget deadline invokeCommand applies

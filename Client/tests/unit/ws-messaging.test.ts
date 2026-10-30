@@ -414,7 +414,7 @@ describe("handleMessage size boundary", () => {
     expect(messages).toHaveLength(1);
   });
 
-  it("does not drop an oversized `ready` frame — the handshake payload has no seq and no retry path (OC-0160)", async () => {
+  it("does not drop an oversized `ready` frame — the handshake payload has no seq and no retry path", async () => {
     const limit = 200;
     client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
     await vi.advanceTimersByTimeAsync(10);
@@ -442,7 +442,7 @@ describe("handleMessage size boundary", () => {
     expect(readyMessages).toHaveLength(1);
   });
 
-  it("does not drop an oversized `auth_ok` frame (handshake exempt from size limit, OC-0160)", async () => {
+  it("does not drop an oversized `auth_ok` frame (handshake exempt from size limit)", async () => {
     const limit = 100;
     client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
     await vi.advanceTimersByTimeAsync(10);
@@ -463,7 +463,7 @@ describe("handleMessage size boundary", () => {
     expect(client.getState()).toBe("connected");
   });
 
-  it("still drops an oversized regular (non-handshake) frame (OC-0160 regression guard)", async () => {
+  it("still drops an oversized regular (non-handshake) frame (regression guard)", async () => {
     const limit = 100;
     client.connect({ host: "localhost:8443", token: "t", maxMessageSizeBytes: limit });
     await vi.advanceTimersByTimeAsync(10);

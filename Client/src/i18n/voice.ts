@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Voice, video and media copy (B9-20): the voice widget and video grid
+ * Voice, video and media copy: the voice widget and video grid
  * controls, the per-user volume menu, the incoming-call banner, the Linux
  * screen picker, the push-to-talk key names and the connection-stats
  * formatters. Loads with the main page and lazy voice chunks, so none of it is
@@ -87,6 +87,7 @@ export const voiceText = defineCatalog("voice", {
   "call.goToCall": "Go to the call",
   "call.inProgress": "Call in progress",
   "call.chooseCamera": "Choose camera",
+  "call.flipCamera": "Flip camera",
   "call.defaultCamera": "Default",
   "call.cameraNumber": "Camera {n}",
   "call.infraredCamera": "{name} (infrared)",
@@ -189,6 +190,8 @@ export const voiceText = defineCatalog("voice", {
     "Audio sharing needs a PulseAudio or PipeWire sound server, and none answered; only the picture is shared.",
   "picker.shareAudio": "Share audio",
   "picker.shareAudioHint": "All sound playing on this computer, except OwnCord's own.",
+  "picker.shareAudioHintWindow":
+    "A screen shares all sound except OwnCord's own. One window shares only its app's sound.",
   "picker.shareAppAudio": "Share the app's sound",
   "picker.shareAppAudioHint": "When you share one window, its app's sound is shared too.",
   "picker.quality": "Stream quality",
@@ -275,4 +278,11 @@ export const voiceText = defineCatalog("voice", {
   "device.micFailed": "Failed to switch microphone",
   "device.speakerFailed": "Failed to switch speaker",
   "audio.settingsFailed": "Failed to update audio settings",
+
+  "passwordDialog.title": "Password required",
+  "passwordDialog.body": "{channel} is protected by a password. Enter it to join.",
+  "passwordDialog.label": "Password",
+  "passwordDialog.join": "Join",
+  "passwordDialog.wrong": "Wrong password",
+  "passwordDialog.rateLimited": "Too many tries, wait a minute",
 });

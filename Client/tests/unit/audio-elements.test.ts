@@ -5,8 +5,8 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/preferences")>()),
+vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
@@ -44,7 +44,7 @@ vi.mock("@stores/voice.store", () => ({
   },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   parseUserId: (identity: string) => {
     const match = identity.match(/^user-(\d+)$/);
     if (match !== null && match[1] !== undefined) return parseInt(match[1], 10);
@@ -52,7 +52,7 @@ vi.mock("@lib/livekitSession", () => ({
   },
 }));
 
-import { AudioElements, setAudioVolumeHost } from "../../src/lib/audioElements";
+import { AudioElements, setAudioVolumeHost } from "../../src/lib/voice/audioElements";
 
 function createMockTrack(kind: string, sid: string) {
   const audioEl = document.createElement("audio");
@@ -182,7 +182,7 @@ describe("AudioElements", () => {
       expect(audioEl.muted).toBe(true);
     });
 
-    it("does not leak the previously-attached element into the tracking set on a fast re-subscribe (OC-0135)", () => {
+    it("does not leak the previously-attached element into the tracking set on a fast re-subscribe", () => {
       // LiveKit can fire TrackSubscribed for an already-attached screenshare-
       // audio track before the old TrackUnsubscribed lands (fast reconnect).
       // The same underlying track's detach() then returns the element from
@@ -270,7 +270,7 @@ describe("AudioElements", () => {
     });
   });
 
-  describe("per-user volume — host scoping (B3-6)", () => {
+  describe("per-user volume — host scoping", () => {
     afterEach(() => {
       // currentHost is module-level state that outlives a single test.
       setAudioVolumeHost(null);
@@ -347,7 +347,7 @@ describe("AudioElements", () => {
       }
     });
 
-    it("consumes the legacy key on migration so a later host does not inherit it (OC-0313)", () => {
+    it("consumes the legacy key on migration so a later host does not inherit it", () => {
       // The pre-scoping `userVolume_7` value must reach the first host
       // exactly once. A later brand-new host has no scoped value of its own
       // and must fall through to the 100 default — not adopt server A's
@@ -369,7 +369,7 @@ describe("AudioElements", () => {
       }
     });
 
-    it("binds the legacy key to the first host when the scoped copy could not be written (Codex on PRs #1502 and #1505)", () => {
+    it("binds the legacy key to the first host when the scoped copy could not be written", () => {
       // Storage at quota: the scoped write throws. The value was read fine,
       // so it must still apply, and the legacy key must survive for a later
       // attempt — bound to server A, so the unrelated user 7 on server B
@@ -975,7 +975,7 @@ describe("AudioElements", () => {
     });
   });
 
-  describe("gain node above 100% (WP 1D-5)", () => {
+  describe("gain node above 100%", () => {
     class FakeGain {
       gain = { value: 1 };
       connect = vi.fn();

@@ -29,7 +29,7 @@ export interface ServerBannerControl {
   readonly element: HTMLDivElement;
   /**
    * A polite live region carrying the notice text so a screen reader hears
-   * each state once (BPR-091). Kept out of `element` so the restart
+   * each state once. Kept out of `element` so the restart
    * countdown's once-a-second tick does not re-announce. Append it once at
    * mount; it is present (empty) from construction, since a screen reader
    * skips a region inserted already filled.
@@ -87,7 +87,7 @@ export function createServerBanner(): ServerBannerControl {
   );
   // Not `once`: the banner is stable for the whole outage, so a retry that
   // fails must be retryable again. A second connect() safely supersedes the
-  // first through the ws generation counter (BPR-092 "working recovery").
+  // first through the ws generation counter.
   retry.addEventListener("click", () => onRetry?.());
 
   /**
@@ -140,7 +140,7 @@ export function createServerBanner(): ServerBannerControl {
    * A connection problem the socket is working to recover from. Until a dial
    * has failed (a drop, an announced restart, "Use here"), it is the plain
    * "Reconnecting...". Once one has, the notice is actionable for the rest of
-   * the outage, across the backoff's later dials (BPR-092). Retry is safe here: `connect()`
+   * the outage, across the backoff's later dials. Retry is safe here: `connect()`
    * cancels the pending backoff before dialing, so it cannot race the loop.
    */
   function showReconnecting(opts: ConnectionBannerOptions = {}): void {
@@ -159,7 +159,7 @@ export function createServerBanner(): ServerBannerControl {
   function showDisconnected(opts: ConnectionBannerOptions = {}): void {
     clearCountdown();
     root.classList.add("visible");
-    // Two distinct facts, two distinct answers (BPR-092). Neither wording
+    // Two distinct facts, two distinct answers. Neither wording
     // tells the user the internet is required to reach a local server.
     const text = connectionNoticeText(opts);
     renderNotice(text, opts);
@@ -207,7 +207,7 @@ export function createServerBanner(): ServerBannerControl {
  * Apply a store connection status to the banner (UX spec §3 table):
  * reconnecting → "Reconnecting..." until a dial fails, then an actionable
  * notice; disconnected → an actionable notice; connected → hidden. `opts` carries the device's own network fact and the
- * manual retry action, so the notice answers the state honestly (BPR-092).
+ * manual retry action, so the notice answers the state honestly.
  */
 export function applyConnectionStatus(
   banner: ServerBannerControl,

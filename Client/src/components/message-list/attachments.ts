@@ -3,18 +3,18 @@
  * Also owns the server host state and URL resolution used by other modules.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
-import { closeOnBackdropClick } from "@lib/modalFactory";
+import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { observeMedia } from "@lib/media-visibility";
-import { createZoomPan, PAN_MIN_SCALE } from "@lib/zoomPan";
-import { loadPref, onPrefChange } from "@lib/preferences";
+import { observeMedia } from "@lib/prefs/mediaVisibility";
+import { createZoomPan, PAN_MIN_SCALE } from "@lib/ui/zoomPan";
+import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
-import { formatByteSize } from "@lib/connectionStats";
-import { ensureHttpProxy } from "@lib/httpProxy";
+import { showToast } from "@lib/ui/toast";
+import { formatByteSize } from "@lib/voice/connectionStats";
+import { ensureHttpProxy } from "@lib/net/httpProxy";
 import { authStore, getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import { desktop } from "../../platform/desktop";
@@ -33,9 +33,9 @@ import { messagingText } from "../../i18n/messaging";
 import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
-import { clearAnimatedStills } from "@lib/animatedStill";
-import { registerSessionReset } from "@lib/sessionRegistry";
-import { sniffImageBlob } from "@lib/imageHeader";
+import { clearAnimatedStills } from "@lib/ui/animatedStill";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { sniffImageBlob } from "@lib/ui/imageHeader";
 import {
   ATTACHMENT_BOX_MAX_H,
   blobImageSize,
@@ -128,13 +128,12 @@ let serverHost: string | null = null;
  *  (no remaining colon) or a bracketed IPv6 literal (ends in "]", as in
  *  "[::1]:443") — otherwise a bare IPv6 literal whose final hextet is "443"
  *  (e.g. "fd00::443") would have that hextet eaten as if it were a port,
- *  same guard as tofu.rs::cert_store_key (OC-0215).
+ *  same guard as tofu.rs::cert_store_key.
  *
  *  A bare (unbracketed) IPv6 literal is then wrapped in brackets so it forms
  *  a parseable authority: resolveServerUrl interpolates serverHost directly
  *  into a URL, and WHATWG's URL.host is always the bracketed form for IPv6,
- *  so isServerUrl's comparison also needs the bracketed form to ever match
- *  (OC-0241). */
+ *  so isServerUrl's comparison also needs the bracketed form to ever match. */
 export function setServerHost(host: string): void {
   const withoutPort =
     host.endsWith(":443") && (!host.slice(0, -4).includes(":") || host.slice(0, -4).endsWith("]"))
@@ -172,14 +171,14 @@ function baseMime(mime: string): string {
  *  a permanently-loading placeholder, so it belongs on the download chip. */
 export function isImageMime(mime: string): boolean {
   const base = baseMime(mime);
-  // A HEIC or TIFF is shown through the server's JPEG preview (WP 8.12); a
+  // A HEIC or TIFF is shown through the server's JPEG preview; a
   // server that does not advertise thumbnails has none, so it stays a file.
   if (isConvertedImageMime(base)) return authStore.getState().uploadPolicy?.thumbnails === true;
   return base.startsWith("image/") && base !== "image/svg+xml";
 }
 
 /** Image types no webview decodes, which the server previews as a JPEG at the
- *  file's `/thumb` route (WP 8.12). The original is kept; Download gives it. */
+ *  file's `/thumb` route. The original is kept; Download gives it. */
 export function isConvertedImageMime(mime: string): boolean {
   const base = baseMime(mime);
   return base === "image/heic" || base === "image/heif" || base === "image/tiff";
@@ -364,7 +363,7 @@ export const IMAGE_DB_MAX_BYTES = 256 * 1024 * 1024;
 const imageCache = new ObjectUrlCache(IMAGE_CACHE_MAX_BYTES, Number.POSITIVE_INFINITY, true);
 /** Server images the server definitely refused (missing, gone, forbidden).
  *  Asking again on every mount only repeated the answer — each one was
- *  fetched twice in the audit's channel-switch run (DP-56). Retry and a cache
+ *  fetched twice in the audit's channel-switch run. Retry and a cache
  *  clear ask again. */
 const missingImages = new Set<string>();
 /** Bounds the set above: one entry per refused URL would otherwise grow for
@@ -373,8 +372,8 @@ const MISSING_IMAGES_MAX = 1000;
 const DEFINITE_FAILURES = new Set([403, 404, 410]);
 let attachmentCacheGeneration = 0;
 
-/** `host#userId` of the account whose server content these caches hold
- *  (B7-13). null while signed out: the durable store is neither read nor
+/** `host#userId` of the account whose server content these caches hold.
+ *  null while signed out: the durable store is neither read nor
  *  written, so nothing crosses from one profile or account to the next. */
 let cacheScope: string | null = null;
 
@@ -392,8 +391,8 @@ export function setAttachmentCacheScope(scope: string | null): void {
 }
 
 /**
- * Delete every durable entry of `scope` — a self-deleted account's images
- * (B7-15c). Call it after auth has cleared, so the scope is no longer armed
+ * Delete every durable entry of `scope` — a self-deleted account's images.
+ * Call it after auth has cleared, so the scope is no longer armed
  * and no late write can land behind the prune.
  */
 export function pruneAttachmentCacheScope(scope: string): Promise<void> {
@@ -476,7 +475,7 @@ function isExternalUrl(url: string): boolean {
   }
 }
 
-/** The server's bounded preview of an image file (P4-08), or the file itself
+/** The server's bounded preview of an image file, or the file itself
  *  on a server that does not advertise thumbnails or for a type the server
  *  passes through unchanged (only JPEG and PNG are scaled). A HEIC, HEIF or
  *  TIFF always takes the preview: the file itself is not an image to a webview. */
@@ -495,7 +494,7 @@ export function thumbnailUrl(fileUrl: string, mime: string): string {
 }
 
 /** The URL whose bytes a webview can show in full: the file itself, or for a
- *  HEIC, HEIF or TIFF its JPEG preview (WP 8.12). */
+ *  HEIC, HEIF or TIFF its JPEG preview. */
 export function shownImageUrl(fileUrl: string, mime: string): string {
   return isConvertedImageMime(mime) ? thumbnailUrl(fileUrl, mime) : fileUrl;
 }
@@ -526,7 +525,7 @@ function isTokenBearingServerPath(pathname: string): boolean {
  * would 401. The token is only ever sent to the configured server host, and
  * only for the server's own content routes.
  *
- * Server URLs only. An external URL is never fetched directly (B7-16): images
+ * Server URLs only. An external URL is never fetched directly: images
  * go through the external-content broker (`fetchExternalImage`), and anything
  * else is refused here rather than handed to a general-purpose client.
  */
@@ -667,7 +666,7 @@ function seedCacheTotal(db: IDBDatabase): Promise<boolean> {
   return seed;
 }
 
-/** Delete every durable entry outside `scope` (including pre-B7-13 keys) when
+/** Delete every durable entry outside `scope` (including keys from before entries were scoped) when
  *  `keep` is true, or every entry inside it when false. */
 async function idbPrune(scope: string, keep: boolean): Promise<void> {
   const db = await openCacheDb();
@@ -814,7 +813,7 @@ export interface ImageLoadOptions {
 /** Fetch an image and return a `blob:` URL an `<img>` can show. Server images
  *  come through memory → IndexedDB → the TOFU proxy; an external image comes
  *  from the broker and never enters those two caches, which hold server
- *  content only (B7-16). */
+ *  content only. */
 export function fetchImageAsObjectUrl(
   url: string,
   opts?: ImageLoadOptions,
@@ -847,7 +846,7 @@ export function fetchImageAsObjectUrl(
       return null;
     }
     // The Blob is pinned by its URL already; keeping the reference costs
-    // nothing and lets an animated avatar read its frames (WP 8.7).
+    // nothing and lets an animated avatar read its frames.
     imageCache.set(url, objectUrl, blob.size, blob);
     if (stored === null && scope !== null) void idbPut(scope, url, blob);
     return objectUrl;
@@ -866,7 +865,7 @@ export function fetchImageAsObjectUrl(
 /** A reader for the bytes behind a blob: URL `fetchImageAsObjectUrl`
  *  returned, while the image cache still holds it; null when it does not. A
  *  blob: URL cannot be fetched back (the CSP's connect-src does not list
- *  blob:), so this is how an animated avatar learns it has frames (WP 8.7). */
+ *  blob:), so this is how an animated avatar learns it has frames. */
 export function cachedImageBytes(objectUrl: string): (() => Promise<Uint8Array | null>) | null {
   const blob = imageCache.blobOf(objectUrl);
   if (blob === undefined || blob === null) return null;
@@ -969,7 +968,7 @@ export function fetchMediaAsObjectUrl(url: string): Promise<string | null> {
 }
 
 // ---------------------------------------------------------------------------
-// File links (WP 8.11): a <video> streams from a server-minted link
+// File links: a <video> streams from a server-minted link
 // ---------------------------------------------------------------------------
 
 /** A source a media element can load with no Authorization header. */
@@ -1060,7 +1059,7 @@ function getFileLink(url: string, fresh = false): Promise<FileLink | null> {
 }
 
 // ---------------------------------------------------------------------------
-// External images (B7-16): the broker's bytes as blob: URLs
+// External images: the broker's bytes as blob: URLs
 // ---------------------------------------------------------------------------
 
 /** Bumped by `clearExternalImageCache`. The broker partition names the server
@@ -1113,7 +1112,7 @@ export function clearExternalImageCache(): void {
   externalGifUrls.clear();
   externalInFlight.clear();
 }
-// Broker-fetched content belongs to the server it was fetched for (B7-16).
+// Broker-fetched content belongs to the server it was fetched for.
 void registerSessionReset("attachments:external-images", clearExternalImageCache, {
   phase: "cache",
 }); // app-lifetime
@@ -1124,7 +1123,7 @@ export function externalKey(source: ExternalImageSource): string {
 }
 
 /** A link preview (or oEmbed title) through the broker, refused before any
- *  network work unless the viewer consented to `url` (B9-8). */
+ *  network work unless the viewer consented to `url`. */
 export function previewExternal(url: string): Promise<ExternalContentResult<ExternalPreview>> {
   if (!externalAllowed(externalKey({ url }))) {
     return Promise.resolve({ ok: false, failure: "unavailable" });
@@ -1203,7 +1202,7 @@ export function loadExternalImage(
   opts?: ImageLoadOptions,
 ): Promise<ExternalContentResult<string>> {
   const key = externalKey(source);
-  // B9-8: nothing is fetched for an item the viewer has not consented to.
+  // Nothing is fetched for an item the viewer has not consented to.
   if (!externalAllowed(key)) return Promise.resolve({ ok: false, failure: "unavailable" });
   const cached = externalObjectUrls.get(key);
   if (cached !== undefined) {
@@ -1263,8 +1262,8 @@ export function loadExternalImage(
 
 // -- Failure + retry ----------------------------------------------------------
 
-/** The typed failure line shared by the embed, image and picker renderers
- *  (B9-9): a status message plus a bounded, explicitly labelled retry. The
+/** The typed failure line shared by the embed, image and picker renderers:
+ *  a status message plus a bounded, explicitly labelled retry. The
  *  caller owns what retry does, so a retry always rechecks the current consent
  *  and partition rather than replaying a stale answer. */
 export function renderFailureStatus(
@@ -1316,8 +1315,8 @@ function buildDownloadButton(att: Attachment, resolvedUrl: string): HTMLButtonEl
 }
 
 /** The play button that stands in for a player until the viewer asks for the
- *  clip, so a row that only scrolls past downloads nothing (DP-16; the whole
- *  file on the first play, D2 (a)). Native controls are inert without a
+ *  clip, so a row that only scrolls past downloads nothing (the whole
+ *  file on the first play). Native controls are inert without a
  *  source, so they arrive with it. A failed download keeps the button:
  *  pressing it again retries. */
 function buildPlayButton(
@@ -1717,7 +1716,7 @@ export function renderAttachment(att: Attachment, gallery?: LightboxGallery): HT
 function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HTMLDivElement {
   const resolvedUrl = resolveServerUrl(att.url);
   const inlineable = isSafeUrl(resolvedUrl);
-  // A voice message (WP 8.9) is recognised by its metadata, whatever MIME the server sniffed.
+  // A voice message is recognised by its metadata, whatever MIME the server sniffed.
   if (inlineable && isVoiceAttachment(att)) {
     return renderVoicePlayer(att, resolvedUrl, {
       fetchMedia: fetchMediaAsObjectUrl,
@@ -1755,7 +1754,7 @@ function renderAttachmentContent(att: Attachment, gallery?: LightboxGallery): HT
     else wrap.style.minHeight = "200px";
 
     function attachLightbox(img: HTMLImageElement): void {
-      // Keyboard-operable like an inline image (B9-9): focus it and Enter or
+      // Keyboard-operable like an inline image: focus it and Enter or
       // Space opens the lightbox, the Menu key or Shift+F10 the image menu.
       img.tabIndex = 0;
       img.setAttribute("role", "button");
@@ -2007,8 +2006,8 @@ export function openImageLightbox(
     activeLightboxClose = null;
   }
 
-  // Focus moves into the lightbox on open and back to the opener on close
-  // (B9-9); captured before the overlay takes focus.
+  // Focus moves into the lightbox on open and back to the opener on close;
+  // captured before the overlay takes focus.
   const opener = document.activeElement;
   const overlay = createElement("div", { class: "image-lightbox" });
   // A modal surface: named so a screen reader announces it, and tabbable
@@ -2039,7 +2038,7 @@ export function openImageLightbox(
       () => current,
     );
   }
-  // `src` can be the server's thumbnail (P4-08): show it at once, then the
+  // `src` can be the server's thumbnail: show it at once, then the
   // full file. A server image shown in full is a memory-cache hit here.
   if (external !== undefined && "url" in external && isServerUrl(external.url)) {
     const opened = current;

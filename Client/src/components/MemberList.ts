@@ -4,16 +4,16 @@
  * Right-click context menu for admin actions (force logout, ban, role change).
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
-import { reconcileModels } from "@lib/reconcile";
-import { select } from "@lib/select";
+import { reconcileModels } from "@lib/net/reconcile";
+import { select } from "@lib/ui/select";
 import { shallowEqual } from "@lib/store";
-import { buildOffsets, rangeFor } from "@lib/virtualRange";
-import { registerSessionReset } from "@lib/sessionRegistry";
-import type { MountableComponent } from "@lib/safe-render";
+import { buildOffsets, rangeFor } from "@lib/ui/virtualRange";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
-import { resolveDisplayName } from "@lib/avatar";
+import { resolveDisplayName } from "@lib/ui/avatar";
 import { membersStore, memberDisplayName, type Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { blocksStore } from "@stores/blocks.store";
@@ -26,9 +26,9 @@ import { assignableRoleNames, outranksPosition } from "../features/moderation/ro
 import { memberTimeoutsStore } from "../features/moderation/store";
 import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
-import { openMenuOnKeyboard, type OpenMenu } from "@lib/context-menu";
+import { openMenuOnKeyboard, type OpenMenu } from "@lib/ui/contextMenu";
 import { Permission, type ReadyRole } from "@lib/types";
-import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/serverCapabilities";
+import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/net/serverCapabilities";
 import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
 import {
   MEMBER_PATCH_FIELDS,
@@ -60,7 +60,7 @@ export interface MemberListOptions {
   /** Open the Change Nickname dialog (MANAGE_NICKNAMES); `current` is the
    *  member's nickname now, null when they have none. Absent hides the item. */
   readonly onChangeNickname?: (userId: number, username: string, current: string | null) => void;
-  /** Add / remove one role from the profile popup's chips (WP 6.3d). */
+  /** Add / remove one role from the profile popup's chips. */
   readonly onAddRole?: (userId: number, username: string, roleId: number) => Promise<void>;
   readonly onRemoveRole?: (userId: number, username: string, roleId: number) => Promise<void>;
   readonly onToggleBlock: (userId: number, username: string, block: boolean) => Promise<void>;
@@ -70,9 +70,9 @@ export interface MemberListOptions {
   /** Start a DM with a user (wires the profile popup's Message button). */
   readonly onMessageUser?: (userId: number) => void;
   /** Call a user: open (or create) the 1:1 DM with them and start a call in
-   *  it (wires the profile popup's Call button, BUG-05). */
+   *  it (wires the profile popup's Call button). */
   readonly onCallUser?: (userId: number) => void;
-  /** Report a user to this server's moderators (the profile popup's Report button, B9-10). */
+  /** Report a user to this server's moderators (the profile popup's Report button). */
   readonly onReportUser?: (userId: number, name: string) => void;
   /** Time a member out for `seconds` (MODERATE_MEMBERS); absent hides Timeout. */
   readonly onTimeoutMember?: (userId: number, username: string, seconds: number) => Promise<void>;
@@ -363,7 +363,7 @@ function createMemberItem(
     const actor = authStore.getState().user;
     const actorRole = actor?.role ?? opts.currentUserRole;
     const roleList = channelsStore.getState().roles;
-    // Permissions are the OR of every held role (WP 6.3d); rank is the top one.
+    // Permissions are the OR of every held role; rank is the top one.
     const baseGates = moderationGates(roleList, actor?.role_ids, actorRole);
     // The server refuses moderation of a member ranked at or above the actor
     // and any role assignment at or above the actor's own rank; mirror both so
@@ -509,7 +509,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   // What the list shows now, in order: navigation walks this, not DOM siblings.
   let items: readonly ListItem[] = [];
   // Rows are reused across renders, so each owns its listeners: a row's owner
-  // is destroyed when reconcile removes or rebuilds it (OC-0295 - listeners on
+  // is destroyed when reconcile removes or rebuilds it (listeners on
   // the component-lifetime signal would retain every discarded row), and
   // destroy() disposes the rest. Per-row state lives in WeakMaps keyed by the
   // row element.

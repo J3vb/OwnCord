@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * Messaging copy that loads with the main page (B9-19): the message list, the
+ * Messaging copy that loads with the main page: the message list, the
  * composer, the message renderers and their status toasts, the search and
  * pinned panels, the emoji/GIF pickers, the mention autocomplete and the
  * message-jump toasts. The slice a startup-reachable module reads lives in
@@ -141,6 +141,9 @@ export const messagingText = defineCatalog("messaging", {
   "pins.close": "Close pinned messages",
 
   "divider.new": "NEW",
+  "imported.tag": "Imported",
+  "imported.tagTitle": "Imported from Discord",
+  "imported.unknownName": "Unknown author",
   "reply.jumpTitle": "Jump to the replied-to message",
   "reply.unknown": "Reply to unknown message",
   "group.add": "{author} added {target} to the group",
@@ -238,6 +241,8 @@ export const messagingText = defineCatalog("messaging", {
   "invite.openBody": "You'll leave {current}.",
   "invite.openBodyInVoice": "You'll leave {current} and your call.",
   "invite.openButton": "Leave and open invite",
+  "invite.openTabFailed":
+    "Couldn't open that server's page. Allow pop-ups for this site and try again.",
   "code.copy": "Copy",
   "code.copied": "Copied!",
   "code.copyFailed": "Failed",

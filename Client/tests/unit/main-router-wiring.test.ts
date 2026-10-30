@@ -26,8 +26,8 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
   getCurrent: vi.fn().mockResolvedValue(null),
   onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
 }));
-vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
@@ -36,8 +36,10 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("@lib/profiles", () => ({
+vi.mock("@lib/prefs/windowState", () => ({
+  initWindowState: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@lib/presence/profiles", () => ({
   createTauriBackend: vi.fn(() => ({})),
   createProfileManager: vi.fn(() => ({})),
 }));
@@ -109,7 +111,7 @@ describe("main.ts wiring of the router", () => {
     hoisted.applyInvite.mockClear();
 
     // An in-chat invite chip goes straight in; an outside link would ask first.
-    const { requestInviteJoin } = await import("@lib/invite-navigation");
+    const { requestInviteJoin } = await import("@lib/nav/inviteNavigation");
     requestInviteJoin("ABC123", "h.example");
 
     // clearAuth("server_switch") fires the logout subscriber, which navigates

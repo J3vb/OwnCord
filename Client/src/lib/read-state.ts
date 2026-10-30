@@ -12,8 +12,8 @@ import { channelsStore, clearUnread, setReadPointer } from "@stores/channels.sto
 import { dmStore, clearDmUnread, setDmReadPointer } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 import { uiStore } from "@stores/ui.store";
-import { dialogOpen } from "./dialogOpen";
-import { readPointerEnabled } from "./serverCapabilities";
+import { dialogOpen } from "./ui/dialogOpen";
+import { readPointerEnabled } from "./net/serverCapabilities";
 
 /** Channels whose mounted list is scrolled away from the live tail. */
 const liveTailOutOfView = new Set<number>();
@@ -45,7 +45,7 @@ export function noteAwayUnread(channelId: number): void {
 /**
  * Whether the reader is away from a channel: its loaded window is detached from
  * the live tail, the list is scrolled away from the tail, or the app window is
- * not focused (P4-03). "Active" only means "the reader is watching" when this
+ * not focused. "Active" only means "the reader is watching" when this
  * is false, so a message landing while away counts as unread and a `ready`
  * resync must not mark the channel read. The focus source is
  * `document.hasFocus()`, as in `lib/notifications.ts`.
@@ -109,7 +109,7 @@ export function markChannelRead(channelId: number): void {
 }
 
 /** Whether a channel's row shows a badge. A voice row draws only the mention
- *  badge (WP 6.1d), so its plain unread count never counts. */
+ *  badge, so its plain unread count never counts. */
 function showsBadge(ch: { type: string; unreadCount: number; mentionCount: number }): boolean {
   return ch.mentionCount > 0 || (ch.type !== "voice" && ch.unreadCount > 0);
 }
@@ -157,7 +157,7 @@ export function unreadChannelIds(opts: UnreadScope = {}): readonly number[] {
 
 /**
  * The server's `mark_read` handler has its own 5-per-second-per-user budget,
- * separate from `channel_focus` (#1331, Server/ws/handlers_presence.go), and
+ * separate from `channel_focus` (Server/ws/handlers_presence.go), and
  * silently drops frames over that budget — no error reaches the client. A
  * burst of `mark_read` sends larger than the budget would still clear every
  * local badge (see `markChannelRead`), so the excess channels' badges would
@@ -336,7 +336,7 @@ export function markActiveChannelReadOnUnload(): void {
   markChannelRead(active);
 }
 
-// -- Read pointer (WP 3D-5) --------------------------------------------------
+// -- Read pointer --------------------------------------------------
 //
 // With the server's `read_pointer` capability, leaving a channel no longer
 // marks it read: only what the reader saw does. The mark is a `mark_read` with
@@ -384,7 +384,7 @@ export function forgetPendingMarkUnread(): void {
 }
 
 /**
- * Whether an id is a thread the reader has heard of (WP 6.9c): `mark_read`
+ * Whether an id is a thread the reader has heard of: `mark_read`
  * accepts a thread id, but a thread is in neither channel store. Set by the
  * threads store when it loads.
  */

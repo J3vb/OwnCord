@@ -1,6 +1,5 @@
 /**
- * The taskbar/tray unread badge (DP-27, owner decision D6 (a)): mentions plus
- * unread direct messages, the Discord red badge.
+ * The taskbar/tray unread badge: mentions plus unread direct messages, the Discord red badge.
  *
  *   - a guild channel contributes its mentions only — plain unread there is
  *     chatter, not a badge;
@@ -14,7 +13,7 @@
  *
  *   - a followed thread contributes its mentions, judged by its parent: the
  *     parent must be a channel the reader still lists, and a parent at
- *     `nothing` drops them (WP 6.9c).
+ *     `nothing` drops them.
  *
  * The count is pushed to the native host when it changes, and again when the
  * window is shown or focused (Windows drops the overlay when the taskbar
@@ -24,10 +23,10 @@
 import { channelsStore } from "../../stores/channels.store";
 import { dmStore } from "../../stores/dm.store";
 import { followedThreadsStore } from "../../stores/followedThreads.store";
-import { isChannelMuted } from "../../lib/channel-mutes";
-import { channelLevelResolver } from "../../lib/notificationLevel";
+import { isChannelMuted } from "../../lib/prefs/channelMutes";
+import { channelLevelResolver } from "../../lib/prefs/notificationLevel";
 import { Disposable } from "../../lib/disposable";
-import { loadPref, onPrefChange } from "../../lib/preferences";
+import { loadPref, onPrefChange } from "../../lib/prefs/preferences";
 import type { Notifier } from "../../platform/contracts/notifications";
 
 /**

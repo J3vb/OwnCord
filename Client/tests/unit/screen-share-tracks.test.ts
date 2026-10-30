@@ -1,5 +1,5 @@
 /**
- * Tests for the track-publishing half of src/lib/screenShare.ts.
+ * Tests for the track-publishing half of src/lib/voice/screenShare.ts.
  *
  * The module sat at 61.1% statements: screen-share-fps.test.ts covers the
  * preset/bitrate helpers, but enableCamera, disableCamera, enableScreenshare,
@@ -18,19 +18,19 @@ import { AudioPresets, Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
-import { initToast, teardownToast } from "@lib/toast";
+import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 
 const createLocalVideoTrack = vi.fn();
 const createLocalScreenTracks = vi.fn();
 const loadPref = vi.fn();
 
-// 120 fps is hidden for now (lib/shareFps); the 120 fps tests turn it back on
+// 120 fps is hidden for now (lib/voice/shareFps); the 120 fps tests turn it back on
 // so the dormant 120 handling (one layer, balanced degradation, Auto's
 // hardware rule) keeps its coverage.
 const offer120 = vi.hoisted(() => ({ value: false }));
-vi.mock("@lib/shareFps", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@lib/shareFps")>();
+vi.mock("@lib/voice/shareFps", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/voice/shareFps")>();
   return {
     ...actual,
     offeredShareFps: (saved: number) =>
@@ -39,7 +39,7 @@ vi.mock("@lib/shareFps", async (importOriginal) => {
 });
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 const gpuProfiles = vi.hoisted(() => ({ value: false }));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/features/voice/videoCodec")>();
@@ -58,7 +58,7 @@ vi.mock("livekit-client", async (importOriginal) => {
   };
 });
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (...args: unknown[]) => loadPref(...args) as unknown,
   savePref: vi.fn(),
 }));
@@ -81,7 +81,7 @@ const {
   stopManualScreenTracks,
   rollbackPendingVideo,
   reconcileVideoFlags,
-} = await import("@lib/screenShare");
+} = await import("@lib/voice/screenShare");
 
 type VideoTrackDeps = Parameters<typeof enableCamera>[1];
 type CameraTrackState = Parameters<typeof stopManualCameraTrack>[0];
@@ -433,7 +433,7 @@ describe("enableCamera", () => {
     });
   });
 
-  it("releases the created track when publishing fails (BUG-100)", async () => {
+  it("releases the created track when publishing fails", async () => {
     const rig = fakeRoom();
     const track = fakeVideoTrack();
     createLocalVideoTrack.mockResolvedValue(track);
@@ -539,7 +539,7 @@ describe("enableCamera", () => {
     expect(voiceStore.getState().localCamera).toBe(false);
   });
 
-  it("does not clear a newer attempt's track when a superseded enable's device acquisition rejects (OC-0007)", async () => {
+  it("does not clear a newer attempt's track when a superseded enable's device acquisition rejects", async () => {
     const rig = fakeRoom();
     const deps = fakeDeps(rig.room);
     const trackB = fakeVideoTrack();
@@ -935,8 +935,7 @@ describe("enableScreenshare", () => {
     expect(videoOpts).toMatchObject({
       simulcast: false,
       screenShareEncoding: { maxBitrate: 12_000_000, maxFramerate: 120 },
-      // M-2: lower the resolution a little before halving the frame rate.
-      degradationPreference: "balanced",
+      degradationPreference: "maintain-framerate",
     });
     expect(videoOpts).not.toHaveProperty("screenShareSimulcastLayers");
   });
@@ -953,11 +952,11 @@ describe("enableScreenshare", () => {
     const videoOpts = rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(videoOpts).toMatchObject({
       screenShareEncoding: { maxFramerate: 60 },
-      degradationPreference: "maintain-resolution",
+      degradationPreference: "maintain-framerate",
     });
   });
 
-  it("publishes 30 and 60 fps shares keeping their resolution", async () => {
+  it("publishes 30 and 60 fps shares keeping their frame rate", async () => {
     for (const fps of [30, 60]) {
       loadPref.mockImplementation((key: string) =>
         key === "screenShareQuality" ? "high" : key === "screenShareFps" ? fps : "",
@@ -970,7 +969,7 @@ describe("enableScreenshare", () => {
       await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
 
       expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
-        degradationPreference: "maintain-resolution",
+        degradationPreference: "maintain-framerate",
       });
       const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
       expect(audioOpts).not.toHaveProperty("degradationPreference");
@@ -1042,7 +1041,7 @@ describe("enableScreenshare", () => {
     });
   });
 
-  it("tears down when the OS stop-sharing button ends the track (BUG-101)", async () => {
+  it("tears down when the OS stop-sharing button ends the track", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
     createLocalScreenTracks.mockResolvedValue([video]);
@@ -1073,7 +1072,7 @@ describe("enableScreenshare", () => {
     expect(createLocalScreenTracks).not.toHaveBeenCalled();
   });
 
-  it("releases created tracks when publishing fails (BUG-100)", async () => {
+  it("releases created tracks when publishing fails", async () => {
     const rig = fakeRoom();
     const video = fakeVideoTrack();
     createLocalScreenTracks.mockResolvedValue([video]);
@@ -1273,7 +1272,7 @@ describe("enableScreenshare", () => {
     expect(voiceStore.getState().localScreenshare).toBe(false);
   });
 
-  it("does not tear down a newer share when a superseded enable's capture rejects (OC-0007)", async () => {
+  it("does not tear down a newer share when a superseded enable's capture rejects", async () => {
     const rig = fakeRoom();
     const deps = fakeDeps(rig.room);
     const videoB = fakeVideoTrack();
@@ -1868,7 +1867,7 @@ describe("video codec", () => {
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({ videoCodec: "vp8" });
   });
 
-  it("at 120 fps a saved VP8 follows Auto's hardware rule (M-2)", async () => {
+  it("at 120 fps a saved VP8 follows Auto's hardware rule", async () => {
     offer120.value = true;
     prefs({ videoCodec: "vp8", screenShareQuality: "high", screenShareFps: 120 });
     encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
@@ -1880,7 +1879,7 @@ describe("video codec", () => {
     expect(encodingInfo).toHaveBeenCalledTimes(1);
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
       videoCodec: "h264",
-      degradationPreference: "balanced",
+      degradationPreference: "maintain-framerate",
     });
   });
 
@@ -1937,7 +1936,7 @@ describe("video codec", () => {
   });
 });
 
-describe("enableScreenshare quality step (WP 1C-2)", () => {
+describe("enableScreenshare quality step", () => {
   afterEach(() => setScreenSourcePicker(null));
 
   it("captures and publishes at the quality and fps picked before the OS picker", async () => {

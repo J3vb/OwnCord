@@ -14,6 +14,8 @@ const root = import.meta.dirname;
 const DESKTOP_INDEX = resolve(root, "src/platform/desktop/index.ts");
 const BROWSER_INDEX = resolve(root, "src/platform/browser/index.ts");
 const PUBLIC_DIR = resolve(root, "public");
+/** The release version, checked equal to the native shell's by release.yml. */
+const APP_VERSION: string = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")).version;
 
 /**
  * Vite hands plugins `/`-separated ids on every OS, while `resolve()` on
@@ -65,7 +67,10 @@ export default mergeConfig(
   shared,
   defineConfig({
     plugins: [browserPlatform(), publicUnderAssets()],
-    define: { __OWNCORD_WEB__: true },
+    define: {
+      __OWNCORD_WEB__: true,
+      "import.meta.env.OWNCORD_APP_VERSION": JSON.stringify(APP_VERSION),
+    },
     publicDir: false,
     build: { outDir: "dist-web" },
   }),

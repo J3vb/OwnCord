@@ -13,10 +13,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// tombstoneMinAge is how long a tombstone outlives its purge at least. Its
-// only job once the purge has run is to drop a late frame from a producer
-// that read the purged rows before the purge, which reaches the hub within
-// moments; an hour is far past any request.
+// tombstoneMinAge is how long a tombstone outlives its purge at least. After the
+// purge it only drops a late frame from a producer that read the purged rows before
+// the purge, which reaches the hub within moments; an hour is far past any request.
 const tombstoneMinAge = time.Hour
 
 // tombstoneBatch is one purge's ids, installed at the hub seq seq and the
@@ -28,27 +27,25 @@ type tombstoneBatch struct {
 	ids []int64
 }
 
-// replayPurgeState holds the replay purge's tombstones and the lock that
-// keeps cold-tier reads out of an in-progress purge.
+// replayPurgeState holds the replay purge's tombstones and the lock that keeps
+// cold-tier reads out of an in-progress purge.
 //
 // users (erased accounts) and messages (retention-swept messages) map each
-// tombstoned id to the seq of the latest batch that installed it; batches
-// lists the installs oldest first, and since seq and time only grow, expiry
-// pops from the front and costs only what it removes. All three are guarded
-// by seqMu: installed under it and read under it by every sequencing path,
-// so a frame naming a tombstoned id is dropped from the moment the purge's
-// in-memory step releases seqMu. A batch expires once both tombstoneMinAge
-// has passed and the hub has sequenced more frames past it than the ring
-// and the cold tier can replay.
+// tombstoned id to the seq of the latest batch that installed it; batches lists the
+// installs oldest first, and since seq and time only grow, expiry pops from the
+// front. All three are guarded by seqMu: installed under it and read under it by
+// every sequencing path, so a frame naming a tombstoned id is dropped from the
+// moment the purge's in-memory step releases seqMu. A batch expires once both
+// tombstoneMinAge has passed and the hub has sequenced more frames past it than the
+// ring and the cold tier can replay.
 //
 // mu is held for writing across a whole purge, from the ring drop to the
-// persisted-row delete. A cold-tier read (purgeGuardedStore) that finds it
-// held, or finds a purge waiting for it, fails at once instead of waiting,
-// so a resume falls through to the full ready rather than reading rows the
-// ring has already dropped but the database still holds. A purge that fails
-// after its ring drop leaves its ids in unfinished, and cold reads keep
-// failing until a retry of that purge succeeds. Lock order: mu before
-// seqMu; no path takes mu while holding seqMu.
+// persisted-row delete. A cold-tier read (purgeGuardedStore) that finds it held, or
+// a purge waiting for it, fails at once instead of waiting, so a resume falls
+// through to the full ready rather than reading rows the ring has dropped but the
+// database still holds. A purge that fails after its ring drop leaves its ids in
+// unfinished, and cold reads keep failing until a retry succeeds. Lock order: mu
+// before seqMu; no path takes mu while holding seqMu.
 type replayPurgeState struct {
 	mu       syncutil.RankedRW[lockRankSerialiser]
 	waiting  atomic.Int32
@@ -170,11 +167,10 @@ func (h *Hub) expireReplayTombstones() {
 	}
 }
 
-// dropsForTombstones reports whether msg names an erased user or a message
-// a retention sweep removed, and so must not be sequenced: a producer that
-// read the rows before the purge can still hand the hub a frame after it.
-// The frame is parsed once, whatever the number of tombstones. Caller holds
-// seqMu; with no tombstones it parses nothing.
+// dropsForTombstones reports whether msg names an erased user or a message a
+// retention sweep removed, and so must not be sequenced: a producer that read the
+// rows before the purge can still hand the hub a frame after it. The frame is parsed
+// once however many tombstones; with none it parses nothing. Caller holds seqMu.
 func (h *Hub) dropsForTombstones(msg []byte) bool {
 	t := &h.tombstones
 	if len(t.users) == 0 && len(t.messages) == 0 {

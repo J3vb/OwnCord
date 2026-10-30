@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServerRail } from "@components/ServerRail";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
 import { dmStore, setDmChannels, type DmChannel } from "@stores/dm.store";
-import { RAIL_LAYOUT_KEY } from "@lib/serverRailLayout";
-import type { ServerProfile } from "@lib/profiles";
+import { RAIL_LAYOUT_KEY } from "@lib/prefs/serverRailLayout";
+import type { ServerProfile } from "@lib/presence/profiles";
 
 function profile(name: string, host: string, color = "#5865f2"): ServerProfile {
   return {

@@ -12,7 +12,7 @@ import {
   cleanupNotificationAudio,
   playNotificationSound,
   startRingback,
-} from "@lib/notificationSound";
+} from "@lib/media/notificationSound";
 import {
   setLocalDeafened,
   joinVoiceChannel,
@@ -60,8 +60,8 @@ const { testPrefs, sinkState } = vi.hoisted(() => ({
   sinkState: { impl: async (_id: string): Promise<void> => {} },
 }));
 
-vi.mock("../../src/lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
+vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),

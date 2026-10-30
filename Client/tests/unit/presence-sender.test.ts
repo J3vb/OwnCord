@@ -7,14 +7,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
-import { createPresenceSender } from "@lib/presence";
-import { createPresenceLimiter } from "@lib/rate-limiter";
+import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import {
   loadCustomStatus,
   loadUserStatus,
   saveCustomStatus,
   saveUserStatus,
-} from "@lib/userStatus";
+} from "@lib/presence/userStatus";
 import type { WsClient } from "@lib/ws";
 
 function createMockWs(): WsClient {
@@ -74,7 +74,7 @@ function createErrorableWs(): {
   };
 }
 
-describe("createPresenceSender — last requested status always reaches the server (OC-0451)", () => {
+describe("createPresenceSender — last requested status always reaches the server", () => {
   beforeEach(() => {
     localStorage.clear();
     authStore.setState(() => ({
@@ -347,7 +347,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
   });
 });
 
-describe("createPresenceSender — custom_status survival across supersession (OC-0156)", () => {
+describe("createPresenceSender — custom_status survival across supersession", () => {
   beforeEach(() => {
     localStorage.clear();
     authStore.setState(() => ({

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 237 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 241 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -140,6 +140,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/api/v1/blocks/{userId}`                                            |
 | PUT     | `/api/v1/blocks/{userId}`                                            |
 | GET     | `/api/v1/channels/`                                                  |
+| GET     | `/api/v1/channels/{id}/media`                                        |
+| GET     | `/api/v1/channels/{id}/media/months`                                 |
 | GET     | `/api/v1/channels/{id}/messages`                                     |
 | GET     | `/api/v1/channels/{id}/messages/around/{messageId}`                  |
 | POST    | `/api/v1/channels/{id}/messages/purge`                               |
@@ -171,6 +173,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/emoji/`                                                     |
 | DELETE  | `/api/v1/emoji/{id}`                                                 |
 | GET     | `/api/v1/emoji/{id}/image`                                           |
+| GET     | `/api/v1/external/image`                                             |
+| GET     | `/api/v1/external/preview`                                           |
 | GET     | `/api/v1/files/{id}`                                                 |
 | POST    | `/api/v1/files/{id}/link`                                            |
 | GET     | `/api/v1/files/{id}/thumb`                                           |
@@ -1183,21 +1187,22 @@ List all channels the authenticated user has `READ_MESSAGES` permission for. DM 
 ]
 ```
 
-| Field               | Type   | Description                                                                                                               |
-| ------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `id`                | int64  | Channel ID                                                                                                                |
-| `name`              | string | Channel name                                                                                                              |
-| `type`              | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
-| `topic`             | string | Channel topic/description                                                                                                 |
-| `category`          | string | Name of the channel's category, `""` when none                                                                            |
-| `category_id`       | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
-| `category_position` | int    | The category's position in the category order, `0` when none                                                              |
-| `position`          | int    | Sort order within category                                                                                                |
-| `slow_mode`         | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
-| `archived`          | bool   | Whether the channel is archived                                                                                           |
-| `nsfw`              | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
-| `voice_max_users`   | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
-| `voice_max_video`   | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| Field                | Type   | Description                                                                                                               |
+| -------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | int64  | Channel ID                                                                                                                |
+| `name`               | string | Channel name                                                                                                              |
+| `type`               | string | `text`, `voice`, or `announcement` (announcement channels are read like text but only `MANAGE_MESSAGES` holders can post) |
+| `topic`              | string | Channel topic/description                                                                                                 |
+| `category`           | string | Name of the channel's category, `""` when none                                                                            |
+| `category_id`        | int64  | The category's id, `0` when none (WP 6.5a)                                                                                |
+| `category_position`  | int    | The category's position in the category order, `0` when none                                                              |
+| `position`           | int    | Sort order within category                                                                                                |
+| `slow_mode`          | int    | Slow-mode delay in seconds (0 = disabled)                                                                                 |
+| `archived`           | bool   | Whether the channel is archived                                                                                           |
+| `nsfw`               | bool   | Age-restriction label, enforced server-side (B5-7): its content needs the caller's own acknowledgement (see below)        |
+| `voice_max_users`    | int    | Voice capacity, 0 = unlimited. Enforced on join (`CHANNEL_FULL`)                                                          |
+| `voice_max_video`    | int    | Simultaneous cameras/screen shares, 0 = unlimited. Enforced on publish (`VIDEO_LIMIT`)                                    |
+| `password_protected` | bool   | `true` for a voice channel that has a password (checked on `voice_join`). The password and its hash are never returned    |
 
 #### The `nsfw` flag
 
@@ -1285,6 +1290,11 @@ edit; an `@word` that matches no username, a `<@&id>` the author may not ping,
 or an `@everyone` from a user without the bit, carries no mention semantics and
 stays plain text. The same fields appear on pinned-message responses and on the
 WebSocket `chat_message`/`chat_edited` payloads.
+
+A message imported from a Discord export also carries
+`"imported_author": {"name", "color"}` (`color` omitted when the export had none)
+on history, pins, `around`, search results and `referenced_message`, and is
+omitted for an ordinary message. See [protocol.md](protocol.md).
 
 A DM can also hold a call log row: a message the server writes for a call in
 the DM's voice channel. It carries two more fields, both omitted for an ordinary
@@ -1497,6 +1507,43 @@ Get all pinned messages for a channel.
 #### Response 200 OK
 
 Returns `{ "messages": [...], "has_more": false }`, most recently pinned first (messages pinned before migration 056 have no pin time and sort last). At most 1000 pins are returned; `has_more` is `true` only when the channel holds more and the list was truncated.
+
+---
+
+### GET /api/v1/channels/{id}/media
+
+One page of the files posted in a channel, for the channel's media gallery. Only attachments of live (not deleted) messages appear; media from users the caller blocked is left out. Rate-limited with the `media:` bucket (120 requests a minute, shared with `/media/months`).
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel (the same gate as the history, checked on every page)
+
+| Query    | Description                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `kind`   | `media` (default: `image/*` and `video/*`) or `files` (everything else, voice messages included)                         |
+| `q`      | Keeps file names containing this text (ASCII case-insensitive, matched literally), at most 100 characters                |
+| `from`   | Keeps files posted by this user id                                                                                       |
+| `order`  | `newest` (default) or `oldest`, by message                                                                               |
+| `month`  | `YYYY-MM` in `tz`: newest-first starts at the end of that month, oldest-first at its start. Ignored when `cursor` is set |
+| `tz`     | IANA time zone for `month`; empty means UTC                                                                              |
+| `cursor` | The previous page's `next_cursor`                                                                                        |
+| `limit`  | Page size, default 60, at most 100                                                                                       |
+
+#### Response 200 OK
+
+`{ "items": [ { "attachment": Attachment, "message_id": 123, "user": { "id", "username", "avatar" }, "timestamp": "2026-10-30 05:00:00" } ], "next_cursor": "123_<attachment id>" }`. `attachment` has the same shape as a message's attachments. `next_cursor` is `""` on the last page. The cursor holds the last item's message id and attachment id, so files posted while a viewer pages never repeat or shift a page; several files of one message keep a stable order. `400 BAD_REQUEST` for a malformed query, `403 FORBIDDEN` without read, `404 NOT_FOUND` for an unknown channel.
+
+---
+
+### GET /api/v1/channels/{id}/media/months
+
+How many items each calendar month holds, for the gallery's month scrubber. Takes `kind`, `q`, `from` and `tz` as above.
+
+**Auth:** Required
+**Permission:** `READ_MESSAGES` on the channel
+
+#### Response 200 OK
+
+`{ "months": [ { "month": "2026-10", "count": 42 } ] }`, newest month first, months counted in `tz` (UTC when empty).
 
 ---
 
@@ -5829,7 +5876,7 @@ The full role list after the reorder, position descending.
 
 `POST /admin/api/channels` takes `{name, type, category_id, category, topic, position}`;
 `PATCH /admin/api/channels/{id}` takes `{name, topic, category_id, category, slow_mode,
-position, archived, nsfw, voice_max_users, voice_max_video}` and seeds every
+position, archived, nsfw, voice_max_users, voice_max_video, password}` and seeds every
 omitted field from the current row, so a partial body is safe.
 
 The numeric fields are bounds-checked before anything is written, and an
@@ -5847,6 +5894,16 @@ refused body writes nothing at all:
 on every content path (see "NSFW Acknowledgement"). The
 audit detail names the transition: `updated #foo (marked NSFW)` /
 `(unmarked NSFW)`, and plain `updated #foo` when the flag did not move.
+
+`password` (string) on the `PATCH` sets, changes or removes a voice channel's
+password: absent leaves it alone, `""` removes it, anything else (1 to 64
+characters, no control characters) becomes the password and is stored only as a
+bcrypt hash. On a channel that is not a voice channel any value answers `400`.
+Every set, change or removal makes members enter the new password on their next
+join but removes nobody already inside, and the audit detail reads `updated #foo
+(password set)` / `(password changed)` / `(password removed)`, never the password.
+No response, list or broadcast carries the password or its hash; they show
+`password_protected` only.
 
 The voice limits are stored on a channel of any type but are only meaningful on
 a voice one; the desktop client offers them for voice channels alone and omits

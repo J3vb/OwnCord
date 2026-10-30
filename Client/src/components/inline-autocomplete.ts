@@ -18,7 +18,7 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, clearChildren, appendChildren } from "@lib/dom";
 
 export interface InlineAutocompleteConfig<T> {

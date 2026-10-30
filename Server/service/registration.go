@@ -9,7 +9,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// RegistrationMode is the registration_mode setting (B4-1, BPR-041): who may
+// RegistrationMode is the registration_mode setting: who may
 // create an account, and how.
 type RegistrationMode string
 
@@ -21,7 +21,7 @@ const (
 	// registration_open = 1 maps to.
 	RegistrationInvite RegistrationMode = "invite"
 	// RegistrationApproval creates the account locked; an admin approves it in
-	// the admin panel before it can sign in (owner decision 1).
+	// the admin panel before it can sign in.
 	RegistrationApproval RegistrationMode = "approval"
 	// RegistrationOpen admits anyone, no invite needed.
 	RegistrationOpen RegistrationMode = "open"

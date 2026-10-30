@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalVideoTrack } from "livekit-client";
 import type { PublishCodec } from "./videoCodec";
 import type { ShareSenderSample } from "./shareSenderStats";
-import type { CameraTrackState, ScreenTrackState, VideoTrackDeps } from "../../lib/screenShare";
+import type {
+  CameraTrackState,
+  ScreenTrackState,
+  VideoTrackDeps,
+} from "../../lib/voice/screenShare";
 
 const republish = vi.hoisted(() => vi.fn());
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
@@ -16,8 +20,8 @@ vi.mock("./native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: false, vp9: nativeVp9.value, decode: [] }),
 }));
 
-vi.mock("../../lib/screenShare", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/screenShare")>();
+vi.mock("../../lib/voice/screenShare", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/voice/screenShare")>();
   return { ...actual, republishVideo: republish };
 });
 
@@ -313,7 +317,7 @@ describe("CodecSwitchController", () => {
     r.controller.stop();
   });
 
-  it("switches an H.265 share down to VP8 when a viewer without H.265 joins, and back up (WP M-6a)", async () => {
+  it("switches an H.265 share down to VP8 when a viewer without H.265 joins, and back up", async () => {
     const r = rig({ screen: "h265", preferred: "h265" });
     r.controller.kick();
     join(2, VP9_PEER);
@@ -325,7 +329,7 @@ describe("CodecSwitchController", () => {
     r.controller.stop();
   });
 
-  it("leaves an H.265 share alone when the new viewer decodes H.265 (WP M-6a)", async () => {
+  it("leaves an H.265 share alone when the new viewer decodes H.265", async () => {
     const r = rig({ screen: "h265", camera: "h265", preferred: "h265" });
     r.controller.kick();
     join(2, H265_PEER);

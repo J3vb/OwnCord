@@ -1,10 +1,10 @@
 package ws
 
-// listening_activity.go — WP 8.10a: the song a member is listening to,
-// reported by the client with listening_update and shown on presence,
-// presence_batch and ready.listening. Like the game (game_activity.go) it is
-// memory only (livePresence.listening): no table, and a disconnect or restart
-// clears it. The per-server switch game_activity_enabled covers both.
+// listening_activity.go: the song a member is listening to, reported with
+// listening_update and shown on presence, presence_batch and ready.listening. Like
+// the game (game_activity.go) it is memory only (livePresence.listening): a
+// disconnect or restart clears it. The per-server switch game_activity_enabled
+// covers both.
 
 import (
 	"context"
@@ -139,14 +139,12 @@ func parseListeningUpdate(userID int64, _ string, raw json.RawMessage) (Command,
 	}, nil
 }
 
-// handleListeningUpdateV2 is the V2 handler for listening_update messages. It
-// decides what the frame changes, against the song the connection holds
-// (info.Listening): a clear with nothing set and a set that names the song
-// already shown are no-ops (no frame, no budget); a set while the server
-// switch is off is refused before the limiter; a set over budget is
-// RATE_LIMITED; a clear is never limited. The swap and the broadcast happen in
-// the applier (Hub.applyListening), which knows the live status and whether
-// the connection still owns its user's slot.
+// handleListeningUpdateV2 handles listening_update. Against the song the connection
+// holds (info.Listening): a clear with nothing set and a set naming the song already
+// shown are no-ops (no frame, no budget); a set while the server switch is off is
+// refused before the limiter; a set over budget is RATE_LIMITED; a clear is never
+// limited. The swap and broadcast happen in Hub.applyListening, which knows the live
+// status and whether the connection still owns its user's slot.
 func handleListeningUpdateV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(PresenceDeps)
 	u := cmd.(ListeningUpdateCmd)

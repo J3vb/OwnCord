@@ -29,7 +29,7 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
   setVoiceSensitivity: vi.fn(),
@@ -104,7 +104,7 @@ describe("TOTP Settings", () => {
   // OC-0354: the store's totp_enabled is a stale default until the profile
   // has been read, so the section asks the server when it opens.
   // -----------------------------------------------------------------------
-  describe("2FA state refresh on open (OC-0354)", () => {
+  describe("2FA state refresh on open", () => {
     it("asks the server once and switches to the disable view when 2FA is really on", async () => {
       mockTotpEnabled = false;
       const options = makeOptions({
@@ -956,7 +956,7 @@ describe("TOTP Settings", () => {
     byTestId<HTMLButtonElement>(`${prefix}-submit`).click();
   }
 
-  describe("Regenerate emergency recovery codes (B7-15b)", () => {
+  describe("Regenerate emergency recovery codes", () => {
     const CODES = ["AAAAA-BBBBB", "CCCCC-DDDDD"];
 
     it("is offered only when 2FA is enabled", () => {
@@ -1032,7 +1032,7 @@ describe("TOTP Settings", () => {
     });
   });
 
-  describe("Recovery kit (B7-15b)", () => {
+  describe("Recovery kit", () => {
     const SECRET = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
 
     it.each([

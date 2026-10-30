@@ -10,7 +10,7 @@
 import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon, type IconName } from "../../lib/icons";
-import { syncVideoSurface } from "../../lib/videoSurface";
+import { syncVideoSurface } from "../../lib/voice/videoSurface";
 import { voiceText } from "../../i18n/voice";
 
 /** How far one arrow key press moves the player. */

@@ -8,37 +8,30 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
-// SRV-05: per-route progress deadlines for the file transfer routes.
-//
-// The server's global ReadTimeout/WriteTimeout (internal/app/lifecycle.go) are
-// 30 s and bound the WHOLE request: net/http sets the connection's read and
-// write deadlines once, when request headers are read, and nothing in a
-// handler extends them. A 25 MB upload on a slow uplink needs about 200 s at
-// 1 Mbit/s, so without an override it is cut mid-body, and the download of
-// that same file truncates silently once the write deadline elapses.
-//
-// Rather than relax the global timeouts (which would weaken the slowloris
-// posture for every route), the two transfer routes wrap their reader/writer so
-// every chunk that actually moves pushes the connection deadline forward. A
-// transfer that keeps progressing is not cut before transferMaxLifetime; a
-// peer that stops sending or reading is abandoned after
-// transferProgressTimeout, and no transfer outlives transferMaxLifetime
-// however it progresses. This mirrors the
-// SetWriteDeadline(time.Time{}) override admin/logstream.go already applies to
-// its own long-lived stream.
-//
+// Per-route progress deadlines for the file transfer routes.
+// The global ReadTimeout/WriteTimeout (internal/app/lifecycle.go) are 30 s and
+// bound the WHOLE request: net/http sets the connection deadlines once, when
+// headers are read, and nothing in a handler extends them. A 25 MB upload on a
+// slow uplink needs about 200 s at 1 Mbit/s, so it would be cut mid-body and the
+// same file's download truncated silently.
+// Rather than relax the global timeouts (which would weaken slowloris protection
+// for every route), the two transfer routes wrap their reader/writer so every
+// chunk that moves pushes the connection deadline forward. A progressing
+// transfer is not cut before transferMaxLifetime, a peer that stops is abandoned
+// after transferProgressTimeout, and no transfer outlives transferMaxLifetime.
+// admin/logstream.go applies the same SetWriteDeadline(time.Time{}) override to
+// its stream.
 // The deadline lives on the underlying *net.Conn, reached through
-// http.NewResponseController, which unwraps the middleware chain. When the
-// writer does not sit over a real connection (an httptest.ResponseRecorder,
-// say) the controller reports http.ErrNotSupported and this is a no-op.
-//
+// http.NewResponseController; over a writer without a real connection
+// (httptest.ResponseRecorder) the controller reports http.ErrNotSupported and
+// this is a no-op.
 // Because a transfer can now outlive the 30 s graceful-shutdown budget,
-// CancelInFlightTransfers (registered with http.Server.RegisterOnShutdown)
-// caps every transfer on that server at shutdownTransferGrace from the start
-// of shutdown, so short transfers still finish and the drain stays bounded.
+// CancelInFlightTransfers (registered with http.Server.RegisterOnShutdown) caps
+// every transfer at shutdownTransferGrace from the start of shutdown, so short
+// transfers finish and the drain stays bounded.
 
-// inFlight holds the transfers whose handlers are still running, and the
-// servers that have begun shutting down.
+// inFlight holds the transfers whose handlers are still running and the servers
+// that have begun shutting down.
 var inFlight = struct {
 	mu      syncutil.Mutex
 	set     map[*transferDeadline]struct{}
@@ -52,8 +45,8 @@ func CancelInFlightTransfers(srv *http.Server) func() {
 	return shutdownTransfers(srv, shutdownTransferGrace)
 }
 
-// shutdownTransfers is CancelInFlightTransfers with the grace supplied, so
-// tests can use a short one.
+// shutdownTransfers is CancelInFlightTransfers with the grace supplied, so tests
+// can use a short one.
 func shutdownTransfers(srv *http.Server, grace time.Duration) func() {
 	return func() {
 		inFlight.mu.Lock()
@@ -68,7 +61,6 @@ func shutdownTransfers(srv *http.Server, grace time.Duration) func() {
 	}
 }
 
-// transferDeadline owns one response's progress deadlines.
 type transferDeadline struct {
 	ctl     *http.ResponseController
 	timeout time.Duration
@@ -84,8 +76,6 @@ func newTransferDeadline(w http.ResponseWriter, r *http.Request) *transferDeadli
 	return startTransfer(w, r, transferProgressTimeout, transferMaxLifetime)
 }
 
-// startTransfer is newTransferDeadline with the bounds supplied, so tests can
-// use short ones.
 func startTransfer(w http.ResponseWriter, r *http.Request, timeout, lifetime time.Duration) *transferDeadline {
 	srv, _ := r.Context().Value(http.ServerContextKey).(*http.Server)
 	d := &transferDeadline{
@@ -103,15 +93,12 @@ func startTransfer(w http.ResponseWriter, r *http.Request, timeout, lifetime tim
 	return d
 }
 
-// release drops the transfer from the in-flight set once the handler is done.
 func (d *transferDeadline) release() {
 	inFlight.mu.Lock()
 	delete(inFlight.set, d)
 	inFlight.mu.Unlock()
 }
 
-// capAt pulls the lifetime cap in to cutoff, so the transfer ends by then
-// however it progresses.
 func (d *transferDeadline) capAt(cutoff time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -121,17 +108,15 @@ func (d *transferDeadline) capAt(cutoff time.Time) {
 	d.arm()
 }
 
-// touch pushes both deadlines out to now+timeout, never past until. Errors
-// are ignored: the only realistic one is http.ErrNotSupported on a writer with
-// no connection, where there is no deadline to manage anyway (a real net/http
-// server always supports it).
+// touch pushes both deadlines out to now+timeout, never past until. Errors are
+// ignored: the only realistic one is http.ErrNotSupported on a writer with no
+// connection, where there is no deadline to manage.
 func (d *transferDeadline) touch() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.arm()
 }
 
-// arm sets both deadlines to now+timeout, never past until; d.mu must be held.
 func (d *transferDeadline) arm() {
 	deadline := time.Now().Add(d.timeout)
 	if deadline.After(d.until) {
@@ -141,10 +126,9 @@ func (d *transferDeadline) arm() {
 	_ = d.ctl.SetWriteDeadline(deadline)
 }
 
-// progressReader re-arms the transfer deadline on every read that returns
-// bytes, so a slow but moving body is not cut by the connection's read
-// deadline before transferMaxLifetime. It wraps an io.ReadCloser
-// (http.MaxBytesReader's result) and preserves Close.
+// progressReader re-arms the transfer deadline on every read that returns bytes,
+// so a slow but moving body is not cut by the connection's read deadline. It
+// wraps http.MaxBytesReader's result and preserves Close.
 type progressReader struct {
 	r io.ReadCloser
 	d *transferDeadline
@@ -160,9 +144,8 @@ func (p progressReader) Read(b []byte) (int, error) {
 
 func (p progressReader) Close() error { return p.r.Close() }
 
-// progressWriter re-arms the transfer deadline on every write that lands
-// bytes, so a slow but moving download is not cut by the connection's write
-// deadline before transferMaxLifetime.
+// progressWriter re-arms the transfer deadline on every write that lands bytes,
+// so a slow but moving download is not cut by the connection's write deadline.
 type progressWriter struct {
 	http.ResponseWriter
 	d *transferDeadline
@@ -176,22 +159,22 @@ func (p progressWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// Unwrap keeps http.NewResponseController able to reach the underlying
-// connection through this wrapper.
+// Unwrap keeps http.NewResponseController able to reach the connection through
+// this wrapper.
 func (p progressWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
 // uploadSlots counts each user's in-flight uploads against
-// maxConcurrentUploadsPerUser. It bounds one member's reserved headroom to
-// that many times the per-file cap, which the 30 s whole-request timeout used
-// to bound implicitly. It lives here, next to the transfer-deadline machinery
-// it guards, to keep upload_handler.go under the file-size invariant.
+// maxConcurrentUploadsPerUser, bounding one member's reserved headroom to that
+// many times the per-file cap (the 30 s whole-request timeout used to bound it
+// implicitly). It lives here beside the transfer-deadline machinery to keep
+// upload_handler.go under the file-size invariant.
 type uploadSlots struct {
 	mu syncutil.Mutex
 	n  map[int64]int
 }
 
-// acquire takes a slot for userID, reporting false when the per-user cap is
-// already reached. Callers must release the slot on every path.
+// acquire takes a slot for userID, reporting false at the per-user cap. Callers
+// must release the slot on every path.
 func (s *uploadSlots) acquire(userID int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

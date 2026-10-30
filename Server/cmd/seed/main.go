@@ -21,8 +21,6 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Seed data definitions ──────────────────────────────────────────────────
-
 // seedUser defines a user to create during seeding.
 type seedUser struct {
 	Username string
@@ -124,8 +122,6 @@ var seedDMMessages = []struct {
 	{uAdmin, "Go to Settings > Account, you can upload one there."},
 }
 
-// ─── Main ───────────────────────────────────────────────────────────────────
-
 func main() {
 	dbPath := flag.String("db", "data/chatserver.db", "path to the SQLite database file")
 	confirmDev := flag.Bool("confirm-dev", false, "confirm this is a development database (required)")
@@ -142,11 +138,9 @@ func main() {
 
 	log.SetFlags(0) // no timestamp prefix — keep output clean
 
-	// The default DB path is data/chatserver.db, and db.Open does not create
-	// intermediate directories. Ensure ./data exists so a fresh checkout works.
-	// This sits here rather than in an init() so that importing or building the
-	// package touches no filesystem — the tool creates the directory only when
-	// it is actually about to open the default database.
+	// db.Open does not create intermediate directories, so ensure ./data exists
+	// for the default path. Here rather than in init() so importing the package
+	// touches no filesystem.
 	if err := os.MkdirAll("data", 0o750); err != nil {
 		log.Printf("warning: could not create data directory: %v", err)
 	}
@@ -208,8 +202,6 @@ func run(database *db.DB) int {
 	return 0
 }
 
-// ─── User creation ──────────────────────────────────────────────────────────
-
 func createUsers(database *db.DB) ([]int64, error) {
 	ids := make([]int64, len(seedUsers))
 
@@ -258,12 +250,9 @@ func roleNameFromID(roleID int) string {
 	}
 }
 
-// ─── Channel creation ───────────────────────────────────────────────────────
-
 func createChannels(database *db.DB) ([]int64, error) {
 	ids := make([]int64, len(seedChannels))
 
-	// Fetch existing channels once to check for duplicates.
 	existing, err := database.ListChannels(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("listing channels: %w", err)
@@ -292,8 +281,6 @@ func createChannels(database *db.DB) ([]int64, error) {
 	return ids, nil
 }
 
-// ─── Message creation ───────────────────────────────────────────────────────
-
 func createMessages(database *db.DB, channelIDs, userIDs []int64) (int, error) {
 	created := 0
 
@@ -301,7 +288,6 @@ func createMessages(database *db.DB, channelIDs, userIDs []int64) (int, error) {
 		channelID := channelIDs[sm.ChannelIdx]
 		userID := userIDs[sm.UserIdx]
 
-		// Check if this exact message already exists (content + user + channel).
 		exists, err := messageExists(database, channelID, userID, sm.Content)
 		if err != nil {
 			return 0, fmt.Errorf("checking message existence: %w", err)
@@ -325,8 +311,8 @@ func createMessages(database *db.DB, channelIDs, userIDs []int64) (int, error) {
 	return created, nil
 }
 
-// messageExists checks whether a message with the given content from the given
-// user already exists in the channel. Used for idempotency.
+// messageExists checks whether a message with this content from this user
+// already exists in the channel, for idempotency.
 func messageExists(database *db.DB, channelID, userID int64, content string) (bool, error) {
 	var count int
 	err := database.QueryRowContext(context.Background(),
@@ -338,8 +324,6 @@ func messageExists(database *db.DB, channelID, userID int64, content string) (bo
 	}
 	return count > 0, nil
 }
-
-// ─── DM conversation ────────────────────────────────────────────────────────
 
 func createDMConversation(database *db.DB, userIDs []int64) (int, error) {
 	adminID := userIDs[uAdmin]

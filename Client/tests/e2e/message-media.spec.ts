@@ -23,7 +23,7 @@ import {
 } from "./helpers";
 
 // These specs cover what loads once the viewer consented (B9-8); the consent
-// gate itself is b9-content-consent.spec.ts.
+// gate itself is content-consent.spec.ts.
 test.beforeEach(({ page }) => grantExternalConsent(page));
 
 // ---------------------------------------------------------------------------

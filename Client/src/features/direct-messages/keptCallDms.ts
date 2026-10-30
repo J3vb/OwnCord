@@ -16,7 +16,7 @@
  * cleared on sign-out.
  */
 
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 
 const kept = new Set<number>();

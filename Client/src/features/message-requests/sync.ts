@@ -1,12 +1,12 @@
 /**
- * Message Requests snapshot loading (B5-6 GET /api/v1/dm-requests) and the
- * session's client for the inbox (B9-6). `ready`, a resume, and a decision
+ * Message Requests snapshot loading (GET /api/v1/dm-requests) and the
+ * session's client for the inbox. `ready`, a resume, and a decision
  * that lost a race all fetch through here; the dispatcher's handler hands
  * over the client, which sign-out forgets.
  */
 
 import { createLogger } from "@lib/logger";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { mapRequest } from "./api";
 import { applySnapshot, beginSnapshot, failSnapshot } from "./store";

@@ -9,23 +9,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// Store is the data-access surface the service layer depends on. It is the
-// set of *db.DB methods the services call — no event/plugin/transaction
-// methods, which belong to other layers. *db.DB satisfies this interface
-// directly (D3 removed the former store package's pass-through wrapper), and
-// tests inject fakes that embed a real in-memory *db.DB and override the one
-// method they need to exercise an error path.
-//
-// permissions.NewChecker takes its own narrower interface (permissions.DB),
-// which *db.DB and this Store both satisfy.
+// Store is the data-access surface the service layer depends on: the *db.DB
+// methods the services call, which *db.DB satisfies directly. Tests inject fakes
+// embedding a real in-memory *db.DB that override one method to exercise an error
+// path. permissions.NewChecker takes its own narrower interface (permissions.DB)
+// that both satisfy.
 type Store interface {
-	CallLogStore // the DM call log worker's reads and writes (WP 3B-9)
-	GroupDMStore // group DM membership and its system rows (WP 3B-10)
-	EmojiStore   // the custom emoji set (R-2)
-	// ── Second-factor state (B4-3) ──
-	// The durable backend behind the auth service's partial-auth, pending
-	// enrolment and used-code stores, plus the recovery-code rows; stdlib
-	// types only, because auth cannot import db back.
+	CallLogStore // the DM call log worker's reads and writes
+	GroupDMStore // group DM membership and its system rows
+	EmojiStore   // the custom emoji set
+	// Second-factor state: the durable backend behind the auth service's
+	// partial-auth, pending-enrolment and used-code stores, plus the recovery-code
+	// rows. Stdlib types only, because auth cannot import db.
 	auth.SecondFactorPersister
 	ReplaceRecoveryCodes(ctx context.Context, userID int64, codeHashes []string) error
 	ListUnusedRecoveryCodes(ctx context.Context, userID int64) (ids []int64, hashes []string, err error)
@@ -33,7 +28,6 @@ type Store interface {
 	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int, error)
 	DeleteRecoveryCodes(ctx context.Context, userID int64) error
 
-	// ── Messages / reactions / read-state ──
 	CreateMessage(ctx context.Context, channelID, userID int64, content string, replyTo *int64) (int64, error)
 	CreateMessageWithMentions(ctx context.Context, channelID, userID int64, content string, replyTo *int64, mentionedUserIDs []int64, replyPingUserID int64, mentionsEveryone bool, mentionedRoleIDs []int64) (*db.Message, error)
 	FindMessageDelivery(ctx context.Context, p db.MessageDeliveryParams) (*db.MessageDelivery, error)
@@ -52,38 +46,35 @@ type Store interface {
 	AddReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	RemoveReaction(ctx context.Context, messageID, userID int64, emoji string) error
 	GetReactionUsers(ctx context.Context, messageID int64, emoji string, limit int) ([]db.ReactionUser, error)
-	// MarkChannelReadAtLatest is the mark-read that computes its own
-	// watermark (OC-0323). The send path's read-state advance happens inside
-	// CreateMessageWithMentions / CreateMessageDelivery.
+	// MarkChannelReadAtLatest is the mark-read that computes its own watermark. The
+	// send path's read-state advance happens inside CreateMessageWithMentions /
+	// CreateMessageDelivery.
 	MarkChannelReadAtLatest(ctx context.Context, userID, channelID int64) error
 	GetReadState(ctx context.Context, userID, channelID int64) (lastMessageID, mentionCount int64, found bool, err error)
-	// MoveReadPointer moves a reader's pointer and recomputes mention_count
-	// from the receipts in one writer transaction (WP 3D-5c). The caller holds
-	// mentionEmitMu across it and the frame it sends.
+	// MoveReadPointer moves a reader's pointer and recomputes mention_count from the
+	// receipts in one writer transaction. The caller holds mentionEmitMu across it and
+	// the frame it sends.
 	MoveReadPointer(ctx context.Context, userID, channelID int64, op db.ReadPointerOp, messageID int64) (db.ReadPointer, error)
 	GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]db.ChannelUnread, error)
 
-	// ── Mentions ──
 	ReplaceMessageMentions(ctx context.Context, messageID int64, mentionedUserIDs []int64, mentionsEveryone bool, mentionedRoleIDs []int64) (replyPingUserID int64, err error)
 	IncrementMentionCounts(ctx context.Context, channelID, msgID int64, userIDs []int64) error
-	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in
-	// one writer transaction — the mention worker's flush path (P5-O05). It
-	// returns userID → mention_count after the bump for exactly the recipients
-	// whose read-state guard admitted it, the live-badge signal (DP-27).
+	// IncrementMentionCountsBatch applies a coalesced window of mention jobs in one
+	// writer transaction (the mention worker's flush). It returns userID to
+	// mention_count for exactly the recipients whose read-state guard admitted the
+	// bump: the live-badge signal.
 	IncrementMentionCountsBatch(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) (map[int64]int64, error)
-	// DecrementMentionCounts reverses the mention_count bumps msgIDs made and
-	// returns userID → mention_count after the reversal for exactly the readers
-	// the guards admitted, the signal a removal path pushes as a live badge.
+	// DecrementMentionCounts reverses the bumps msgIDs made and returns userID to
+	// mention_count for exactly the readers the guards admitted, the live-badge signal
+	// for a removal path.
 	DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) (map[int64]int64, error)
 	GetUserIDsByUsernames(ctx context.Context, usernames []string) (map[string]int64, error)
 	ListMentionTargetsByRoles(ctx context.Context, roleIDs []int64) ([]db.MentionTarget, error)
 	ListBlockersOf(ctx context.Context, blockedID int64) ([]int64, error)
-	// IsBlocked answers the single (blocker, blocked) pair rather than the
-	// whole blocker set ListBlockersOf returns. Push dispatch needs exactly
-	// that pair, re-asked immediately before every delivery attempt: the
-	// audience-wide ListBlockersOf result is a snapshot taken before the
-	// dispatch began, and a block landing while it is in flight must stop the
-	// remaining attempts (R3).
+	// IsBlocked answers the single (blocker, blocked) pair rather than ListBlockersOf's
+	// whole set. Push dispatch re-asks it before every delivery attempt: the
+	// audience-wide result is a pre-dispatch snapshot, and a block landing in flight
+	// must stop the remaining attempts.
 	IsBlocked(ctx context.Context, blockerID, blockedID int64) (bool, error)
 	GetChannelOverrides(ctx context.Context, channelID int64) (map[int64]db.ChannelOverride, error)
 	GetAllChannelPermissionsForRole(ctx context.Context, roleID int64) (map[int64]db.ChannelOverride, error)
@@ -94,36 +85,30 @@ type Store interface {
 	GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (map[int64][]db.AttachmentInfo, error)
 	GetReferencedMessages(ctx context.Context, channelID int64, ids []int64) (map[int64]*db.ReferencedMessage, error)
 
-	// ── Channels ──
 	ListChannels(ctx context.Context) ([]db.Channel, error)
 	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
 	CreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
-	// GetChannelPermissions / GetUserChannelPermissions are the two single-row
-	// override lookups permissions.DB requires (Store is passed straight to
-	// permissions.NewChecker).
+	// GetChannelPermissions / GetUserChannelPermissions are the single-row override
+	// lookups permissions.DB requires.
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
-	// Override CRUD for the channel family's permission layer (B3-8 part 2):
-	// the full role/user override listings the matrix editor renders, and the
-	// writes/clears the service gates.
+	// Override CRUD for the channel permission layer: the listings the matrix editor
+	// renders and the gated writes/clears.
 	ListChannelRoleOverrides(ctx context.Context, channelID int64) ([]db.ChannelRoleOverride, error)
 	ListChannelUserOverrides(ctx context.Context, channelID int64) ([]db.ChannelUserOverride, error)
 	UpsertChannelOverride(ctx context.Context, channelID, roleID, allow, deny int64) error
 	DeleteChannelOverride(ctx context.Context, channelID, roleID int64) error
 	UpsertChannelUserOverride(ctx context.Context, channelID, userID, allow, deny int64) error
 	DeleteChannelUserOverride(ctx context.Context, channelID, userID int64) error
-	// GetMemberGrants fetches every held role's override and the per-user
-	// layer for one member in batch queries — the single fetch behind every
-	// "what can this member do here" site, and the reason no site pays an N+1
-	// for the extra layers.
+	// GetMemberGrants fetches every held role's override and the per-user layer for
+	// one member in batch queries: the single fetch behind every "what can this
+	// member do here" site, so none pays an N+1.
 	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
 
-	// ── Users ──
 	GetUserByID(ctx context.Context, id int64) (*db.User, error)
 	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
 	GetOwnerUser(ctx context.Context) (*db.User, error)
 
-	// ── API tokens ──
 	CreateAPIToken(ctx context.Context, userID int64, tokenHash, label string, expiresAt *time.Time) (int64, error)
 	ListAPITokens(ctx context.Context) ([]db.APITokenListItem, error)
 	RevokeAPIToken(ctx context.Context, id int64) (int64, error)
@@ -132,15 +117,15 @@ type Store interface {
 	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
 	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
 	CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error)
-	// Recovery kit (B4-5).
+	// Recovery kit.
 	UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error
 	GetRecoveryKit(ctx context.Context, userID int64) (*db.RecoveryKit, error)
 	RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (int64, error)
-	// Owner-issued recovery credential (B4-6).
+	// Owner-issued recovery credential.
 	UpsertRecoveryAssist(ctx context.Context, userID int64, verifier string, issuedBy int64, verification string, expiresAt time.Time) error
 	GetRecoveryAssist(ctx context.Context, userID int64) (*db.RecoveryAssist, error)
 	RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (int64, error)
-	// Approval-mode registration (B4-1).
+	// Approval-mode registration.
 	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error)
 	ListPendingUsers(ctx context.Context, limit, offset int) ([]db.PendingUser, error)
 	CountPendingUsers(ctx context.Context) (int64, error)
@@ -159,7 +144,7 @@ type Store interface {
 	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
 	UpdateUserRole(ctx context.Context, userID, roleID int64) error
 	ResetAllUserStatuses(ctx context.Context) error
-	// Account erasure (B4-9): the stages of the database half (WP 4.1a).
+	// Account erasure: the stages of the database half.
 	ErasureStageStore
 	EraseAccountPreflight(ctx context.Context, userID int64) error
 	ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*db.ErasureJob, error)
@@ -171,8 +156,8 @@ type Store interface {
 	ListUserIDs(ctx context.Context) ([]int64, error)
 	LogAuditEntry(ctx context.Context, e db.AuditEntry) error
 	ListUnfinishedErasureJobs(ctx context.Context) ([]db.ErasureJob, error)
-	// FinishOwedErasureCheckpoint (B6-11 task 5): the erasure runner's tick
-	// finishes a wal_checkpoint(TRUNCATE) an erasure could not.
+	// FinishOwedErasureCheckpoint finishes, on the runner's tick, a
+	// wal_checkpoint(TRUNCATE) an erasure could not.
 	FinishOwedErasureCheckpoint(ctx context.Context) (bool, error)
 	RecordErasureJobAttempt(ctx context.Context, id int64, filesRemoved int, lastError string) error
 	CompleteErasureJob(ctx context.Context, id int64, filesRemoved int) error
@@ -182,7 +167,7 @@ type Store interface {
 	RetentionPolicySnapshot(ctx context.Context) (*db.RetentionPolicySnapshot, error)
 	PreviewRetentionChange(ctx context.Context, change db.RetentionChange, revision string, observed time.Time) (*db.RetentionChangeEffect, error)
 	ApplyRetentionChange(ctx context.Context, actorID int64, change db.RetentionChange, revision string) (string, error)
-	// Retention (B4-11): the policy, the sweep and its run journal.
+	// Retention: the policy, the sweep and its run journal.
 	ServerRetentionDays(ctx context.Context) (int, error)
 	ListChannelRetention(ctx context.Context) ([]db.ChannelRetention, error)
 	GetChannelRetention(ctx context.Context, channelID int64) (*db.ChannelRetention, error)
@@ -199,7 +184,6 @@ type Store interface {
 	ListUnfinishedRetentionRuns(ctx context.Context) ([]db.RetentionRun, error)
 	ListMembers(ctx context.Context) ([]db.MemberSummary, error)
 
-	// ── Sessions ──
 	CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
 	CreateFirstSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash string) (*db.Session, error)
@@ -216,7 +200,6 @@ type Store interface {
 	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
 	MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error)
 
-	// ── Roles ──
 	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
 	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
 	ListRoles(ctx context.Context) ([]*db.Role, error)
@@ -229,14 +212,12 @@ type Store interface {
 	ListUserIDsByRole(ctx context.Context, roleID int64) ([]int64, error)
 	CountRoleMembers(ctx context.Context) (map[int64]int, error)
 
-	// ── Invites ──
 	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
 	ListInvites(ctx context.Context) ([]*db.Invite, error)
 	RevokeInvite(ctx context.Context, code string) error
 	ListInviteRedemptions(ctx context.Context, inviteID int64, limit int) ([]*db.InviteRedemption, error)
 
-	// ── Voice ──
 	JoinVoiceChannel(ctx context.Context, userID, channelID int64) error
 	JoinVoiceChannelIfCapacity(ctx context.Context, userID, channelID int64, maxUsers int) error
 	LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error)
@@ -253,23 +234,17 @@ type Store interface {
 	CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error)
 	SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error)
 	SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error)
-	// MuteForTimeoutSession is SetVoiceServerMute scoped to one exact
-	// session (channelID, joinedAt), stamping actionID as owner
-	// (voice_states.server_muted_by) atomically with the mute, only on a
-	// genuine unmuted->muted transition (round 4, replacing round 3's
-	// CompareAndSetServerMute — see migration 049's comment).
-	// supersededIDs transfers ownership from those just-superseded ledger
-	// ids onto actionID, inside the same transaction as the mute (round 5,
-	// Codex review P2) — the caller (ws.Hub, under its per-user lock) is
-	// the only place this transfer may happen; see moderation.go's
-	// TimeoutVoiceMuter.MuteForTimeout doc comment.
+	// MuteForTimeoutSession is SetVoiceServerMute scoped to one exact session
+	// (channelID, joinedAt), stamping actionID as owner (voice_states.server_muted_by)
+	// atomically with the mute, only on a genuine unmuted-to-muted transition.
+	// supersededIDs transfers ownership from just-superseded ledger ids onto actionID
+	// in the same transaction; only the caller (ws.Hub, under its per-user lock) may
+	// do that transfer (see TimeoutVoiceMuter.MuteForTimeout).
 	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error)
-	// ClearServerMuteOwnedBy clears server_muted for whichever voice_states
-	// row currently names one of actionIDs as owner and reports its
-	// channel/join token for the paired SFU call (round 4).
+	// ClearServerMuteOwnedBy clears server_muted for the voice_states row naming one
+	// of actionIDs as owner and reports its channel/join token for the paired SFU call.
 	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
 
-	// ── Direct messages ──
 	GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*db.Channel, bool, error)
 	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created bool, recipientOpened bool, accepted *db.MessageRequest, err error)
 	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
@@ -287,7 +262,6 @@ type Store interface {
 	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
 	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
 
-	// ── Message requests (migration 046, B5-6) ──
 	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 	CreateMessageRequest(ctx context.Context, senderID, recipientID, channelID, firstMessageID int64) (db.MessageRequestOutcome, error)
 	GetMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
@@ -296,49 +270,42 @@ type Store interface {
 	TransitionMessageRequest(ctx context.Context, id, recipientID int64, to string) (bool, error)
 	AcceptMessageRequest(ctx context.Context, id, recipientID int64) (*db.MessageRequest, error)
 
-	// ── Blocks ──
 	BlockUser(ctx context.Context, blockerID, blockedID int64) error
 	UnblockUser(ctx context.Context, blockerID, blockedID int64) error
 	IsEitherBlocked(ctx context.Context, userA, userB int64) (bool, error)
 	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
 
-	// ── GIF favorites (migration 059) ──
 	AddGIFFavorite(ctx context.Context, userID int64, f db.GIFFavorite) error
 	RemoveGIFFavorite(ctx context.Context, userID int64, url string) error
 	ListGIFFavorites(ctx context.Context, userID int64) ([]db.GIFFavorite, error)
 
-	// ── NSFW acknowledgements (migration 047, B5-7) ──
 	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error)
 	RevokeNSFW(ctx context.Context, userID, channelID int64) error
 	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
 	ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error)
 	AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u db.ChannelUpdate) error
 
-	// ── Attachments ──
 	CreateAttachmentVoice(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height, durationMs *int, waveform *string) error
 	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
 	DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error)
 	DiscardUnlinkedAttachment(ctx context.Context, id string, userID int64) (storedAs string, found bool, err error)
 	DeleteOrphanedAttachments(ctx context.Context, cutoff time.Time) ([]string, error)
-	// IsMessageDeleted backs the tombstone half of attachment access; the
-	// avatar check backs the "public exactly while in use" half.
+	// IsMessageDeleted backs the tombstone half of attachment access; the avatar
+	// check backs the "public exactly while in use" half.
 	IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error)
 	IsAvatarFileURL(ctx context.Context, url string) (bool, error)
 	IsGroupDMIconForUser(ctx context.Context, fileID string, userID int64) (bool, error) // live icon, members only
-	// The per-user upload byte counter (migration 044, B5-2): charged before
-	// a store write, released on a failed one, recounted from the rows on
-	// the maintenance tick. See UploadService.Reserve.
+	// The per-user upload byte counter: charged before a store write, released on a
+	// failed one, recounted from the rows on the maintenance tick (UploadService.Reserve).
 	ChargeUserStorage(ctx context.Context, userID, bytes, quota int64) (bool, error)
 	ReleaseUserStorage(ctx context.Context, userID, bytes int64) error
 	UserStorageUsed(ctx context.Context, userID int64) (int64, error)
 	ListUserStorageIDs(ctx context.Context) ([]int64, error)
 	RecountUserStorage(ctx context.Context, userID int64) error
 
-	// ── Reports (migration 048, B5-8) ──
-	// FileReport inserts the report row and its evidence snapshot in one
-	// writer transaction (P1-4): no autocommit window for an erasure to land
-	// content or an author id mid-intake. publicID is generated by the
-	// caller (crypto/rand) — the sole externally-visible identifier.
+	// FileReport inserts the report row and its evidence snapshot in one writer
+	// transaction, leaving no autocommit window for an erasure to land content or an
+	// author id mid-intake. The caller generates publicID (crypto/rand).
 	FileReport(ctx context.Context, publicID string, reporterID, subjectID int64, targetType, targetRef string, channelID *int64, reason, detail string, evidence []db.ReportEvidenceInput) (int64, error)
 	GetReport(ctx context.Context, id int64) (*db.Report, error)
 	GetReportByPublicID(ctx context.Context, publicID string) (*db.Report, error)
@@ -346,129 +313,107 @@ type Store interface {
 	ListReportsQueue(ctx context.Context, state string) ([]db.ReportQueueRow, error)
 	ListReportsMine(ctx context.Context, reporterID int64) ([]db.ReportSummary, error)
 	// AssignReport is guarded on state, the caller's last-observed assignee
-	// (optimistic concurrency) and EXISTS(users) — see db/report_queries.go.
+	// (optimistic concurrency) and EXISTS(users).
 	AssignReport(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
-	// AssignReportForced is the force-reassign path: BOTH principals' role
-	// positions are read fresh inside the same transaction as the write
-	// (Codex review, widened — the actor's used to be trusted stale from
-	// before the transaction opened) — ErrForbidden means the caller does
-	// not outrank the current assignee.
+	// AssignReportForced is the force-reassign path: BOTH principals' role positions
+	// are read fresh inside the write's transaction. ErrForbidden means the caller
+	// does not outrank the current assignee.
 	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
 	CloseReport(ctx context.Context, id int64, state, outcome string, actorID int64) (bool, error)
 	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
-	// InsertReportNote is guarded on EXISTS(users) and the report's state
-	// (Codex review widened); false means the caller answers 409 — either
-	// the author was erased, or the report closed, between requirePerm and
-	// the write.
+	// InsertReportNote is guarded on EXISTS(users) and the report's state; false
+	// means 409: the author was erased, or the report closed, before the write.
 	InsertReportNote(ctx context.Context, reportID, authorID int64, body string) (bool, error)
 	ListReportNotes(ctx context.Context, reportID int64) ([]db.ReportNoteRow, error)
-	// ListReportEvents reads report_events (second Codex review): this
-	// feature's own immutable history, never the shared audit_log — exposed
-	// only inside the queue detail. The mutations above write their own
-	// event in the same transaction.
+	// ListReportEvents reads report_events, this feature's own immutable history
+	// (never the shared audit_log), exposed only inside the queue detail. The
+	// mutations above write their event in the same transaction.
 	ListReportEvents(ctx context.Context, reportID int64) ([]db.ReportEvent, error)
 	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
 
-	// ── Moderation actions (migration 049, B5-9) ──
-	// WarnUser/TimeoutUser write their entire effect as one ledger row, in
-	// one transaction with the live rank guard (recordModerationAction):
-	// a target promoted between the caller's check and this write is
-	// refused (db.ErrOutranked), not sanctioned.
+	// WarnUser/TimeoutUser write their whole effect as one ledger row, in one
+	// transaction with the live rank guard: a target promoted after the caller's
+	// check is refused (db.ErrOutranked), not sanctioned.
 	WarnUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
-	// TimeoutUser also returns the ids it just superseded (round 5, Codex
-	// review P2): the caller passes them to the voice half's mute call so
-	// the ownership transfer runs under ITS per-user lock, not here.
+	// TimeoutUser also returns the ids it superseded; the caller passes them to the
+	// voice mute so the ownership transfer runs under ITS per-user lock.
 	TimeoutUser(ctx context.Context, targetID, actorID int64, reportID *int64, reason string, expiresAt time.Time) (id int64, supersededIDs []int64, err error)
-	// LiftTimeout returns the ids of the timeout rows it lifted (nil, none
-	// lifted). The caller passes them to ClearServerMuteOwnedBy, which
-	// clears whichever voice_states row (if any) is currently owned by one
-	// of them — ownership lives on the session now, not this ledger
-	// (round 4, replacing round 3's voiceMuted bool).
+	// LiftTimeout returns the ids of the timeout rows it lifted (nil, none). The
+	// caller passes them to ClearServerMuteOwnedBy: ownership lives on the voice
+	// session, not this ledger.
 	LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedIDs []int64, err error)
-	// HasActiveTimeout is the indexed per-user timeout lookup
-	// (FinalizeTimeoutLift; PermissionService.Subject reads its mirror).
+	// HasActiveTimeout is the indexed per-user lookup (FinalizeTimeoutLift;
+	// PermissionService.Subject reads its mirror).
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
-	// ListActiveTimeoutExpiries loads PermissionService's in-memory mirror
-	// of every active timeout (P5-O02).
+	// ListActiveTimeoutExpiries loads PermissionService's in-memory mirror of every
+	// active timeout.
 	ListActiveTimeoutExpiries(ctx context.Context) ([]db.ActiveTimeoutExpiry, error)
 	AcknowledgeWarning(ctx context.Context, userID, actionID int64) (bool, error)
 	ListUnacknowledgedWarnings(ctx context.Context, userID int64) ([]db.ModerationNotice, error)
 	ListModerationActionsForTarget(ctx context.Context, targetID int64) ([]db.ModerationAction, error)
 	ListOwnModerationActions(ctx context.Context, userID, limit int64) ([]db.OwnModerationAction, error)
 	ListModerationActionsForReport(ctx context.Context, reportID int64) ([]db.ModerationAction, error)
-	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser
-	// plus a ledger row, in one transaction (plan item 2) — the ...WithReport
-	// shape the plan asks for, so the existing BanUser/ForceLogoutUser
-	// signatures on this interface are untouched.
+	// BanUserWithAction/ForceLogoutWithAction are BanUser/ForceLogoutUser plus a
+	// ledger row, in one transaction.
 	BanUserWithAction(ctx context.Context, targetID int64, reason string, expires *time.Time, actorID int64, reportID *int64) (int64, error)
-	// ForceLogoutWithAction's reason is the ledger row's text; empty falls
-	// back to the fixed phrase every direct caller used before P2-10 (Codex
-	// review) let ActOnReport store a caller-submitted one instead.
+	// ForceLogoutWithAction's reason is the ledger row's text; empty falls back to
+	// the fixed phrase.
 	ForceLogoutWithAction(ctx context.Context, targetID, actorID int64, reportID *int64, reason string) (int64, error)
-	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are
-	// DeleteMessage/PurgeChannelMessages plus a removal ledger row, in the
-	// same transaction, when the deleter is not the author.
-	// DeleteMessageWithRemoval's reason is the ledger row's text; empty
-	// falls back to the fixed phrase "message removed" (P2-10).
+	// DeleteMessageWithRemoval/PurgeChannelMessagesWithAction are DeleteMessage/
+	// PurgeChannelMessages plus a removal ledger row in the same transaction, when
+	// the deleter is not the author. DeleteMessageWithRemoval's reason is the row's
+	// text; empty falls back to "message removed".
 	DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int64, isMod bool, authorID int64, reportID *int64, reason string) error
 	PurgeChannelMessagesWithAction(ctx context.Context, channelID, before int64, limit int, actorID int64, reportID *int64) ([]int64, error)
-	// PurgeUserChannelMessagesSince/ListUserMessageChannelsSince are the ban
-	// purge's author-and-window-scoped counterparts of
-	// PurgeChannelMessagesWithAction; RecordRemovalAction writes the one
-	// removal ledger row (targeting the author) for the whole purge.
+	// PurgeUserChannelMessagesSince/ListUserMessageChannelsSince are the ban purge's
+	// author-and-window-scoped counterparts of PurgeChannelMessagesWithAction;
+	// RecordRemovalAction writes the one removal ledger row (targeting the author).
 	PurgeUserChannelMessagesSince(ctx context.Context, channelID, userID int64, since string, limit int) ([]int64, error)
 	ListUserMessageChannelsSince(ctx context.Context, userID int64, since string) ([]int64, error)
 	RecordRemovalAction(ctx context.Context, targetID, actorID int64, reason string) error
 	RetireModerationActions(ctx context.Context, days int) (int64, error)
-	// GetModerationAction is B5-10's appeal submission and decision both
-	// needing the appealed action's own kind, target and actor.
+	// GetModerationAction backs appeal submission and decision, which need the
+	// action's kind, target and actor.
 	GetModerationAction(ctx context.Context, id int64) (*db.ModerationAction, error)
 
-	// ── Appeals (migration 050, B5-10) ──
-	// FindAppealForAction is the dedupe FAST PATH; InsertAppeal's
-	// UNIQUE(action_id) violation is what actually enforces decision 8's
-	// "one appeal per action, ever" under concurrency.
+	// FindAppealForAction is the dedupe FAST PATH; InsertAppeal's UNIQUE(action_id)
+	// violation enforces "one appeal per action, ever" under concurrency.
 	FindAppealForAction(ctx context.Context, actionID int64) (int64, error)
 	InsertAppeal(ctx context.Context, publicID string, actionID, appellantID int64, body string) (int64, error)
 	GetAppeal(ctx context.Context, id int64) (*db.Appeal, error)
 	GetAppealByPublicID(ctx context.Context, publicID string) (*db.Appeal, error)
 	ListAppealsMine(ctx context.Context, appellantID int64) ([]db.AppealSummary, error)
 	ListAppealsQueue(ctx context.Context, state string) ([]db.AppealQueueRow, error)
-	// AssignAppealTx is Assign's plain (non-forced) path, wrapped in its own
-	// transaction with a fresh authority re-check (P2) and, when
-	// checkSelfReview is true, decision 8's deciding-moderator eligibility
-	// test (round 4) — both inside the same transaction — see db.AssignAppealTx.
+	// AssignAppealTx is Assign's plain path in its own transaction with a fresh
+	// authority re-check and, when checkSelfReview is true, the deciding-moderator
+	// eligibility test (see db.AssignAppealTx).
 	AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
 		checkSelfReview bool, appellantID, permBit, adminBit int64,
 		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
 	AssignAppealForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64,
 		checkSelfReviewNeeded bool, appellantID, permBit, adminBit int64,
 		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (bool, error)
-	// DecideAppealTx runs a fresh authority re-check (P2), the stale/terminal
-	// row rejection (P3), the self-review eligibility test, the guarded
-	// decide UPDATE (on the OBSERVED state/assignee) and, for an overturn,
-	// the reversal, all in one transaction — see db.DecideAppealTx.
-	// reversalApplied tells the caller whether to write the reversal's own
-	// audit row (item 4), best-effort, AFTER this commits.
+	// DecideAppealTx runs the fresh authority re-check, stale/terminal row rejection,
+	// self-review test, the guarded decide UPDATE (on the OBSERVED state/assignee)
+	// and, for an overturn, the reversal in one transaction (see db.DecideAppealTx).
+	// reversalApplied tells the caller whether to write the reversal's audit row,
+	// best-effort, AFTER the commit.
 	DecideAppealTx(ctx context.Context, appealID int64, observedState string, observedAssigneeID int64, outcome string, decidedBy int64, note string, checkSelfReview bool, appellantID, permBit, adminBit int64, action db.AppealedAction,
 		checkAuthority func(rolePerms int64, banned bool, banExpires *string) error) (result db.AppealWriteOutcome, soleModeratorUsed, reversalApplied bool, err error)
 	WithdrawAppeal(ctx context.Context, id, appellantID int64) (bool, error)
 
-	// ── Push (migration 045, B5-4) ──
-	// UpsertPushSubscription's keep is the per-user device cap; the upsert,
-	// the eviction ranking and the eviction delete run in one transaction.
+	// UpsertPushSubscription's keep is the per-user device cap; upsert, eviction
+	// ranking and eviction delete run in one transaction.
 	UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
 	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
 	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
 	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
 	// ListPushSubscriptionsForDispatch and DeletePushSubscriptionByID are
-	// dispatch-only (B5-11): the former returns the push credential for a
-	// caller-narrowed audience, the latter prunes by id alone on a push
-	// service's 404/410.
+	// dispatch-only: the former returns push credentials for a caller-narrowed
+	// audience, the latter prunes by id on a push service's 404/410.
 	ListPushSubscriptionsForDispatch(ctx context.Context, userIDs []int64, keyID string) ([]db.PushSubscriptionForDispatch, error)
 	DeletePushSubscriptionByID(ctx context.Context, id int64) (bool, error)
 
-	// ── Admin ──
 	UserCount(ctx context.Context) (int64, error)
 	GetServerStats(ctx context.Context) (*db.ServerStats, error)
 	ListAllUsers(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error)
@@ -483,11 +428,10 @@ type Store interface {
 	BackupToSafe(ctx context.Context, path, safeRoot string) error
 	CountUsersWithoutTOTP(ctx context.Context) (int, error)
 
-	// ── Settings ──
 	GetSetting(ctx context.Context, key string) (string, error)
 	SetSetting(ctx context.Context, key, value string) error
 	GetAllSettings(ctx context.Context) (map[string]string, error)
-	// ApplySettings upserts every pair in one transaction — the settings
-	// PATCH is atomic from the caller's perspective (settings family).
+	// ApplySettings upserts every pair in one transaction, so the settings PATCH is
+	// atomic.
 	ApplySettings(ctx context.Context, updates map[string]string) error
 }

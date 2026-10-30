@@ -20,28 +20,28 @@ import {
 } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import type { ChannelAccess } from "../../features/channels/channelRow.view";
-import { formatChannelLink } from "@lib/deep-link";
-import { navigateToChannel } from "@lib/channel-navigation";
+import { formatChannelLink } from "@lib/nav/deepLink";
+import { navigateToChannel } from "@lib/nav/channelNavigation";
 import { markChannelRead, showsUnreadBadge } from "@lib/read-state";
 import {
   getChannelMute,
   muteChannel,
   unmuteChannel,
   getChannelMutesHost,
-} from "@lib/channel-mutes";
+} from "@lib/prefs/channelMutes";
 import {
   createMenuItem,
   createSubmenuTrigger,
   openMenuOnKeyboard,
   openMenuShell,
-} from "@lib/context-menu";
+} from "@lib/ui/contextMenu";
 import {
   NOTIFICATION_LEVELS,
   effectiveNotificationLevel,
   getChannelNotificationLevel,
   setChannelNotificationLevel,
   type NotificationLevel,
-} from "@lib/notificationLevel";
+} from "@lib/prefs/notificationLevel";
 import { appendPurgeSection } from "@components/purge-prompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
@@ -56,7 +56,7 @@ const LEVEL_KEYS = {
 
 /** Bubbles from a channel row when its mute is toggled. Re-exported from the
  *  mute store, which dispatches it on every write (F16). */
-export { CHANNEL_MUTE_CHANGED } from "@lib/channel-mutes";
+export { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 
 /**
  * Attach a context menu to a channel element for mark-read/move/edit/delete/
@@ -64,12 +64,12 @@ export { CHANNEL_MUTE_CHANGED } from "@lib/channel-mutes";
  * key (A11Y-01).
  *
  * `signal` governs only the row-level `contextmenu` listener below, so it
- * dies with the row that created it on the next re-render (OC-0229).
+ * dies with the row that created it on the next re-render.
  * `lifetimeSignal` is the sidebar's own factory-lifetime signal (aborted only
  * on sidebar destroy) and owns everything INSIDE the opened menu instead --
  * the menu is mounted on document.body, independent of the row's render, and
  * must not be torn down (or have its item clicks silently detached) by an
- * unrelated re-render (OC-0282).
+ * unrelated re-render.
  */
 export function attachChannelContextMenu(
   el: HTMLElement,
@@ -111,7 +111,7 @@ export function attachChannelContextMenu(
   // The link opens the channel's message view, so a voice channel has none to
   // offer (joining one is a click on its row, not a link).
   const showCopyLink = channel.type !== "voice";
-  // A voice channel's chat opens without joining (WP 6.1d); clicking the row
+  // A voice channel's chat opens without joining; clicking the row
   // still joins.
   const showOpenChat = channel.type === "voice";
   const hasEntries =
@@ -129,7 +129,7 @@ export function attachChannelContextMenu(
   function openMenu(anchorX: number, anchorY: number): void {
     // lifetimeSignal (not the per-render `signal`): the menu is mounted on
     // document.body, independent of the row that opened it, so an unrelated
-    // re-render must not close it (OC-0282).
+    // re-render must not close it.
     openMenuShell({
       x: anchorX,
       y: anchorY,

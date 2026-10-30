@@ -1,5 +1,5 @@
 /**
- * lib/mentions.ts — id tokens (`<@id>`, `<@&id>`) and role mentions (WP 6.3e):
+ * lib/text/mentions.ts — id tokens (`<@id>`, `<@&id>`) and role mentions (WP 6.3e):
  * which messages highlight or notify the signed-in user, and the composer's
  * picked-span conversion.
  */
@@ -12,8 +12,8 @@ import {
   highlightsCurrentUser,
   mentionsCurrentUser,
   resolveMentionsFromContent,
-} from "../../src/lib/mentions";
-import { applyPickedMentions, tokensToPickedText } from "../../src/lib/pickedMentions";
+} from "../../src/lib/text/mentions";
+import { applyPickedMentions, tokensToPickedText } from "../../src/lib/text/pickedMentions";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";

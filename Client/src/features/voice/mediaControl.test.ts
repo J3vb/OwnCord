@@ -50,7 +50,7 @@ vi.mock("../../stores/voice.store", () => ({
   setShareDenied: vi.fn(),
   bumpLocalCameraRev: vi.fn(),
 }));
-vi.mock("../../lib/preferences", () => ({
+vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: vi.fn(),
 }));
@@ -60,7 +60,7 @@ vi.mock("../../lib/logger", () => ({
     return log;
   },
 }));
-vi.mock("../../lib/deviceManager", () => ({ isMicPolicyGated: () => gate.gated }));
+vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => gate.gated }));
 // The live codec switch has its own tests (codecSwitch.test.ts).
 vi.mock("./codecSwitch", () => ({
   CodecSwitchController: class {
@@ -79,10 +79,10 @@ const changeScreenshareSource = vi.hoisted(() => vi.fn(async (..._args: unknown[
 const setScreenshareQuality = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => undefined));
 vi.mock("./screenshareChange", () => ({ changeScreenshareSource, setScreenshareQuality }));
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("../../lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("../../lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 vi.mock("./videoCodec", () => ({ h264GpuPublish: (codec: string) => codec === "h264" }));
 const inPlaceSource = vi.hoisted(() => ({ value: null as { changeSource: () => void } | null }));
-vi.mock("../../lib/screenShare", () => ({
+vi.mock("../../lib/voice/screenShare", () => ({
   enableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   disableCamera: vi.fn(async (..._args: unknown[]) => undefined),
   enableScreenshare: vi.fn(async (..._args: unknown[]) => undefined),
@@ -98,7 +98,7 @@ import {
   setShareDenied,
   bumpLocalCameraRev,
 } from "../../stores/voice.store";
-import { savePref } from "../../lib/preferences";
+import { savePref } from "../../lib/prefs/preferences";
 import {
   enableCamera,
   disableCamera,
@@ -106,7 +106,7 @@ import {
   disableScreenshare,
   reconcileVideoFlags,
   inPlaceSourceChange,
-} from "../../lib/screenShare";
+} from "../../lib/voice/screenShare";
 import { CameraDeviceUnusable, CameraSwitchUnavailable } from "./cameraSwitch";
 import { voiceText } from "../../i18n/voice";
 import { MediaControl, syncShareGrant, type MediaControlHost } from "./mediaControl";
@@ -277,7 +277,7 @@ describe("microphonePublishingAllowed", () => {
   });
 });
 
-describe("syncShareGrant (WP 1C-3)", () => {
+describe("syncShareGrant", () => {
   it("marks share denied only when the grant leaves screen share out", () => {
     syncShareGrant(fakeRoom());
     expect(setShareDenied).toHaveBeenLastCalledWith(false);

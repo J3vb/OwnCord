@@ -26,27 +26,14 @@ import (
 	_ "modernc.org/sqlite" // the same pure-Go driver the server uses, registered as "sqlite"
 )
 
-// ─── the -drills run ────────────────────────────────────────────────────────
-//
-// B6-11's drills ask the questions the Go unit tests in db/ cannot: a real
-// process that really restarts itself, a real filesystem that really fills, a
-// real child process that really dies. The Go tests prove the mechanisms on a
-// copy; these phases prove the install an owner operates.
-//
-// Four phases, each with its own install directory:
-//
-//	R  backup, restore, deletion markers      (drills 1 and 2)
-//	C  corrupt operator input                  (drill 5, process half)
-//	D  headroom, then full, then recovery      (drills 3 and 4)
-//	S  the SFU                                 (drill 6)
-//
-// Nothing here relaunches the server. Each phase boots it and, where a phase
-// needs a restart, it asks the server for one through the same endpoint an
-// owner uses and then waits for whatever the restart produced — which is the
-// behaviour under test rather than a rehearsal of it.
-
 // phase is one drill phase: the letter -phases selects it by, and what it
 // covers (printed so a green run says what it ran).
+//
+// The phases are R (backup, restore, deletion markers; drills 1, 2), C
+// (corrupt operator input; drill 5), D (headroom, full, recovery; drills 3, 4)
+// and S (the SFU; drill 6). Nothing relaunches the server: a phase that needs
+// a restart asks for one through the owner's endpoint, so the restart is the
+// behaviour under test.
 type phase struct {
 	letter byte
 	what   string
@@ -59,14 +46,10 @@ var drillPhases = []phase{
 	{'S', "the SFU"},
 }
 
-// parsePhases turns -phases into the phases to run, in the order they are
-// numbered rather than the order they were typed: a phase may depend on what
-// an earlier one left behind, and the numbering is the only order that is
-// known to be correct.
-//
-// An empty spec means all of them. A spec that selects nothing — no letters at
-// all — is an error rather than an empty run, because a run that executes no
-// drill exits 0 and reads exactly like a run that passed every drill.
+// parsePhases turns -phases into the phases to run, in numbered order, since a
+// phase may depend on what an earlier one left behind. An empty spec means all
+// of them; a spec with no letters is an error, because a run that executes no
+// drill exits 0 and reads like a pass.
 func parsePhases(spec string) ([]phase, error) {
 	asked := make([]byte, 0, len(drillPhases))
 	for _, r := range spec {
@@ -108,11 +91,7 @@ func allPhaseLetters() string {
 	return strings.Join(letters, ", ")
 }
 
-// ─── known findings ─────────────────────────────────────────────────────────
-
-// ledgerRow is the part of a .superpowers/findings-ledger.json row this
-// harness reads. Two fields, because those are the two the flag is validated
-// against and nothing here is a ledger tool.
+// ledgerRow is the part of a findings-ledger row this harness reads.
 type ledgerRow struct {
 	ID     string `json:"id"`
 	Status string `json:"status"`
@@ -123,11 +102,10 @@ type ledger struct {
 	Findings []ledgerRow `json:"findings"`
 }
 
-// ledgerPaths is where the tracked ledger is looked for, in order: the workflow
-// runs this harness from Server/, a developer may run it from the repository
-// root. An id the ledger cannot be checked against is a usage error (see
-// newKnown), so a path that quietly resolved to nothing would disable the
-// flag's validation rather than fail it.
+// ledgerPaths is where the tracked ledger is looked for: the workflow runs
+// from Server/, a developer may run from the repository root. A path that
+// quietly resolved to nothing would disable the flag's validation (see
+// newKnown).
 var ledgerPaths = []string{
 	filepath.Join("..", ".superpowers", "findings-ledger.json"),
 	filepath.Join(".superpowers", "findings-ledger.json"),
@@ -169,31 +147,22 @@ func (l ledger) find(id string) (ledgerRow, bool) {
 }
 
 // known is the -known-findings flag: the ledger ids this run may downgrade a
-// failure to a warning for.
-//
-// The flag is currently inert by construction. triage downgrades only a failure
-// that carries an id, no failure construction in this file sets one, and the
-// ledger holds no open row a drill could name — so every run that can pass
-// validation today downgrades nothing. That is deliberate rather than
-// unfinished: R12 keeps an unfixed security-adjacent finding out of the tracked
-// ledger and R13 forbids inventing an id for one, so there is nothing honest to
-// name yet. Read the flag as a gate being prepared, never as a gate that is
-// holding something open.
+// failure to a warning for. It is currently inert: triage downgrades only a
+// failure that carries an id, and no failure here sets one, so no run
+// downgrades anything.
 type known struct {
 	// ids are the OPEN ledger ids the flag named.
 	ids map[string]bool
-	// release reports whether this run is the release (workflow_call) path.
-	// Only there is a known id downgraded: the nightly and dispatch runs fail
-	// on exactly the same phase, so a finding cannot hide behind the flag on
-	// the runs that exist to find it.
+	// release reports whether this is the release (workflow_call) path; only
+	// there is a known id downgraded, so nightly and dispatch runs cannot hide
+	// a finding behind the flag.
 	release bool
 }
 
-// newKnown validates the flag against the ledger. An id the ledger does not
-// list, or lists as anything but open, is refused rather than ignored: ignored,
-// it would downgrade nothing and read exactly like a flag that worked — and a
-// fixed finding left in the list would become a permanent hole in the gate the
-// moment it was repaired (R14).
+// newKnown validates the flag against the ledger. An id the ledger lacks or
+// lists as anything but open is refused: ignored, it would read like a working
+// flag, and a fixed finding left in the list would become a permanent hole in
+// the gate.
 func newKnown(spec string, l ledger, release bool) (known, error) {
 	k := known{ids: map[string]bool{}, release: release}
 	for id := range strings.SplitSeq(spec, ",") {
@@ -214,9 +183,8 @@ func newKnown(spec string, l ledger, release bool) (known, error) {
 }
 
 // knownFindings is -known-findings as the run uses it. The ledger is read only
-// when the flag names something, so a run without the flag cannot fail because
-// the ledger was not where it was expected — and the flag is empty on every run
-// that is not a release rehearsal (task 4 gates the steps).
+// when the flag names something, so a run without the flag cannot fail on a
+// missing ledger.
 func knownFindings(spec string) (known, error) {
 	if strings.TrimSpace(spec) == "" {
 		return known{ids: map[string]bool{}, release: releasePath()}, nil
@@ -228,9 +196,8 @@ func knownFindings(spec string) (known, error) {
 	return newKnown(spec, l, releasePath())
 }
 
-// releasePath reports whether this run is the release rehearsal. The workflow
-// calls the rehearsal through workflow_call, so that is the one event name the
-// downgrade is allowed on.
+// releasePath reports whether this run is the release rehearsal, which the
+// workflow calls through workflow_call.
 func releasePath() bool { return os.Getenv("GITHUB_EVENT_NAME") == "workflow_call" }
 
 // failure is one thing a drill measured that the milestone says must not
@@ -256,11 +223,9 @@ func failureList(failures []failure) string {
 	return strings.Join(lines, "\n")
 }
 
-// triage splits a phase's failures into the ones that fail this run and the
-// ones the release path downgrades to a ::warning::. A failure is downgraded
-// only when the flag named its id AND this is the release path: the flag is
-// what authorises it, and the release path is the only place the owner asked
-// for it (question 5).
+// triage splits a phase's failures into those that fail this run and those the
+// release path downgrades to a ::warning::: only a failure whose id the flag
+// named, on the release path.
 func (k known) triage(failures []failure) (fail, warn []failure) {
 	for _, f := range failures {
 		if f.id != "" && k.release && k.ids[f.id] {
@@ -272,19 +237,12 @@ func (k known) triage(failures []failure) (fail, warn []failure) {
 	return fail, warn
 }
 
-// ─── the run ────────────────────────────────────────────────────────────────
-
-// runDrills runs the phases -phases selected. The phases run in one process and
-// in the numbered order; each gets its own install directory, because a phase
-// that breaks a credential or fills a filesystem must not leave that behind for
-// the next one.
+// runDrills runs the selected phases in one process, in numbered order. Each
+// gets its own install directory so a broken credential or full filesystem is
+// not left for the next one.
 func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k known) error {
 	d := &drill{bin: binRef, dataFS: dataFS, known: k, docker: useDocker}
 
-	// One phase leaves a server running only when it failed to leave the state
-	// it wanted (a replacement that booted when it should have refused), and
-	// the next phase would then measure that process instead of its own. Named
-	// here so the failure reads as what it is rather than as a port conflict.
 	if useDocker {
 		fmt.Printf("drills: container leg, phase %s, image %s\n", phaseLetters(phases), binRef)
 	} else {
@@ -297,9 +255,8 @@ func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k k
 	}
 
 	// Every requested phase runs even after one fails: stopping at the first
-	// red phase hid C, D and S from 2026-10-02 on, behind a phase R
-	// failure nobody could see past. A failed phase may leave a server on the
-	// port, so the port is reclaimed before the next phase asserts it is free.
+	// red phase hid the later ones behind it. A failed phase may leave a
+	// server on the port, so the port is reclaimed before the next phase.
 	results := runEach(phases, func(p phase) error {
 		err := d.runPhase(p)
 		if err != nil {
@@ -314,9 +271,8 @@ func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k k
 	if err := failedPhases(results); err != nil {
 		return err
 	}
-	// Printed here rather than by main, because a phase that skipped is not a
-	// pass and the run's last line is where that has to be legible: "phase D:
-	// passed" over a skip is the read the brief's gotcha forbids.
+	// Printed here, not by main: a skipped phase is not a pass, and the run's
+	// last line must say so.
 	fmt.Println(d.summary(phases))
 	return nil
 }
@@ -338,9 +294,8 @@ func runEach(phases []phase, run func(phase) error) []phaseResult {
 	return results
 }
 
-// failedPhases is the run's error: nil when no phase failed, otherwise one
-// error naming every failed phase, so the exit status is non-zero whichever
-// phase it was.
+// failedPhases is nil when no phase failed, otherwise one error naming every
+// failed phase.
 func failedPhases(results []phaseResult) error {
 	var failed []string
 	for _, r := range results {
@@ -355,10 +310,9 @@ func failedPhases(results []phaseResult) error {
 		len(failed), len(results), strings.Join(failed, ", "))
 }
 
-// table is the per-phase summary printed after every run, red or green: one
-// row per requested phase with its result and, for anything but a clean pass,
-// why. The reason is the error's first line; the full error, with the server
-// log, was printed when the phase failed.
+// table is the per-phase summary printed after every run: one row per phase
+// with its result and, for anything but a clean pass, why (the first line of
+// the error; the full error and server log were printed when it failed).
 func (d *drill) table(results []phaseResult) string {
 	var b strings.Builder
 	b.WriteString("drills summary:\n")
@@ -379,15 +333,13 @@ func (d *drill) table(results []phaseResult) string {
 	return b.String()
 }
 
-// reclaimPort frees the port after a failed phase, so the next phase measures
-// its own server rather than failing on this one's leftover. The server this
-// harness spawned is killed by annotate on the way to the failure; what can
+// reclaimPort frees the port after a failed phase so the next measures its own
+// server. The server this harness spawned is killed by annotate; what can
 // remain is a self-restart replacement, which is not this harness's child (see
-// awaitRestart) and may still be booting, so the port alone cannot say whether
-// one exists. It is found by its working directory, which it inherited from a
-// boot in one of this run's install directories, so nothing outside the run is
-// touched. Where that lookup is not available the next phase fails on
-// ensurePortFree, which names the cause, and the table still lists it.
+// awaitRestart) and may still be booting. It is found by its working directory
+// inside this run's install directories, so nothing outside the run is
+// touched. Where that lookup is unavailable the next phase fails on
+// ensurePortFree, which names the cause.
 func (d *drill) reclaimPort() {
 	if d.srv != nil && !d.srv.adopted && !d.srv.exited && d.srv.cmd != nil {
 		_ = d.srv.cmd.Process.Kill()
@@ -452,11 +404,10 @@ func (d *drill) summary(phases []phase) string {
 func (d *drill) runPhase(p phase) error {
 	d.phase = fmt.Sprintf("phase %c", p.letter)
 	d.letter = p.letter
-	// Each phase owns its install directory. Phase R's restores leave a
-	// replacement process behind when it boots, and that process holds both
-	// the directory and the port, so the directory is not removed here — the
-	// process may still be writing to it. It is under the OS temp directory
-	// and the next run uses a fresh one.
+	// Each phase owns its install directory. It is not removed here: phase R's
+	// restores leave a replacement process holding the directory and the port,
+	// possibly still writing. It is under the OS temp directory and the next
+	// run uses a fresh one.
 	dir, err := os.MkdirTemp("", "owncord-drill-")
 	if err != nil {
 		return err
@@ -488,30 +439,23 @@ func (d *drill) runPhase(p phase) error {
 	return nil
 }
 
-// verdict is the line a completed phase prints, or "" for a phase that must
-// print none. Every branch of it exists to keep one word off that line —
-// "passed" — for work that did not run, which is the brief's gotcha and the
-// reason the skip machinery exists at all. It is a function rather than three
-// prints at their call sites so a test can hold that, since nothing in a green
-// run can.
+// verdict is the line a completed phase prints, or "" when it must print none.
+// Every branch keeps the word "passed" off work that did not run; it is a
+// function so a test can hold that, since nothing in a green run can.
 func (d *drill) verdict(p phase) string {
 	if slices.Contains(d.skipped, p.letter) {
-		// No line: the phase measured nothing, and the run's summary is the one
-		// place that says so.
+		// No line: the phase measured nothing; the run's summary says so.
 		return ""
 	}
 	if steps := d.partial[p.letter]; len(steps) > 0 {
-		// The rest of the phase measured, so neither word alone is true. Name
-		// the step, and the reason, on the line a reader skims.
+		// Neither word alone is true: name the step and the reason.
 		return fmt.Sprintf("phase %c (%s): passed, except %s", p.letter, p.what, strings.Join(steps, "; except "))
 	}
 	return fmt.Sprintf("phase %c (%s): passed", p.letter, p.what)
 }
 
-// skipStep records a step that did not run and prints why. Recording is the
-// half that matters: without it the phase's verdict is computed as though the
-// step had passed, which is how a whole brief step once went unexecuted behind
-// a green run.
+// skipStep records a step that did not run and prints why. Without the record
+// the phase's verdict would be computed as though the step had passed.
 func (d *drill) skipStep(reason string) {
 	if d.partial == nil {
 		d.partial = make(map[byte][]string)
@@ -536,18 +480,15 @@ type drill struct {
 	// cannot signal (see awaitRestart).
 	srv   *server
 	boots int
-	// container is the running container, on the -docker leg only: phase D
-	// needs its log and its filesystem, which the target seam's methods do not
-	// expose (they are the upgrade rehearsal's vocabulary, not the drill's).
+	// container is the running container (-docker leg only): phase D needs its
+	// log and filesystem, which the target seam's methods do not expose.
 	container *dockerTarget
-	// skipped are the phases that measured nothing because the machine could
-	// not give them what they assert on. Collected so the run's own last line
-	// cannot report a skip as a pass.
+	// skipped are phases that measured nothing because the machine could not
+	// give them what they assert on, so the last line cannot report a skip as
+	// a pass.
 	skipped []byte
-	// partial are the steps within a phase that never ran, keyed by phase. A
-	// step-level skip is neither a pass nor a phase skip: the phase's other
-	// steps did measure, so the phase has to name the part of itself that did
-	// not happen rather than choosing between "passed" and "skipped".
+	// partial are the steps within a phase that never ran, keyed by phase; the
+	// phase names them rather than choosing between "passed" and "skipped".
 	partial map[byte][]string
 	// letter is the running phase's letter, so a step can record its own skip
 	// without being handed it.
@@ -560,24 +501,18 @@ type drill struct {
 func (d *drill) baseURL() string { return defaultBaseURL }
 
 // boot launches the drill's server in its install directory and waits for it.
-// extraEnv is the config-override channel the rehearsal already uses
-// (OWNCORD_<SECTION>_<KEY>), so a phase can change a setting without rewriting
-// the config.yaml it is about to measure.
+// extraEnv uses the OWNCORD_<SECTION>_<KEY> overrides, so a phase can change a
+// setting without rewriting config.yaml.
 func (d *drill) boot(logName string, extraEnv ...string) error {
 	return d.bootAt(d.dir, logName, extraEnv...)
 }
 
-// bootAt is boot in another install directory, which phase S's second step
-// needs: an install told to use an SFU somebody else manages must not inherit
-// the config.yaml step 1's boot wrote, or it is the same install asked twice.
-//
-// The install directory's own data/ is created first, and it is not redundant:
-// config.yaml ships tls.cert_file as "data/cert.pem", relative to the WORKING
-// directory rather than to server.data_dir, and a boot that moves data_dir
-// (phase D) is exactly the boot that stops the server creating this one. Left
-// out, that boot dies writing its self-signed certificate — before it can
-// measure any disk pressure, and with a message about a certificate rather than
-// about the directory that is missing.
+// bootAt is boot in another install directory (phase S's second step must not
+// inherit step 1's config.yaml). The directory's data/ is created first:
+// config.yaml's tls.cert_file is "data/cert.pem", relative to the working
+// directory, and a boot that moves data_dir (phase D) would otherwise die
+// writing its self-signed certificate, with a message about a certificate
+// rather than the missing directory.
 func (d *drill) bootAt(dir, logName string, extraEnv ...string) error {
 	d.dir = dir
 	if !slices.Contains(d.dirs, dir) {
@@ -596,9 +531,8 @@ func (d *drill) bootAt(dir, logName string, extraEnv ...string) error {
 	return s.waitHealthy(d.phase)
 }
 
-// failures reports a phase's failures: the ones the release path downgrades
-// print a ::warning:: and pass, everything else fails the phase with the
-// server's log attached — the log is what makes a failure diagnosable from CI.
+// failures reports a phase's failures: downgraded ones print a ::warning:: and
+// pass, the rest fail the phase with the server's log attached.
 func (d *drill) failures(problems []failure) error {
 	if len(problems) == 0 {
 		return nil
@@ -617,18 +551,15 @@ func (d *drill) failures(problems []failure) error {
 	return err
 }
 
-// awaitRestart waits out a restart the server performed on its own, and points
+// awaitRestart waits out a restart the server performed on its own and points
 // the harness at whatever comes next.
 //
-// D9: the replacement is not this harness's child. updater.SpawnReplacement starts
-// it detached — its own session on Unix, where the drills run — and
-// there is no PID file to find it by, so `drain` and `waitErr` are both
-// unavailable for it. What IS shared is the log file (the replacement inherits
-// the parent's stdout/stderr) and the install directory (it inherits its cwd),
-// which is all `server` needs for healthcheck polling. The harness's notion of
-// "the running server" is therefore a local `server` value with adopted set,
-// not a new method on the target seam: the seam describes an install, and this
-// is about one process the harness will never own.
+// The replacement is not this harness's child: updater.SpawnReplacement starts
+// it detached with no PID file, so drain and waitErr are unavailable. What is
+// shared is the log file and the install directory (inherited stdout/stderr
+// and cwd), which is all server needs for healthcheck polling. Hence a local
+// server value with adopted set, not a method on the target seam, which
+// describes an install.
 func (d *drill) awaitRestart() error {
 	s := d.srv
 	if s == nil {
@@ -658,13 +589,10 @@ type restartOutcome struct {
 	tail   string // the log written since the restart was requested
 }
 
-// awaitUnwatchedRestart waits for a restart whose processes the harness holds no
-// handle on, and reports which of the two things happened: a server answered
-// the healthcheck again, or the replacement died on boot and said why.
-//
-// The port and the log are the only evidence available, which is exactly why
-// phases R's last two steps use this: what an operator has after a restore is
-// also only the port and the log.
+// awaitUnwatchedRestart waits for a restart whose processes the harness holds
+// no handle on, and reports whether a server answered the healthcheck again or
+// the replacement died on boot and said why. The port and the log are all an
+// operator has after a restore, so phase R's last two steps use this.
 func (d *drill) awaitUnwatchedRestart(logOffset int64) (restartOutcome, error) {
 	deadline := time.Now().Add(bootTimeout)
 	// The old process has to leave before anything new can bind, and until it
@@ -689,10 +617,8 @@ func (d *drill) awaitUnwatchedRestart(logOffset int64) (restartOutcome, error) {
 		if healthy(d.bin, d.dir) {
 			return restartOutcome{booted: true, tail: tail}, nil
 		}
-		// The binary prints [ERROR] and "server exited with error" on any
-		// lifecycle return, and a replacement that cannot serve has already
-		// gone quiet on the port: the two together are the boot's obituary,
-		// well before the full timeout is worth waiting out.
+		// A replacement that cannot serve prints [ERROR] and has gone quiet on
+		// the port: the boot's obituary, well before the timeout.
 		if strings.Contains(tail, "[ERROR]") || strings.Contains(tail, "server exited with error") {
 			return restartOutcome{booted: false, tail: tail}, nil
 		}
@@ -700,10 +626,9 @@ func (d *drill) awaitUnwatchedRestart(logOffset int64) (restartOutcome, error) {
 	return restartOutcome{}, fmt.Errorf("neither a healthy server nor a boot failure appeared within %s", bootTimeout)
 }
 
-// logSince reads the log from offset on. The replacement writes to the same
-// file the boot wrote to (it inherits the file descriptor), so a step that
-// wants to read only what the RESTART said has to remember where the file
-// ended before the restart was requested.
+// logSince reads the log from offset on. The replacement shares the boot's
+// file descriptor, so a step that wants only what the restart said must
+// record the offset first.
 func logSince(path string, offset int64) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -720,8 +645,7 @@ func logSince(path string, offset int64) (string, error) {
 	return string(data), nil
 }
 
-// logOffset is the log's current size — what logSince wants recorded before a
-// restart is requested.
+// logOffset is the log's current size, to record before a restart.
 func logOffset(path string) (int64, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -753,8 +677,6 @@ func (d *drill) stop() error {
 	return d.srv.drain(d.phase)
 }
 
-// ─── HTTP, against the running server ───────────────────────────────────────
-
 // get decodes a 200 response.
 func get(path string, token string, out any) error {
 	return request(http.MethodGet, defaultBaseURL+path, token, "", nil, http.StatusOK, out)
@@ -773,10 +695,8 @@ type healthBody struct {
 	Reason string `json:"reason"`
 }
 
-// healthOf reads /health, decoding the body on 200 AND on 503 — a degraded
-// server answers 503 with the reason this drill is asserting, so a helper that
-// only decoded 200 would report the drill's own expectation as a transport
-// failure.
+// healthOf reads /health, decoding the body on 200 and on 503: a degraded
+// server answers 503 with the reason being asserted.
 func healthOf() (healthBody, int, error) {
 	req, err := http.NewRequest(http.MethodGet, defaultBaseURL+"/health", nil) //nolint:noctx // bounded by the client Timeout
 	if err != nil {
@@ -810,14 +730,12 @@ type auditRow struct {
 	SubjectToken string `json:"subject_token"`
 }
 
-// livekitHealth reads the diagnostics endpoint's view of the SFU.
-//
-// D10: the endpoint is /api/v1/diagnostics/connectivity, NOT /api/v1/diagnostics
-// (which does not exist). It is administrator-gated and rate-limited to five
-// requests a minute, so it is called once per phase and never in a retry loop —
-// a 429 read as "the SFU is down" would invert what phase S asserts. The field
-// is voice.livekit_health; livekit_healthy is a different field on the metrics
-// endpoint.
+// livekitHealth reads the diagnostics endpoint's view of the SFU. The endpoint
+// is /api/v1/diagnostics/connectivity, administrator-gated and rate-limited to
+// five requests a minute, so it is called once per phase, never in a retry
+// loop: a 429 read as "the SFU is down" would invert what phase S asserts. The
+// field is voice.livekit_health (livekit_healthy is a different field on the
+// metrics endpoint).
 func livekitHealth(token string) (bool, error) {
 	var diag struct {
 		Voice struct {
@@ -830,8 +748,6 @@ func livekitHealth(token string) (bool, error) {
 	}
 	return diag.Voice.LiveKitHealth, nil
 }
-
-// ─── the fixture pieces the drills need ─────────────────────────────────────
 
 // channelRow is the part of db.Channel these drills read.
 type channelRow struct {
@@ -875,9 +791,9 @@ func createInvite(baseURL, token string) (string, error) {
 	return resp.Code, nil
 }
 
-// registerUser is the second account phase R erases. It is registered through
-// the public endpoint an owner's invitee uses, not seeded into the database:
-// the erasure has to be exercised against a user the server itself made.
+// registerUser registers the second account phase R erases, through the public
+// endpoint an invitee uses, so the erasure runs against a user the server
+// itself made.
 func registerUser(baseURL, invite, username string) (string, int64, error) {
 	body, err := json.Marshal(map[string]any{
 		"username":    username,
@@ -930,9 +846,8 @@ func authenticated(token string) (bool, string, error) {
 	return true, me.Username, nil
 }
 
-// messageCount counts a channel's messages seen through the API, which is the
-// question an owner asks ("is what I wrote still there"), not the one the
-// database would answer.
+// messageCount counts a channel's messages as the API shows them, which is the
+// question an owner asks.
 func messageCount(token string, channelID int64) (int, error) {
 	var resp struct {
 		Messages []struct {
@@ -947,13 +862,9 @@ func messageCount(token string, channelID int64) (int, error) {
 	return len(resp.Messages), nil
 }
 
-// ─── out-of-process SQLite ──────────────────────────────────────────────────
-
-// openSQLite opens a database file from THIS process. A check run through the
-// server's own API would be the server grading its own homework, which is why
-// the integrity checks and the marker reads go through the driver directly —
-// the same pure-Go one the server uses, so the file is read the way the server
-// reads it.
+// openSQLite opens a database file from this process with the server's own
+// pure-Go driver, so integrity and marker checks do not have the server grade
+// itself.
 func openSQLite(path string) (*sql.DB, error) {
 	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(5000)"
 	db, err := sql.Open("sqlite", dsn)
@@ -981,9 +892,8 @@ func integrityCheck(path string) (string, error) {
 	return answer, nil
 }
 
-// markerState is what the deletion-marker file says about an installation.
-// It is read directly because it is the file a restore cannot touch: it lives
-// outside the database, which is the whole reason an erasure survives one.
+// markerState is what the deletion-marker file says. It is read directly
+// because it lives outside the database, so a restore cannot touch it.
 type markerState struct {
 	count int
 	token string
@@ -1005,10 +915,9 @@ func readMarkers(dataDir string) (markerState, error) {
 	return state, nil
 }
 
-// messageRows counts the rows the database really holds, for the one assertion
-// in phase D that is about acknowledgement rather than about visibility: every
-// message the server said it stored must be a row, and every row must be one it
-// said it stored.
+// messageRows counts the rows the database holds, for phase D's
+// acknowledgement assertion: every message the server said it stored is a row
+// and every row was acknowledged.
 func messageRows(dataDir string, channelID, userID int64) (int, error) {
 	db, err := openSQLite(filepath.Join(dataDir, "chatserver.db"))
 	if err != nil {
@@ -1022,8 +931,6 @@ func messageRows(dataDir string, channelID, userID int64) (int, error) {
 	}
 	return n, nil
 }
-
-// ─── WebSocket ──────────────────────────────────────────────────────────────
 
 // wsFrame is one server→client frame. Payload stays raw: which structure it
 // holds is decided by Type, and decoding it eagerly would turn a frame this
@@ -1049,11 +956,10 @@ func (f wsFrame) errCode() (string, string) {
 	return payload.Code, payload.Message
 }
 
-// fullSendOutcome is which bucket one reply to the full stage's chat_send lands
-// in. The buckets are the whole assertion: phase D's verdict is that every send
-// was answered AND that at least one was refused by the full filesystem, so
-// which replies may count as that refusal decides whether the phase measured
-// the disk or measured something else.
+// fullSendOutcome is which bucket one reply to the full stage's chat_send
+// lands in. Phase D asserts that every send was answered and at least one was
+// refused by the full filesystem, so which replies count as that refusal
+// decides whether it measured the disk.
 type fullSendOutcome int
 
 const (
@@ -1063,12 +969,10 @@ const (
 	fullSendSilent                           // nothing arrived, or not an answer to this send
 )
 
-// classifyFullSend sorts a chat_send reply. The distinction that matters is
-// between a refusal and a throttle: service.sendMessageRateGate charges the
-// per-user chat rate limit BEFORE it reads the channel, so a RATE_LIMITED reply
-// never reached SQLite and proves nothing about the disk. Counting one as a
-// refusal is how a run that only ever touched the rate limiter comes to report
-// that fifty sends exercised the full filesystem.
+// classifyFullSend sorts a chat_send reply. A refusal differs from a throttle:
+// service.sendMessageRateGate charges the chat rate limit before it reads the
+// channel, so a RATE_LIMITED reply never reached SQLite and says nothing about
+// the disk.
 func classifyFullSend(frame wsFrame, err error) fullSendOutcome {
 	if err != nil {
 		return fullSendSilent
@@ -1082,18 +986,16 @@ func classifyFullSend(frame wsFrame, err error) fullSendOutcome {
 	if code, _ := frame.errCode(); code == errCodeRateLimited {
 		return fullSendThrottled
 	}
-	// Everything else is a refusal. That includes a frame whose payload will not
-	// parse: the rate-limiter's reply is built by serviceErrorToResult and is
-	// always well-formed, so an error this drill cannot read is definitionally
-	// not the rate limiter and came from further in than the precheck.
+	// Everything else is a refusal, including an unparseable error frame: the
+	// rate limiter's reply is always well-formed, so one this drill cannot
+	// read came from further in than the precheck.
 	return fullSendRefused
 }
 
-// voiceGuardRefused is probeVoiceJoin's stop predicate for the post-kill probe:
-// it reports whether the reply is the LiveKit-process guard refusing. It is
-// deliberately not "any error frame", because voice_join's per-user rate limit
-// is checked before the guard is and answers RATE_LIMITED — a probe that
-// stopped on that would call a guard which mints on every attempt a pass.
+// voiceGuardRefused is probeVoiceJoin's stop predicate for the post-kill
+// probe: whether the reply is the LiveKit-process guard refusing. Not any
+// error frame, because voice_join's per-user rate limit is checked first and
+// answers RATE_LIMITED.
 func voiceGuardRefused(f wsFrame) bool {
 	code, _ := f.errCode()
 	return code == errCodeVoiceError
@@ -1113,10 +1015,8 @@ func wsURL(baseURL string) string {
 	return strings.Replace(baseURL, "https://", "wss://", 1) + "/api/v1/ws"
 }
 
-// dialWS opens a session and completes the auth handshake: the first frame on
-// every connection is the auth frame, and the server answers auth_ok or closes.
-// A session that is not authenticated would make every later assertion vacuous
-// (a dropped socket looks exactly like a socket that received nothing).
+// dialWS opens a session and completes the auth handshake (auth_ok or close);
+// an unauthenticated session would make every later assertion vacuous.
 func dialWS(token string) (*wsConn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), fixtureTimeout)
 	defer cancel()
@@ -1184,13 +1084,9 @@ func (w *wsConn) send(kind string, payload any) error {
 	return wsjson.Write(ctx, w.conn, wsFrame{Type: kind, Payload: raw})
 }
 
-// await returns the first frame of one of the wanted types, dropping frames of
-// other types.
-//
-// Dropping rather than failing is deliberate: 20 sockets opened for phase R see
-// presence broadcasts and their own replay traffic as well, and a helper that
-// treated an unexpected frame as an error would fail the drill for the server
-// doing its job. A wanted type that never arrives is the failure.
+// await returns the first frame of a wanted type, dropping the others: sockets
+// also see presence broadcasts and replay traffic, so an unexpected frame must
+// not fail the drill. A wanted type that never arrives is the failure.
 func (w *wsConn) await(timeout time.Duration, want ...string) (wsFrame, error) {
 	deadline := time.After(timeout)
 	for {
@@ -1208,9 +1104,7 @@ func (w *wsConn) await(timeout time.Duration, want ...string) (wsFrame, error) {
 	}
 }
 
-// chatSend sends one message and returns the reply frame — the ok or the error,
-// whichever the server answers with. Phase D asks "an error frame, not
-// silence"; the fixture asks for the ok; both read the same reply.
+// chatSend sends one message and returns the reply, ok or error.
 func (w *wsConn) chatSend(channelID int64, content string) (wsFrame, error) {
 	if err := w.send("chat_send", map[string]any{"channel_id": channelID, "content": content}); err != nil {
 		return wsFrame{}, err
@@ -1238,15 +1132,14 @@ func wantOK(frame wsFrame, kind string) error {
 }
 
 const (
-	// drillPassword is the throwaway accounts' password: an invite-mode install
-	// validates its length (8-72) and nothing else. It is a literal on a
-	// temporary install that is never reachable off loopback.
+	// drillPassword is the throwaway accounts' password; an invite-mode
+	// install validates only its length (8-72), on a temp install never
+	// reachable off loopback.
 	drillPassword = "drill-passphrase" //nolint:gosec // throwaway accounts on a temp-dir server
 
-	// markerRelPath is the deletion-marker file, relative to the data
-	// directory (internal/app/erasure.go). It is spelled here rather than
-	// imported because importing `app` would drag the whole server into this
-	// harness — and the path is one of the things this drill exists to pin.
+	// markerRelPath is the deletion-marker file under the data directory
+	// (internal/app/erasure.go), spelled here because importing app would drag
+	// in the whole server and the path is something this drill pins.
 	markerRelPath = "erasure/markers.sqlite"
 
 	// erasureKeyRelPath is the key the marker file's tokens are HMACed under.
@@ -1260,12 +1153,8 @@ const (
 	restartSockets = 20
 )
 
-// ─── the drill's view of the install ────────────────────────────────────────
-
-// dataDir is where the server's own files live: config's server.data_dir,
-// default "data" under the install directory. database.path, backup.dir and
-// upload.storage_dir all default to children of it, which is why the drill
-// resolves them from here rather than spelling "data" at each call site.
+// dataDir is server.data_dir (default "data" under the install directory);
+// database.path, backup.dir and upload.storage_dir default to children of it.
 func (d *drill) dataDir() string    { return filepath.Join(d.dir, "data") }
 func (d *drill) backupDir() string  { return filepath.Join(d.dataDir(), "backups") }
 func (d *drill) uploadsDir() string { return filepath.Join(d.dataDir(), "uploads") }
@@ -1282,8 +1171,6 @@ func (d *drill) annotate(cause error) error {
 	return cause
 }
 
-// ─── phase R: backup, restore, deletion markers ─────────────────────────────
-
 // rState is what phase R's steps hand each other: the fixture the phase built
 // and the handles the later steps need to ask again.
 type rState struct {
@@ -1299,14 +1186,12 @@ type rState struct {
 	markers     markerState
 }
 
-// phaseR is drills 1 and 2 end to end against one live install: a real backup,
-// a real erase, a real restore through the admin endpoint's own self-restart,
-// and the two ways an operator can lose the erasure history across it.
+// phaseR is drills 1 and 2 against one live install: a real backup, a real
+// erase, a real restore through the admin endpoint's own self-restart, and the
+// two ways an operator can lose the erasure history across it.
 //
-// A step's assertions accumulate rather than stop the phase, because the steps
-// after them measure something else and the later measurements are what make a
-// failure diagnosable. Only a broken fixture (a request that never arrived, a
-// socket that never authenticated) stops the phase early.
+// A step's assertions accumulate rather than stop the phase, so later
+// measurements can diagnose a failure. Only a broken fixture stops it early.
 func (d *drill) phaseR() error {
 	if err := d.ensurePortFree(); err != nil {
 		return err
@@ -1338,10 +1223,10 @@ func (d *drill) phaseR() error {
 	if err != nil {
 		return err
 	}
-	// The phase leaves the port free or the next phase measures this one's
-	// leftovers. Step 7's boot fails closed and exits, which is what makes that
-	// true; saying so here is what turns a mystery port conflict three phases
-	// later into a failure at the step that caused it.
+	// The phase must leave the port free or the next phase measures this one's
+	// leftovers. Step 7's boot fails closed and exits, which makes that true;
+	// checking turns a mystery port conflict three phases later into a failure
+	// at the step that caused it.
 	if serving(d.baseURL()) {
 		problems = append(problems, failure{what: fmt.Sprintf(
 			"phase R ended with something still serving %s — the last step's boot should have failed closed and exited", d.baseURL())})
@@ -1350,9 +1235,8 @@ func (d *drill) phaseR() error {
 }
 
 // stepRFix builds the install phase R restores: an owner, a second account V
-// with ten messages and an upload, a third account created after the backup
-// (D3's "restore drops newer data"), and 20 authenticated sockets watching for
-// the restart.
+// with ten messages and an upload, a third account created after the backup,
+// and 20 authenticated sockets watching for the restart.
 func (d *drill) stepRFix(r *rState) ([]failure, error) {
 	token, err := d.setup()
 	if err != nil {
@@ -1391,24 +1275,19 @@ func (d *drill) stepRFix(r *rState) ([]failure, error) {
 		return nil, d.annotate(err)
 	}
 
-	// 20 sessions that stay authenticated across the restore, one account each.
-	// They are the drill's answer to "does every connected client learn the
-	// server is going away", which is the only thing an owner sees before the
-	// process exits mid-conversation.
+	// 20 sessions that stay authenticated across the restore, answering "does
+	// every connected client learn the server is going away".
 	//
-	// ONE ACCOUNT EACH, and that is not decoration. The hub's pub/sub subscribes
-	// a client under its USER id (ws/pubsub.go's Subscribe: subs[client.userID]
-	// = client), so a second socket for the same account REPLACES the first in
-	// the global topic — and the older socket, still connected, still answering
-	// pings, still counted as a client, receives no global broadcast at all.
-	// Measured on this drill's first run, with all 20 sockets on the owner's
-	// account: 1 of 20 received server_restart. 20 sockets for 20 accounts is
-	// the shape a server with 20 clients actually has.
+	// One account each: the hub subscribes a client under its user id
+	// (ws/pubsub.go Subscribe), so a second socket for the same account
+	// replaces the first in the global topic and the older socket, still
+	// connected, receives no global broadcast (with all 20 on the owner's
+	// account only 1 received server_restart).
 	//
-	// Accounts cost a registration each, and register is capped at 3 a minute
+	// Each account costs a registration, and register is capped at 3 a minute
 	// per IP (api/constants.go, scaled by security.auth_rate_limit_multiplier),
-	// so the boot above scales that cap. Without it the third registration of
-	// the run is refused with 429 and the phase cannot be built at all.
+	// so the boot scales that cap; otherwise the third registration is refused
+	// with 429.
 	for i := range restartSockets {
 		invite, err := createInvite(d.baseURL(), token)
 		if err != nil {
@@ -1429,9 +1308,9 @@ func (d *drill) stepRFix(r *rState) ([]failure, error) {
 	return nil, nil
 }
 
-// stepRBackup takes the backup a restore is made from, and integrity-checks it
-// out of process: a backup that fails the check is worse than no backup,
-// because the operator believes they have one.
+// stepRBackup takes the backup a restore is made from and integrity-checks it
+// out of process: a backup that fails the check is worse than none, because
+// the operator believes they have one.
 func (d *drill) stepRBackup(r *rState) ([]failure, error) {
 	name, err := createBackup(d.baseURL(), r.token)
 	if err != nil {
@@ -1450,9 +1329,9 @@ func (d *drill) stepRBackup(r *rState) ([]failure, error) {
 	return nil, nil
 }
 
-// stepRErase erases V through the route B4-9 added, and asserts the marker file
-// recorded it: a marker that was never written is a restore that resurrects an
-// erased account, and nothing else in the run would notice.
+// stepRErase erases V through the account erasure route and asserts the marker
+// file recorded it: a marker never written is a restore that resurrects an
+// erased account, and nothing else would notice.
 func (d *drill) stepRErase(r *rState) ([]failure, error) {
 	if err := wantStatus(http.MethodDelete,
 		fmt.Sprintf("/admin/api/users/%d", r.victimID), r.token, http.StatusNoContent); err != nil {
@@ -1471,21 +1350,18 @@ func (d *drill) stepRErase(r *rState) ([]failure, error) {
 			state.count, state.token)}}, nil
 	}
 
-	// The newcomer is registered HERE rather than in step 1, and where it sits
-	// is the whole assertion: it is created after the backup was taken, so a
-	// restore that rolled the install back has to drop it. Created before the
-	// backup, "the restore drops newer data" would be asked about an account the
-	// backup already contains, and the step could only ever measure a pass.
+	// The newcomer is registered here, after the backup, on purpose: a restore
+	// that rolled the install back has to drop it. Created before the backup,
+	// "the restore drops newer data" could only ever pass.
 	if r.newcomer, _, err = registerUser(d.baseURL(), r.invite, drillNewcomer); err != nil {
 		return nil, d.annotate(err)
 	}
 
-	// The live erase removed V's file, and a backup holds the database rather
-	// than the uploads, so without writing it back the post-restore assertion
-	// ("V's file is gone") would hold vacuously: it is already gone. Writing it
-	// back is what an operator restoring a file set does, and it makes the
-	// startup replay's file removal the only thing that can satisfy the check.
-	// Recorded here rather than assumed silently.
+	// The live erase removed V's file and a backup holds the database, not the
+	// uploads, so without writing it back "V's file is gone" after the restore
+	// would hold vacuously. Writing it back is what an operator restoring a
+	// file set does, and leaves the startup replay as the only thing that can
+	// satisfy the check.
 	if err := os.WriteFile(filepath.Join(d.uploadsDir(), r.victimFile), fixturePayload(), 0o600); err != nil {
 		return nil, d.annotate(fmt.Errorf("restoring V's upload file by hand, to give the replay something to remove: %w", err))
 	}
@@ -1496,11 +1372,10 @@ func (d *drill) stepRErase(r *rState) ([]failure, error) {
 // stepRRestore asks for the restore, watches the 20 sockets, and follows the
 // self-restart the endpoint performs.
 func (d *drill) stepRRestore(r *rState) ([]failure, error) {
-	// The reader, issued immediately before the restore POST and collected
-	// after it: whichever of the two answers first, the request overlapped the
-	// restore. Its outcome is a measurement, not an assertion — the restore
-	// closes the database out from under any in-flight read by design, and what
-	// the drill asserts is that the server comes back with the restored data.
+	// The reader is issued just before the restore POST and collected after
+	// it, so the request overlaps the restore. Its outcome is a measurement,
+	// not an assertion: the restore closes the database under any in-flight
+	// read by design.
 	reader := readWhileRestoring(r.token, r.text.ID)
 
 	if err := wantStatus(http.MethodPost, "/admin/api/backups/"+r.backup+"/restore",
@@ -1532,10 +1407,9 @@ func (d *drill) stepRRestore(r *rState) ([]failure, error) {
 	return problems, nil
 }
 
-// stepRInspect reads the install the restore produced. Every assertion here is
-// one an owner would make after restoring, in the order they would make it —
-// which is also why each one is its own function: the sequence is the spec, and
-// a reader checking it against the brief follows the list below.
+// stepRInspect reads the install the restore produced. Each assertion is one an
+// owner would make after restoring, in order, and its own function: the
+// sequence is the spec.
 func (d *drill) stepRInspect(r *rState) ([]failure, error) {
 	var problems []failure
 	fail := func(format string, args ...any) {
@@ -1557,8 +1431,8 @@ func (d *drill) stepRInspect(r *rState) ([]failure, error) {
 	return problems, nil
 }
 
-// inspectSafetyCopies: the safety copy the admin panel promises before an
-// irreversible overwrite, and that it is a usable database rather than a file.
+// inspectSafetyCopies checks the safety copy the admin panel promises before
+// an irreversible overwrite exists and is a usable database.
 func (d *drill) inspectSafetyCopies(fail func(string, ...any)) error {
 	copies, err := preRestoreCopies(d.backupDir())
 	if err != nil {
@@ -1581,9 +1455,9 @@ func (d *drill) inspectSafetyCopies(fail func(string, ...any)) error {
 	return nil
 }
 
-// inspectLiveDatabase: the live database is a valid database. It was written by
-// overwriting a file a closed server was holding, which is the one moment a
-// restore can corrupt it.
+// inspectLiveDatabase checks the live database is valid; it was written by
+// overwriting a file a closed server held, the one moment a restore can
+// corrupt it.
 func (d *drill) inspectLiveDatabase(fail func(string, ...any)) error {
 	answer, err := integrityCheck(filepath.Join(d.dataDir(), "chatserver.db"))
 	if err != nil {
@@ -1595,10 +1469,9 @@ func (d *drill) inspectLiveDatabase(fail func(string, ...any)) error {
 	return nil
 }
 
-// inspectErasureHeld: the erased account did not come back, and neither did its
-// messages. Both were in the backup (it predates the erasure) and only the
-// startup replay removes them again — a replay that does nothing leaves V
-// serving, which is exactly what drill 2 is for.
+// inspectErasureHeld checks the erased account and its messages did not come
+// back. Both were in the backup (which predates the erasure), so only the
+// startup replay removes them again (drill 2).
 func (d *drill) inspectErasureHeld(r *rState, fail func(string, ...any)) error {
 	if alive, who, err := authenticated(r.victimToken); err != nil {
 		return err
@@ -1616,9 +1489,8 @@ func (d *drill) inspectErasureHeld(r *rState, fail func(string, ...any)) error {
 	return nil
 }
 
-// inspectPostBackupDataGone: D3, the restore drops what was written after the
-// backup. The third account is that data, and it goes through the real path
-// rather than a synthetic one.
+// inspectPostBackupDataGone checks the restore drops what was written after
+// the backup (drill 3): the third account, through the real path.
 func (d *drill) inspectPostBackupDataGone(r *rState, fail func(string, ...any)) error {
 	if alive, who, err := authenticated(r.newcomer); err != nil {
 		return err
@@ -1628,18 +1500,15 @@ func (d *drill) inspectPostBackupDataGone(r *rState, fail func(string, ...any)) 
 	return nil
 }
 
-// inspectAuditTrail: the audit trail says what happened, including the replay
-// under the marker's own token — that token is the only link between the erase
-// and the erasure the operator cannot see (the account is gone).
+// inspectAuditTrail checks the audit trail says what happened, including the
+// replay under the marker's own token, the only link between the erase and the
+// erasure the operator cannot see (the account is gone).
 //
-// Where each row LIVES is the assertion, and the two halves are in different
-// databases by design. The restore writes backup_restore into the live database
-// and then overwrites that file with the backup, so the row survives only inside
-// the pre-restore safety copy — the handler says so, and
-// admin/handlers_backup_test.go asserts it — while the replay runs after the boot
-// and lands in the restored database. Measured on the first run of this drill:
-// the live log holds no backup_restore row. The brief predicts both in one place;
-// this is where they are.
+// Where each row lives is the assertion, in different databases by design. The
+// restore writes backup_restore into the live database and then overwrites
+// that file with the backup, so the row survives only in the pre-restore
+// safety copy (admin/handlers_backup_test.go asserts it), while the replay
+// runs after the boot and lands in the restored database.
 func (d *drill) inspectAuditTrail(r *rState, fail func(string, ...any)) error {
 	rows, err := auditLog(r.token)
 	if err != nil {
@@ -1667,8 +1536,8 @@ func (d *drill) inspectAuditTrail(r *rState, fail func(string, ...any)) error {
 	return nil
 }
 
-// inspectUploadGone: V's file is gone from disk. The replay removes files as well
-// as rows, and a restored upload whose row is gone is an orphan nobody can serve.
+// inspectUploadGone checks V's file is gone from disk: the replay removes
+// files as well as rows, and a restored upload whose row is gone is an orphan.
 func (d *drill) inspectUploadGone(r *rState, fail func(string, ...any)) error {
 	if _, err := os.Stat(filepath.Join(d.uploadsDir(), r.victimFile)); err == nil {
 		fail("the erased account's upload file is still on disk at uploads/%s after the restore: the replay removed the row and not the file", r.victimFile)
@@ -1678,9 +1547,9 @@ func (d *drill) inspectUploadGone(r *rState, fail func(string, ...any)) error {
 	return nil
 }
 
-// inspectMarkerSurvived: the marker survived the restore. The markers are the one
-// thing the restore cannot roll back, and a replay that consumed or discarded the
-// marker would erase V once and leave the next restore to resurrect it.
+// inspectMarkerSurvived checks the marker survived the restore, the one thing
+// it cannot roll back; a replay that consumed it would erase V once and leave
+// the next restore to resurrect it.
 func (d *drill) inspectMarkerSurvived(r *rState, fail func(string, ...any)) error {
 	state, err := readMarkers(d.dataDir())
 	if err != nil {
@@ -1696,18 +1565,17 @@ func (d *drill) inspectMarkerSurvived(r *rState, fail func(string, ...any)) erro
 }
 
 // stepRNoMarkerFile is drill 2's first half: the marker file is gone and the
-// same backup is restored again. The owner decided (open question 1) that the
-// server boots and logs a startup error that its erasure history is absent,
-// rather than refusing to boot — so that is what this asserts, and what it
-// measures either way is printed: the erased account coming back is the thing
-// the operator needs to know about.
+// same backup is restored again. The server must boot and log a startup error
+// that its erasure history is absent, rather than refuse to boot. What it
+// measures either way is printed, since the erased account coming back is what
+// the operator needs to know.
 //
-// The delete is attempted while the replacement runs and the restore is what
-// takes the process down: the replacement is not this harness's child (see
+// The delete is attempted while the replacement runs and the restore takes the
+// process down: the replacement is not this harness's child (see
 // awaitRestart), and this is the one order in which the marker file is absent
-// at the moment the next process opens it. The -wal and -shm sidecars go with
-// it — a fresh empty file beside a live -wal is not the state an operator who
-// deleted the marker file is in.
+// when the next process opens it. The -wal and -shm sidecars go with it; a
+// fresh empty file beside a live -wal is not the state of an operator who
+// deleted the marker file.
 func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 	markers := filepath.Join(d.dataDir(), filepath.FromSlash(markerRelPath))
 	deleted := 0
@@ -1719,9 +1587,9 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 		case errors.Is(err, fs.ErrNotExist):
 		default:
 			// Windows refuses to unlink a file another process holds open, and
-			// the running server holds this one open for its whole life. That
-			// is a limit of this machine, not a measurement, so the step is
-			// recorded as not having run — never as a pass.
+			// the running server holds this one for its whole life. That is a
+			// limit of this machine, not a measurement, so the step is recorded
+			// as not having run, never as a pass.
 			d.skipStep(fmt.Sprintf("step 6 did not run (%v — the running server holds the marker file open; only a stopped server can lose it on this platform)", err))
 			return nil, nil
 		}
@@ -1733,8 +1601,7 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 	if deleted < 3 {
 		// The marker file went but a sidecar did not. The install is already
 		// mutated, so this is neither a skip nor a clean run: say which files
-		// survived and carry on, so the boot below is measured against the
-		// state the operator would actually be in.
+		// survived and carry on.
 		d.skipStep(fmt.Sprintf("step 6 ran on a partially deleted marker set (%d of 3 files removed; SQLite's sidecars are still present)", deleted))
 	}
 	offset, err := logOffset(d.srv.logPath)
@@ -1749,8 +1616,7 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Whatever comes next owns the port, so the harness points at it: the log
-	// is the same file and the directory is the same directory.
+	// Whatever comes next owns the port; the log and directory are the same.
 	d.srv = &server{bin: d.bin, dir: d.dir, logPath: d.srv.logPath, adopted: true, waitErr: make(chan error, 1)}
 
 	var problems []failure
@@ -1764,20 +1630,17 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 		fmt.Printf("%s: with the marker file deleted the install booted and the erased account is %s\n",
 			d.phase, erasedPhrase(alive))
 		if alive {
-			// Recorded, not failed. Open question 1 decided that a missing
-			// marker file boots, and the markers are what names an erased
-			// account in a restored backup — with them gone nothing is left
-			// that could remove it, so the resurrection is the decided
-			// behaviour rather than a defect this drill can assert against.
-			// It is still the loudest thing step 6 measures.
+			// Recorded, not failed: a missing marker file boots by design, and
+			// the markers are what names an erased account in a restored backup,
+			// so with them gone nothing can remove it. It is still the loudest
+			// thing step 6 measures.
 			fmt.Printf("%s: RESURRECTION — %s authenticated again after the restore and nothing removes it (the markers that named it are gone). Decided behaviour, measured here rather than asserted.\n",
 				d.phase, who)
 		}
 	}
-	// The decided behaviour, asserted as a whole: it boots, and it says its
-	// erasure history is gone. A boot that refuses is a different behaviour
-	// (safer, and still not what was decided), and one that boots silently is
-	// the failure the decision exists to prevent.
+	// The expected behaviour as a whole: it boots, and it says its erasure
+	// history is gone. Refusing to boot is safer but not what is intended;
+	// booting silently is the failure this guards against.
 	switch {
 	case !outcome.booted:
 		problems = append(problems, failure{what: fmt.Sprintf(
@@ -1792,9 +1655,9 @@ func (d *drill) stepRNoMarkerFile(r *rState) ([]failure, error) {
 }
 
 // stepRNoErasureKey is drill 2's second half: the key is gone and the marker
-// file is intact. The marker file is bound to the key by fingerprint (OC-0388),
-// so the boot must fail closed with a named reason rather than serve with
-// markers it cannot match.
+// file is intact. The marker file is bound to the key by fingerprint, so the
+// boot must fail closed with a named reason rather than serve with markers it
+// cannot match.
 func (d *drill) stepRNoErasureKey(r *rState) ([]failure, error) {
 	if err := os.Remove(filepath.Join(d.dataDir(), erasureKeyRelPath)); err != nil {
 		return nil, d.annotate(fmt.Errorf("deleting %s: %w", erasureKeyRelPath, err))
@@ -1827,12 +1690,10 @@ func (d *drill) stepRNoErasureKey(r *rState) ([]failure, error) {
 	return problems, nil
 }
 
-// ─── phase R's small helpers ────────────────────────────────────────────────
-
 // readWhileRestoring issues the paginated messages GET the reader pool serves
-// (db's reader, not the single writer), and reports what it got. It runs while
-// the restore is being asked for, so the restore is asked for with a reader
-// open — which is the handle a restore that waited on readers would block on.
+// (db's reader, not the single writer) while the restore is being asked for,
+// so the restore runs with a reader open, which is what a restore that waited
+// on readers would block on.
 func readWhileRestoring(token string, channelID int64) <-chan string {
 	out := make(chan string, 1)
 	go func() {
@@ -1887,10 +1748,9 @@ func hasAuditRow(rows []auditRow, action, token string) bool {
 	return false
 }
 
-// auditRowsOf reads the audit_log table out of a database FILE, the way
-// integrityCheck reads a file's pages: the pre-restore safety copy is not being
-// served by any server, so the endpoint that auditLog uses cannot see the one
-// row that only exists inside it.
+// auditRowsOf reads the audit_log table out of a database file: the
+// pre-restore safety copy is served by no server, so the audit endpoint cannot
+// see the row that exists only inside it.
 func auditRowsOf(path string) ([]auditRow, error) {
 	db, err := openSQLite(path)
 	if err != nil {
@@ -1917,11 +1777,10 @@ func auditRowsOf(path string) ([]auditRow, error) {
 	return out, nil
 }
 
-// saysHistoryGone reports whether a log says the erasure history is absent: one
-// line that names the erasure markers AND calls them missing. Two words in one
-// line rather than one literal phrasing, because the decided behaviour names a
-// behaviour ("log a startup error that the erasure history is absent") and not
-// a sentence, and only the tail this step's boot wrote is searched.
+// saysHistoryGone reports whether a log says the erasure history is absent:
+// one line naming the erasure markers and calling them missing. Two words in
+// one line rather than a literal phrase, because the expected behaviour is
+// "a startup error that the history is absent", not a sentence.
 func saysHistoryGone(log string) bool {
 	for line := range strings.SplitSeq(log, "\n") {
 		lower := strings.ToLower(line)
@@ -1941,9 +1800,8 @@ func erasedPhrase(alive bool) string {
 	return "still gone"
 }
 
-// shortToken prints a subject token without its body: the token is an HMAC the
-// operator reads in the audit log, and the drill's log lines only need to say
-// which one it is.
+// shortToken prints a subject token without its body; log lines only need to
+// say which one it is.
 func shortToken(token string) string {
 	if len(token) <= 12 {
 		return token
@@ -1960,12 +1818,10 @@ func tailExcerpt(tail string) string {
 	return tail[len(tail)-limit:]
 }
 
-// ─── phase C: corrupt operator input ────────────────────────────────────────
-
-// phaseC is drill 5's process half: the two corrupt inputs an operator can hand
-// a running server — a damaged backup to restore, and a config.yaml with a
-// syntax error. db/b6_11_corrupt_drills_test.go proves the mechanisms on a
-// copy; "the live server refused and stayed up" is not a property of a copy.
+// phaseC is drill 5's process half: the two corrupt inputs an operator can
+// hand a running server, a damaged backup to restore and a config.yaml with a
+// syntax error. "The live server refused and stayed up" is not a property of
+// a copy, which is all the db tests exercise.
 func (d *drill) phaseC() error {
 	if err := d.ensurePortFree(); err != nil {
 		return err
@@ -1991,9 +1847,9 @@ func (d *drill) phaseC() error {
 }
 
 // stepCCorruptBackup hands the restore a backup with bytes overwritten in it.
-// The refusal is what the operator needs: the alternative is a live database
-// overwritten with a file SQLite itself rejects, and the pre-restore safety
-// copy is the only thing standing between them and a dead install.
+// It must be refused: otherwise a live database is overwritten with a file
+// SQLite itself rejects, with only the pre-restore safety copy between the
+// operator and a dead install.
 func (d *drill) stepCCorruptBackup() ([]failure, error) {
 	token, err := d.setup()
 	if err != nil {
@@ -2015,9 +1871,8 @@ func (d *drill) stepCCorruptBackup() ([]failure, error) {
 	if err != nil {
 		return nil, d.annotate(err)
 	}
-	// wantStatus is the assertion: a 200 here means the restore went ahead on
-	// a file SQLite rejects, and the run should stop rather than measure a
-	// install that no longer holds what the fixture put there.
+	// wantStatus is the assertion: a 200 means the restore went ahead on a
+	// file SQLite rejects, and the run should stop.
 	if err := wantStatus(http.MethodPost, "/admin/api/backups/"+name+"/restore",
 		token, http.StatusBadRequest); err != nil {
 		return nil, d.annotate(fmt.Errorf("restoring a corrupt backup: %w", err))
@@ -2055,16 +1910,14 @@ func (d *drill) stepCCorruptBackup() ([]failure, error) {
 }
 
 // stepCBrokenConfig boots the binary on a config.yaml that does not parse. The
-// operator edited the file and needs the FILE and the LINE, in seconds, before
-// anything else happened — a server that boots half-configured on a typo is
-// worse than one that refuses.
+// operator needs the file and the line, in seconds; a server that boots
+// half-configured on a typo is worse than one that refuses.
 func (d *drill) stepCBrokenConfig() ([]failure, error) {
 	dir := filepath.Join(d.dir, "broken-config")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	// A tab where YAML wants a space, which is the shape of a hand-edited file
-	// and what an operator produces at least once.
+	// A tab where YAML wants a space: a hand-edited file's typical typo.
 	const broken = "server:\n  name: drill\n\tport: 8443\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(broken), 0o600); err != nil {
 		return nil, err
@@ -2109,11 +1962,10 @@ func (d *drill) stepCBrokenConfig() ([]failure, error) {
 // corruptDetectably overwrites bytes in a database file until PRAGMA
 // integrity_check stops saying ok, and reports the offset it stopped at.
 //
-// The self-check is what keeps the step from passing vacuously. SQLite reads
-// only the pages a query touches, and a byte overwritten in a page's
-// unallocated space is never read: a "corrupt" file nothing rejects would make
-// the restore's 400 look like a refusal of corruption it never saw. The offsets
-// are tried in order and the last one that worked is printed.
+// The self-check keeps the step from passing vacuously: SQLite reads only the
+// pages a query touches, so a byte overwritten in a page's unallocated space is
+// never read, and the restore's 400 would look like a refusal of corruption it
+// never saw.
 func corruptDetectably(path string) (int64, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -2142,8 +1994,7 @@ func corruptDetectably(path string) (int64, error) {
 		if err := damageBytes(path, offset, 64); err != nil {
 			return 0, err
 		}
-		// An error from integrity_check is detection too: the pragma reporting
-		// "database disk image is malformed" is the file being rejected.
+		// An error from integrity_check is detection too (a malformed image).
 		if answer, err := integrityCheck(path); err != nil || answer != "ok" {
 			return offset, nil //nolint:nilerr // an error from integrity_check IS the corruption this loop looks for, not a failure to detect it
 		}
@@ -2154,8 +2005,8 @@ func corruptDetectably(path string) (int64, error) {
 }
 
 // damageBytes overwrites n bytes at offset with a pattern no b-tree page can
-// be, past the page header so the damage is in a page's contents rather than in
-// its type — the same shape db/b6_11_corrupt_drills_test.go's corruptBytes uses.
+// be, past the page header so the damage is in a page's contents rather than
+// its type.
 func damageBytes(path string, offset int64, n int) error {
 	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
@@ -2168,20 +2019,16 @@ func damageBytes(path string, offset int64, n int) error {
 	return f.Close()
 }
 
-// ─── phase D: headroom, then full, then recovery ────────────────────────────
-
-// diskEnv points every writable path that phase D measures at the size-limited
-// filesystem. server.data_dir alone is not enough and the difference is not
-// obvious: database.path, backup.dir and upload.storage_dir are separate keys
-// whose defaults are relative to the install directory, so a drill that moved
-// only data_dir would fill a filesystem the database is not on and never reach
-// ENOSPC at all.
+// diskEnv points every writable path phase D measures at the size-limited
+// filesystem. server.data_dir alone is not enough: database.path, backup.dir
+// and upload.storage_dir are separate keys with install-relative defaults, so
+// moving only data_dir would fill a filesystem the database is not on and
+// never reach ENOSPC.
 //
-// The TLS pair is deliberately NOT here. It is written once at boot and never
-// again, so it is not something the fill can push to the wall, and moving it
-// would move it out from under the healthcheck: that probe is a second process
-// reading the same config.yaml and it is not given this environment. See
-// bootAt for the directory the pair therefore needs.
+// The TLS pair is deliberately not here: it is written once at boot, so the
+// fill cannot push it to the wall, and moving it would move it out from under
+// the healthcheck, a second process reading the same config.yaml without this
+// environment. See bootAt for the directory the pair needs.
 func (d *drill) diskEnv() []string {
 	fs := d.dataFS
 	return []string{
@@ -2194,9 +2041,9 @@ func (d *drill) diskEnv() []string {
 }
 
 // dStage is phase D's running state: the socket its messages go through, the
-// channel and owner they belong to, and the number of acknowledgements — the
-// count the database must hold after the recovery, because an acknowledgement
-// and a row are the same promise.
+// channel and owner they belong to, and the acknowledgement count the database
+// must hold after the recovery, since an acknowledgement and a row are the
+// same promise.
 type dStage struct {
 	token string
 	owner int64
@@ -2205,15 +2052,15 @@ type dStage struct {
 	oks   int
 }
 
-// dirFiller is phase D's non-container filesystem: the directory -data-fs names.
-// A nil filler means this machine has none to give it — the skip is recorded and
+// dirFiller is phase D's non-container filesystem: the directory -data-fs
+// names. A nil filler means this machine has none; the skip is recorded and
 // printed here, never scored as a pass.
 func (d *drill) dirFiller() (filler, error) {
-	// No -data-fs, or Windows: NTFS has no tmpfs, and the drill's own cap would
-	// still be 64 MiB written to somebody's real volume before it gave up.
+	// No -data-fs, or Windows (no tmpfs, and the drill's cap would be 64 MiB
+	// written to somebody's real volume).
 	if d.dataFS == "" || runtime.GOOS == "windows" {
-		// The run's exit status and the phases after this one must not read as
-		// "phase D measured nothing and was fine".
+		// So the exit status and later phases do not read as "phase D measured
+		// nothing and was fine".
 		d.skipped = append(d.skipped, 'D')
 		fmt.Printf("%s: skipped (no size-limited filesystem)\n", d.phase)
 		return nil, nil
@@ -2225,9 +2072,8 @@ func (d *drill) dirFiller() (filler, error) {
 }
 
 // phaseD is drills 3 and 4: the filesystem under the reserved headroom, then
-// full to the wall, then given back. Standalone it runs against whatever
-// -data-fs names; with -docker it runs against the tmpfs task 4 mounts at
-// /app/data, which is the deployment's own disk-pressure story.
+// full to the wall, then given back. Standalone it runs against what -data-fs
+// names; with -docker, against the tmpfs mounted at /app/data.
 func (d *drill) phaseD() error {
 	if err := d.ensurePortFree(); err != nil {
 		return err
@@ -2236,9 +2082,8 @@ func (d *drill) phaseD() error {
 		f   filler
 		err error
 	)
-	// Two sibling branches rather than one if/else: each owns its own nesting,
-	// and keeping them flat is what holds this function inside its complexity
-	// budget without moving a number.
+	// Two flat sibling branches keep this function inside its complexity
+	// budget.
 	if !d.docker {
 		if f, err = d.dirFiller(); err != nil || f == nil {
 			return err
@@ -2260,9 +2105,8 @@ func (d *drill) phaseD() error {
 			return err
 		}
 		// Phase D asserts on a filesystem of a known size, and docker cp is the
-		// only way this harness can put bytes into a container (the image is
-		// distroless: no shell, no dd), so before measuring anything it asks
-		// whether this harness can reach that filesystem at all.
+		// only way to put bytes into the distroless container (no shell, no
+		// dd), so first ask whether this harness can reach that filesystem.
 		reachable, err := d.tmpfsReachable(f)
 		if err != nil || !reachable {
 			return err
@@ -2297,23 +2141,22 @@ func (d *drill) phaseD() error {
 	if err := d.failures(problems); err != nil {
 		return err
 	}
-	// dRecover's last step leaves the rebooted server running, and the phases
-	// after this one start by asserting nothing is serving :8443 yet. Without
-	// this the next phase fails with "a previous phase left a server behind" —
-	// a true statement blamed on the wrong phase.
+	// dRecover leaves the rebooted server running, and the next phase starts
+	// by asserting nothing is serving :8443; without this it would fail with a
+	// true statement blamed on the wrong phase.
 	return d.stop()
 }
 
-// tmpfsReachable reports whether this harness can put bytes into the container's
-// tmpfs at all.
+// tmpfsReachable reports whether this harness can put bytes into the
+// container's tmpfs at all.
 //
-// docker cp resolves its destination in the container's rootfs, BELOW a mount at
-// that path, so bytes copied into a --tmpfs mount point land in the layer
-// underneath while the filesystem the server writes to stays empty — the copy
-// reports success and the tmpfs reports zero used. The probe copies more than the
-// mount is declared to hold: if that succeeds, nothing after it would measure
-// disk pressure, and a stage that measured nothing must not report anything but a
-// skip. A false result has already recorded that skip.
+// docker cp resolves its destination in the container's rootfs, below a mount
+// at that path, so bytes copied into a --tmpfs mount point land in the layer
+// underneath while the server's filesystem stays empty: the copy reports
+// success and the tmpfs zero used. The probe copies more than the mount holds;
+// if that succeeds nothing after it would measure disk pressure, so a stage
+// that measured nothing must report only a skip. A false result has already
+// recorded that skip.
 func (d *drill) tmpfsReachable(f filler) (bool, error) {
 	probe := uint64(drillTmpfsBytes + drillFillStep)
 	n, err := f.fill(probe)
@@ -2327,12 +2170,11 @@ func (d *drill) tmpfsReachable(f filler) (bool, error) {
 			d.phase, probe>>20, drillTmpfsBytes>>20)
 		return false, nil
 	case err != nil && !errors.Is(err, errNoSpace):
-		// Neither a full filesystem nor a success: this is the harness failing,
-		// and the raw error is what a reader needs to tell that from ENOSPC.
+		// Neither full nor success: the harness itself failed; keep the raw
+		// error to tell that from ENOSPC.
 		return false, d.annotate(err)
 	case errors.Is(err, errNoSpace):
-		// The probe may have left a partial file on the tmpfs: free it before
-		// setup runs on a filesystem that is already full.
+		// The probe may have left a partial file: free it before setup runs.
 		if err := f.release(); err != nil {
 			return false, d.annotate(err)
 		}
@@ -2341,8 +2183,7 @@ func (d *drill) tmpfsReachable(f filler) (bool, error) {
 }
 
 // dHeadroom fills until the product's own health report says the disk is under
-// its floor, then asks the three questions drill 3 is about with the disk
-// nearly full: health, upload, message.
+// its floor, then asks drill 3's questions: health, upload, message.
 func (d *drill) dHeadroom(f filler, s *dStage) ([]failure, error) {
 	if err := d.fillToHealthFloor(f); err != nil {
 		return nil, err
@@ -2386,10 +2227,9 @@ func (d *drill) dHeadroom(f filler, s *dStage) ([]failure, error) {
 }
 
 // dBackup takes a backup with the filesystem nearly full and asserts the
-// OC-0212 invariant rather than an error. The brief predicts an error; a small
-// database may legitimately fit in the window above 2 MiB, so the assertion is
-// the one that matters either way: no partial file is left behind, and a 200 is
-// a file that integrity_checks. The measured status is printed.
+// no-partial-file invariant rather than an error: a small database may fit in
+// the window above 2 MiB, so either way no partial file may remain and a 200
+// must be a file that integrity_checks. The measured status is printed.
 func (d *drill) dBackup(s *dStage) ([]failure, error) {
 	before, err := listBackups(d.baseURL(), s.token)
 	if err != nil {
@@ -2429,10 +2269,9 @@ func (d *drill) dBackup(s *dStage) ([]failure, error) {
 	return problems, nil
 }
 
-// dFull fills to the wall and asks 50 messages' worth of questions: every send
-// must be answered, the server must still be there, and the log must name what
-// happened. The paths that go quiet are recorded, because a silent path is a
-// candidate finding and the drill is the only thing that can see it.
+// dFull fills to the wall and sends 50 messages: every send must be answered,
+// the server must still be there, and the log must name what happened. Quiet
+// paths are recorded as candidate findings only this drill can see.
 func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 	if err := d.fillToWall(f); err != nil {
 		return nil, err
@@ -2442,8 +2281,7 @@ func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 	silent, refused, acked, throttled := 0, 0, 0, 0
 	for i := range drillFullSends {
 		if i > 0 {
-			// Paced: the chat rate limit refuses a send before the disk is
-			// touched, so a tight loop would be asking about the rate limiter.
+			// Paced: the chat rate limit refuses before the disk is touched.
 			time.Sleep(drillFullSendPause)
 		}
 		frame, err := s.conn.chatSend(s.text.ID, fmt.Sprintf("full %d", i))
@@ -2472,13 +2310,10 @@ func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 			silent, drillFullSends)})
 	}
 	if refused == 0 && silent == 0 {
-		// The other half of the same claim, and the one silence cannot catch: if
-		// nothing was refused then the filesystem was not actually full, and the
-		// drill has measured nothing about the disk path — the fill did not do
-		// its job, so it must not report as though it had. Guarded on no silence
-		// too, because fifty unanswered sends is a server that stopped
-		// answering, and blaming the fill for that would be the wrong sentence
-		// in the log an operator reads.
+		// The other half of the claim, which silence cannot catch: if nothing
+		// was refused the filesystem was not full and the fill did not do its
+		// job. Guarded on no silence too, since fifty unanswered sends is a
+		// server that stopped answering, not a fill failure.
 		problems = append(problems, failure{what: fmt.Sprintf(
 			"%d chat_sends on a full filesystem and not one was refused: the fixture proves nothing about the disk path, and a pass here would assert that a full disk refuses writes having never seen one refused",
 			drillFullSends)})
@@ -2515,8 +2350,8 @@ func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 	return problems, nil
 }
 
-// dRecover gives the space back and asks the same three questions again, then
-// restarts and counts the rows the acknowledgements promised.
+// dRecover gives the space back, repeats the three questions, then restarts
+// and counts the rows the acknowledgements promised.
 func (d *drill) dRecover(f filler, s *dStage) ([]failure, error) {
 	if err := f.release(); err != nil {
 		return nil, d.annotate(err)
@@ -2546,12 +2381,10 @@ func (d *drill) dRecover(f filler, s *dStage) ([]failure, error) {
 	}
 
 	if d.docker {
-		// A container's /app/data is a tmpfs: it is destroyed with the
-		// container, so a reboot here would measure a fresh install rather than
-		// a recovery. This is the one place the container leg runs, and it runs
-		// only this phase, so a plain print here would leave the whole leg
-		// reporting a pass over a step that never ran — the exact read the skip
-		// machinery exists to prevent.
+		// A container's /app/data is a tmpfs destroyed with the container, so
+		// a reboot would measure a fresh install, not a recovery. Record the
+		// skip: a plain print would leave the leg reporting a pass over a step
+		// that never ran.
 		d.skipStep("the durability half is standalone-only — /app/data is a tmpfs, destroyed with the container")
 		return problems, nil
 	}
@@ -2560,10 +2393,10 @@ func (d *drill) dRecover(f filler, s *dStage) ([]failure, error) {
 	return problems, err
 }
 
-// dRebootCount restarts the install and asks the question acknowledgements
-// exist for: every message the server said it stored is a row, and every row is
-// one it said it stored. Both halves are findings — a message kept that was
-// never acknowledged, and a message acknowledged and lost.
+// dRebootCount restarts the install and checks the acknowledgement promise:
+// every message the server said it stored is a row, and every row is one it
+// said it stored. A message kept but never acknowledged, and one acknowledged
+// and lost, are both findings.
 func (d *drill) dRebootCount(s *dStage) ([]failure, error) {
 	if err := d.stop(); err != nil {
 		return nil, err
@@ -2601,11 +2434,10 @@ func (d *drill) dRebootCount(s *dStage) ([]failure, error) {
 // fillToHealthFloor fills until /health reports the disk degradation the drill
 // booted the floor for.
 //
-// The boundary is found through the product's own health report rather than
-// from a statfs: /health degrades at the same floor the upload path refuses at,
-// so crossing it is exactly the state this stage is about — and a container's
-// tmpfs cannot be stat'ed from the host at all. The first fill is computed from
-// the declared size and every later one follows the five-second health cache.
+// The boundary is found through the product's own health report, not statfs:
+// /health degrades at the same floor the upload path refuses at, and a
+// container's tmpfs cannot be stat'ed from the host. The first fill is computed
+// from the declared size; later ones follow the five-second health cache.
 func (d *drill) fillToHealthFloor(f filler) error {
 	filled, err := f.fill(drillHeadroomFirstFill)
 	if err != nil && !errors.Is(err, errNoSpace) {
@@ -2632,7 +2464,7 @@ func (d *drill) fillToHealthFloor(f filler) error {
 				f.total()>>20, status, body.Status, body.Reason, drillTmpfsBytes>>20))
 		case time.Now().After(deadline):
 			// The answer is cached (healthCacheTTL, 5 s), so a top-up plus a
-			// fresh cache window is how the boundary is found without a statfs.
+			// fresh cache window finds the boundary without statfs.
 			n, err := f.fill(drillFillStep)
 			if errors.Is(err, errNoSpace) {
 				return d.annotate(fmt.Errorf(
@@ -2653,9 +2485,8 @@ func (d *drill) fillToHealthFloor(f filler) error {
 }
 
 // fillToWall fills until the filesystem refuses more. The loop is bounded by
-// drillFillCap across BOTH fills, so a -data-fs that is not a size-limited
-// filesystem cannot fill a real disk: it fails instead, which is the only
-// honest outcome for a drill that cannot measure what it was pointed at.
+// drillFillCap across both fills, so a -data-fs that is not size-limited
+// cannot fill a real disk; it fails instead.
 func (d *drill) fillToWall(f filler) error {
 	for f.total() < drillFillCap {
 		n, err := f.fill(drillFillStep)
@@ -2673,9 +2504,8 @@ func (d *drill) fillToWall(f filler) error {
 		f.total()>>20))
 }
 
-// awaitHealthyAgain polls until /health says ok again. The answer is cached for
-// five seconds, so a single call would read the pre-recovery answer and report
-// the recovery as a failure.
+// awaitHealthyAgain polls until /health says ok again; the answer is cached for
+// five seconds, so a single call would read the pre-recovery answer.
 func (d *drill) awaitHealthyAgain() error {
 	deadline := time.Now().Add(2 * healthCacheWait)
 	last := ""
@@ -2725,10 +2555,9 @@ func (d *drill) logText() (string, error) {
 	return string(data), err
 }
 
-// backupFile reads a backup out of the install for an out-of-process integrity
-// check: straight off the filesystem on the standalone leg, through docker cp
-// on the container one (the file is in the container's tmpfs, which only docker
-// can read).
+// backupFile locates a backup for an out-of-process integrity check: on the
+// filesystem for the standalone leg, through docker cp for the container's
+// tmpfs.
 func (d *drill) backupFile(name string) (string, error) {
 	if d.container == nil {
 		return filepath.Join(d.dataFS, "backups", name), nil
@@ -2754,19 +2583,16 @@ func newNames(before, after []string) []string {
 	return fresh
 }
 
-// mentionsFullDisk reports whether the log names the failure the product's own
-// driver reports when the disk is full. Both spellings are accepted because
-// either can be the one in the log: the driver's ("Insertion failed because
-// database is full (SQLITE_FULL)") and SQLite's own strerror (13).
+// mentionsFullDisk reports whether the log names the failure the driver
+// reports when the disk is full: its own ("database is full (SQLITE_FULL)") or
+// SQLite's strerror (13).
 func mentionsFullDisk(log string) bool {
 	return strings.Contains(log, "SQLITE_FULL") || strings.Contains(log, "database or disk is full")
 }
 
 // quietPaths are the log lines a candidate finding would be written from: the
-// disk-pressure errors themselves and any line from a background path that
-// writes (the audit flusher, the persister, session touch). Nothing here is
-// asserted — the drill records what the log says, so the candidates are
-// readable in the run rather than only in a log somebody greps afterwards.
+// disk-pressure errors and any line from a background path that writes. Nothing
+// is asserted; the lines are printed so candidates are readable in the run.
 func quietPaths(log string) []string {
 	names := []string{
 		"sqlite_full", "disk is full", "disk full", "no space",
@@ -2788,25 +2614,22 @@ func quietPaths(log string) []string {
 	return lines
 }
 
-// ─── the disk fillers ───────────────────────────────────────────────────────
-
 // errNoSpace is what a filler reports when the filesystem refused more bytes.
-// It is not one sentinel per platform: the write itself says the same thing
-// more portably than any errno (Write returns n < len(p) only when it had to
-// stop), and the two legs reach the wall through completely different calls.
+// It is one sentinel, not an errno per platform, because the two legs reach
+// the wall through different calls.
 var errNoSpace = errors.New("the filesystem refused more bytes")
 
 // filler puts junk on the filesystem phase D is filling and takes it off again.
 // Two implementations, because a container's tmpfs is not a path this harness
 // can write to: it goes through docker cp.
 type filler interface {
-	// fill appends up to n bytes and reports how many it managed. A short fill
-	// is errNoSpace: that is the state the full stage is looking for.
+	// fill appends up to n bytes and reports how many it managed; a short fill
+	// is errNoSpace.
 	fill(n uint64) (uint64, error)
 	// release gives the space back.
 	release() error
 	// total is every byte this filler has put on the filesystem, so the cap
-	// bounds the whole phase rather than one loop of it.
+	// bounds the whole phase.
 	total() uint64
 }
 
@@ -2822,8 +2645,8 @@ type dirFiller struct {
 }
 
 func newDirFiller(dir string) (*dirFiller, error) {
-	// Truncated rather than appended to: a leftover junk file from an earlier
-	// run would silently change how much of the filesystem is left.
+	// Truncated rather than appended to: leftovers from an earlier run would
+	// change how much of the filesystem is left.
 	path := filepath.Join(dir, drillJunkName)
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		return nil, fmt.Errorf("creating %s: %w", path, err)
@@ -2857,9 +2680,8 @@ func (f *dirFiller) fill(n uint64) (uint64, error) {
 func (f *dirFiller) release() error { return os.Remove(f.path) }
 
 // dockerFiller fills a container's tmpfs through docker cp. The image is
-// distroless: no shell and no rm, so copying a file in is the only way to put
-// bytes there and copying a one-byte file over the same path is the only way to
-// take them out again.
+// distroless (no shell, no rm), so copying a file in puts bytes there and
+// copying a one-byte file over the same path takes them out.
 type dockerFiller struct {
 	fillerCount
 	t    *dockerTarget
@@ -2888,18 +2710,15 @@ func (f *dockerFiller) fill(n uint64) (uint64, error) {
 	}
 	if err := f.copyIn(f.t.name, stage); err != nil {
 		if isNoSpace(err) {
-			// docker cp may have extracted most of the file before the daemon hit
-			// ENOSPC, so release() must still overwrite it. f.bytes stays put: the
+			// docker cp may have extracted most of the file before ENOSPC, so
+			// release() must still overwrite it. f.bytes stays put: the
 			// partial size is unknown.
 			f.junk = append(f.junk, name)
 			return 0, errNoSpace
 		}
-		// isNoSpace matches the daemon's wording, not an errno — docker cp
-		// extracts inside the daemon, so the ENOSPC it hit is not the error this
-		// process can inspect. A daemon that reworded that message therefore
-		// lands here, and the raw text is printed as itself: otherwise the run
-		// reports a full tmpfs as a harness failure whose message names neither
-		// the filesystem nor the missing match.
+		// isNoSpace matches the daemon's wording, not an errno. A daemon that
+		// reworded the message lands here, and the raw text is printed so a
+		// full tmpfs is not reported as a harness failure naming nothing.
 		fmt.Printf("%s: the container refused %d bytes with an error matching no known ENOSPC wording (%v) — if the tmpfs is full, the daemon's message has changed and isNoSpace needs the new text\n",
 			f.t.name, n, err)
 		return 0, fmt.Errorf("putting %d bytes into the container: %w", n, err)
@@ -2919,8 +2738,8 @@ func (f *dockerFiller) release() error {
 			return err
 		}
 	}
-	// One copy, one tar: every name this filler created is replaced by a
-	// one-byte file, which frees the blocks the big ones held.
+	// One copy, one tar: each name is replaced by a one-byte file, freeing
+	// the blocks the big ones held.
 	if err := f.copyIn(f.t.name, stage); err != nil {
 		return fmt.Errorf("releasing the container's junk: %w", err)
 	}
@@ -2928,14 +2747,11 @@ func (f *dockerFiller) release() error {
 }
 
 // isNoSpace recognises the daemon's answer to a full tmpfs, which arrives as
-// text rather than as an errno: docker cp runs the extraction inside the
-// daemon, so the ENOSPC it hit is not the error this process sees.
+// text because docker cp extracts inside the daemon.
 func isNoSpace(err error) bool {
 	lower := strings.ToLower(err.Error())
 	return strings.Contains(lower, "no space left on device") || strings.Contains(lower, "disk full")
 }
-
-// ─── phase S: the SFU ───────────────────────────────────────────────────────
 
 // phaseS is drill 6: what a voice join does when the SFU it was told to manage
 // dies under it, and what it does when the SFU it was told to use was never
@@ -2946,7 +2762,7 @@ func (d *drill) phaseS() error {
 	}
 	bin, ok := livekitBinary()
 	if !ok {
-		// A skip, printed, never a pass (see the phase D skip).
+		// A skip, printed, never a pass.
 		d.skipped = append(d.skipped, 'S')
 		fmt.Printf("%s: skipped (no livekit-server binary: set %s, or put one at %s)\n",
 			d.phase, livekitBinaryEnv, filepath.Join("tools", "livekit-server"))
@@ -3003,20 +2819,16 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 		return nil, d.annotate(err)
 	}
 	// The guard reads IsRunning(), which goes false when the supervisor's
-	// Wait() returns — microseconds after the signal, but not necessarily
-	// before a join that raced it. So the probe retries, on a FRESH socket
-	// each time: a socket that already holds a voice state would get
-	// ALREADY_JOINED whatever the SFU is doing, and a minted token from a
-	// fresh socket is real evidence of the guard being absent.
+	// Wait() returns, microseconds after the signal but possibly after a join
+	// that raced it. So the probe retries, each time on a fresh socket: one
+	// that already holds a voice state would get ALREADY_JOINED whatever the
+	// SFU is doing.
 	//
-	// The probe stops only on the guard's OWN refusal. voice_join is capped at
-	// five attempts per user per second (ws.voiceJoinRateLimit) and that check
-	// runs before the guard (ws.voiceJoinPrecheck), so a predicate that
-	// accepted any error frame would stop on the probe's own RATE_LIMITED and
-	// report this step as a pass — having watched the rate limiter refuse
-	// instead of the guard. That is the exact reading a BROKEN guard produces:
-	// it mints on every attempt, the probe throttles itself, and the one
-	// outcome the step exists to catch is the one it would call success.
+	// The probe stops only on the guard's own refusal. voice_join is capped at
+	// five attempts per user per second (ws.voiceJoinRateLimit), checked
+	// before the guard (ws.voiceJoinPrecheck), so a predicate accepting any
+	// error frame would stop on the probe's own RATE_LIMITED and pass a broken
+	// guard that mints on every attempt.
 	seen, err := probeVoiceJoin(token, voice.ID, restartWindow, voiceProbePause, voiceGuardRefused)
 	if err != nil {
 		return nil, d.annotate(err)
@@ -3044,10 +2856,8 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 	}
 	fmt.Printf("%s: with the SFU killed voice_join refused with %s: %s\n", d.phase, code, message)
 
-	// The diagnostics endpoint is administrator-gated and rate-limited to five
-	// requests a minute on its own key, so it is called once (D10) — a retry
-	// loop here would collect 429s, and a 429 read as "the SFU is down" would
-	// invert what this step asserts.
+	// Administrator-gated and rate-limited to five requests a minute, so it
+	// is called once: a 429 read as "the SFU is down" would invert the step.
 	healthy, err := livekitHealth(token)
 	if err != nil {
 		return nil, d.annotate(err)
@@ -3058,11 +2868,9 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 		problems = append(problems, failure{what: "the diagnostics endpoint reports livekit_health=true while the managed SFU's process is dead"})
 	}
 
-	// The supervisor's first restart: a 3 second backoff (ws.LiveKitProcess),
-	// then the child is back. A fresh socket again — the one that refused holds
-	// no voice state (the refusal happens before the join persists), but the
-	// first socket is still in the channel and a re-join from it would answer
-	// ALREADY_JOINED.
+	// The supervisor's first restart comes after a 3 second backoff
+	// (ws.LiveKitProcess), on a fresh socket again: the first is still in the
+	// channel and would answer ALREADY_JOINED.
 	seen, err = probeVoiceJoin(token, voice.ID, supervisorRestartBudget, pollInterval/2,
 		func(f wsFrame) bool { return f.Type == "voice_token" })
 	if err != nil {
@@ -3077,12 +2885,10 @@ func (d *drill) stepSSupervised(bin string) ([]failure, error) {
 	return problems, nil
 }
 
-// probeVoiceJoin asks to join on a fresh socket until done(frame), or until the
-// budget runs out, and returns every frame it saw in order.
-//
-// A fresh socket per attempt is the point rather than a detail: a socket that
-// already holds a voice state answers ALREADY_JOINED whatever the SFU is doing,
-// so a re-join from a reused socket would measure the socket and not the guard.
+// probeVoiceJoin asks to join on a fresh socket until done(frame) or the
+// budget runs out, and returns every frame it saw in order. A reused socket
+// holding a voice state would answer ALREADY_JOINED and measure the socket,
+// not the guard.
 func probeVoiceJoin(token string, voiceID int64, budget, pause time.Duration, done func(wsFrame) bool) ([]wsFrame, error) {
 	var seen []wsFrame
 	deadline := time.Now().Add(budget)
@@ -3108,19 +2914,17 @@ func probeVoiceJoin(token string, voiceID int64, budget, pause time.Duration, do
 // stepSExternalAbsent boots an install pointed at an externally managed SFU
 // that is not there and records what a join does.
 //
-// Recorded rather than asserted: the brief asks for "token minted or error",
-// and a minted token is the disguised-success shape B6-6 forbids — a finding
-// that needs a ledger row before a drill can fail on it, which R12/R13 say a
-// drill does not write. So it prints a ::warning:: that cannot be missed in CI
-// and the measurement, and the fix (one HealthCheck before the mint) stays a
-// behaviour change with its own PR.
+// Recorded rather than asserted: a minted token there is the disguised-success
+// shape the connectivity check forbids, but a drill cannot fail on a finding
+// without a ledger row and does not write ledger rows. It prints a ::warning::
+// and the measurement; the fix (one HealthCheck before the mint) is a behaviour
+// change with its own PR.
 func (d *drill) stepSExternalAbsent() ([]failure, error) {
 	if err := d.stop(); err != nil {
 		return nil, err
 	}
-	// Its own install directory: the first boot's config.yaml may have recorded
-	// the binary path the drill gave it, and step 2 is exactly the absence of
-	// one.
+	// Its own install directory: the first boot's config.yaml may have
+	// recorded the binary path, and this step is its absence.
 	dir := filepath.Join(d.dir, "external")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -3156,17 +2960,16 @@ func (d *drill) stepSExternalAbsent() ([]failure, error) {
 }
 
 // livekitBinaryEnv is how the workflow hands phase S the binary it fetched and
-// verified (load-baseline.yml's "Fetch and verify livekit-server" step).
+// verified.
 const livekitBinaryEnv = "OWNCORD_DRILL_LIVEKIT_BINARY"
 
 // livekitBinary resolves the livekit-server phase S kills: the path the
 // workflow fetched, or a copy where a developer keeps one. The harness never
-// downloads it — the workflow verifies the release against the vendor's
-// checksums.txt before it gets here, and a harness that fetched its own copy
-// would be a second, unverified source of the same binary.
+// downloads it, since the workflow verifies the release against the vendor's
+// checksums first and a second fetch would be an unverified source.
 //
-// The path comes back absolute because the SERVER starts it, and the server's
-// working directory is the install directory rather than this process's.
+// The path comes back absolute because the server starts it and its working
+// directory is the install directory, not this process's.
 func livekitBinary() (string, bool) {
 	candidates := []string{}
 	if p := os.Getenv(livekitBinaryEnv); p != "" {
@@ -3191,20 +2994,16 @@ func livekitBinary() (string, bool) {
 	return "", false
 }
 
-// killLiveKit kills whatever process is running a given livekit-server binary.
-//
-// The supervised child belongs to the SERVER, not to this harness: the server
-// spawns it (ws.LiveKitProcess.runLoop) and holds the only handle to it, with
-// no PID file anywhere. Killing by image is what an operator's own tooling has
-// (taskkill, pkill) and is the only handle a process outside the server has;
-// on a drill machine nothing else runs under that name.
+// killLiveKit kills whatever process runs a given livekit-server binary. The
+// supervised child belongs to the server (ws.LiveKitProcess.runLoop), which
+// holds the only handle and writes no PID file; killing by image is what an
+// operator's tooling has (taskkill, pkill), and nothing else on a drill
+// machine runs under that name.
 func killLiveKit(bin string) error {
 	switch runtime.GOOS {
 	case "windows":
-		// Absolute, because taskkill is in the one directory a Git Bash PATH is
-		// allowed to be missing: System32 itself, which MSYS leaves out while
-		// keeping its subdirectories. PATH lookup here fails with "executable
-		// file not found in %PATH%" on a machine that has it.
+		// Absolute: taskkill is in System32, which a Git Bash PATH may omit,
+		// and PATH lookup then fails with "executable file not found".
 		root := os.Getenv("SystemRoot")
 		if root == "" {
 			root = `C:\Windows`
@@ -3224,8 +3023,8 @@ func runCommand(name string, args ...string) error {
 	return nil
 }
 
-// ownerID is the drill owner's user id, read from the session it authenticated
-// with: phase D counts the rows THAT user's acknowledged sends must have left.
+// ownerID is the drill owner's user id, read from its session: phase D counts
+// the rows that user's acknowledged sends must have left.
 func ownerID(token string) (int64, error) {
 	var me struct {
 		ID int64 `json:"id"`
@@ -3239,9 +3038,9 @@ func ownerID(token string) (int64, error) {
 	return me.ID, nil
 }
 
-// uploadStatus posts the fixture attachment and reports the status and body the
-// server answered with, because phase D's assertion is a refusal (507
-// STORAGE_LOW_DISK) that request() would report as a transport failure.
+// uploadStatus posts the fixture attachment and reports the status and body,
+// because phase D asserts a refusal (507 STORAGE_LOW_DISK) that request()
+// would report as a transport failure.
 func uploadStatus(token string) (int, string, error) {
 	body, contentType, err := multipartUpload()
 	if err != nil {
@@ -3280,106 +3079,90 @@ func backupStatus(token string) (int, string, error) {
 }
 
 const (
-	// drillTmpfsBytes is the filesystem phase D fills: task 4 mounts a 24 MiB
-	// tmpfs for the standalone leg and passes --tmpfs size=24m for the
-	// container one. The size is declared rather than measured because a
-	// container's tmpfs cannot be stat'ed from the host; the first fill is
-	// computed from it and every assertion after that is a measurement.
+	// drillTmpfsBytes is the filesystem phase D fills: a 24 MiB tmpfs for the
+	// standalone leg, --tmpfs size=24m for the container. It is declared, not
+	// measured, since a container's tmpfs cannot be stat'ed from the host; the
+	// first fill is computed from it.
 	drillTmpfsBytes = 24 << 20
 
 	// drillMinFreeDiskMB is the floor the drill boots with
-	// (server.min_free_disk_mb), the same floor /health reports and the upload
-	// path reserves — which is what makes "cross the floor once and both
-	// answers are observable" true.
+	// (server.min_free_disk_mb), which /health reports and the upload path
+	// reserves, so crossing it once makes both answers observable.
 	drillMinFreeDiskMB = 8
 
-	// drillHeadroomFirstFill is the first fill: the tmpfs minus a margin that
-	// leaves the free space inside the brief's window (under 8 MiB, above
-	// 2 MiB) once the server's own files have taken their share. Later fills
-	// top it up a megabyte at a time until /health agrees.
+	// drillHeadroomFirstFill is the tmpfs minus a margin that leaves the free
+	// space in the headroom window (under 8 MiB, above 2 MiB) once the
+	// server's own files have taken their share; later fills top up until
+	// /health agrees.
 	drillHeadroomFirstFill = 17 << 20
 
-	// drillFillStep is what each later fill adds — one megabyte, because a
-	// megabyte is the resolution the headroom window can afford.
+	// drillFillStep is what each later fill adds: the resolution the headroom
+	// window can afford.
 	drillFillStep = 1 << 20
 
-	// drillFillCap bounds everything phase D will ever write. It is what keeps
-	// a -data-fs mistake (a real disk) from becoming a filled disk: the drill
-	// fails instead, which is the honest outcome for a filesystem it cannot
-	// fill to a wall.
+	// drillFillCap bounds everything phase D will write, so a -data-fs mistake
+	// (a real disk) fails instead of filling the disk.
 	drillFillCap = 64 << 20
 
-	// drillJunkName is the junk file (or the name each container junk file
-	// starts with). Named rather than random so a leftover from a killed run is
-	// recognisable.
+	// drillJunkName is the junk file (or the prefix of each container junk
+	// file), named so a leftover from a killed run is recognisable.
 	drillJunkName = "drill-junk"
 
-	// drillFullSends is how many messages the full stage sends: the brief's 50,
-	// each of which must be answered.
+	// drillFullSends is how many messages the full stage sends; each must be
+	// answered.
 	drillFullSends = 50
 
-	// drillFullSendPause spaces the full stage's sends. MessageService's
-	// precheck allows ten chat sends per user per second
-	// (service.sendMessageRateGate) and answers RATE_LIMITED BEFORE it reads
-	// the channel, let alone writes to a full disk, so a loop that asked fifty
-	// times in a few milliseconds would measure the drill's own pacing and
-	// report it as the filesystem refusing. 120ms is eight a second: under the
-	// cap with room for the harness's own sends in the same sliding window.
+	// drillFullSendPause spaces the full stage's sends. The precheck allows ten
+	// chat sends per user per second (service.sendMessageRateGate) and answers
+	// RATE_LIMITED before reading the channel, so a fast loop would measure the
+	// drill's pacing, not the filesystem. 120ms is eight a second, under the
+	// cap with room for the harness's own sends.
 	drillFullSendPause = 120 * time.Millisecond
 
-	// The two WS error codes phase D and phase S must tell apart BY NAME. A
-	// refusal that proves the thing under test is not the same as a refusal
-	// the drill caused itself, and a step that counts either one is asserting
-	// something it did not watch. Spelled here rather than imported because
-	// importing `ws` would drag the whole server into this harness (the same
-	// reason as markerRelPath); they mirror Server/ws/errors.go.
+	// The two WS error codes phases D and S must tell apart by name: a
+	// refusal that proves the thing under test is not one the drill caused
+	// itself. Spelled here because importing ws would drag in the whole server
+	// (as with markerRelPath); they mirror Server/ws/errors.go.
 	//
 	// errCodeVoiceError is what the LiveKit-process guard answers with. It is
-	// also the code for "voice is not configured on this server", which the
-	// post-kill probe cannot reach: the step completes a join first, so
-	// h.livekit is non-nil by the time the guard is what refuses.
+	// also the code for "voice is not configured", which the post-kill probe
+	// cannot reach: a join completes first, so h.livekit is non-nil.
 	errCodeRateLimited = "RATE_LIMITED"
 	errCodeVoiceError  = "VOICE_ERROR"
 
-	// drillVictim and drillNewcomer are the two accounts phase R registers
-	// through an invite: the one it erases, and the one it creates after the
-	// backup so the restore has newer data to drop.
+	// drillVictim and drillNewcomer are the accounts phase R registers through
+	// an invite: the one it erases, and one created after the backup so the
+	// restore has newer data to drop.
 	drillVictim   = "drill-victim"
 	drillNewcomer = "drill-newcomer"
 
-	// healthCacheWait bounds a wait for /health to answer with the state the
-	// disk is in. The endpoint caches its answer for five seconds
-	// (api/router.go's healthCacheTTL), so this must exceed it.
+	// healthCacheWait bounds a wait for /health to show the disk state; the
+	// endpoint caches for five seconds (api/router.go's healthCacheTTL).
 	healthCacheWait = 8 * time.Second
 
-	// pollInterval is the drill's own poll, four times finer than the harness's
-	// pollEvery: the states phase D and S wait for change within a second of an
-	// event the drill just caused.
+	// pollInterval is the drill's own poll, four times finer than the
+	// harness's pollEvery.
 	pollInterval = 250 * time.Millisecond
 
 	// configFailBudget is how long a boot on a broken config.yaml may take
-	// before the delay itself is the finding: an operator who just edited the
-	// file is waiting for it.
+	// before the delay is the finding: the operator is waiting.
 	configFailBudget = 5 * time.Second
 
-	// restartBroadcastBudget is how long the open sessions are given to receive
-	// server_restart. It is generous because the frame is sent before the
-	// process exits and is buffered per connection, so the wait is for the
-	// harness's own bookkeeping rather than for anything on the wire.
+	// restartBroadcastBudget is how long open sessions are given to receive
+	// server_restart; generous because the frame is buffered per connection
+	// before the process exits.
 	restartBroadcastBudget = 10 * time.Second
 
 	// restartWindow is how long the post-kill probe may keep asking while the
-	// managed SFU is down. The supervisor's first restart is after a 3 second
+	// managed SFU is down; the supervisor's first restart is after a 3 second
 	// backoff (ws.LiveKitProcess's baseDelay), so the window stays inside it.
 	restartWindow = 2500 * time.Millisecond
 
 	// voiceProbePause spaces the post-kill voice_join probe. voice_join is
-	// capped at five attempts per user per second (ws.voiceJoinRateLimit) and
-	// that check runs BEFORE the LiveKit-process guard, so a probe that asked
-	// faster than the cap would collect RATE_LIMITED frames of its own making.
-	// 300ms is 3⅓ a second, which leaves the successful join that starts the
-	// probe inside the same sliding window and still gives ~8 attempts across
-	// restartWindow — far more than the microsecond race it exists to cover.
+	// capped at five attempts per user per second (ws.voiceJoinRateLimit),
+	// checked before the LiveKit-process guard, so a faster probe would collect
+	// its own RATE_LIMITED frames. 300ms leaves the join that starts the probe
+	// in the same window and gives ~8 attempts across restartWindow.
 	voiceProbePause = 300 * time.Millisecond
 
 	// supervisorRestartBudget is how long the managed SFU's first restart is
@@ -3387,18 +3170,15 @@ const (
 	// loaded CI machine.
 	supervisorRestartBudget = 30 * time.Second
 
-	// registerRateLimitPerMinute is what the API caps registrations at per IP
-	// per minute (api/constants.go) — quoted in phase R's own output, so the
-	// scaling below reads as a deliberate override rather than a mystery.
+	// registerRateLimitPerMinute is the API's registration cap per IP per
+	// minute (api/constants.go), quoted in phase R's output so the scaling
+	// reads as deliberate.
 	registerRateLimitPerMinute = 3
 
 	// drillAuthRateScale is security.auth_rate_limit_multiplier for phase R's
-	// boot. The phase needs 20 accounts and the register cap is 3 a minute per
-	// IP, so a run that stayed inside it would need seven minutes of waiting to
-	// build its fixture. The multiplier is the documented knob for a deployment
-	// where many users share one address, and nothing phase R asserts — a
-	// backup, a restore, a marker replay, a restart notice — goes through the
-	// auth rate limiter.
+	// boot: 20 accounts at 3 a minute per IP would need seven minutes. It is
+	// the documented knob for many users behind one address, and nothing
+	// phase R asserts goes through the auth rate limiter.
 	drillAuthRateScale = 40
 )
 

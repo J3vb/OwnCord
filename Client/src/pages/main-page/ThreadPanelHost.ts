@@ -1,5 +1,5 @@
 /**
- * ThreadPanelHost (WP 6.9c) — owns the side panel's slot: which thread is open,
+ * ThreadPanelHost — owns the side panel's slot: which thread is open,
  * the `thread_focus` frames that say so, and the panel's lazy load.
  *
  * `threadsStore.focusedThreadId` is the single truth for "a panel is open", and
@@ -28,7 +28,7 @@ import { channelsStore } from "@stores/channels.store";
 import { authStore } from "@stores/auth.store";
 import { safetyStore } from "../../features/safety/store";
 import type { ThreadPanelComponent } from "@components/ThreadPanel";
-import { RateLimiter } from "@lib/rate-limiter";
+import { RateLimiter } from "@lib/net/rateLimiter";
 import { setThreadResume, withThreadsStore } from "@stores/threadsLoader";
 import { resumeThreadFocus } from "../../features/messaging/threadResume";
 import type { MessageController } from "./MessageController";

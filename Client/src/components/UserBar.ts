@@ -5,7 +5,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
@@ -22,9 +22,9 @@ import {
   saveCustomStatus,
   saveStatusTimer,
   saveUserStatus,
-} from "@lib/userStatus";
+} from "@lib/presence/userStatus";
 import { parseExpiry } from "@components/statusDefs";
-import { avatarInitial, resolveDisplayName } from "@lib/avatar";
+import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import {
   avatarAnimationMode,
   isRenderableAvatar,
@@ -36,7 +36,7 @@ import {
   resolveServerUrl,
 } from "@components/message-list/attachments";
 import type { WsClient } from "@lib/ws";
-import type { PresenceSender } from "@lib/presence";
+import type { PresenceSender } from "@lib/presence/presence";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { portalText } from "../i18n/portal";
@@ -50,8 +50,8 @@ export interface UserBarOptions {
    * and this picker). Sending straight through `ws` instead would bypass the
    * presence rate limiter's client-side token *and* its retry, so a frame
    * the server drops (1 update / 10s, keyed by user id — service/
-   * channel.go) is lost for the rest of the session instead of retried
-   * (OC-0210). Required, alongside `ws`, for the picker to be enabled.
+   * channel.go) is lost for the rest of the session instead of retried.
+   * Required, alongside `ws`, for the picker to be enabled.
    */
   readonly presenceSender?: PresenceSender | null;
   /** The mic and headphone buttons. They work in a call or not: outside one
@@ -66,7 +66,7 @@ export interface UserBarOptions {
  * the only case callers should fall back to the localStorage pref for —
  * once a user is loaded, its `custom_status` (even "") is authoritative and
  * must not be second-guessed against a value that may belong to a different
- * account or server (OC-0310).
+ * account or server.
  */
 function serverCustomStatus(): string | null {
   const user = authStore.getState().user;
@@ -283,8 +283,8 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     // The picker is usable only when the socket is live (store-backed status,
     // docs/architecture/ux §3) AND a presence sender was provided to send
     // through — without one, selecting a status would either be a silent
-    // no-op or (worse) bypass the shared presence rate limiter and its retry
-    // (OC-0210). `ws` is checked too since a sender without a live socket
+    // no-op or (worse) bypass the shared presence rate limiter and its retry.
+    // `ws` is checked too since a sender without a live socket
     // behind it is not meaningfully usable either.
     const canSetStatus = (): boolean => {
       const ws = options?.ws;
@@ -302,7 +302,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     function applyStatus(status: UserStatus, durationMs?: number): void {
       saveUserStatus(status);
       // After the save, which ends any earlier timer: this one reverts the
-      // status to Online when it runs out (lib/statusTimer, started by the page).
+      // status to Online when it runs out (lib/presence/statusTimer, started by the page).
       if (durationMs !== undefined && isTimedStatus(status)) {
         saveStatusTimer(status, Date.now() + durationMs);
       }
@@ -312,7 +312,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         // No custom_status field: a plain status change must leave whatever
         // text the user set standing. Routed through the shared sender
         // (not ws.send directly) so a frame the presence limiter's window
-        // rejects is retried instead of lost — see @lib/presence.
+        // rejects is retried instead of lost — see @lib/presence/presence.
         sender.send(status);
       }
     }
@@ -350,7 +350,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       // Start from the stored selection, not a hardcoded "online" — otherwise
       // this picker and the settings Account tab show different statuses.
       currentStatus: loadUserStatus(),
-      // The server's own auth_ok.user.custom_status is authoritative (OC-0310):
+      // The server's own auth_ok.user.custom_status is authoritative:
       // the localStorage pref is only a same-window fallback for before the
       // first `ready` arrives. Once authStore has a user, its custom_status —
       // even null/"" meaning "no status set" — wins outright; falling through
@@ -464,7 +464,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     // Subscribe to auth changes. Also reflects a custom_status that arrives
     // (or changes) through authStore — a later auth_ok, or the settings
     // Account tab's own presence send being echoed back — into the picker,
-    // using the same setCustomStatus() the seed above trusts (OC-0310). The
+    // using the same setCustomStatus() the seed above trusts. The
     // null-safe read happens inside the callback so both "no user yet" and
     // "user with no custom status" collapse to the same "" default.
     disposable.onStoreChange(

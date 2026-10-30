@@ -11,7 +11,7 @@
 import { createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { showToast } from "@lib/toast";
+import { showToast } from "@lib/ui/toast";
 import { mediaControlsText } from "../../i18n/mediaControls";
 import type { LightboxGallery, LightboxHandle } from "./attachments";
 

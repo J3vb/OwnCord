@@ -1,4 +1,4 @@
-// The browser file saver (6.13d): a save is a download of a blob through
+// The browser file saver: a save is a download of a blob through
 // `<a download>`. The browser owns the destination (its downloads folder, or
 // its own prompt), so there is no dialog to pick a location with and no path
 // to write to: `pickSaveLocation` hands the suggested name back as the

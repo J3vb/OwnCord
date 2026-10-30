@@ -1,5 +1,5 @@
 /**
- * The English text seam (B9-3, BPR-064): feature-owned catalogs with typed
+ * The English text seam: feature-owned catalogs with typed
  * parameters and plurals, and the one place dates and numbers are formatted.
  *
  * A feature defines its catalog once and reads it where it renders:
@@ -25,7 +25,7 @@
  * download. The expansion transform exists for tests only.
  */
 
-import { getTimeFormat } from "../lib/timeFormat";
+import { getTimeFormat } from "../lib/text/timeFormat";
 
 /** The locale every catalog string, number and date is written in. */
 export const TEXT_LOCALE = "en-US";

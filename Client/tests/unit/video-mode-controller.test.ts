@@ -20,7 +20,7 @@ vi.mock("@stores/voice.store", () => ({
   voiceStore: { getState: mockVoiceStoreGetState },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getLocalCameraStream: mockGetLocalCameraStream,
   getLocalScreenshareStream: mockGetLocalScreenshareStream,
   hasLocalScreenshareAudio: mockHasLocalScreenshareAudio,
@@ -123,7 +123,7 @@ describe("createVideoModeController", () => {
     expect(ctrl.isVideoMode()).toBe(false);
   });
 
-  it("checkVideoMode does NOT auto-open for remote camera (BUG-105)", () => {
+  it("checkVideoMode does NOT auto-open for remote camera", () => {
     const users = new Map([[2, { userId: 2, camera: true, screenshare: false, username: "bob" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 10, voiceUsers: new Map([[10, users]]) }),
@@ -167,7 +167,7 @@ describe("createVideoModeController", () => {
     expect(slots.messagesSlot.style.display).toBe("");
   });
 
-  it("turning on your camera while reading chat stays in chat (WP 1B-4)", () => {
+  it("turning on your camera while reading chat stays in chat", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -429,7 +429,7 @@ describe("createVideoModeController", () => {
     });
   });
 
-  describe("chat beside the grid (WP 6.1b)", () => {
+  describe("chat beside the grid", () => {
     function setup() {
       const slots = makeSlots();
       const chatColumn = document.createElement("div");
@@ -560,7 +560,7 @@ describe("createVideoModeController", () => {
     expect(slots.videoGridSlot.style.display).toBe("none");
   });
 
-  it("turning on your screen share while reading chat stays in chat (WP 1B-4)", () => {
+  it("turning on your screen share while reading chat stays in chat", () => {
     const users = new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({
@@ -695,7 +695,7 @@ describe("createVideoModeController", () => {
     expect(vg.removeStream).toHaveBeenCalledWith(1_000_001);
   });
 
-  it("checkVideoMode does NOT auto-open for remote screenshare (BUG-105)", () => {
+  it("checkVideoMode does NOT auto-open for remote screenshare", () => {
     const users = new Map([
       [1, { userId: 1, camera: false, screenshare: false, username: "me" }],
       [2, { userId: 2, camera: false, screenshare: true, username: "bob" }],
@@ -837,7 +837,7 @@ describe("createVideoModeController", () => {
     expect(ctrl.getFocusedTileId()).toBeNull();
   });
 
-  describe("your own video never takes over the chat (WP 1B-4)", () => {
+  describe("your own video never takes over the chat", () => {
     const me = () =>
       new Map([[1, { userId: 1, camera: false, screenshare: false, username: "me" }]]);
 
@@ -1022,7 +1022,7 @@ describe("createVideoModeController", () => {
       expect(vg.clearStreams).not.toHaveBeenCalled();
     });
 
-    it("clears videoGrid streams on a voice channel switch (A -> B) even though currentChannelId never passes through null (OC-0012)", () => {
+    it("clears videoGrid streams on a voice channel switch (A -> B) even though currentChannelId never passes through null", () => {
       // VoiceCallbacks.onVoiceJoin moves currentChannelId straight from the
       // old channel to the new one (joinVoiceChannel is optimistic), so the
       // channelId === null branch never runs on a switch. Remote tiles left
@@ -1496,7 +1496,7 @@ describe("createVideoModeController", () => {
       expect(avatarTiles()).toHaveLength(0);
     });
   });
-  describe("call pop-out (WP 1C-7)", () => {
+  describe("call pop-out", () => {
     const user = (userId: number, username: string) => ({
       userId,
       username,

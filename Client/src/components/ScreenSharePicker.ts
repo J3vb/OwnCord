@@ -30,17 +30,17 @@
  *
  * Registered from the UI side (`MainPage` -> `screenPickerSlot.ts`) and loaded
  * on demand; the native picker adapter is a lower layer and may not import
- * this component directly (ARCH-06).
+ * this component directly.
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import type { NativeVoiceScreenSource } from "../platform/contracts/nativeVoice";
 import { voiceText as t } from "../i18n/voice";
 import { desktop } from "../platform/desktop";
-import { getEffectiveScreenShareFps, type StreamQuality } from "@lib/screenShare";
-import { SHARE_FPS_OPTIONS } from "@lib/shareFps";
+import { getEffectiveScreenShareFps, type StreamQuality } from "@lib/voice/screenShare";
+import { SHARE_FPS_OPTIONS } from "@lib/voice/shareFps";
 
 export interface ScreenSharePick {
   /** The host source id, "portal" on Wayland, or "os" on the web path. */
@@ -373,9 +373,16 @@ function openPicker(
       if (opts.osPicker !== true)
         options.appendChild(
           opts.audioAvailable === true
-            ? buildAudioSwitch((on) => {
-                selectedAudio = on;
-              })
+            ? buildAudioSwitch(
+                (on) => {
+                  selectedAudio = on;
+                },
+                {
+                  label: t("picker.shareAudio"),
+                  // X11 knows which app owns a window; the portal does not say.
+                  hint: t(opts.portal ? "picker.shareAudioHint" : "picker.shareAudioHintWindow"),
+                },
+              )
             : buildAudioNote(),
         );
       options.appendChild(buildQualityOption());
@@ -449,7 +456,7 @@ function openPicker(
         fpsSelect.value = String(selectedFps);
         syncFpsHint();
       };
-      // Windows (M-2): what 120 fps needs, while it is chosen.
+      // Windows: what 120 fps needs, while it is chosen.
       const fps120Hint =
         opts.osPicker === true
           ? createElement(

@@ -1,6 +1,6 @@
 /**
  * Unit tests for the Push-to-Talk service (src/platform/desktop/pushToTalkService.ts, and
- * the vkName display helper in src/lib/ptt.ts).
+ * the vkName display helper in src/lib/voice/ptt.ts).
  *
  * Covers:
  *  - vkName: known keys, A-Z, 0-9, Numpad, unknown (hex fallback)
@@ -50,7 +50,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => mockListen(...args),
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => {
     testPrefs.set(key, value);
@@ -81,7 +81,7 @@ vi.mock("@lib/logger", () => ({
 
 // PTT only ever calls setPttGated; setMuted is mocked so tests can assert it is
 // never touched (PTT no longer uses mute).
-vi.mock("../../src/lib/livekitSession", () => ({
+vi.mock("../../src/lib/voice/livekitSession", () => ({
   setPttGated: (gated: boolean) => mockSetPttGated(gated),
   setMuted: (muted: boolean) => mockSetMuted(muted),
 }));
@@ -90,7 +90,7 @@ vi.mock("../../src/lib/livekitSession", () => ({
 // Import module under test (AFTER mocks)
 // ---------------------------------------------------------------------------
 
-import { vkName } from "../../src/lib/ptt";
+import { vkName } from "../../src/lib/voice/ptt";
 import { pushToTalk } from "../../src/platform/desktop/pushToTalkService";
 
 const { init: initPtt, stop: stopPtt, updateKey: updatePttKey, captureKeyPress } = pushToTalk;
@@ -544,7 +544,7 @@ describe("updatePttKey", () => {
 // Tests: updatePttKey gates an already-hot mic when bound mid-call (OC-0162)
 // ---------------------------------------------------------------------------
 
-describe("updatePttKey gates the mic when binding a key mid-call (OC-0162)", () => {
+describe("updatePttKey gates the mic when binding a key mid-call", () => {
   beforeEach(async () => {
     resetAll();
     // The module-level `listening` flag is not reset by resetAll() (it lives
@@ -1392,7 +1392,7 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
 // started, and can lose it again.
 // ---------------------------------------------------------------------------
 
-describe("PTT on the portal backend (LP-9b)", () => {
+describe("PTT on the portal backend", () => {
   const portalStatus = (ptt: string | null) => ({
     backend: "portal",
     portalVersion: 2,

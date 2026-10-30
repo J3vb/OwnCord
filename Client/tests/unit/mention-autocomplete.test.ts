@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -26,7 +26,10 @@ import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { resetMessagesStore, setMessages } from "../../src/stores/messages.store";
-import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../src/lib/net/serverCapabilities";
 import type { MessageResponse } from "../../src/lib/types";
 import { Permission } from "../../src/lib/types";
 
@@ -191,7 +194,7 @@ describe("filterMentionSuggestions", () => {
     expect(filterMentionSuggestions("every").map((s) => s.token)).toEqual(["everyone"]);
   });
 
-  // The composer's own token scanner and both parsers (client lib/mentions.ts,
+  // The composer's own token scanner and both parsers (client lib/text/mentions.ts,
   // server mentions.go) only accept [\p{L}\p{N}_.-]{1,64} -- a username with a
   // space or "@" truncates the token on insert, so picking it produces a dead
   // token that resolves to no mention and notifies nobody.

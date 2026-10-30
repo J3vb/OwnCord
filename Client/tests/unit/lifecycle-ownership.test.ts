@@ -29,7 +29,7 @@ const srcDir = path.join(clientRoot, "src");
 const LONG_LIVED = /^(window|document|document\.body|document\.documentElement|navigator\..*)$/;
 
 // The two lifecycle primitives. R4 exempts them by rule, not by allowlist.
-const PRIMITIVE_FILES = new Set(["lib/disposable.ts", "lib/sessionScope.ts"]);
+const PRIMITIVE_FILES = new Set(["lib/disposable.ts", "lib/net/sessionScope.ts"]);
 
 const sourceFiles = readdirSync(srcDir, { recursive: true, encoding: "utf8" })
   .filter(
@@ -67,7 +67,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/formatting.ts",
+    file: "lib/text/formatting.ts",
     receiver: "window",
     event: "owncord:pref-change",
     category: "app-lifetime",
@@ -88,21 +88,21 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/channel-mutes.ts",
+    file: "lib/prefs/channelMutes.ts",
     receiver: "window",
     event: "owncord:pref-change",
     category: "app-lifetime",
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/channel-mutes.ts",
+    file: "lib/prefs/channelMutes.ts",
     receiver: "window",
     event: "storage",
     category: "app-lifetime",
     reason: "app-lifetime cross-tab storage listener installed once at module load",
   },
   {
-    file: "lib/deviceManager.ts",
+    file: "lib/voice/deviceManager.ts",
     receiver: "navigator.mediaDevices",
     event: "devicechange",
     category: "per-mount",
@@ -117,35 +117,35 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/media-visibility.ts",
+    file: "lib/prefs/mediaVisibility.ts",
     receiver: "document",
     event: "visibilitychange",
     category: "app-lifetime",
     reason: "once-guarded app-lifetime visibility listener (ensureVisibilityListener)",
   },
   {
-    file: "lib/media-visibility.ts",
+    file: "lib/prefs/mediaVisibility.ts",
     receiver: "window",
     event: "blur",
     category: "app-lifetime",
     reason: "once-guarded app-lifetime visibility listener (ensureVisibilityListener)",
   },
   {
-    file: "lib/media-visibility.ts",
+    file: "lib/prefs/mediaVisibility.ts",
     receiver: "window",
     event: "focus",
     category: "app-lifetime",
     reason: "once-guarded app-lifetime visibility listener (ensureVisibilityListener)",
   },
   {
-    file: "lib/safe-render.ts",
+    file: "lib/text/safeRender.ts",
     receiver: "window",
     event: "error",
     category: "app-lifetime",
     reason: "global error handler installed once at startup (installGlobalErrorHandlers)",
   },
   {
-    file: "lib/safe-render.ts",
+    file: "lib/text/safeRender.ts",
     receiver: "window",
     event: "unhandledrejection",
     category: "app-lifetime",
@@ -221,13 +221,13 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the SessionScope that aborts the transport (api.ts owner.addCleanup)",
   },
   {
-    file: "lib/profiles.ts",
+    file: "lib/presence/profiles.ts",
     fn: "pingHost",
     category: "cancellation-token",
     reason: "owner: the per-attempt HEALTH_TIMEOUT_MS timer that aborts it",
   },
   {
-    file: "lib/roomEventHandlers.ts",
+    file: "lib/voice/roomEventHandlers.ts",
     fn: "abandonRoomAndReconnect",
     category: "cancellation-token",
     reason: "owner: the next attempt, which aborts this one",
@@ -371,7 +371,7 @@ for (const rel of sourceFiles) {
         }
       }
       // `onPrefChange(keys, handler)` with no signal is a bare window listener
-      // under another name (lib/preferences.ts), so R1 counts it as one.
+      // under another name (lib/prefs/preferences.ts), so R1 counts it as one.
       if (name === "onPrefChange" && node.arguments.length < 3) {
         bareListeners++;
         bareListenerFiles.add(rel);

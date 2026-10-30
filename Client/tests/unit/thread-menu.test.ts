@@ -11,7 +11,7 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { createMessageList } from "@components/MessageList";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { resetThreadsStore } from "@stores/threads.store";
 import {
   OTHER,

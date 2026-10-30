@@ -10,38 +10,27 @@ import (
 )
 
 // AcknowledgeNSFWTxRaceHook runs once per AcknowledgeNSFW call when non-nil,
-// inside the writer transaction, immediately after the label check
-// and before the insert (Codex round 4, item B). Test-only (always nil in
-// production; exported because service's tests exercise this race through
-// NSFWService.Acknowledge, not db.AcknowledgeNSFW directly): the writer
-// connection is capped at one (d.writer.SetMaxOpenConns(1) in db.go), so
-// anything this hook does that also needs the writer — a concurrent
-// RevokeNSFW, say — can only block, never interleave. Lets a test prove
-// that deterministically instead of a sleep that merely favours one
-// ordering.
+// inside the writer transaction after the label check and before the insert.
+// Test-only (exported because service's tests exercise the race through
+// NSFWService.Acknowledge). The writer connection is capped at one, so
+// anything the hook does that needs the writer, like a concurrent RevokeNSFW,
+// can only block, never interleave, which lets a test prove that
+// deterministically.
 var AcknowledgeNSFWTxRaceHook func()
 
-// AcknowledgeNSFW records that userID has consented to see channelID's
-// labelled content (migration 047, B5-7). The label check and the insert run
-// inside ONE writer transaction (Codex round 2, P3) — SQLite serializes
-// writers, so a concurrent Revoke or relabel (both writes) cannot land
-// between this transaction's read and its write, nor between the insert and
-// answering whether there was anything to acknowledge. That closes the
-// window a rows-affected-only answer couldn't: rows affected 0 means either
-// "already acknowledged" (fine, idempotent) or "not labelled" (refuse), and
-// resolving that with a SEPARATE post-insert read let a duplicate PUT racing
-// a revoke of someone ELSE's row answer NOT_NSFW for a channel that is, at
-// that very moment, still labelled.
+// AcknowledgeNSFW records that userID consented to channelID's labelled
+// content. The label check and insert share ONE writer transaction, so a
+// concurrent Revoke or relabel cannot land between the read and the write nor
+// between the insert and the answer. That closes a window a rows-affected-only
+// answer could not: 0 rows means "already acknowledged" (idempotent) or "not
+// labelled" (refuse), and a separate post-insert read let a duplicate PUT
+// racing a revoke of someone else's row answer NOT_NSFW for a channel still
+// labelled.
 //
-// Hand-rolled rather than a sqlc query: sqlc's SQLite engine mis-slices the
-// generated text for an INSERT ... SELECT ... FROM statement in this
-// codebase's pinned version (v1.30.0) — it silently drops the final token of
-// the statement and corrupts the NEXT query in the same file. Plain
-// database/sql on the writer connection, like AdminUpdateChannelClearingNSFW
-// below.
-//
-// labelled=false means channelID does not exist or is not labelled right
-// now — ErrNotNSFW's case, whether or not a row already existed.
+// Hand-rolled because sqlc v1.30.0's SQLite engine mis-slices an INSERT ...
+// SELECT ... FROM, dropping the final token and corrupting the next query in
+// the file. labelled=false means channelID does not exist or is not labelled
+// now (ErrNotNSFW), whether or not a row existed.
 func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (labelled bool, err error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
@@ -74,9 +63,8 @@ func (d *DB) AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (labe
 	return true, nil
 }
 
-// RevokeNSFW deletes userID's acknowledgement of channelID, taking effect on
-// the caller's very next read — there is no cache to invalidate. Deleting a
-// row that does not exist is a no-op, not an error — DELETE
+// RevokeNSFW deletes userID's acknowledgement of channelID, effective on the
+// very next read (no cache). Deleting a missing row is a no-op, so DELETE
 // /nsfw-acknowledgement is idempotent.
 func (d *DB) RevokeNSFW(ctx context.Context, userID, channelID int64) error {
 	if err := d.q.RevokeNSFW(ctx, dbgen.RevokeNSFWParams{UserID: userID, ChannelID: channelID}); err != nil {
@@ -85,10 +73,9 @@ func (d *DB) RevokeNSFW(ctx context.Context, userID, channelID int64) error {
 	return nil
 }
 
-// HasNSFWAcknowledgement reports whether userID has acknowledged channelID.
-// Every content path — REST reads, search, the socket, attachment bytes —
-// asks this (or the batch form below) live, never from a cache, so a
-// revocation takes effect on the very next call.
+// HasNSFWAcknowledgement reports whether userID acknowledged channelID. Every
+// content path (REST, search, socket, attachment bytes) asks this live, never
+// from a cache, so a revocation applies at once.
 func (d *DB) HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error) {
 	n, err := d.q.HasNSFWAcknowledgement(ctx, dbgen.HasNSFWAcknowledgementParams{UserID: userID, ChannelID: channelID})
 	if err != nil {
@@ -97,10 +84,9 @@ func (d *DB) HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64
 	return n > 0, nil
 }
 
-// ListNSFWAcknowledgedUserIDs returns every user who has acknowledged
-// channelID — the hub's one-batch-query-per-broadcast audience resolution
-// for a labelled channel's content-bearing frames (ws/hub_visibility.go),
-// taken only when the channel is labelled so an unlabelled one pays nothing.
+// ListNSFWAcknowledgedUserIDs returns every user who acknowledged channelID,
+// the hub's one-query-per-broadcast audience for a labelled channel's frames
+// (ws/hub_visibility.go); unlabelled channels pay nothing.
 func (d *DB) ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) ([]int64, error) {
 	ids, err := d.q.ListNSFWAcknowledgedUserIDs(ctx, channelID)
 	if err != nil {
@@ -110,10 +96,9 @@ func (d *DB) ListNSFWAcknowledgedUserIDs(ctx context.Context, channelID int64) (
 }
 
 // DeleteNSFWAcknowledgementsForChannel removes every acknowledgement of
-// channelID — the label-lifecycle rule (service/channel_admin.go): clearing
-// the nsfw flag deletes standing consent in the same transaction as the flag
-// write, so a later re-label re-prompts everyone. Also used, indirectly via
-// the FK cascade, when the channel itself is deleted.
+// channelID. Clearing the nsfw flag deletes standing consent in the flag's
+// transaction so a later re-label re-prompts everyone; deleting the channel
+// does it via the FK cascade.
 func (d *DB) DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID int64) error {
 	if err := d.q.DeleteNSFWAcknowledgementsForChannel(ctx, channelID); err != nil {
 		return fmt.Errorf("DeleteNSFWAcknowledgementsForChannel: %w", err)
@@ -122,13 +107,10 @@ func (d *DB) DeleteNSFWAcknowledgementsForChannel(ctx context.Context, channelID
 }
 
 // AdminUpdateChannelClearingNSFW is AdminUpdateChannel plus
-// DeleteNSFWAcknowledgementsForChannel, both in one transaction: the flag
-// write and the standing-consent clear must commit together, or a crash
-// between them could leave the flag off with acknowledgements still on file
-// (a later re-label would silently trust warnings issued for a DIFFERENT
-// on/off cycle). Callers use this only when the update actually turns nsfw
-// from 1 to 0 — turning it on writes nothing extra (decision 13's own
-// comment: "flipping on writes nothing").
+// DeleteNSFWAcknowledgementsForChannel in one transaction: a crash between
+// them could leave the flag off with acknowledgements on file, and a later
+// re-label would trust warnings from a different on/off cycle. Callers use it
+// only when the update turns nsfw from 1 to 0.
 func (d *DB) AdminUpdateChannelClearingNSFW(ctx context.Context, id int64, u ChannelUpdate) error {
 	if err := d.adminUpdateChannel(ctx, id, u, true); err != nil {
 		return fmt.Errorf("AdminUpdateChannelClearingNSFW: %w", err)

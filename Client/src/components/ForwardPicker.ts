@@ -1,5 +1,5 @@
 /**
- * Forward picker (WP 6.9a): a dialog to choose up to five channels or DMs for
+ * Forward picker: a dialog to choose up to five channels or DMs for
  * one message, optionally with a message of the sender's own, then send and
  * show each target's result. Loaded on the first Forward, through
  * ChannelController, so it stays out of the startup and MainPage chunks.
@@ -12,8 +12,8 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
-import { showToast } from "@lib/toast";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import { showToast } from "@lib/ui/toast";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
 import { dmStore } from "@stores/dm.store";

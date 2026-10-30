@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MountableComponent } from "@lib/safe-render";
-import type { DownloadProgress } from "@lib/updater";
+import type { MountableComponent } from "@lib/text/safeRender";
+import type { DownloadProgress } from "@lib/net/updater";
 
 const { invoke, relaunch, listen, unlisten } = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -16,7 +16,7 @@ vi.mock("@lib/logger", () => ({
 }));
 
 let createUpdateNotifier: typeof import("@components/UpdateNotifier").createUpdateNotifier;
-let downloadAndInstallUpdate: typeof import("@lib/updater").downloadAndInstallUpdate;
+let downloadAndInstallUpdate: typeof import("@lib/net/updater").downloadAndInstallUpdate;
 let host: HTMLElement;
 let finishInstall: () => void;
 let failInstall: (err: Error) => void;
@@ -26,7 +26,7 @@ beforeEach(async () => {
   vi.useFakeTimers();
   vi.resetModules();
   ({ createUpdateNotifier } = await import("@components/UpdateNotifier"));
-  ({ downloadAndInstallUpdate } = await import("@lib/updater"));
+  ({ downloadAndInstallUpdate } = await import("@lib/net/updater"));
   host = document.createElement("div");
   document.body.appendChild(host);
   unlisten.mockReset();

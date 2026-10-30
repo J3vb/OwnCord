@@ -10,16 +10,15 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// eraseInlineBudget is how long Erase drives the drain stage itself before it
-// hands the rest to the maintenance loop. With the lock, the finish and the
-// file removals on top it stays under the HTTP server's 30 s WriteTimeout, so a request still answers while most accounts finish inline,
-// as they did when the erasure was one transaction. A variable so tests can
-// shrink it.
+// eraseInlineBudget is how long Erase drives the drain stage itself before
+// handing the rest to the maintenance loop. With the lock, finish and file
+// removals it stays under the HTTP server's 30 s WriteTimeout, so most accounts
+// finish inline. A variable so tests can shrink it.
 var eraseInlineBudget = 12 * time.Second
 
-// ErasureStageStore is the database half of a live erasure in three short
-// writer transactions (db.EraseAccountLock, EraseAccountDrain,
-// EraseAccountFinish); the file half is journaled in erasure_jobs.
+// ErasureStageStore is the database half of a live erasure in three short writer
+// transactions (EraseAccountLock, Drain, Finish); the file half is journaled in
+// erasure_jobs.
 type ErasureStageStore interface {
 	EraseAccountLock(ctx context.Context, userID int64, guard bool) (*db.ErasureJob, error)
 	EraseAccountDrain(ctx context.Context, userID int64, deadline time.Time) (bool, error)
@@ -27,24 +26,21 @@ type ErasureStageStore interface {
 	GetErasureJob(ctx context.Context, id int64) (*db.ErasureJob, error)
 }
 
-// ErrErasureInProgress is returned by Erase when the account is locked
-// (sessions revoked, the erasure queued) but not yet finished: the inline
-// budget ran out, a stage failed after the lock, or another caller is driving
-// the same user. The pending marker and the queued job complete it — the
-// maintenance loop at once, the next start-up otherwise — so callers report
-// success, exactly as for ErrErasureFilesPending.
+// ErrErasureInProgress is returned by Erase when the account is locked (sessions
+// revoked, erasure queued) but not finished: the inline budget ran out, a stage
+// failed after the lock, or another caller is driving the user. The pending marker
+// and queued job complete it (maintenance loop at once, else next start-up), so
+// callers report success, as for ErrErasureFilesPending.
 var ErrErasureInProgress = errors.New("erasure: in progress")
 
 // WakeCh receives one value per burst of Erase calls that left work for the
-// maintenance loop; the loop selects on it beside its ticker and calls
-// Resume. The channel holds one value: a wake while one is pending is the
-// same wake.
+// maintenance loop, which selects on it beside its ticker and calls Resume. It
+// holds one value: a wake while one is pending is the same wake.
 func (s *ErasureService) WakeCh() <-chan struct{} {
 	return s.wake
 }
 
-// RequestResume asks the maintenance loop to run Resume now rather than at
-// its next tick. Never blocks.
+// RequestResume asks the maintenance loop to run Resume now. Never blocks.
 func (s *ErasureService) RequestResume() {
 	select {
 	case s.wake <- struct{}{}:
@@ -52,7 +48,6 @@ func (s *ErasureService) RequestResume() {
 	}
 }
 
-// claim marks userID as being driven and reports whether the caller got it.
 func (s *ErasureService) claim(userID int64) bool {
 	s.inFlightMu.Lock()
 	defer s.inFlightMu.Unlock()
@@ -69,20 +64,18 @@ func (s *ErasureService) release(userID int64) {
 	delete(s.inFlight, userID)
 }
 
-// Erase erases userID in three stages (db.EraseAccountLock, Drain, Finish),
-// then this job's files. Errors from the lock stage are the store's
-// (db.ErrLastAdmin, db.ErrNotFound) and mean nothing changed. From the lock
-// on the erasure is committed to and every outcome but ErrErasureFilesPending
-// and ErrErasureInProgress is success: both mean the account is gone or on
-// its way out and the journal finishes the rest. Logs the id only, never a
-// name.
+// Erase erases userID in three stages (EraseAccountLock, Drain, Finish), then this
+// job's files. Lock-stage errors are the store's (db.ErrLastAdmin, db.ErrNotFound)
+// and mean nothing changed. From the lock on the erasure is committed to and every
+// outcome but ErrErasureFilesPending and ErrErasureInProgress is success (the
+// account is gone or on its way out and the journal finishes). Logs the id only.
 func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 	if !s.claim(userID) {
 		return fmt.Errorf("%w: user %d is already being erased", ErrErasureInProgress, userID)
 	}
-	// One defer, in this order: release the claim, then wake. A wake sent
-	// while the claim is still held can be taken by the maintenance loop,
-	// which then skips the user and leaves the job to the next tick.
+	// One defer, in this order: release the claim, then wake. A wake sent while the
+	// claim is held can be taken by the loop, which skips the user and leaves the job
+	// to the next tick.
 	wake := false
 	defer func() {
 		s.release(userID)
@@ -91,14 +84,12 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 		}
 	}()
 
-	// The marker goes down first, pending, so a crash between the lock and
-	// the marker cannot leave an erasure that a restore could undo. A
-	// pending marker is applied on the next open whether or not the
-	// transaction committed (MarkerStore.ReplayAccounts — a restore reverts
-	// a commit, so the main database cannot say), which is why the
-	// refusals run before it is written: a refused erasure must leave no
-	// marker a crash could turn into an erasure. The users sequence goes
-	// down with it, the floor below which no id is handed out again.
+	// The marker goes down first, pending, so a crash between the lock and the marker
+	// cannot leave an erasure a restore could undo. A pending marker is applied on the
+	// next open whether or not the transaction committed (a restore reverts a commit),
+	// so refusals run before it is written: a refused erasure must leave no marker a
+	// crash could turn into an erasure. The users sequence goes down with it, the
+	// floor below which no id is handed out again.
 	var token string
 	created := false
 	if s.markers != nil {
@@ -124,15 +115,14 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 		return err
 	}
 
-	// The point of no return. The rest outlives the request that started it,
-	// and a failure from here on keeps the marker pending: it must not reach
-	// DiscardPending, and the account is already unusable.
+	// The point of no return. The rest outlives the request, and a failure from here
+	// keeps the marker pending: it must not reach DiscardPending.
 	bg := context.WithoutCancel(ctx)
 	if s.hub != nil {
 		s.hub.DisconnectRevokedUser(userID)
 	}
-	// A send that was in flight at the lock may have queued a badge
-	// increment the first flush did not see.
+	// A send in flight at the lock may have queued a badge increment the first flush
+	// missed.
 	if s.flushMentions != nil {
 		s.flushMentions(bg)
 	}
@@ -149,10 +139,9 @@ func (s *ErasureService) Erase(ctx context.Context, userID int64) error {
 	return s.finishErasure(ctx, userID, job)
 }
 
-// lockBehindBarrier is the lock stage behind the audit and mention barrier
-// (eraseBehindBarrier's reasoning): everything the audit writer holds is on
-// disk first, with its ids, so an entry about the subject queued before the
-// finish transaction is rewritten by its UPDATE.
+// lockBehindBarrier is the lock stage behind the audit and mention barrier (see
+// eraseBehindBarrier): the audit writer's entries are on disk first, so an entry
+// about the subject queued before finish is rewritten by its UPDATE.
 func (s *ErasureService) lockBehindBarrier(ctx context.Context, userID int64) error {
 	if err := s.barrier(ctx); err != nil {
 		return err
@@ -163,8 +152,8 @@ func (s *ErasureService) lockBehindBarrier(ctx context.Context, userID int64) er
 	return nil
 }
 
-// driveToFinish runs the drain stage until deadline (zero: no limit) and then
-// the finish stage. ErrErasureInProgress means the deadline came first.
+// driveToFinish runs the drain stage until deadline (zero: no limit), then the
+// finish stage. ErrErasureInProgress means the deadline came first.
 func (s *ErasureService) driveToFinish(ctx context.Context, userID int64, token string, deadline time.Time) (*db.ErasureJob, error) {
 	done, err := s.st.EraseAccountDrain(ctx, userID, deadline)
 	if err != nil {
@@ -186,24 +175,21 @@ func (s *ErasureService) confirmMarker(ctx context.Context, userID int64, token 
 		return
 	}
 	if err := s.markers.ConfirmAccount(ctx, token); err != nil {
-		// The account is gone; a pending marker is applied on the next
-		// open either way, so this is loud but not fatal.
+		// The account is gone; a pending marker is applied on the next open either way,
+		// so this is loud but not fatal.
 		slog.Error("erasure: could not confirm the marker", "user_id", userID, "err", err)
 	}
 }
 
-// Resume runs every unfinished job once and reports how many are now done.
-// A queued job is first driven through drain and finish (no guard: it passed
-// at the lock, and no time limit: this is the maintenance loop), then its
-// files go like any other job's. A job whose files still fail to go stays
-// for the next call.
-//
-// It also pays any WAL checkpoint an erasure owes (B6-11 task 5). That debt is
-// not a job: the erasure's rows and files are gone either way, and what is
-// left is frames holding the erased bytes still sitting in the -wal because
-// the checkpoint behind the commit came back blocked. Nothing else would run
-// TRUNCATE again — SQLite's autocheckpoint is PASSIVE and never truncates the
-// log — so the erasure would leave those bytes on disk indefinitely.
+// Resume runs every unfinished job once and reports how many are now done. A
+// queued job is driven through drain and finish first (no guard, it passed at the
+// lock; no time limit, this is the maintenance loop), then its files go like any
+// job's; a job whose files still fail stays for the next call. It also pays any
+// WAL checkpoint an erasure owes. That debt is not a job: the rows and files are
+// gone, but frames holding the erased bytes sit in the -wal because the commit's
+// checkpoint came back blocked, and nothing else would run TRUNCATE again
+// (SQLite's autocheckpoint is PASSIVE and never truncates), leaving the bytes on
+// disk indefinitely.
 func (s *ErasureService) Resume(ctx context.Context) (int, error) {
 	jobs, err := s.st.ListUnfinishedErasureJobs(ctx)
 	if err != nil {
@@ -229,25 +215,24 @@ func (s *ErasureService) Resume(ctx context.Context) (int, error) {
 			done++
 		}
 	}
-	// Best effort, and after the jobs above so the frames they wrote are under
-	// the same TRUNCATE. Both outcomes are already reported where they happen
-	// and a debt that stays unpaid keeps its flag set, so the next tick tries
-	// again: a blocked checkpoint is not this tick's failure.
+	// Best effort, after the jobs so their frames fall under the same TRUNCATE. A
+	// debt left unpaid keeps its flag, so the next tick retries; a blocked checkpoint
+	// is not this tick's failure.
 	_, _ = s.st.FinishOwedErasureCheckpoint(ctx)
 	return done, firstErr
 }
 
-// resumeQueued finishes a queued job. It reports false, with no error, when
-// somebody else is driving the user or already finished the job.
+// resumeQueued finishes a queued job; false with no error when somebody else is
+// driving the user or already finished it.
 func (s *ErasureService) resumeQueued(ctx context.Context, job *db.ErasureJob) (bool, error) {
 	if !s.claim(job.UserID) {
-		// No wake here: Erase wakes the loop after it releases the claim
-		// when it leaves the job queued, and a wake now would only spin.
+		// No wake: Erase wakes the loop after releasing the claim when it leaves the job
+		// queued, and a wake now would only spin.
 		return false, nil
 	}
 	defer s.release(job.UserID)
-	// The listing is older than the claim: the request that held it may have
-	// finished the job in between.
+	// The listing is older than the claim: the request holding it may have finished
+	// the job.
 	cur, err := s.st.GetErasureJob(ctx, job.ID)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {

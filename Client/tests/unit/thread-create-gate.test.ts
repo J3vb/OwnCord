@@ -6,7 +6,10 @@ import {
   threadAgoLabel,
   threadCountLabel,
 } from "../../src/components/message-list/threadChip";
-import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../src/lib/net/serverCapabilities";
 import { removeThread, resetThreadsStore, upsertThread } from "../../src/stores/threads.store";
 import {
   ME,

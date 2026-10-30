@@ -7,7 +7,7 @@ import { settingsText } from "./settings";
 import { voiceText } from "./voice";
 import { connectText } from "./connect";
 
-describe("B9-20 catalogs", () => {
+describe("settings catalogs", () => {
   it("keeps the settings tabs' labels", () => {
     expect(
       ["account", "appearance", "notifications", "voice", "logs"].map((k) =>

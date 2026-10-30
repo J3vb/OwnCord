@@ -1,4 +1,4 @@
-//! The song being played, for the "Listening to <song>" status (WP 8.10b).
+//! The song being played, for the "Listening to <song>" status.
 //!
 //! The OS already knows what is playing: Windows keeps it in the Global System
 //! Media Transport Controls (the source of the volume flyout) and Linux players
@@ -114,7 +114,7 @@ pub fn detect_media(prefs: MediaPrefs) -> MediaReading {
         return MediaReading::Unknown;
     };
     let candidates = platform_candidates();
-    let mut last = LAST_PLAYER.lock().unwrap_or_else(|e| e.into_inner());
+    let mut last = crate::sync::lock(&LAST_PLAYER);
     reading_from(candidates, &prefs, &mut last)
 }
 

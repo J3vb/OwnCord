@@ -1,6 +1,6 @@
 package admin
 
-// The message forwarding log messages (WP 6.9a). They live beside
+// The message forwarding log messages. They live beside
 // support_event_codes.go because that table is at the file-size ceiling; init
 // folds them in.
 func init() {

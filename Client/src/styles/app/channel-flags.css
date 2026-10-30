@@ -14,6 +14,18 @@
   color: var(--text-muted);
 }
 
+/* Password marker beside a voice channel's name; neutral like the nsfw marker,
+   for the same reason. */
+.channel-item .ch-password {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.channel-item.active .ch-password {
+  color: var(--text-muted);
+}
+
 /* Private-channel lock over the bottom-right of the type glyph. Absolute
    against the row (position: relative) so it takes no flex space and cannot
    shift the nsfw marker or the capacity badge; left is the row's 8px padding

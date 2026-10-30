@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRingController, createOutgoingCall, RING_TIMEOUT_MS } from "@lib/call-ring";
-import type { RingEndReason, RingState, OutgoingCallState } from "@lib/call-ring";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRingController, createOutgoingCall, RING_TIMEOUT_MS } from "@lib/voice/callRing";
+import type { RingEndReason, RingState, OutgoingCallState } from "@lib/voice/callRing";
 
 /**
  * Statechart harness. The timer is injected rather than faked globally so a
@@ -451,7 +451,7 @@ describe("outgoing call", () => {
     expect(h.armed()).toBe(true);
   });
 
-  it("a call to an offline 1:1 contact is offline at once, with no window and no ringback (D-14)", () => {
+  it("a call to an offline 1:1 contact is offline at once, with no window and no ringback", () => {
     const h = outgoingHarness();
     h.call.start(5, [9], true);
 
@@ -540,5 +540,129 @@ describe("outgoing call — ringback", () => {
     h.call.start(5, [9]);
 
     expect(h.ringbacks).toEqual([true, false, true]);
+  });
+});
+
+describe("outgoing call — restart and late declines", () => {
+  it("a second start clears the first window before arming its own", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9]);
+    expect(h.clearedCount()).toBe(0);
+    h.call.start(6, [9]);
+
+    expect(h.clearedCount()).toBe(1);
+    expect(h.call.current()).toEqual({ channelId: 6, phase: "ringing", pending: [9] });
+  });
+
+  it("a decline that arrives after the window ran out changes nothing", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [8, 9]);
+    h.fireTimeout();
+    expect(h.call.current()?.phase).toBe("no-answer");
+    const changes = h.states.length;
+
+    h.call.declined(5, 9);
+
+    expect(h.call.current()).toEqual({ channelId: 5, phase: "no-answer", pending: [8, 9] });
+    expect(h.states).toHaveLength(changes);
+  });
+
+  it("a decline for an offline 1:1 changes nothing", () => {
+    const h = outgoingHarness();
+    h.call.start(5, [9], true);
+    h.call.declined(5, 9);
+    expect(h.call.current()).toEqual({ channelId: 5, phase: "offline", pending: [9] });
+  });
+});
+
+describe("call timers without an injected clock", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("an answered ring never times out afterwards", () => {
+    const ended: Array<RingEndReason | undefined> = [];
+    const missed: RingState[] = [];
+    const ctrl = createRingController({
+      onRingStateChange: () => {},
+      onChime: () => {},
+      onAccept: () => {},
+      onDecline: () => {},
+      onMissed: (s) => missed.push(s),
+      onRingEnd: (_s, reason) => ended.push(reason),
+    });
+    ctrl.incoming(ring());
+    ctrl.accept();
+    vi.advanceTimersByTime(RING_TIMEOUT_MS * 2);
+
+    expect(ended).toEqual(["accepted"]);
+    expect(missed).toEqual([]);
+  });
+
+  it("a ring that nobody answers times out after the window", () => {
+    const missed: RingState[] = [];
+    const ctrl = createRingController({
+      onRingStateChange: () => {},
+      onChime: () => {},
+      onAccept: () => {},
+      onDecline: () => {},
+      onMissed: (s) => missed.push(s),
+    });
+    ctrl.incoming(ring());
+    vi.advanceTimersByTime(RING_TIMEOUT_MS - 1);
+    expect(missed).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(missed).toEqual([ring()]);
+    expect(ctrl.current()).toBeNull();
+  });
+
+  it("a cleared outgoing call never reports no-answer afterwards", () => {
+    const states: Array<OutgoingCallState | null> = [];
+    const call = createOutgoingCall({ onChange: (s) => states.push(s) });
+    call.start(5, [9]);
+    call.clear();
+    vi.advanceTimersByTime(RING_TIMEOUT_MS * 2);
+
+    expect(states.map((s) => s?.phase ?? null)).toEqual(["ringing", null]);
+  });
+
+  it("a redialled ring keeps ringing for a full window from the redial", () => {
+    const ended: Array<RingEndReason | undefined> = [];
+    const ctrl = createRingController({
+      onRingStateChange: () => {},
+      onChime: () => {},
+      onAccept: () => {},
+      onDecline: () => {},
+      onRingEnd: (_s, reason) => ended.push(reason),
+    });
+    ctrl.incoming(ring());
+    vi.advanceTimersByTime(20_000);
+    ctrl.incoming(ring());
+    vi.advanceTimersByTime(20_000);
+    expect(ended).toEqual([]);
+    expect(ctrl.current()).not.toBeNull();
+    vi.advanceTimersByTime(10_000);
+    expect(ended).toEqual(["timeout"]);
+  });
+
+  it("a restarted outgoing call waits a full window from the restart", () => {
+    const call = createOutgoingCall({ onChange: () => {} });
+    call.start(5, [9]);
+    vi.advanceTimersByTime(20_000);
+    call.start(5, [9]);
+    vi.advanceTimersByTime(20_000);
+    expect(call.current()?.phase).toBe("ringing");
+    vi.advanceTimersByTime(10_000);
+    expect(call.current()?.phase).toBe("no-answer");
+  });
+
+  it("an unanswered outgoing call reports no-answer after the window", () => {
+    const call = createOutgoingCall({ onChange: () => {} });
+    call.start(5, [9]);
+    vi.advanceTimersByTime(RING_TIMEOUT_MS);
+    expect(call.current()?.phase).toBe("no-answer");
   });
 });

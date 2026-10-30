@@ -1,5 +1,5 @@
 /**
- * The local report form (B9-10, BPR-070): report a message, one of its
+ * The local report form: report a message, one of its
  * attachments, or a user to this server's moderators.
  *
  * The target is the caller's actual local identifier; the server derives the
@@ -17,8 +17,8 @@ import type { ApiClient, ReportReason, ReportTargetType } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { createModal, type ModalInstance } from "@lib/modalFactory";
-import { showToast } from "@lib/toast";
+import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import { showToast } from "@lib/ui/toast";
 import { reportsText as t } from "../../i18n/reports";
 import { RestErrorCode } from "@lib/protocolTypes";
 

@@ -12,7 +12,7 @@ import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/Connec
 import { connectText } from "../../src/i18n/connect";
 
 const mockLoadCredential = vi.fn().mockResolvedValue(null);
-vi.mock("../../src/lib/credentials", () => ({
+vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: (...args: unknown[]) => mockLoadCredential(...args),
 }));
 

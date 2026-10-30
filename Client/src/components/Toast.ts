@@ -11,7 +11,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 
 export type ToastType = "info" | "error" | "success" | "warning";
@@ -210,7 +210,7 @@ export function createToastContainer(): ToastContainer {
   }
 
   function mount(container: Element): void {
-    // One polite live region for all toasts (DC-13): screen readers announce
+    // One polite live region for all toasts: screen readers announce
     // each toast as it is appended without interrupting current speech.
     // aria-atomic="false" so only the newly added toast is read, not the stack.
     root = createElement("div", {

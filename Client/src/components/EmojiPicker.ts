@@ -2,9 +2,9 @@
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
 import { Disposable } from "@lib/disposable";
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
-import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
+import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { buildCustomEmojiNode } from "@components/message-list/custom-emoji";
 import { messagingText } from "../i18n/messaging";
 import { addRecentEmoji, getRecentEmoji } from "./emojiRecent";
@@ -173,7 +173,7 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
 
   // Scrollable content area (holds category labels + grids). Announced as a
   // single flat listbox — the category grids are visual grouping only, and
-  // roving tabindex (DC-13) treats every .ep-emoji cell as one list.
+  // roving tabindex treats every .ep-emoji cell as one list.
   const scrollArea = createElement("div", {
     class: "ep-scroll",
     role: "listbox",

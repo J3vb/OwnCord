@@ -8,7 +8,7 @@
 // can confirm it (via `accept_cert_fingerprint`) before any credential-bearing
 // request is sent. `decide` is a pure function with no persistence side effects;
 // the only user-confirmed writer of a pin is the explicit
-// `accept_cert_fingerprint` command, with one exception (B11-5): a routine
+// `accept_cert_fingerprint` command, with one exception: a routine
 // public-CA renewal. When the pinned leaf
 // was itself publicly valid for the host and the new leaf is too, `evaluate`
 // re-pins silently instead of prompting. Every other change still prompts.
@@ -21,7 +21,7 @@ use tauri::{AppHandle, Runtime};
 use crate::constants::{CERTS_STORE, CERT_WEB_PKI_STORE};
 
 /// The distinct code a loopback proxy reports for a TLS/certificate failure.
-/// The webview maps it to its own certificate copy (DP-54 follow-up): without
+/// The webview maps it to its own certificate copy: without
 /// it, a refused or failed handshake is indistinguishable from an unreachable
 /// server. Kept in step with `Client/src/lib/api.ts`'s `TLS_CERT_CODE`.
 pub(crate) const TLS_CERT_ERROR_CODE: &str = "TLS_CERT_UNVERIFIED";
@@ -169,7 +169,7 @@ impl rustls::client::danger::ServerCertVerifier for CaptureVerifier {
                 v.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
                     .is_ok()
             });
-        if let Ok(mut guard) = self.captured.lock() {
+        if let Ok(mut guard) = crate::sync::lock_checked(&self.captured) {
             *guard = Some(Observed {
                 fingerprint: fingerprint_hex(end_entity.as_ref()),
                 web_pki_valid,
@@ -381,7 +381,7 @@ impl rustls::client::danger::ServerCertVerifier for HostScopedVerifier {
 /// "::1"), after the `:443` strip above runs (so "[::1]:443" also unwraps).
 /// The ws proxy computes this key from a bracketed `wss://[::1]/...`
 /// authority (ws.ts's `bracketBareIPv6Host` has to bracket a bare IPv6 host
-/// for the URL to parse at all — see OC-0163), while the http/livekit proxies
+/// for the URL to parse at all), while the http/livekit proxies
 /// may see the bare or default-port-bracketed form of the very same server —
 /// without unwrapping here those resolve to different keys and the same
 /// server's certificate gets pinned (and re-confirmed by the user) twice. A
@@ -394,7 +394,7 @@ pub(crate) fn cert_store_key(host: &str) -> String {
     // hextet is "443" — e.g. "fd00::443" — would have that hextet eaten as
     // if it were a port, truncating the address to "fd00:" and pinning the
     // same server under a different key than the ws/livekit proxies use for
-    // the bracketed form of the same address (OC-0215).
+    // the bracketed form of the same address.
     let stripped = match host.strip_suffix(":443") {
         Some(rest) if !rest.contains(':') || rest.ends_with(']') => rest,
         _ => host,
@@ -568,7 +568,7 @@ mod tests {
         );
     }
 
-    // B11-5: a routine public-CA renewal re-pins silently, but only when the
+    // A routine public-CA renewal re-pins silently, but only when the
     // pinned leaf was itself publicly valid for this host AND the new one is.
     #[test]
     fn decide_renews_when_old_and_new_leaf_are_web_pki_valid() {
@@ -663,7 +663,7 @@ mod tests {
         assert_eq!(cert_store_key("example.com:8443"), "example.com:8443");
     }
 
-    // OC-0163: ws_connect (via extract_host on a bracketed "wss://[::1]/..."
+    // ws_connect (via extract_host on a bracketed "wss://[::1]/..."
     // URL, once ws.ts brackets a bare IPv6 host to make it parse) and
     // start_http_proxy/start_livekit_proxy (which see the bare or
     // livekit-bracketed form of the SAME server) must resolve to the SAME
@@ -686,7 +686,7 @@ mod tests {
         assert_eq!(cert_store_key("[2001:db8::1]:8443"), "[2001:db8::1]:8443");
     }
 
-    // OC-0215: a BARE (unbracketed) IPv6 literal whose final hextet happens to
+    // A BARE (unbracketed) IPv6 literal whose final hextet happens to
     // be "443" must NOT have that hextet eaten by the ":443" default-port
     // strip — "fd00::443" is a whole address, not "fd00::" on port 443. The
     // http proxy passes bare hosts verbatim (http_proxy::split_host_port has
@@ -768,9 +768,7 @@ mod tests {
         // Accepts unconditionally — the TOFU gate happens after the handshake.
         assert!(result.is_ok());
         assert_eq!(
-            captured
-                .lock()
-                .unwrap()
+            crate::sync::lock(&captured)
                 .as_ref()
                 .map(|o| o.fingerprint.clone()),
             Some(fingerprint_hex(b"leaf-cert"))
@@ -795,7 +793,7 @@ mod tests {
         // The web-PKI verdict is recorded, never enforced: the handshake is
         // accepted either way and the TOFU gate decides afterwards.
         assert!(result.is_ok());
-        let observed = captured.lock().unwrap().clone();
+        let observed = crate::sync::lock(&captured).clone();
         observed
     }
 
@@ -830,7 +828,7 @@ mod tests {
         assert!(verifier
             .verify_server_cert(&leaf, &[], &name, &[], now)
             .is_ok());
-        assert!(!captured.lock().unwrap().as_ref().unwrap().web_pki_valid);
+        assert!(!crate::sync::lock(&captured).as_ref().unwrap().web_pki_valid);
     }
 
     // ── HostScopedVerifier ──────────────────────────────────────────────────

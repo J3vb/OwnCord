@@ -1,12 +1,12 @@
 /**
- * Settings > Advanced > Activity > music (WP 8.10c): the "Share the music
+ * Settings > Advanced > Activity > music: the "Share the music
  * you're listening to" switch, what this device sees right now, and "Your
  * players" with a "Show to others" switch each.
  *
  * Device-local like the game switch (a `localStorage` pref, on by default, no
  * toast): the server never learns the setting, only the one song while it is
  * on. Turning it off stops the read and tells the server at once; the loop
- * that does both listens for the pref change (`@lib/musicActivity`). The
+ * that does both listens for the pref change (`@lib/presence/musicActivity`). The
  * "Detected now" line reads only while the switch is on, with the hidden
  * players left out, so what it shows is what others can see.
  */
@@ -23,13 +23,13 @@ import {
   toMediaPrefs,
   withPlayerHidden,
   type SeenPlayer,
-} from "@lib/musicActivityPrefs";
+} from "@lib/prefs/musicActivityPrefs";
 import {
   hasReceivedReady,
   onGameActivityPolicy,
   serverSupportsListeningActivity,
-} from "@lib/serverCapabilities";
-import { savePref } from "@lib/preferences";
+} from "@lib/net/serverCapabilities";
+import { savePref } from "@lib/prefs/preferences";
 import { desktop } from "../../platform/desktop";
 import { listeningDetailsText as t } from "../../i18n/listeningDetails";
 import { createToggle } from "./helpers";

@@ -5,8 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Track } from "livekit-client";
 import { FIXTURE_SAMPLE_RATE, placeInRoomTone, readAudioFixture } from "../helpers/wav";
-import { vadThreshold } from "../../src/lib/audioPipeline";
-import { createMicProcessor } from "../../src/lib/micProcessor";
+import { vadThreshold } from "../../src/lib/voice/audioPipeline";
+import { createMicProcessor } from "../../src/lib/voice/micProcessor";
 import {
   FakeAudioContext,
   fakeMediaStreamTrack,

@@ -29,7 +29,7 @@ export type UserStatus = "online" | "idle" | "dnd" | "invisible" | "offline";
 /** Channel types supported by the server. */
 export type ChannelType = "text" | "voice" | "announcement" | "dm" | "forum";
 
-/** A forum tag as the server states it (WP 6.9d). `position` is its place in the forum's list. */
+/** A forum tag as the server states it. `position` is its place in the forum's list. */
 export interface ForumTag {
   readonly id: number;
   readonly name: string;
@@ -37,14 +37,14 @@ export interface ForumTag {
   readonly position: number;
 }
 
-/** A forum's tags and settings, on a `type: "forum"` channel only (WP 6.9d). */
+/** A forum's tags and settings, on a `type: "forum"` channel only. */
 export interface ForumSettings {
   readonly tags: readonly ForumTag[];
   readonly require_tag: boolean;
   readonly default_auto_archive_minutes: 60 | 1440 | 4320 | 10080;
 }
 
-/** The body of `PUT .../channels/{id}/forum`: the whole settings; a tag without `id` is created (WP 6.9d). */
+/** The body of `PUT .../channels/{id}/forum`: the whole settings; a tag without `id` is created. */
 export interface ForumSettingsBody {
   readonly tags: readonly {
     readonly id?: number;
@@ -100,7 +100,7 @@ export interface MessageUser {
 /** User object with role, used in auth_ok and member_join. */
 export interface UserWithRole extends MessageUser {
   readonly role: string;
-  /** Every role the user holds, top role first (WP 6.3c). Absent from an older
+  /** Every role the user holds, top role first. Absent from an older
    *  server, where `role` is the only role. */
   readonly role_ids?: readonly number[];
   readonly totp_enabled?: boolean;
@@ -108,7 +108,7 @@ export interface UserWithRole extends MessageUser {
    *  server's 3C-7 (absent from older servers). */
   readonly about?: string | null;
   /** Profile banner image path (`/api/v1/files/<id>`). Null = none, absent =
-   *  older server (WP 6.11b). */
+   *  older server. */
   readonly banner?: string | null;
   /** Profile banner colour (`#rgb` / `#rrggbb`). Null = none, absent = older server. */
   readonly banner_color?: string | null;
@@ -136,13 +136,13 @@ export interface Attachment {
   readonly url: string;
   readonly width?: number;
   readonly height?: number;
-  /** Length of a voice message in ms (WP 8.9). With `waveform`, the attachment is one. */
+  /** Length of a voice message in ms. With `waveform`, the attachment is one. */
   readonly duration_ms?: number;
   /** A voice message's loudness, base64url (no padding) bytes 0-255, one per bar. */
   readonly waveform?: string;
 }
 
-/** The length and waveform an upload declares to be a voice message (WP 8.9). */
+/** The length and waveform an upload declares to be a voice message. */
 export interface VoiceUploadMeta {
   readonly durationMs: number;
   /** base64url without padding, 1..256 bytes decoded. */
@@ -166,9 +166,9 @@ export interface ReadyChannel {
   readonly name: string;
   readonly type: ChannelType;
   readonly category: string | null;
-  /** The category's id, 0 when none (WP 6.5a). Absent from older servers: group by `category`. */
+  /** The category's id, 0 when none. Absent from older servers: group by `category`. */
   readonly category_id?: number;
-  /** The category's place in the category order, 0 when none (WP 6.5a). */
+  /** The category's place in the category order, 0 when none. */
   readonly category_position?: number;
   /** Channel topic ("" = none). Absent from older servers. */
   readonly topic?: string;
@@ -194,7 +194,7 @@ export interface ReadyChannel {
   readonly can_moderate_voice?: boolean;
   /**
    * Whether the current user may move voice participants in this channel at
-   * any rank (MOVE_MEMBERS, WP 8.4a), independent of can_moderate_voice: a
+   * any rank (MOVE_MEMBERS), independent of can_moderate_voice: a
    * role with only Move Members moves but cannot mute, deafen or disconnect.
    * Absent from older servers.
    */
@@ -228,8 +228,8 @@ export interface ReadyChannel {
    */
   readonly last_read_message_id?: number;
   /**
-   * Whether the channel is labelled age-restricted. The server enforces it
-   * (B5-7): none of its content reaches a caller without their own
+   * Whether the channel is labelled age-restricted. The server enforces it:
+   * none of its content reaches a caller without their own
    * acknowledgement. Absent from older servers, which is read as "not
    * labelled".
    */
@@ -248,7 +248,7 @@ export interface ReadyChannel {
    */
   readonly private?: boolean;
   /**
-   * Whether the CALLER has acknowledged this labelled channel (B5-7) — per
+   * Whether the CALLER has acknowledged this labelled channel — per
    * account, so every device inherits it. Always false for an unlabelled
    * channel. Absent reads as "not acknowledged": the gate fails closed.
    */
@@ -260,6 +260,11 @@ export interface ReadyChannel {
    */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /**
+   * A voice channel that asks for a password on join. Absent from older
+   * servers, which read as unprotected. The password itself is never sent.
+   */
+  readonly password_protected?: boolean;
 }
 
 /** Member object in the ready payload. */
@@ -268,7 +273,7 @@ export interface ReadyMember {
   readonly username: string;
   readonly avatar: string | null;
   readonly role: string;
-  /** Every role the member holds, top role first (WP 6.3c). Absent from an
+  /** Every role the member holds, top role first. Absent from an
    *  older server, where `role` is the only role. */
   readonly role_ids?: readonly number[];
   readonly status: UserStatus;
@@ -317,10 +322,10 @@ export interface ReadyRole {
   readonly position?: number;
   /** True for the fallback role members land on when their role is deleted. */
   readonly is_default?: boolean;
-  /** The role is its own member-list group (WP 6.3c). Absent means an older
+  /** The role is its own member-list group. Absent means an older
    *  server: every role counts as hoisted. */
   readonly hoist?: boolean;
-  /** Any member may ping the role (WP 6.3c). Absent = not mentionable. */
+  /** Any member may ping the role. Absent = not mentionable. */
   readonly mentionable?: boolean;
 }
 
@@ -391,7 +396,7 @@ export interface AuthOkPayload {
   /** What the composer checks before an upload; absent on older servers. */
   readonly upload_policy?: UploadPolicy;
   /**
-   * Whether game activity is shown on this server right now (WP 8.3e-2). Sent
+   * Whether game activity is shown on this server right now. Sent
    * on every connect and resume; absent on older servers.
    */
   readonly game_activity_policy?: GameActivityPolicyPayload;
@@ -422,14 +427,14 @@ export interface AuthErrorPayload {
   readonly min_epoch?: number;
 }
 
-/** One channel category, as the managers' list carries it (WP 6.5a). */
+/** One channel category, as the managers' list carries it. */
 export interface ChannelCategory {
   readonly id: number;
   readonly name: string;
   readonly position: number;
 }
 
-/** channel_categories — the managers' full category list, replacing what they hold (WP 6.5a). */
+/** channel_categories — the managers' full category list, replacing what they hold. */
 export interface ChannelCategoriesPayload {
   readonly categories: readonly ChannelCategory[];
 }
@@ -446,7 +451,7 @@ export interface ReadyActivity extends GameActivity {
   readonly user_id: number;
 }
 
-/** The song a member is listening to, as it rides `presence` and `listening_update` (WP 8.10). */
+/** The song a member is listening to, as it rides `presence` and `listening_update`. */
 export interface ListeningActivity {
   readonly title: string;
   /** May be empty. */
@@ -472,16 +477,16 @@ export interface ReadyPayload {
     /**
      * The server keeps a read pointer: `channel_focus` may skip marking read,
      * `mark_read` may carry a `message_id`, and `mark_unread` and `read_state`
-     * exist (WP 3D-5). Absent means an older server.
+     * exist. Absent means an older server.
      */
     readonly read_pointer?: boolean;
     /**
-     * The server keeps private per-member profile notes (WP 6.11a), read and
+     * The server keeps private per-member profile notes, read and
      * written over `/users/me/notes/{userId}`. Absent means an older server.
      */
     readonly user_notes?: boolean;
     /**
-     * The server keeps a profile banner, an image and/or a colour (WP 6.11b):
+     * The server keeps a profile banner, an image and/or a colour:
      * `POST` and `DELETE` `/users/me/banner`, `banner_color` on `PATCH
      * /users/me`. Advertised even when attachment storage is off, in which case
      * the upload route is not mounted. Absent means an older server.
@@ -489,34 +494,34 @@ export interface ReadyPayload {
     readonly profile_banners?: boolean;
     /**
      * The server understands `poll_create`, `poll_vote` and `poll_end` and sends
-     * `poll_update` (WP 6.9b). Absent means an older server: no Poll button.
+     * `poll_update`. Absent means an older server: no Poll button.
      */
     readonly polls?: boolean;
     /**
-     * The server has custom stickers (WP 8.8): `sticker_id` on `chat_send`,
+     * The server has custom stickers: `sticker_id` on `chat_send`,
      * `sticker` on `chat_message`, `sticker_update` and `/api/v1/stickers`.
      * Absent means an older server: no sticker button.
      */
     readonly stickers?: boolean;
     /**
-     * The server stores the caller's two direct message privacy settings (WP
-     * 6.8b), read and written over `/users/me/privacy`. Absent means an older
+     * The server stores the caller's two direct message privacy settings,
+     * read and written over `/users/me/privacy`. Absent means an older
      * server.
      */
     readonly dm_privacy?: boolean;
     /**
-     * The server supports threads (WP 6.9c): the `thread_*` frames and `GET
+     * The server supports threads: the `thread_*` frames and `GET
      * /channels/{id}/threads`. Absent means an older server, which shows no
      * thread controls.
      */
     readonly threads?: boolean;
     /**
-     * The server supports forum channels (WP 6.9d): `forum_post_create` and a
+     * The server supports forum channels: `forum_post_create` and a
      * forum's posts. Absent means an older server, which offers no Forum type.
      */
     readonly forums?: boolean;
     /**
-     * A member can hold several roles (WP 6.3c): `role_ids` rides `members[]`,
+     * A member can hold several roles: `role_ids` rides `members[]`,
      * `auth_ok.user`, `member_join.user` and `member_update`, roles carry
      * `hoist`, and `PUT`/`DELETE {base}/{id}/roles/{roleId}` add and remove
      * one. Absent means an older server, where `role` is the only role.
@@ -524,12 +529,12 @@ export interface ReadyPayload {
     readonly multi_role?: boolean;
     /**
      * A moderator holding MANAGE_NICKNAMES can set another member's nickname
-     * over `PUT /moderation/users/{id}/nickname` (WP 6.4). Absent means an
+     * over `PUT /moderation/users/{id}/nickname`. Absent means an
      * older server, where the bit may exist but the route does not.
      */
     readonly manage_nicknames?: boolean;
     /**
-     * Content may carry `<@id>` and `<@&id>` mention tokens (WP 6.3f): the
+     * Content may carry `<@id>` and `<@&id>` mention tokens: the
      * composer sends the ones the user picked, the server resolves them and
      * lists honoured roles in `mention_roles`. Absent means an older server,
      * where a mention is the plain `@name` text.
@@ -537,51 +542,51 @@ export interface ReadyPayload {
     readonly id_mentions?: boolean;
     /**
      * The server understands `thread_follow`, sends `thread_follow_update` and
-     * lists the viewer's followed threads in `ready.threads` (WP 6.9c). Absent
+     * lists the viewer's followed threads in `ready.threads`. Absent
      * means an older server: no Follow control, no followed threads.
      */
     readonly thread_follows?: boolean;
     /**
      * The server accepts `voice_duration_ms` and `voice_waveform` on an upload
-     * and returns `duration_ms` and `waveform` on the attachment (WP 8.9).
+     * and returns `duration_ms` and `waveform` on the attachment.
      * Absent means an older server: no mic button in the composer.
      */
     readonly voice_messages?: boolean;
     /**
      * The server understands `activity_update` and carries a member's game as
-     * `activity` on `presence` and `presence_batch` and as `ready.activities`
-     * (WP 8.3). Absent means an older server: nothing is sent, no game shown.
+     * `activity` on `presence` and `presence_batch` and as `ready.activities`.
+     * Absent means an older server: nothing is sent, no game shown.
      */
     readonly game_activity?: boolean;
     /**
      * The server understands `listening_update` and carries a member's song as
-     * `listening` on `presence` and `presence_batch` and as `ready.listening`
-     * (WP 8.10). Absent means an older server: nothing is sent, no song shown.
+     * `listening` on `presence` and `presence_batch` and as `ready.listening`.
+     * Absent means an older server: nothing is sent, no song shown.
      */
     readonly listening_activity?: boolean;
   };
   /**
-   * The songs connected members are listening to (WP 8.10), sorted by user id.
+   * The songs connected members are listening to, sorted by user id.
    * Absent from a server without `listening_activity`; later changes arrive as
    * `presence`.
    */
   readonly listening?: readonly ReadyListening[];
   /**
-   * The games connected members are playing (WP 8.3), sorted by user id. Absent
+   * The games connected members are playing, sorted by user id. Absent
    * from a server without `game_activity`; authoritative for the moment of the
    * snapshot, later changes arrive as `presence`.
    */
   readonly activities?: readonly ReadyActivity[];
   readonly channels: readonly ReadyChannel[];
   /**
-   * The viewer's followed, open threads, newest activity first (WP 6.9c).
+   * The viewer's followed, open threads, newest activity first.
    * Present whenever the server advertises `thread_follows`; authoritative for
    * the set. Absent from older servers.
    */
   readonly threads?: readonly ReadyThread[];
   /**
-   * The full category list, present only for a viewer holding MANAGE_CHANNELS
-   * (WP 6.5a). Absent for everyone else and for older servers, which derive
+   * The full category list, present only for a viewer holding MANAGE_CHANNELS.
+   * Absent for everyone else and for older servers, which derive
    * their groups from the channels alone.
    */
   readonly categories?: readonly ChannelCategory[];
@@ -589,10 +594,10 @@ export interface ReadyPayload {
   readonly voice_states: readonly ReadyVoiceState[];
   readonly roles: readonly ReadyRole[];
   readonly dm_channels?: readonly DmChannelPayload[];
-  /** The caller's unacknowledged warnings (B5-9). Absent from older servers. */
+  /** The caller's unacknowledged warnings. Absent from older servers. */
   readonly notices?: readonly ReadyNotice[];
   /**
-   * Active timeouts (WP 3C-7c): the full list for a moderator, only the
+   * Active timeouts: the full list for a moderator, only the
    * caller's own entry for anyone else. Absent from older servers.
    */
   readonly member_timeouts?: readonly MemberTimeoutEntry[];
@@ -604,7 +609,7 @@ export interface MemberTimeoutEntry {
   readonly expires_at: string;
 }
 
-/** member_timeouts (WP 3C-7c): replaces the viewer's list wholesale. */
+/** member_timeouts: replaces the viewer's list wholesale. */
 export interface MemberTimeoutsPayload {
   readonly timeouts: readonly MemberTimeoutEntry[];
 }
@@ -618,7 +623,7 @@ export interface ReadyNotice {
 }
 
 /**
- * mod_action (B5-9): a warning or timeout applied to this user, targeted and
+ * mod_action: a warning or timeout applied to this user, targeted and
  * not replayed. A lifted timeout arrives as id 0, kind "timeout" and a null
  * expires_at (Server/ws/moderation_actions.go).
  */
@@ -630,7 +635,7 @@ export interface ModActionPayload {
 }
 
 /**
- * appeal_status (B5-10): the caller's own appeal changed state, targeted and
+ * appeal_status: the caller's own appeal changed state, targeted and
  * not replayed (Server/ws/appeal_status.go). decision_note is null until decided.
  */
 export interface AppealStatusPayload {
@@ -640,7 +645,7 @@ export interface AppealStatusPayload {
 }
 
 /**
- * mention_count (DP-27): one reader's `read_states.mention_count` changed in a
+ * mention_count: one reader's `read_states.mention_count` changed in a
  * channel. Targeted, unsequenced and never replayed. `count` is the reader's
  * total after the bump, so a client repaints the badge from it directly rather
  * than incrementing. This is how a mention in a channel the user is not viewing
@@ -652,7 +657,7 @@ export interface MentionCountPayload {
 }
 
 /**
- * channel_activity (WP 2B-2): an unread hint for readable channels the reader
+ * channel_activity: an unread hint for readable channels the reader
  * is not viewing. Batched (about one frame a second), unsequenced and never
  * replayed. Per channel at most two entries in ascending `message_id`: the
  * latest message that mentioned the reader, then the latest overall.
@@ -672,7 +677,7 @@ export interface ChannelActivityPayload {
 }
 
 /**
- * mod_queue (B5-8/B5-10): a report or appeal queue changed, to MODERATE_MEMBERS
+ * mod_queue: a report or appeal queue changed, to MODERATE_MEMBERS
  * holders only, unsequenced and never replayed. Exactly one id is set; it is
  * an invalidation signal, never the report itself.
  */
@@ -682,6 +687,16 @@ export interface ModQueuePayload {
   readonly state: string;
 }
 
+/**
+ * Who wrote a message imported from a Discord export. Imported messages share
+ * one hidden account, so this replaces `user` wherever a name is shown. `color`
+ * is the export's role colour, untrusted: use it only as a `#rrggbb` hex.
+ */
+export interface ImportedAuthor {
+  readonly name: string;
+  readonly color?: string;
+}
+
 /** Reply parent snippet. A deleted parent is redacted to `{id, deleted: true}`. */
 export interface ReferencedMessage {
   readonly id: number;
@@ -689,10 +704,12 @@ export interface ReferencedMessage {
   readonly content: string;
   readonly deleted: boolean;
   readonly has_attachments: boolean;
+  /** Present when the parent is an imported message. */
+  readonly imported_author?: ImportedAuthor;
 }
 
 /**
- * The call a `kind: "call"` row stands for (WP 3B-9). `ended_at` is null while
+ * The call a `kind: "call"` row stands for. `ended_at` is null while
  * the call is live; `participants` is everyone who was ever in it.
  */
 export interface CallInfo {
@@ -702,7 +719,7 @@ export interface CallInfo {
 }
 
 /**
- * The payload of a group DM system row (WP 3B-11a), by `kind`: `target_user_id`
+ * The payload of a group DM system row, by `kind`: `target_user_id`
  * for group_add / group_remove, `name` for group_rename ("" = the name was
  * removed), `icon_removed` for group_icon, nothing for group_leave. The render
  * source for those rows; `content` is only an English fallback sentence.
@@ -714,7 +731,7 @@ export interface GroupEventInfo {
 }
 
 /**
- * The snapshot link on a forwarded message (WP 6.9a). No author and no channel
+ * The snapshot link on a forwarded message. No author and no channel
  * name ride on it; `source_message_id` is null once the original is deleted or
  * purged, so the jump link is shown only while it is set.
  */
@@ -724,7 +741,7 @@ export interface ForwardInfo {
   readonly source_timestamp: string;
 }
 
-/** One answer of a poll (WP 6.9b). `emoji` is a Unicode emoji or a `:shortcode:`, or null. */
+/** One answer of a poll. `emoji` is a Unicode emoji or a `:shortcode:`, or null. */
 export interface PollAnswer {
   readonly answer_id: number;
   readonly text: string;
@@ -747,7 +764,7 @@ export interface PollResults {
   readonly me: readonly number[];
 }
 
-/** The `poll` block of a poll message, live and in history (WP 6.9b). */
+/** The `poll` block of a poll message, live and in history. */
 export interface PollInfo {
   readonly question: string;
   readonly answers: readonly PollAnswer[];
@@ -799,7 +816,7 @@ export interface PollEndOkPayload {
 }
 
 /**
- * A thread as the server states it (WP 6.9c). Always absolute: a later frame
+ * A thread as the server states it. Always absolute: a later frame
  * replaces an earlier one. `owner_id` and `starter_message_id` are null once
  * the user or the message is erased; `last_message_at` is null with no replies.
  */
@@ -815,7 +832,7 @@ export interface ThreadInfo {
   readonly message_count: number;
   readonly last_message_at: string | null;
   readonly created_at: string;
-  /** Present only when the parent is a forum (WP 6.9d): the post's tags and opening message. */
+  /** Present only when the parent is a forum: the post's tags and opening message. */
   readonly post?: ForumPostMeta;
 }
 
@@ -907,8 +924,8 @@ export interface ChatMessagePayload {
    */
   readonly mentions?: readonly number[];
   /**
-   * Role IDs this message mentions that resolved and cleared the sender's gate
-   * (WP 6.3f). Authoritative when present; absent from older servers, where
+   * Role IDs this message mentions that resolved and cleared the sender's gate.
+   * Authoritative when present; absent from older servers, where
    * the `<@&id>` tokens in `content` stand in.
    */
   readonly mention_roles?: readonly number[];
@@ -924,7 +941,7 @@ export interface ChatMessagePayload {
    * The server's applyMentionCounts (mentions.go) skips the mention-count
    * bump for an @here fan-out reader with no live connection at send time;
    * the client uses this bit to avoid raising a badge a reconnect replay
-   * cannot otherwise correct (OC-0271). Absent from older servers.
+   * cannot otherwise correct. Absent from older servers.
    */
   readonly mentions_here?: boolean;
   /** `ChatMessageKind` value ("call" for a DM call log row), open to future kinds; absent for an ordinary message (and from older servers). */
@@ -932,13 +949,13 @@ export interface ChatMessagePayload {
   readonly call?: CallInfo;
   /** See GroupEventInfo; present on a group DM system row only. */
   readonly group_event?: GroupEventInfo;
-  /** Present on a forwarded message only (WP 6.9a). */
+  /** Present on a forwarded message only. */
   readonly forward?: ForwardInfo;
-  /** Present on a poll message only (WP 6.9b). */
+  /** Present on a poll message only. */
   readonly poll?: PollInfo;
-  /** Present on a sticker message only (WP 8.8). */
+  /** Present on a sticker message only. */
   readonly sticker?: MessageStickerInfo;
-  /** Present on a thread's starter message only (WP 6.9c). */
+  /** Present on a thread's starter message only. */
   readonly thread?: ThreadInfo;
 }
 
@@ -1014,11 +1031,11 @@ export interface PresencePayload {
    *  (null = none), so a cleared text is distinguishable from an event that
    *  simply does not mention it. */
   readonly custom_status?: string | null;
-  /** The game the user is playing (WP 8.3). Always present on a server with
+  /** The game the user is playing. Always present on a server with
    *  `game_activity` (null = none); absent from an older one, where the store
    *  leaves the shown game alone. */
   readonly activity?: GameActivity | null;
-  /** The song the user is listening to (WP 8.10). Always present on a server
+  /** The song the user is listening to. Always present on a server
    *  with `listening_activity` (null = none); absent from an older one. */
   readonly listening?: ListeningActivity | null;
 }
@@ -1044,6 +1061,8 @@ export interface ChannelCreatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.password_protected — absent means unchanged. */
+  readonly password_protected?: boolean;
   /** See ReadyChannel.afk — absent means unchanged. */
   readonly afk?: boolean;
   /**
@@ -1095,11 +1114,13 @@ export interface ChannelUpdatePayload {
   /** Voice capacity limits (0 = unlimited). See ReadyChannel. */
   readonly voice_max_users?: number;
   readonly voice_max_video?: number;
+  /** See ReadyChannel.password_protected — absent means unchanged. */
+  readonly password_protected?: boolean;
   /** See ReadyChannel.afk — absent means unchanged. */
   readonly afk?: boolean;
 }
 
-/** nsfw_ack — the caller acknowledged or revoked a labelled channel on another device (B5-7). */
+/** nsfw_ack — the caller acknowledged or revoked a labelled channel on another device. */
 export interface NsfwAckPayload {
   readonly channel_id: number;
   readonly acknowledged: boolean;
@@ -1253,7 +1274,7 @@ export interface EmojiUpdatePayload {
 }
 
 /**
- * `sticker_update` (WP 8.8) — the server's whole custom-sticker set after an
+ * `sticker_update` — the server's whole custom-sticker set after an
  * upload, rename or delete, replaced wholesale like `emoji_update`.
  */
 export interface StickerUpdatePayload {
@@ -1272,7 +1293,7 @@ export interface UploadPolicyPayload {
 
 /**
  * `game_activity_policy` — an admin turned game activity on or off for the
- * server (WP 8.3e-2). Unsequenced and not replayed; `auth_ok` carries the same
+ * server. Unsequenced and not replayed; `auth_ok` carries the same
  * value on every connect and resume.
  */
 export interface GameActivityPolicyPayload {
@@ -1282,7 +1303,7 @@ export interface GameActivityPolicyPayload {
 export interface MemberUpdatePayload {
   readonly user_id: number;
   readonly role: string;
-  /** Every role the member holds now, top first (WP 6.3c); absent from an older server. */
+  /** Every role the member holds now, top first; absent from an older server. */
   readonly role_ids?: readonly number[];
 }
 
@@ -1341,12 +1362,12 @@ export interface DmChannelPayload {
   readonly is_group?: boolean;
   /**
    * The group's owner (user id). Groups only, and only from a server with
-   * WP 3B-10; its absence on a group means member management is unavailable.
+   * group DM member management; its absence on a group means member management is unavailable.
    */
   readonly owner_id?: number;
   /**
    * The group's icon: "/api/v1/files/{id}", or "" for none. Absent from a
-   * server without WP 3B-10c; absent and "" both mean no icon.
+   * server without group icons; absent and "" both mean no icon.
    */
   readonly icon?: string;
   readonly last_message_id: number | null;
@@ -1385,7 +1406,7 @@ export interface DmChannelClosePayload {
   readonly channel_id: number;
 }
 
-/** A Message Request's sender (B5-6). `avatar` may be a stranger-controlled URL: never fetch it. */
+/** A Message Request's sender. `avatar` may be a stranger-controlled URL: never fetch it. */
 export interface DmRequestSender {
   readonly id: number;
   readonly username: string;
@@ -1429,7 +1450,7 @@ export interface ErrorPayload {
   readonly message: string;
   /** SERVER_BUSY only: the least wait before redialling. */
   readonly retry_after_ms?: number;
-  /** THREAD_EXISTS only: the thread the message already has (WP 6.9c). */
+  /** THREAD_EXISTS only: the thread the message already has. */
   readonly thread_id?: number;
 }
 
@@ -1455,7 +1476,7 @@ export interface AuthPayload {
    */
   readonly active_channel_id?: number;
   /**
-   * What this client can render, declared once per connection (WP 6.9d). The
+   * What this client can render, declared once per connection. The
    * server withholds anything not declared, so an older client never sees it.
    */
   readonly features?: readonly string[];
@@ -1476,11 +1497,11 @@ export interface ChatSendPayload {
   /** With reply_to, whether the reply mentions the parent's author (3A-12). */
   readonly reply_ping?: boolean;
   readonly attachments: readonly string[];
-  /** Sends a custom sticker (WP 8.8): needs `client_message_id`, no text, no attachments. */
+  /** Sends a custom sticker: needs `client_message_id`, no text, no attachments. */
   readonly sticker_id?: number;
 }
 
-/** Create a forum post and its opening message in one step (WP 6.9d). */
+/** Create a forum post and its opening message in one step. */
 export interface ForumPostCreatePayload {
   readonly channel_id: number;
   readonly name: string;
@@ -1499,20 +1520,20 @@ export interface ForumPostCreateOkPayload {
   readonly skipped_attachment_ids?: readonly string[];
 }
 
-/** Copy one message into one channel or DM; `client_message_id` is required (WP 6.9a). */
+/** Copy one message into one channel or DM; `client_message_id` is required. */
 export interface ChatForwardPayload {
   readonly client_message_id: string;
   readonly channel_id: number;
   readonly message_id: number;
 }
 
-/** One answer of a new poll; `emoji` is optional (WP 6.9b). */
+/** One answer of a new poll; `emoji` is optional. */
 export interface PollCreateAnswer {
   readonly text: string;
   readonly emoji?: string;
 }
 
-/** Post a poll as a message; `client_message_id` is required (WP 6.9b). */
+/** Post a poll as a message; `client_message_id` is required. */
 export interface PollCreatePayload {
   readonly client_message_id: string;
   readonly channel_id: number;
@@ -1522,7 +1543,7 @@ export interface PollCreatePayload {
   readonly allow_multiselect: boolean;
 }
 
-/** Set the sender's whole selection on a poll; `[]` removes the vote (WP 6.9b). */
+/** Set the sender's whole selection on a poll; `[]` removes the vote. */
 export interface PollVotePayload {
   readonly message_id: number;
   readonly answer_ids: readonly number[];
@@ -1609,12 +1630,12 @@ export interface PresenceUpdatePayload {
   readonly custom_status_expires_in?: number;
 }
 
-/** Client→Server: the game being played, or null once it stops (WP 8.3). */
+/** Client→Server: the game being played, or null once it stops. */
 export interface ActivityUpdatePayload {
   readonly activity: GameActivity | null;
 }
 
-/** Client→Server: the song being listened to, or null once it stops (WP 8.10). */
+/** Client→Server: the song being listened to, or null once it stops. */
 export interface ListeningUpdatePayload {
   readonly listening: ListeningActivity | null;
 }
@@ -1623,6 +1644,8 @@ export interface VoiceJoinPayload {
   readonly channel_id: number;
   /** Set on the user's own join; automatic rejoins (reconnect, voice_moved) omit it. */
   readonly user_initiated?: boolean;
+  /** The channel's password, sent once by the user for a protected channel; never stored. */
+  readonly password?: string;
 }
 
 /** Client → Server: leave current voice channel (no payload needed). */
@@ -1807,7 +1830,7 @@ export interface AuthResponse {
 export interface RegisterResponse {
   readonly user?: { readonly id: number; readonly username: string };
   readonly token?: string;
-  /** Approval-mode registration (B4-1): the server answered 202 — the
+  /** Approval-mode registration: the server answered 202 — the
    *  account exists but cannot sign in until an admin approves it. */
   readonly status?: "pending_approval";
 }
@@ -1833,7 +1856,7 @@ export interface HealthResponse {
   readonly online_users: number;
 }
 
-/** Registration mode reported by `server-info` (B4-1, B7-15a). */
+/** Registration mode reported by `server-info`. */
 export type RegistrationMode = "closed" | "invite" | "approval" | "open";
 
 /**
@@ -1871,13 +1894,13 @@ export function retentionNotice(info: ServerInfoResponse | undefined): string | 
 }
 
 /**
- * GET /api/v1/server-info response (B6-7).
+ * GET /api/v1/server-info response.
  *
  * `protocol_epoch` is the wire epoch this server speaks; the client compares it
  * with `PROTOCOL_EPOCH` to know whether it can connect before opening a
- * WebSocket. There is deliberately no version field (C-2).
+ * WebSocket. There is deliberately no version field.
  *
- * B7-15 adds `registration_mode` and a retention summary; both are optional so
+ * `registration_mode` and a retention summary; both are optional so
  * an older server (or a failed read) leaves them undefined and consumers fall
  * back to today's invite-required behaviour. `registration_mode` is parsed
  * through `parseRegistrationMode` at the point of use — an unknown string is
@@ -1917,6 +1940,8 @@ export interface MessageResponse {
   readonly edited_at: string | null;
   readonly deleted: boolean;
   readonly timestamp: string;
+  /** Present on an imported message; `user` is then the hidden import account. */
+  readonly imported_author?: ImportedAuthor;
   /** Server-resolved mentioned user IDs. Absent from older servers. */
   readonly mentions?: readonly number[];
   /** See ChatMessagePayload.mention_roles. */
@@ -1926,13 +1951,13 @@ export interface MessageResponse {
   readonly call?: CallInfo;
   /** See GroupEventInfo; present on a group DM system row only. */
   readonly group_event?: GroupEventInfo;
-  /** Present on a forwarded message only (WP 6.9a). */
+  /** Present on a forwarded message only. */
   readonly forward?: ForwardInfo;
-  /** Present on a poll message only (WP 6.9b). */
+  /** Present on a poll message only. */
   readonly poll?: PollInfo;
-  /** Present on a sticker message only (WP 8.8). */
+  /** Present on a sticker message only. */
   readonly sticker?: MessageStickerInfo;
-  /** Present on a thread's starter message only (WP 6.9c). */
+  /** Present on a thread's starter message only. */
   readonly thread?: ThreadInfo;
 }
 
@@ -1991,7 +2016,7 @@ export interface MemberResponse {
   readonly role: string;
   readonly status: UserStatus;
   /** Whether 2FA is enrolled. Present on the caller's own GET /users/me
-   *  response — the only place the server states it (OC-0354). */
+   *  response — the only place the server states it. */
   readonly totp_enabled?: boolean;
   readonly display_name?: string | null;
   readonly about?: string | null;
@@ -2030,6 +2055,8 @@ export interface SearchResultItem {
   readonly user: MessageUser;
   readonly content: string;
   readonly timestamp: string;
+  /** Present on an imported message; `user` is then the hidden import account. */
+  readonly imported_author?: ImportedAuthor;
 }
 
 /** GET /api/search response. */
@@ -2074,7 +2101,7 @@ export interface StickerResponse {
 }
 
 /**
- * The `sticker` block of a sticker message, live and in history (WP 8.8).
+ * The `sticker` block of a sticker message, live and in history.
  * `name` is the label kept from send time; `id` and `url` are null once the
  * sticker has been deleted.
  */

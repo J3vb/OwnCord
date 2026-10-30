@@ -52,6 +52,7 @@
           "payload": {
             "activities": [],
             "capabilities": {
+              "channel_media": true,
               "dm_privacy": true,
               "forums": true,
               "game_activity": true,
@@ -89,6 +90,7 @@
                 "name": "general",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
+                "password_protected": false,
                 "position": 0,
                 "private": false,
                 "slow_mode": 0,
@@ -116,6 +118,7 @@
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
+                "password_protected": false,
                 "position": 1,
                 "private": false,
                 "slow_mode": 0,
@@ -360,6 +363,7 @@
           "payload": {
             "activities": [],
             "capabilities": {
+              "channel_media": true,
               "dm_privacy": true,
               "forums": true,
               "game_activity": true,
@@ -397,6 +401,7 @@
                 "name": "general",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
+                "password_protected": false,
                 "position": 0,
                 "private": false,
                 "slow_mode": 0,
@@ -424,6 +429,7 @@
                 "name": "Voice",
                 "nsfw": false,
                 "nsfw_acknowledged": false,
+                "password_protected": false,
                 "position": 1,
                 "private": false,
                 "slow_mode": 0,

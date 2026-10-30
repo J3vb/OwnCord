@@ -14,34 +14,24 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// setupLimiterReapInterval controls how often the setup endpoint's
-// dedicated rate limiter reaps stale window entries. Cleanup is
-// per-key-window-aware since item 6 (round 3 review; auth/ratelimit.go's
-// entry.window), so there is no separate max-window to tune here — each
-// entry retires on its own window. The reap test runs on synctest's fake
-// clock rather than shrinking this.
+// setupLimiterReapInterval controls how often the setup endpoint's dedicated
+// rate limiter reaps stale window entries. Cleanup is per-key-window-aware
+// (auth/ratelimit.go), so each entry retires on its own window and there is
+// no max-window to tune. The reap test runs on synctest's fake clock.
 const setupLimiterReapInterval = 5 * time.Minute
 
 // setupLimiterHook, when non-nil, receives the *auth.RateLimiter NewAdminAPI
-// creates for the /setup endpoint. Test-only seam: NewAdminAPI returns only
-// an http.Handler, so tests otherwise have no way to reach that limiter to
-// verify it gets reaped.
+// creates for the /setup endpoint. Test-only seam: NewAdminAPI returns only an
+// http.Handler, so tests otherwise cannot reach that limiter.
 var setupLimiterHook func(*auth.RateLimiter)
 
-// startSetupLimiterReap keeps rl's window map bounded for the life of the
-// process. Every distinct source IP that ever hits POST /setup leaves an
-// entry that Allow itself only prunes on a repeat call from that same key —
-// a one-shot caller's entry sits forever unless something sweeps the whole
-// map. The app reaps the main limiter with RateLimiter.RunCleanup on its own
-// cancellable context (internal/app/limiter_cleanup.go) — but
 // mountUserRoutes registers the member-management routes under the
 // authenticated perimeter. Ban/unban and role change are authorized inside
 // ModerationService (BAN_MEMBERS / MANAGE_ROLES + hierarchy), so PATCH stays
-// perimeter-level — a moderator with only BAN_MEMBERS must reach it.
-// Force-logout is KICK_MEMBERS; account erasure (B4-9) is ERASE_ACCOUNTS or
-// ADMINISTRATOR with the hierarchy re-checked in the service; recovery
-// credentials (B4-6) are the owner's or an ISSUE_RECOVERY holder's, with the
-// target's rank checked in the service (WP 8.4d).
+// perimeter-level: a moderator with only BAN_MEMBERS must reach it.
+// Force-logout is KICK_MEMBERS; account erasure is ERASE_ACCOUNTS or
+// ADMINISTRATOR; recovery credentials are the owner's or an ISSUE_RECOVERY
+// holder's. Rank is re-checked in the service.
 func mountUserRoutes(r chi.Router, gates *gateRegistry, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
 	mountMemberActionRoutes(r, "/users", svc, hub, mod)
 	gates.route(r, gateEraseAccounts, http.MethodDelete, "/users/{id}", handleDeleteUser(mod, hub))
@@ -50,11 +40,10 @@ func mountUserRoutes(r chi.Router, gates *gateRegistry, svc *service.Services, h
 
 // mountMemberActionRoutes registers the member-list actions the desktop client
 // uses: list, ban/unban, role change (PATCH), add/remove one role (PUT/DELETE
-// roles/{roleId}) and force-logout. They are
-// mounted twice, under /admin/api/users for the panel and under
-// /api/v1/moderation/members (NewMemberAPI) for the client, so both run the
-// same handlers and the same ModerationService rank checks. The list sits at
-// base itself, the per-user routes under base/{id}.
+// roles/{roleId}) and force-logout. They are mounted twice, under
+// /admin/api/users for the panel and /api/v1/moderation/members (NewMemberAPI)
+// for the client, so both run the same handlers and rank checks. The list sits
+// at base itself, the per-user routes under base/{id}.
 func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, hub HubBroadcaster, mod *service.ModerationService) {
 	list := base
 	if list == "" {
@@ -62,7 +51,7 @@ func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, h
 	}
 	r.Get(list, handleListUsers(svc.Users))
 	r.Patch(base+"/{id}", handlePatchUser(svc.Users, hub, mod))
-	// Add or remove one role of a member (WP 6.3c). Authorized in
+	// Add or remove one role of a member. Authorized in
 	// ModerationService, so perimeter-level like PATCH.
 	r.Put(base+"/{id}/roles/{roleId}", handleMemberRole(mod, true))
 	r.Delete(base+"/{id}/roles/{roleId}", handleMemberRole(mod, false))
@@ -77,9 +66,9 @@ func mountMemberActionRoutes(r chi.Router, base string, svc *service.Services, h
 // Authentication is the admin perimeter's (a session or API token whose role
 // holds a moderation bit) and authorisation is the same per-action permission
 // and rank check, in ModerationService. Unlike /admin it is not subject to
-// server.admin_allowed_cidrs: these are routine moderator actions. They accept
-// only a session or API token issued by this server, and the permission and
-// rank checks, not the network, are what bound them.
+// server.admin_allowed_cidrs: these are routine moderator actions, accepted
+// only with a session or API token issued by this server, and the permission
+// and rank checks, not the network, bound them.
 func NewMemberAPI(svc *service.Services, hub HubBroadcaster, _ PermissionInvalidator) http.Handler {
 	r := chi.NewRouter()
 	r.Use(adminAuthMiddleware(svc.Sessions))
@@ -89,10 +78,10 @@ func NewMemberAPI(svc *service.Services, hub HubBroadcaster, _ PermissionInvalid
 
 // mountChannelActionRoutes registers the channel actions the desktop client
 // uses: create, edit and delete, all under MANAGE_CHANNELS. They are mounted
-// twice, under /admin/api/channels for the panel and under
-// /api/v1/moderation/channels (NewChannelAPI) for the client, so both run the
-// same handlers and the same permission check. The create route sits at base
-// itself, the per-channel routes under base/{id}.
+// twice, under /admin/api/channels for the panel and /api/v1/moderation/channels
+// (NewChannelAPI) for the client, so both run the same handlers and permission
+// check. The create route sits at base itself, the per-channel routes under
+// base/{id}.
 func mountChannelActionRoutes(r chi.Router, base string, channels *service.ChannelService, hub HubBroadcaster) {
 	create := base
 	if create == "" {
@@ -101,7 +90,7 @@ func mountChannelActionRoutes(r chi.Router, base string, channels *service.Chann
 	r.Group(func(r chi.Router) {
 		r.Use(requirePerm(permissions.ManageChannels))
 		r.Post(create, handleCreateChannel(channels, hub))
-		// Categories (WP 6.5a). "/categories/order" is registered before
+		// Categories. "/categories/order" is registered before
 		// "/categories/{id}" so "order" is never read as an id.
 		r.Get(base+"/categories", handleListCategories(channels))
 		r.Post(base+"/categories", handleCreateCategory(channels, hub))
@@ -116,12 +105,11 @@ func mountChannelActionRoutes(r chi.Router, base string, channels *service.Chann
 
 // NewChannelAPI serves the channel create, edit and delete actions on the main
 // /api/v1 surface (mounted by api.NewRouter at /api/v1/moderation/channels),
-// for the same reason as NewMemberAPI: a reverse proxy in front of a server may
-// answer /admin/... with a web page. Authentication is the admin perimeter's
-// (a session or API token issued by this server) and authorisation is the same
-// MANAGE_CHANNELS check. Unlike /admin it is not subject to
-// server.admin_allowed_cidrs; the token and the permission bit, not the
-// network, bound it, so nobody outside this server's own members can reach it.
+// for the same reason as NewMemberAPI: a reverse proxy may answer /admin/...
+// with a web page. Authentication is the admin perimeter's (a session or API
+// token issued by this server) and authorisation is the MANAGE_CHANNELS check.
+// Unlike /admin it is not subject to server.admin_allowed_cidrs; the token and
+// permission bit, not the network, bound it.
 func NewChannelAPI(svc *service.Services, hub HubBroadcaster) http.Handler {
 	r := chi.NewRouter()
 	r.Use(adminAuthMiddleware(svc.Sessions))
@@ -130,8 +118,7 @@ func NewChannelAPI(svc *service.Services, hub HubBroadcaster) http.Handler {
 }
 
 // OwnerOnlyRoute is one (method, pattern) pair ownerOnly registered, relative
-// to NewAdminAPI's own router (the same shape doRequest's test helper takes
-// paths in — no "/admin/api" prefix).
+// to NewAdminAPI's own router (no "/admin/api" prefix).
 type OwnerOnlyRoute struct {
 	Method  string
 	Pattern string
@@ -139,30 +126,26 @@ type OwnerOnlyRoute struct {
 
 // ownerOnlyRegistry records every route ownerOnly registers while one
 // NewAdminAPI call builds its router. It belongs to that call's AdminAPI, so
-// two APIs built in one process (every test does) each keep their own
-// complete list. It is only written during construction, on one goroutine,
-// and only read afterwards.
+// two APIs built in one process (every test does) each keep their own list. It
+// is only written during construction, on one goroutine.
 type ownerOnlyRegistry struct {
 	routes []OwnerOnlyRoute
 }
 
 // ownerOnly is the ONE call site every Owner-gated admin route goes through
-// (minting or revoking an API token, taking or restoring a backup, checking
-// or applying an update, issuing a recovery credential) — registering h on r
-// wrapped in ownerOnlyMiddleware, and recording the (method, pattern) pair so
-// a test can walk the exact set NewAdminAPI wires (OwnerOnlyRoutesForTest)
-// instead of a second, hand-maintained list beside it that the addition of a
-// new owner-only route could leave stale (P2-13, Codex review: the previous
-// test hard-coded six routes and had already drifted, missing backup delete
-// and restore).
+// (minting or revoking an API token, taking or restoring a backup, checking or
+// applying an update, issuing a recovery credential): it registers h on r
+// wrapped in ownerOnlyMiddleware and records the (method, pattern) pair so a
+// test can walk the exact set NewAdminAPI wires (OwnerOnlyRoutesForTest)
+// instead of a hand-maintained list that a new route could leave stale.
 func (o *ownerOnlyRegistry) ownerOnly(r chi.Router, method, pattern string, h http.Handler) {
 	o.routes = append(o.routes, OwnerOnlyRoute{Method: method, Pattern: pattern})
 	r.Method(method, pattern, ownerOnlyMiddleware(h))
 }
 
-// backupGate is the single-flight state of POST /backup (WP 8.4c) for one
-// NewAdminAPI call. Per API, not a package global, so two APIs built in one
-// process (every test does) never share a running backup.
+// backupGate is the single-flight state of POST /backup for one NewAdminAPI
+// call. Per API, not a package global, so two APIs in one process never share
+// a running backup.
 type backupGate struct {
 	// running is set while a manual backup is being taken; a second POST
 	// /backup while it is set is refused with 409 BACKUP_RUNNING.
@@ -189,7 +172,7 @@ func (a *AdminAPI) ownerOnlyRoutes() []OwnerOnlyRoute {
 	return slices.Clone(a.owner.routes)
 }
 
-// mountRetentionRoutes registers message retention (B4-11) under
+// mountRetentionRoutes registers message retention under
 // MANAGE_SERVER: the policy, its effect preview and the per-channel
 // overrides — server management, not moderation.
 func mountRetentionRoutes(r chi.Router, retention *service.RetentionService) {
@@ -204,11 +187,14 @@ func mountRetentionRoutes(r chi.Router, retention *service.RetentionService) {
 	})
 }
 
-// NewAdminAPI has no shutdown hook and is called directly by ~180 tests that
-// never capture one, so a parked goroutine here would leak under every
-// test's goleak check. time.AfterFunc self-rescheduling avoids that: between
-// fires there is no live goroutine, only a runtime timer, so nothing needs
-// to stop it.
+// startSetupLimiterReap keeps rl's window map bounded for the life of the
+// process: Allow prunes a key only on a repeat call from it, so a one-shot
+// caller's entry would sit forever. The app reaps the main limiter with
+// RateLimiter.RunCleanup on its own cancellable context
+// (internal/app/limiter_cleanup.go), but NewAdminAPI has no shutdown hook and
+// ~180 tests call it without capturing one, so a parked goroutine here would
+// leak under every goleak check. Self-rescheduling time.AfterFunc leaves only
+// a runtime timer between fires.
 func startSetupLimiterReap(rl *auth.RateLimiter) {
 	var reap func()
 	reap = func() {
@@ -218,41 +204,21 @@ func startSetupLimiterReap(rl *auth.RateLimiter) {
 	time.AfterFunc(setupLimiterReapInterval, reap)
 }
 
-// ─── NewAdminAPI ──────────────────────────────────────────────────────────────
-
-// NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
-// except the unauthenticated setup endpoints are protected by
-// adminAuthMiddleware, which admits any role holding a bit of
-// permissions.AdminPerimeter; route groups then require the specific bit
-// (requirePerm) or the Owner role (ownerOnlyMiddleware).
-//
-// The optional trailing SetupOptions enables the first-run wizard's
-// config.yaml write-back and restart; without it the setup endpoints keep
-// their legacy account-only behaviour (the case in most tests).
 // adminRequiredServices fills in every service this mux dereferences without a
 // nil guard, from the handle this package already holds.
 //
-// The distinction that decides what belongs here: a service the ROUTER
-// dereferences must exist, because there is no request-time branch left to
-// fail closed in — the handler would simply panic. A service only a HANDLER
-// dereferences may be nil, because the handler checks it and answers 500
-// "… service unavailable"; those (Moderation, Roles, Channels, Settings) are
-// deliberately left alone, and the rows that pin their refusals construct
-// exactly that.
-//
-// Sessions and Setup were the first two: without a SessionService no request
-// can be authenticated at all, and without a SetupService the unauthenticated
-// first-run routes have nothing to answer with, on a server that by definition
-// has nobody able to read its logs yet. Users and Tokens joined them when the
-// user and token families moved those routes off the raw handle — before that
-// they operated on `database`, which is never nil here, so the fail-closed
-// posture the doc comment above claimed had quietly stopped being true for
-// /stats, /users and /tokens.
+// A service the ROUTER dereferences must exist, because there is no
+// request-time branch left to fail closed in: the handler would panic. A
+// service only a HANDLER dereferences may be nil, because the handler checks it
+// and answers 500 "... service unavailable"; those (Moderation, Roles,
+// Channels, Settings) are left alone. Sessions are required because without a
+// SessionService no request can be authenticated, Setup because the
+// unauthenticated first-run routes would have nothing to answer with, and
+// Users and Tokens because /stats, /users and /tokens route through them.
 func adminRequiredServices(database *db.DB, svc *service.Services) *service.Services {
-	// Copy before filling: the bundle the caller passes is the app-wide one
-	// the composition root shares with the rest of the server, and these
-	// fallbacks are the admin mux's own. Writing them through the pointer
-	// would install admin's wiring into everyone else's view of the bundle.
+	// Copy before filling: the bundle passed in is the app-wide one shared with
+	// the rest of the server, and these fallbacks are the admin mux's own;
+	// writing through the pointer would leak admin's wiring into it.
 	filled := service.Services{}
 	if svc != nil {
 		filled = *svc
@@ -273,12 +239,12 @@ func adminRequiredServices(database *db.DB, svc *service.Services) *service.Serv
 }
 
 // mountCategoryPermRoutes registers the category permission template routes
-// and the per-channel re-sync (WP 6.5d). They are admin API only: the member
+// and the per-channel re-sync. They are admin API only: the member
 // API never mounts them.
 func mountCategoryPermRoutes(r chi.Router, channels *service.ChannelService) {
-	// Re-sync one channel to its category's template (WP 6.5d).
+	// Re-sync one channel to its category's template.
 	r.Post("/channels/{id}/permissions/sync", handleSyncChannelPermissions(channels))
-	// Category permission templates (WP 6.5d): the same row is written
+	// Category permission templates: the same row is written
 	// to every synced channel in the category, in one transaction.
 	r.Get("/channels/categories/{id}/permissions", handleGetCategoryPermissions(channels))
 	r.Put("/channels/categories/{id}/permissions/{roleId}", handlePutCategoryPermission(channels))
@@ -287,25 +253,27 @@ func mountCategoryPermRoutes(r chi.Router, channels *service.ChannelService) {
 	r.Delete("/channels/categories/{id}/user-permissions/{userId}", handleDeleteCategoryUserPermission(channels))
 }
 
+// NewAdminAPI returns a chi router with all /admin/api/* routes. All routes
+// except the unauthenticated setup endpoints are protected by
+// adminAuthMiddleware, which admits any role holding a bit of
+// permissions.AdminPerimeter; route groups then require the specific bit
+// (requirePerm) or the Owner role (ownerOnlyMiddleware).
+//
+// The optional trailing SetupOptions enables the first-run wizard's
+// config.yaml write-back and restart; without it the setup endpoints keep
+// their account-only behaviour (the case in most tests).
 func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater.Updater, logBuf *RingBuffer, allowedOrigins []string, _ PermissionInvalidator, svc *service.Services, opts ...SetupOptions) *AdminAPI {
 	r := chi.NewRouter()
-	// Fresh per call: the registry belongs to the API this call returns, so
-	// no other API shares its list.
+	// Fresh per call: the registry belongs to the API this call returns.
 	api := &AdminAPI{Router: r}
 	gates := &api.gates
 	backups := &api.backup
 
-	// The four services this mux routes to, named once. NewAdminAPI used to
-	// take them as four positional parameters; each B3-8 family that moved an
-	// admin handler behind a service added another, and the auth family would
-	// have added one more. Taking the bundle the caller already holds keeps
-	// that growth out of a 200-call-site signature.
-	//
-	// A nil service the HANDLERS check stays the fail-closed case they
-	// implement (they answer 500 "… service unavailable" rather than writing
-	// unchecked) — the tests that pin that behaviour pass exactly that. A nil
-	// service the ROUTER dereferences has no such branch left, so
-	// adminRequiredServices builds those; see its doc comment.
+	// The services this mux routes to, named once so a new service family does
+	// not grow a 200-call-site signature. A nil service the HANDLERS check
+	// stays fail-closed (they answer 500 "... service unavailable"); a nil
+	// service the ROUTER dereferences has no such branch, so
+	// adminRequiredServices builds those.
 	svc = adminRequiredServices(database, svc)
 	mod, roles, settings, channels := svc.Moderation, svc.Roles, svc.Settings, svc.Channels
 
@@ -363,7 +331,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// narrower moderation bit.
 		gates.route(r, gateViewDiagnostics, http.MethodPost, "/logs/ticket", handleLogTicket(database))
 
-		// Runtime log level (SRE-07): read the level in force, set a timed
+		// Runtime log level: read the level in force, set a timed
 		// debug boost that reverts on its own, or revert it at once.
 		// VIEW_DIAGNOSTICS like the log stream it tunes.
 		gates.route(r, gateViewDiagnostics, http.MethodGet, "/logs/level", handleGetLogLevel(setupOpts.LogLevel))
@@ -374,11 +342,11 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.Get("/me", handleGetMe(settings, version))
 		gates.route(r, gateViewDiagnostics, http.MethodPost, "/support-bundles/preview", http.HandlerFunc(bundles.preview))
 		gates.route(r, gateViewDiagnostics, http.MethodPost, "/support-bundles/download", http.HandlerFunc(bundles.download))
-		// Attention panel (RI-07): server health detail, VIEW_DIAGNOSTICS like
+		// Attention panel: server health detail, VIEW_DIAGNOSTICS like
 		// the support bundle that carries the same counters.
 		gates.route(r, gateViewDiagnostics, http.MethodGet, "/attention", handleGetAttention(svc.Attention))
 		mountUserRoutes(r, gates, svc, hub, mod)
-		// The approval-mode registration queue (B4-1): deciding who joins
+		// The approval-mode registration queue: deciding who joins
 		// is server management, not moderation of existing members.
 		r.With(requirePerm(permissions.ManageServer)).
 			Get("/registrations", handleListRegistrations(svc.Users))
@@ -400,7 +368,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 			r.Put("/channels/{id}/user-permissions/{userId}", handlePutChannelUserPermission(channels))
 			r.Delete("/channels/{id}/user-permissions/{userId}", handleDeleteChannelUserPermission(channels))
 			mountCategoryPermRoutes(r, channels)
-			// RI-06: explain a member's effective access and preview a
+			// Explain a member's effective access and preview a
 			// proposed override — read-only, same bit as editing overrides.
 			r.Get("/channels/{id}/access/explain", handleExplainAccess(channels))
 			r.Post("/channels/{id}/access/preview", handlePreviewAccess(channels))
@@ -422,7 +390,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 
 		r.With(requirePerm(permissions.ViewAuditLog)).
 			Get("/audit-log", handleGetAuditLog(settings))
-		// API tokens — the owner's or a MANAGE_TOKENS holder's (WP 8.4d), who
+		// API tokens — the owner's or a MANAGE_TOKENS holder's, who
 		// sees and revokes only their own. Minting a network-reachable,
 		// revocation-surviving bearer credential is gated like backups/updates.
 		gates.route(r, gateManageTokens, http.MethodGet, "/tokens", handleListAPITokens(svc.Tokens))
@@ -445,10 +413,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 }
 
 // mountBackupRoutes registers the backup, restore and archive routes. Create
-// and link are the owner's or a MANAGE_BACKUPS holder's (WP 8.4c); list also
+// and link are the owner's or a MANAGE_BACKUPS holder's; list also
 // admits a RESTORE_BACKUPS holder, who must pick the backup to restore; delete,
-// restore and the full archive are the owner's or a RESTORE_BACKUPS holder's
-// (WP 8.4d). The backup schedule and retention stay Owner-only, as settings
+// restore and the full archive are the owner's or a RESTORE_BACKUPS holder's.
+// The backup schedule and retention stay Owner-only, as settings
 // keys. They share the one backupPaths this API resolved from its
 // SetupOptions, so no handler reads a directory from process-wide state.
 func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, database *db.DB, setupOpts SetupOptions, paths backupPaths) {
@@ -462,7 +430,7 @@ func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, d
 }
 
 // registerConfigOverrideRoutes mounts the admin-panel config overrides, the
-// owner's or a MANAGE_CONFIG holder's (WP 8.4d): reading and writing
+// owner's or a MANAGE_CONFIG holder's: reading and writing
 // config-overrides.json and restarting the process to apply them (or on
 // demand). Changing a server-wide setting and restarting is gated like backups
 // and updates.

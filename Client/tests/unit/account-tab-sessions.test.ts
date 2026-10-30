@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const mockShowToast = vi.fn();
-vi.mock("@lib/toast", () => ({ showToast: (...args: unknown[]) => mockShowToast(...args) }));
+vi.mock("@lib/ui/toast", () => ({ showToast: (...args: unknown[]) => mockShowToast(...args) }));
 
 import { buildAccountTab } from "@components/settings/AccountTab";
 import { authStore } from "@stores/auth.store";

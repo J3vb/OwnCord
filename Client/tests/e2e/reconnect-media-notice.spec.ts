@@ -17,8 +17,8 @@ import {
   keyboardReachable,
   setAppearance,
   textContrast,
-} from "./support/b9-accessibility";
-import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/b9-zoom";
+} from "./support/accessibility";
+import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/zoom-reflow";
 
 async function signIn(page: Page): Promise<void> {
   await page.goto("/");

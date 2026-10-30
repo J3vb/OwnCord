@@ -1,4 +1,4 @@
-// The browser platform's socket transport (6.13c): the page's own `WebSocket`
+// The browser platform's socket transport: the page's own `WebSocket`
 // behind the `SocketConnection` contract. `lib/ws.ts` keeps everything above
 // the seam, as on desktop: the auth frame, the state machine, the reconnect
 // policy, frame parsing and the send-failure codes.
@@ -17,6 +17,7 @@ import type {
   SocketRetryHint,
   SocketTransport,
 } from "../contracts/socket";
+import { holdSessionToken, releaseSessionToken } from "./session";
 import { inertUnsubscribe, refuse, UnavailableError } from "./unavailable";
 
 /** `WebSocket.OPEN`, by spec. */
@@ -60,6 +61,8 @@ function createBrowserSocket(): SocketConnection {
   let settleAttempt: (() => void) | null = null;
   /** The current attempt's handshake timer, until it opens or closes. */
   let handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Identifies this connection to the tab's session holder. */
+  const sessionOwner = {};
 
   function clearHandshakeTimer(): void {
     if (handshakeTimer !== null) clearTimeout(handshakeTimer);
@@ -90,6 +93,7 @@ function createBrowserSocket(): SocketConnection {
     generation++;
     const gen = generation;
     retire();
+    holdSessionToken(sessionOwner, options.token);
     const Socket: typeof WebSocket | undefined = globalThis.WebSocket;
     if (typeof Socket !== "function") throw new UnavailableError();
 
@@ -144,6 +148,7 @@ function createBrowserSocket(): SocketConnection {
   async function disconnect(): Promise<void> {
     generation++;
     retire();
+    releaseSessionToken(sessionOwner);
   }
 
   async function send(text: string): Promise<void> {

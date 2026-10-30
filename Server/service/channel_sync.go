@@ -9,23 +9,18 @@ import (
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
-// ─── Syncing a channel to its category's template (WP 6.5d) ─────────────────
-//
-// Three paths replace a channel's own override rows with its category's
-// template and mark it synced: the sync endpoint, a channel PATCH that moves
-// the channel and carries sync_permissions, and (without replacing anything)
-// a create inside a category.
-//
-// Replacing rows is authorized like writing them. The escalation guard covers
-// the union of every row the replace removes and every row it writes, and the
-// hierarchy rules cover every role and member those rows name. The create path
-// is the one that checks nothing: copying a template is not a grant by the
-// person creating the channel, because the template was already guarded when
-// it was written.
+// Syncing a channel to its category's template: three paths replace a channel's
+// own override rows with the template's and mark it synced: the sync endpoint, a
+// channel PATCH that moves the channel with sync_permissions, and (replacing
+// nothing) a create inside a category.
+// Replacing rows is authorized like writing them: the escalation guard covers the
+// union of every row removed and written, and the hierarchy rules cover every role
+// and member those rows name. The create path checks nothing: copying a template is
+// not a grant by the creator, since the template was guarded when written.
 
-// ErrPermsChanged reports that a sync found override rows it had not checked, because they
-// changed between the check and the write. Nothing was written; retry. It is
-// also an ErrConflict.
+// ErrPermsChanged reports that a sync found override rows it had not checked
+// because they changed between the check and the write. Nothing was written; retry.
+// It is also an ErrConflict.
 var ErrPermsChanged = errors.New("channel permissions changed while syncing, try again")
 
 // syncApproval records the roles and members whose hierarchy was checked
@@ -44,12 +39,12 @@ func planRows(p db.ChannelSyncPlan) []db.OverrideRow {
 	return rows
 }
 
-// prepareSync resolves, before the write transaction, who the replace would
-// touch and applies the hierarchy rules to each of them, then returns the
-// guard for inside the transaction. The guard does no store reads (the writer
-// connection is held while it runs): it verifies that the rows it is shown are
-// ones already checked and runs the escalation guard over their union. A
-// refusal is also recorded in *refused for the caller to answer unwrapped.
+// prepareSync resolves, before the write transaction, who the replace would touch,
+// applies the hierarchy rules to each, and returns the guard for inside the
+// transaction. The guard does no store reads (the writer connection is held): it
+// verifies the rows it is shown were already checked and runs the escalation guard
+// over their union. A refusal is also recorded in *refused for the caller to
+// answer unwrapped.
 func (s *ChannelService) prepareSync(ctx context.Context, actorRole *db.Role, channelID, categoryID int64, refused *error) (db.ChannelSyncGuard, error) {
 	cp, err := s.catPermStore()
 	if err != nil {
@@ -135,11 +130,10 @@ func (s *ChannelService) auditSync(ctx context.Context, actorID int64, ch *db.Ch
 			len(plan.Removed.Roles)+len(plan.Removed.Users), len(plan.Written.Roles)+len(plan.Written.Users)))
 }
 
-// SyncChannelPermissions re-syncs one channel to its category's template: its
-// role and member overrides are replaced with the template's and it is marked
-// synced, all in one transaction. ErrBadRequest when the channel has no
-// category; ErrForbidden when the actor could not have written the rows
-// removed or written.
+// SyncChannelPermissions re-syncs one channel to its category's template: its role
+// and member overrides are replaced with the template's and it is marked synced,
+// in one transaction. ErrBadRequest when the channel has no category; ErrForbidden
+// when the actor could not have written the rows removed or written.
 func (s *ChannelService) SyncChannelPermissions(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel) (PermEffect, error) {
 	cp, err := s.catPermStore()
 	if err != nil {
@@ -182,10 +176,10 @@ func mapSyncErr(err, refused error) error {
 	}
 }
 
-// templateEffect names who to invalidate after a channel was created as a
-// copy of its category's template: the holders of every role, and every
-// member, the template has a row for. Without it a connected member's cached
-// overrides would not know the new channel's rows until the cache expires.
+// templateEffect names who to invalidate after a channel was created as a copy of
+// its category's template: the holders of every role and every member the template
+// has a row for. Without it a connected member's cached overrides would not know
+// the new channel's rows until the cache expires.
 func (s *ChannelService) templateEffect(ctx context.Context, categoryID int64) PermEffect {
 	if categoryID == 0 || s.cperm == nil {
 		return PermEffect{}
@@ -251,9 +245,8 @@ func (s *ChannelService) prepareUpdateSync(ctx context.Context, req AdminChannel
 }
 
 // afterUpdateSync audits a committed sync and drops the cached permissions of
-// everyone its replaced rows name. The returned effect says whether any row
-// changed, so the caller refreshes the channel's audience once it has re-read
-// the row.
+// everyone its replaced rows name. The effect says whether any row changed, so the
+// caller refreshes the channel's audience after re-reading the row.
 func (s *ChannelService) afterUpdateSync(ctx context.Context, actorID int64, ch *db.Channel, req AdminChannelUpdate, plan db.ChannelSyncPlan) PermEffect {
 	if !req.SyncPermissions {
 		return PermEffect{}

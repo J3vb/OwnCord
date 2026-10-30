@@ -17,12 +17,12 @@ vi.mock("../../src/platform/desktop", () => ({
   desktop: { urlOpener: { open }, devTools: { open: devToolsOpen } },
 }));
 vi.mock("../../src/features/messaging/fileDropGuard", () => ({ installFileDropGuard }));
-vi.mock("@lib/toast", () => ({ showToast }));
+vi.mock("@lib/ui/toast", () => ({ showToast }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() }),
 }));
 vi.mock("@components/MaskedLinkGuard", () => ({ guardMaskedLink }));
-vi.mock("@lib/touchInput", () => ({ installTouchInput }));
+vi.mock("@lib/ui/touchInput", () => ({ installTouchInput }));
 
 import { installGlobalGuards } from "../../src/app/globalGuards";
 import { connectText } from "../../src/i18n/connect";
@@ -193,7 +193,7 @@ describe("installGlobalGuards", () => {
     it("logs and ignores a failed chunk load", async () => {
       stubPointer(true);
       vi.resetModules();
-      vi.doMock("@lib/touchInput", () => {
+      vi.doMock("@lib/ui/touchInput", () => {
         throw new Error("chunk failed");
       });
       const fresh = await import("../../src/app/globalGuards");
@@ -201,7 +201,7 @@ describe("installGlobalGuards", () => {
       await vi.waitFor(() =>
         expect(warn).toHaveBeenCalledWith("touch input failed to load", expect.any(Error)),
       );
-      vi.doMock("@lib/touchInput", () => ({ installTouchInput }));
+      vi.doMock("@lib/ui/touchInput", () => ({ installTouchInput }));
     });
   });
 });

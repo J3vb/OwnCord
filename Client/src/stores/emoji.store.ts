@@ -14,7 +14,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 
 /** One custom emoji as the server describes it. */
 export interface CustomEmoji {
@@ -31,7 +31,7 @@ export interface EmojiState {
   /** Lookup by lowercase shortcode. Rebuilt with the list, never mutated. */
   readonly byShortcode: ReadonlyMap<string, CustomEmoji>;
   /**
-   * Bumped by every `emoji_update`-sourced write (OC-0251). Optional —
+   * Bumped by every `emoji_update`-sourced write. Optional —
    * absent/undefined reads as revision 0 — so state literals that predate
    * this field (tests, a full setState replace) do not need updating.
    *
@@ -69,7 +69,7 @@ export const SHORTCODE_PATTERN = /^[a-z0-9_]{2,32}$/;
  *
  * `rev`, when given, must match the store's current `rev` — the revision the
  * caller observed right before starting the fetch this reply answers
- * (OC-0251, mirroring the blocksStore blockedByMeRev guard). A mismatch
+ * (mirroring the blocksStore blockedByMeRev guard). A mismatch
  * means a fresher `emoji_update` landed after the fetch was issued, so this
  * reply is stale and is skipped rather than reverting that broadcast. Omit
  * `rev` to always apply — the `emoji_update` handler's unconditional call is
@@ -100,7 +100,7 @@ export function setCustomEmoji(list: readonly CustomEmoji[], rev?: number): void
 /**
  * Drop every custom emoji (logout, or a switch to another server).
  *
- * Bumps `rev` rather than resetting it to 0 (OC-0362): a reset would let a
+ * Bumps `rev` rather than resetting it to 0: a reset would let a
  * still-in-flight GET /emoji from the session being torn down match the
  * next session's ready-time snapshot (both 0) and clobber it with the
  * previous server's emoji.

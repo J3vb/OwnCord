@@ -20,7 +20,7 @@ jobs:
     #    list to grant access; there is no other way in.
     # 2. The trigger text mentions @claude.
     #
-    # scripts/check-workflow-guards.mjs asserts that both this actor term and the
+    # scripts/checks/check-workflow-guards.mjs asserts that both this actor term and the
     # cost bounds below survive; actionlint checks expression syntax and cannot
     # see authorization intent.
     if: |

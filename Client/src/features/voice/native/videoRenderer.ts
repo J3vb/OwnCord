@@ -8,19 +8,19 @@
 // latest frame instead of queueing them.
 //
 // The canvas itself is the picture: it is registered as the surface of a
-// `MediaStreamTrack` (`lib/videoSurface.ts`), and every <video> given that
+// `MediaStreamTrack` (`lib/voice/videoSurface.ts`), and every <video> given that
 // track shows the canvas in its place. The track keeps the video grid and
 // track lifecycle consuming MediaStreams exactly as they do for browser
 // LiveKit tracks, but carries no frames (`captureStream(0)`): on some
 // WebKitGTK GPU stacks a captured canvas reaches a <video> as its first frames
 // only, and remote video froze on them.
 //
-// Lifecycle (B7-11): the owner (`NativeRoom`) disposes it when the track is
+// Lifecycle: the owner (`NativeRoom`) disposes it when the track is
 // unsubscribed or the room disconnects; dispose closes the socket, stops the
 // track, takes the canvas down and releases the GL context. The frame server
 // also closes every socket when the native session ends.
 import { createLogger } from "../../../lib/logger";
-import { registerVideoSurface } from "../../../lib/videoSurface";
+import { registerVideoSurface } from "../../../lib/voice/videoSurface";
 import { nativeCounters } from "./counters";
 
 const log = createLogger("nativeVideo");

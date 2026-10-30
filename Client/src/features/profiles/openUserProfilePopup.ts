@@ -16,7 +16,7 @@ import type {
   ProfileRolesControl,
   UserProfilePopupComponent,
 } from "../../components/UserProfilePopup";
-import { showToast } from "../../lib/toast";
+import { showToast } from "../../lib/ui/toast";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { requestsText } from "../../i18n/requests";
 import { formatDate } from "../../i18n/format";
@@ -24,7 +24,7 @@ import { blocksStore } from "../../stores/blocks.store";
 import { uiStore } from "../../stores/ui.store";
 import { channelsStore } from "../../stores/channels.store";
 import { memberRolesState, roleChangeChoices } from "../moderation/roleAssignment";
-import { multiRoleEnabled } from "../../lib/serverCapabilities";
+import { multiRoleEnabled } from "../../lib/net/serverCapabilities";
 import { createNoteBinding, currentNotesContext } from "./userNotes";
 
 /** What the popup's action buttons do. Each is omitted when the caller has no
@@ -39,7 +39,7 @@ export interface UserProfilePopupCallbacks {
   /** Change the member's role (MANAGE_ROLES). Omitted: no role picker. It
    *  reports its own failures; the card follows the roster, not this call. */
   readonly onChangeRole?: (userId: number, username: string, newRole: string) => Promise<void>;
-  /** Add / remove one role (WP 6.3d). Both set on a server that advertises
+  /** Add / remove one role. Both set on a server that advertises
    *  `multi_role`: the role area becomes chips. They report their own failures. */
   readonly onAddRole?: (userId: number, username: string, roleId: number) => Promise<void>;
   readonly onRemoveRole?: (userId: number, username: string, roleId: number) => Promise<void>;

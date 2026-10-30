@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // We need to mock livekitSession before importing anything that uses auth.store
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),
@@ -875,7 +875,7 @@ describe("SidebarMemberSection", () => {
     });
   });
 
-  describe("user report (B9-10)", () => {
+  describe("user report", () => {
     it("opens the report for that user with the live member list for focus fallback", async () => {
       const section = createSidebarMemberSection(defaultOpts());
       container.appendChild(section.element);

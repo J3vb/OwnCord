@@ -6,7 +6,7 @@ import { resetThreadsStore } from "@stores/threads.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
 import type { ApiClient } from "@lib/api";
-import { initToast, teardownToast } from "@lib/toast";
+import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@components/Toast";
 import type { WsClient } from "@lib/ws";
 import { createMockWsClient } from "../helpers/mock-ws";

@@ -1,5 +1,5 @@
 /**
- * Threads store (WP 6.9c) — the threads this session has heard of, and which
+ * Threads store — the threads this session has heard of, and which
  * one the side panel has open.
  *
  * A thread is a channel row on the server, but it never enters `channelsStore`:
@@ -13,7 +13,7 @@
  * and the panel's open/close. Every frame carries the thread's whole state, so
  * a later one simply replaces an earlier one.
  *
- * `followed` is the follow map (WP 6.9c): the threads this member follows and
+ * `followed` is the follow map: the threads this member follows and
  * their unread and mention counts. `ready.threads` replaces it, a
  * `thread_follow_update` keeps it current, and `channel_activity`,
  * `mention_count` and `read_state` frames for a followed thread id feed the
@@ -26,7 +26,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { setKnownThreadCheck, setThreadReadPointer } from "@lib/read-state";
 import type { ReadyThread, ThreadInfo } from "@lib/types";
 import { publishFollowedThreads, type FollowedThreadRow } from "./followedThreads.store";
@@ -214,7 +214,7 @@ export function resetThreadsStore(): void {
   commit(() => INITIAL);
 }
 
-// ── Follow map (WP 6.9c) ────────────────────────────────────────────────────
+// ── Follow map ────────────────────────────────────────────────────
 
 const NO_COUNTS: FollowedThread = { unread: 0, mentions: 0, lastMessageId: 0, lastReadId: 0 };
 

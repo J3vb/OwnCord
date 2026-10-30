@@ -238,6 +238,8 @@ var deadlineBound = []string{
 	"GET /api/v1/auth/me",
 	"GET /api/v1/blocks/",
 	"GET /api/v1/channels/",
+	"GET /api/v1/channels/{id}/media",
+	"GET /api/v1/channels/{id}/media/months",
 	"GET /api/v1/channels/{id}/messages",
 	"GET /api/v1/channels/{id}/messages/around/{messageId}",
 	"GET /api/v1/channels/{id}/messages/{messageId}/reactions/{emoji}/users",
@@ -393,6 +395,9 @@ var deadlineOptionalBound = map[string]bool{
 	"* /metrics/*": true,
 	"GET /":        true,
 	"* /assets/*":  true,
+	// The browser client's external-content broker mounts with the portal.
+	"GET /api/v1/external/preview": true,
+	"GET /api/v1/external/image":   true,
 }
 
 // deadlineOptionalExempt are exempt routes that mount only under a build tag

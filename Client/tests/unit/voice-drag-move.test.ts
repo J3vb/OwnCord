@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: vi.fn(() => false),
@@ -74,7 +74,7 @@ function mouse(target: EventTarget, type: string, x: number, y: number, buttons 
   );
 }
 
-describe("drag a voice user onto another channel (WP 1D-8)", () => {
+describe("drag a voice user onto another channel", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   let onMove: ReturnType<typeof vi.fn<(userId: number, toChannelId: number) => void>>;
@@ -163,7 +163,7 @@ describe("drag a voice user onto another channel (WP 1D-8)", () => {
     expect(document.querySelector(".voice-user-drag-ghost")).toBeNull();
   });
 
-  it("makes rows draggable and sends the move with only can_move_voice (WP 8.4b)", () => {
+  it("makes rows draggable and sends the move with only can_move_voice", () => {
     mount(false, [], true);
     expect(row(TARGET_ID).classList.contains("voice-user-draggable")).toBe(true);
     dragTargetTo(50, 420);

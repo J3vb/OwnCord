@@ -1,8 +1,8 @@
-// Phase C Step 9 — `storage` host capability.
+// `storage` host capability.
 //
-// Plugins get a per-plugin namespaced KV store backed by the PluginStore
-// rows in the events/plugin schema. Capacity caps and value-size caps are
-// enforced here so a misbehaving plugin can't fill the database.
+// Plugins get a per-plugin namespaced KV store backed by the PluginStore rows.
+// Capacity and value-size caps are enforced here so a misbehaving plugin cannot
+// fill the database.
 
 package plugin
 
@@ -11,12 +11,11 @@ import (
 	"fmt"
 )
 
-// Key isolation is structural rather than checked: every call below passes
-// inst.ID as the namespace and there is no parameter by which a caller (let
-// alone a guest module) can name a different plugin's namespace. The
-// plugin_kv table's PRIMARY KEY (plugin_id, key) — migrations/015_plugins.sql
-// — makes the same split the storage layout, so two plugins using the same
-// key never collide. Audit 2026-04-07 finding #2.
+// Key isolation is structural: every call passes inst.ID as the namespace and
+// no parameter lets a caller (let alone a guest module) name another plugin's
+// namespace. The plugin_kv PRIMARY KEY (plugin_id, key)
+// (migrations/015_plugins.sql) makes the same split the storage layout, so two
+// plugins using the same key never collide.
 const (
 	maxPluginKeyBytes   = 256       // 256 B per key
 	maxPluginValueBytes = 64 * 1024 // 64 KB per value

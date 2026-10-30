@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { loadPref, savePref, STORAGE_PREFIX } from "../../src/components/settings/helpers";
-import { applyTheme, THEMES } from "../../src/lib/themes";
+import { applyTheme, THEMES } from "../../src/lib/prefs/themes";
 
 describe("settings/helpers", () => {
   let container: HTMLDivElement;

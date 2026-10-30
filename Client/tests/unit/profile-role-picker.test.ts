@@ -17,7 +17,10 @@ import {
   changeMemberRole,
   removeMemberRole,
 } from "../../src/features/moderation/roleAssignment";
-import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../src/lib/net/serverCapabilities";
 import { authStore } from "@stores/auth.store";
 import { membersStore, updateMemberRole } from "@stores/members.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
@@ -311,7 +314,7 @@ describe("profile popup role picker", () => {
   });
 });
 
-describe("profile popup role chips on a multi_role server (WP 6.3d)", () => {
+describe("profile popup role chips on a multi_role server", () => {
   const chipEls = (): HTMLElement[] =>
     Array.from(document.querySelectorAll<HTMLElement>(".upp-chip"));
   const xs = (): HTMLButtonElement[] =>

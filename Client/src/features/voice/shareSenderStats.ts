@@ -1,6 +1,6 @@
 /**
  * What your own screen share is actually sending, and why it falls short:
- * one sender stats sample read from the WebRTC sender (M-1), with a row per
+ * one sender stats sample read from the WebRTC sender, with a row per
  * encoder layer (screen-sharing pipeline plan, PR 2a).
  *
  * Rates come from counter deltas between two reads of the same sender, per

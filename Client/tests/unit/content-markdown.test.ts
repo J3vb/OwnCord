@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),
@@ -20,7 +20,7 @@ import {
   renderInlineContent,
   renderMessageContent,
 } from "../../src/components/message-list/content-parser";
-import { parseInline, parseBlocks, splitCodeFences } from "../../src/lib/markdown";
+import { parseInline, parseBlocks, splitCodeFences } from "../../src/lib/text/markdown";
 import { highlightCode, resolveLanguage } from "../../src/components/message-list/syntax-highlight";
 import { extractUrls } from "../../src/components/message-list/media";
 import { membersStore } from "../../src/stores/members.store";

@@ -7,8 +7,8 @@ import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
-import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
-import type { MountableComponent } from "@lib/safe-render";
+import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../i18n/shell";
 
 // ---------------------------------------------------------------------------

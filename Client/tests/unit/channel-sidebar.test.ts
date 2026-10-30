@@ -7,7 +7,7 @@ const { mockRePinPeerIdentity, mockGetUserLocalMute } = vi.hoisted(() => ({
   mockRePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
   mockGetUserLocalMute: vi.fn((_userId: number) => false),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: vi.fn(),
   getUserVolume: vi.fn(() => 1),
   getUserLocalMute: (userId: number) => mockGetUserLocalMute(userId),
@@ -16,7 +16,7 @@ vi.mock("@lib/livekitSession", () => ({
 }));
 
 const { mockShowToast } = vi.hoisted(() => ({ mockShowToast: vi.fn() }));
-vi.mock("@lib/toast", () => ({
+vi.mock("@lib/ui/toast", () => ({
   showToast: mockShowToast,
   initToast: vi.fn(),
   teardownToast: vi.fn(),
@@ -24,8 +24,8 @@ vi.mock("@lib/toast", () => ({
 
 // Stub the identity-key crypto so the mismatch modal's fingerprint compute is
 // deterministic in jsdom (real WebCrypto key import needs a valid SPKI blob).
-vi.mock("@lib/e2eeCrypto", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/lib/e2eeCrypto")>();
+vi.mock("@lib/net/e2eeCrypto", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/lib/net/e2eeCrypto")>();
   return {
     ...actual,
     importIdentityPublicKey: vi.fn(() => Promise.resolve({} as CryptoKey)),
@@ -73,7 +73,7 @@ import {
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { membersStore } from "../../src/stores/members.store";
 import { Permission, type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
-import { computeKeyFingerprint } from "@lib/e2eeCrypto";
+import { computeKeyFingerprint } from "@lib/net/e2eeCrypto";
 import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
 import { expectConsole } from "../helpers/console";
 import {
@@ -82,9 +82,9 @@ import {
   muteChannel,
   unmuteChannel,
   invalidateMuteCache,
-} from "@lib/channel-mutes";
-import { STORAGE_PREFIX } from "@lib/preferences";
-import { setHideMutedChannels } from "@lib/hide-muted-channels";
+} from "@lib/prefs/channelMutes";
+import { STORAGE_PREFIX } from "@lib/prefs/preferences";
+import { setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 
 function resetStores(): void {
   channelsStore.setState(() => ({
@@ -264,7 +264,7 @@ describe("ChannelSidebar", () => {
   });
 
   // ── B9-21: the channel list is a single Tab stop with arrow-key navigation ──
-  describe("keyboard navigation (B9-21)", () => {
+  describe("keyboard navigation", () => {
     it("exposes exactly one Tab stop and marks the active channel", () => {
       setChannels(testChannels);
       setActiveChannel(1);
@@ -659,7 +659,7 @@ describe("ChannelSidebar", () => {
 
   // ── WP 3D-4d: Hide Muted Channels ──
 
-  describe("Hide Muted Channels (WP 3D-4d)", () => {
+  describe("Hide Muted Channels", () => {
     const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
       id,
       name: `text-${id}`,
@@ -869,7 +869,7 @@ describe("ChannelSidebar", () => {
     });
   });
 
-  describe("collapsed category shows what matters (WP 2B-5)", () => {
+  describe("collapsed category shows what matters", () => {
     const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
       id,
       name: `text-${id}`,
@@ -1163,7 +1163,7 @@ describe("ChannelSidebar", () => {
     expect(onOpenCall).not.toHaveBeenCalled();
   });
 
-  it("a timeout disables joining voice with the server expiry, never leaving (B9-15)", () => {
+  it("a timeout disables joining voice with the server expiry, never leaving", () => {
     setChannels(testChannels);
     setActiveTimeout(new Date(Date.now() + 3_600_000).toISOString());
     sidebar.mount(container);
@@ -2444,7 +2444,7 @@ describe("ChannelSidebar", () => {
     expect((await reopen())!.querySelector('[data-action="server-mute"]')).not.toBeNull();
   });
 
-  it("offers only Move to to a role whose verdict is can_move_voice without can_moderate_voice (WP 8.4b)", async () => {
+  it("offers only Move to to a role whose verdict is can_move_voice without can_moderate_voice", async () => {
     const cb = voiceModCallbacks();
     const channels: ReadyChannel[] = [
       ...testChannels.map((ch) =>
@@ -2667,7 +2667,7 @@ describe("ChannelSidebar", () => {
     expect(icon.title).toBe("Muted by a moderator");
   });
 
-  it("shows a locally muted participant's icon and redraws on a local Mute change (WP 1D-5)", () => {
+  it("shows a locally muted participant's icon and redraws on a local Mute change", () => {
     sidebar.destroy?.();
     sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
     setChannels(testChannels);
@@ -3131,7 +3131,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(title).toContain("not an identity");
   });
 
-  it("refreshes the badge tooltip when a peer's session fingerprint changes at an unchanged status (OC-0208)", () => {
+  it("refreshes the badge tooltip when a peer's session fingerprint changes at an unchanged status", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "unverified", null, "5E55 1234 5678 9ABC");
     sidebar.mount(container);
@@ -3186,7 +3186,7 @@ describe("ChannelSidebar voice identity badge", () => {
     expect(badge!.classList.contains("mismatch")).toBe(true);
   });
 
-  it("shows a distinct 'could not check' badge when the pin store was unreadable (DC-08)", () => {
+  it("shows a distinct 'could not check' badge when the pin store was unreadable", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     setPeerVerif(10, "unknown", null);
     sidebar.mount(container);
@@ -3426,7 +3426,7 @@ describe("ChannelSidebar voice identity badge", () => {
 // another channel, a voice peer toggling mute, the WS flipping to
 // reconnecting -- tears the open re-pin prompt down, and a re-render landing
 // during the async fingerprint compute makes the click a silent no-op.
-describe("ChannelSidebar identity-mismatch modal lifetime (OC-0281)", () => {
+describe("ChannelSidebar identity-mismatch modal lifetime", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
@@ -3904,7 +3904,7 @@ describe("ChannelSidebar channel context menu permissions", () => {
 // must still be disposed before it detaches, or the old leak returns for that
 // row. This pins both halves of the keyed contract: identity is kept for an
 // unchanged row, and the listeners of a replaced one die with it.
-describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
+describe("ChannelSidebar row listeners across re-renders", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
@@ -4003,7 +4003,7 @@ describe("ChannelSidebar row listeners across re-renders (OC-0229)", () => {
 // open popover is torn down by events that have nothing to do with it -- a
 // message in another channel, a peer toggling their mic, a category
 // collapsing.
-describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () => {
+describe("ChannelSidebar popovers survive unrelated re-renders", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
@@ -4093,7 +4093,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders (OC-0282)", () =>
 // kept current by one select over their stores. A row's node is kept unless
 // something it draws changed; these pin which changes keep or rebuild which
 // node, and where focus goes when its row goes.
-describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
+describe("ChannelSidebar voice rows on models", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   let onVoiceJoin: Mock<(channelId: number) => void>;
@@ -4170,7 +4170,7 @@ describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
     mockGetUserLocalMute.mockImplementation(() => false);
   });
 
-  it("rename mid-call updates the label (OC-0333)", () => {
+  it("rename mid-call updates the label", () => {
     setChannels(testChannels);
     setMembersMap([member(10, "alice", "Alice"), member(11, "bob", "Bob")]);
     addVoiceUser(VOICE_CH, 10, "alice");
@@ -4465,7 +4465,7 @@ describe("ChannelSidebar voice rows on models (5.4c-2)", () => {
 // The text rows and category groups reconcile from models, so a row's node is
 // kept unless something it draws changed. The row's handlers are bound from
 // the model too (`access`, `orderIds`), so a role edit rebinds them.
-describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
+describe("ChannelSidebar text rows and groups on models", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   const VOICE_CH = 3; // "voice-lobby" in testChannels
@@ -4710,7 +4710,7 @@ describe("ChannelSidebar text rows and groups on models (5.4d-1)", () => {
   });
 });
 
-describe("ChannelSidebar on one select (5.4d-2)", () => {
+describe("ChannelSidebar on one select", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 

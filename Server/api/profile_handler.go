@@ -19,21 +19,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// ─── Request / Response types ────────────────────────────────────────────────
-
-// userResponse is the caller's own user record, the shape auth responses and
-// PATCH /users/me return. It lives beside the profile handler because this is
-// the file that still sees db.User; the auth handlers get it through
-// toUserResponse without naming db (B3-2).
 type userResponse struct {
 	ID       int64  `json:"id"`
 	Username string `json:"username"`
 	Avatar   string `json:"avatar,omitempty"`
 	// DisplayName and About are always present (null = unset) so the settings
 	// form can tell "cleared" from "the server does not know this field".
-	DisplayName *string `json:"display_name"`
-	About       *string `json:"about"`
-	// CustomStatus is the user's own free-text status line.
+	DisplayName  *string `json:"display_name"`
+	About        *string `json:"about"`
 	CustomStatus *string `json:"custom_status"`
 	// CustomStatusExpiresAt: RFC 3339 instant the status clears; null if none.
 	CustomStatusExpiresAt *string `json:"custom_status_expires_at"`
@@ -49,7 +42,6 @@ type userResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-// toUserResponse converts a db.User to the API response shape.
 func toUserResponse(u *db.User) *userResponse {
 	avatar := ""
 	if u.Avatar != nil {
@@ -83,16 +75,15 @@ func toUserResponse(u *db.User) *userResponse {
 
 // updateProfileRequest is the JSON body for PATCH /api/v1/users/me.
 // identity_public_key, when present, publishes the client's long-term E2EE
-// identity public key (F3 voice E2EE TOFU); omitted = leave unchanged.
+// identity public key; omitted leaves it unchanged.
 type updateProfileRequest struct {
 	Username          string  `json:"username"`
 	Avatar            *string `json:"avatar"`
 	IdentityPublicKey *string `json:"identity_public_key"`
-	// DisplayName and About are omitted = unchanged, "" = cleared. Both are
-	// length-checked in UserService, which is also the path a non-REST
-	// caller would take; DisplayName is additionally sanitized in this
-	// handler (before validateDisplayName runs — see the OC-0197 comment at
-	// the call site) and UserService's own sanitize of it is then a no-op.
+	// DisplayName and About: omitted = unchanged, "" = cleared. Both are
+	// length-checked in UserService (the path a non-REST caller takes);
+	// DisplayName is also sanitized in this handler before validateDisplayName
+	// runs, so UserService's own sanitize is then a no-op.
 	DisplayName *string `json:"display_name"`
 	About       *string `json:"about"`
 	// BannerColor is omitted = unchanged, "" = cleared, otherwise #rgb or
@@ -101,13 +92,11 @@ type updateProfileRequest struct {
 	BannerColor *string `json:"banner_color"`
 }
 
-// changePasswordRequest is the JSON body for PUT /api/v1/users/me/password.
 type changePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
 }
 
-// sessionResponse is the JSON shape for a single session in list responses.
 type sessionResponse struct {
 	ID        int64  `json:"id"`
 	Device    string `json:"device"`
@@ -115,43 +104,34 @@ type sessionResponse struct {
 	CreatedAt string `json:"created_at"`
 	LastUsed  string `json:"last_used"`
 	IsCurrent bool   `json:"is_current"`
-	// Unseen is the new-login signal (B4-7): true from the login that created
+	// Unseen is the new-login signal: true from the login that created
 	// the session until the account lists its sessions from another device.
 	// This listing acknowledges every row but the caller's own.
 	Unseen bool `json:"unseen"`
 }
 
-// sessionsListResponse is the JSON envelope for GET /api/v1/users/me/sessions.
 type sessionsListResponse struct {
 	Sessions []sessionResponse `json:"sessions"`
 }
 
-// ─── Route mounting ──────────────────────────────────────────────────────────
-
-// ProfileBroadcaster is the interface the profile handler uses to notify
-// connected WebSocket clients about profile changes.
 type ProfileBroadcaster interface {
 	BroadcastUserUpdate(u ws.UserUpdate)
 }
 
 // revokeAllSessionsRateLimitPerMinute bounds DELETE /api/v1/users/me/sessions
-// per account (Codex P2 on PR #1500). Every call revokes the caller's own
-// session or API token, so the cap bounds how fast a fresh sign-in can
-// repeat it.
+// per account. Every call revokes the caller's own session or API token, so the
+// cap bounds how fast a fresh sign-in can repeat it.
 const revokeAllSessionsRateLimitPerMinute = 5
 
-// MountProfileRoutes registers user profile management endpoints.
-// All routes require authentication. trustedProxies is used for rate limiting.
-//
-// store may be nil, in which case the avatar-upload route is not registered —
-// a server with no storage backend has nowhere to put the bytes, and a route
-// that 500s on every call is worse than one that 404s.
-//
-// cfg may be nil (tests that mount only the profile surface): the same-host
-// avatar guard then falls back to the request's Host header alone. In
-// production the router always passes the running config, so the guard compares
-// against the server's own configured hosts rather than anything the client
-// supplied.
+// MountProfileRoutes registers the authenticated user profile endpoints;
+// trustedProxies is used for rate limiting.
+// store may be nil, in which case the avatar-upload route is not registered:
+// with no storage backend a route that 500s on every call is worse than one that
+// 404s.
+// cfg may be nil (tests mounting only the profile surface), in which case the
+// same-host avatar guard falls back to the request's Host header alone.
+// Production always passes the running config, so the guard compares against the
+// server's configured hosts, not anything the client supplied.
 func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, limiter *auth.RateLimiter, trustedProxies []string, broadcaster ProfileBroadcaster, cfg *config.Config) {
 	selfHosts := configuredSelfHosts(cfg)
 	r.Route("/api/v1/users/me", func(r chi.Router) {
@@ -197,62 +177,50 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 	})
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 // allowedAvatarMIME is the set of still image types an avatar, banner or group
-// icon may be, matched against the type sniffed from the file's own bytes.
-// GIF is added per surface (imageLimits.AllowGIF, WP 8.7) where the client
-// freezes it to its first frame until hovered. SVG is absent, for the same reason emoji refuse it: it is markup with script
-// and external-fetch capability, and an avatar is rendered inline by
-// definition.
+// icon may be, matched against the type sniffed from the file's own bytes. GIF
+// is added per surface (imageLimits.AllowGIF), where the client freezes it to
+// its first frame until hovered. SVG is absent, as for emoji: it is markup with
+// script and external-fetch capability, and an avatar is rendered inline.
 var allowedAvatarMIME = map[string]bool{
 	"image/png":  true,
 	"image/jpeg": true,
 	"image/webp": true,
 }
 
-// ─── Handlers ────────────────────────────────────────────────────────────────
-
-// handleUpdateProfile processes PATCH /api/v1/users/me.
-// parseUpdateProfileRequest decodes the PATCH /users/me body and applies the
-// bound-then-sanitize-then-validate pass to every field, in the same order the
-// register path canonicalizes them. On any failure it writes the error response
-// and returns ok=false, and the caller must return without writing anything
-// further. Split out of handleUpdateProfile only to keep that handler under the
-// funlen limit; the field logic is unchanged.
+// parseUpdateProfileRequest decodes the PATCH /users/me body and applies
+// bound-then-sanitize-then-validate to every field, in the order the register
+// path canonicalizes them. On failure it writes the error response and returns
+// ok=false, and the caller must write nothing further.
 func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string, currentUsername string) (updateProfileRequest, bool) {
 	var req updateProfileRequest
 	if !decodeJSON(w, r, &req) {
 		return req, false
 	}
 
-	// OC-0151: bound the raw field before it ever reaches the fixpoint
-	// sanitizer below, for the same reason as the register path
-	// (auth_handler.go's registerReadRequest) — sanitizeToFixpoint's
-	// cost is quadratic in input length, and nothing bounds this field
-	// before it runs. This is a cheap byte-length pre-check — *4 still
-	// admits any legitimate 32-rune UTF-8 username.
+	// Bound the raw field before the fixpoint sanitizer, as on the register path
+	// (auth_handler.go's registerReadRequest): sanitizeToFixpoint is quadratic
+	// in input length. This is a cheap byte-length pre-check; *4 still admits
+	// any legitimate 32-rune UTF-8 username.
 	if len(req.Username) > maxLoginUsernameLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
 	}
 
 	// Use the fixpoint sanitizer (service.SanitizeText), not a bare
-	// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always
-	// HTML-escaped, so a plain apostrophe would be persisted as &#39;
-	// and login (which never re-escapes) would look the account up
-	// under a name that no longer matches. See service.SanitizeText's
-	// doc comment and the register path (auth_handler.go), which
-	// already canonicalizes the same way.
+	// bluemonday.StrictPolicy().Sanitize: its output is always HTML-escaped, so
+	// an apostrophe would be persisted as &#39; and login (which never
+	// re-escapes) would look the account up under a name that no longer matches.
+	// The register path canonicalizes the same way.
 	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
 	if req.Username == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is required")
 		return req, false
 	}
-	// A rename is held to the strict rules; resending the name the account
-	// already has (a display-name or about edit that carries it along) only
-	// gets the loose check, so an account that predates the strict rules can
-	// still edit the rest of its profile.
+	// A rename is held to the strict rules; resending the account's current name
+	// (e.g. a display-name edit that carries it along) gets only the loose
+	// check, so an account that predates the strict rules can still edit the
+	// rest of its profile.
 	validateName := auth.ValidateNewUsername
 	if req.Username == currentUsername {
 		validateName = auth.ValidateUsername
@@ -262,22 +230,14 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		return req, false
 	}
 
-	// OC-0192: bound the raw field before it reaches the fixpoint
-	// sanitizer below, same reasoning as the username bound above —
-	// sanitizeToFixpoint's cost is quadratic in input length. Unlike
-	// username, an oversized avatar was previously only caught *after*
-	// sanitizing, by validateAvatarURL's maxAvatarURLLen check.
 	if req.Avatar != nil && len(*req.Avatar) > maxAvatarURLLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "avatar URL is too long")
 		return req, false
 	}
 
-	// Sanitize and validate avatar if provided. Use the fixpoint
-	// sanitizer (service.SanitizeText), not a bare
-	// bluemonday.StrictPolicy().Sanitize call — Sanitize's output is always HTML-escaped, so a URL with more
-	// than one query parameter would have its "&" separators rewritten
-	// to "&amp;" and be persisted (and served) broken. Same reasoning as
-	// the username path above.
+	// Use the fixpoint sanitizer (service.SanitizeText), not a bare bluemonday
+	// call: its output is HTML-escaped, so a URL with several query parameters
+	// would have its "&" rewritten to "&amp;" and be persisted broken.
 	if req.Avatar != nil {
 		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
 		if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
@@ -287,21 +247,14 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		req.Avatar = &trimmed
 	}
 
-	// display_name gets the same username-shaped scrutiny beyond length:
-	// it is rendered wherever a username is, so control characters and
-	// bidi overrides are exactly as unwelcome here. Length and the
-	// empty-clears-it rule still live in UserService, but sanitizing has
-	// to happen *before* validateDisplayName, not after: OC-0197 found
-	// that validating the raw JSON string let an HTML-entity-encoded
-	// control or bidi character (e.g. "&#x202e;") pass this check as
-	// harmless ASCII, only to be turned into the real character
-	// afterwards by UserService.UpdateProfile's cleanText call — the
-	// same sanitize-then-validate order the username path above already
-	// uses. OC-0192's raw-byte bound applies here too, now that
-	// sanitizing happens in this handler (UserService.UpdateProfile
-	// still bounds DisplayName/About the same way before its own
-	// cleanText calls, for any non-REST caller; cleanText's fixpoint
-	// output is stable, so that re-sanitize is a no-op here).
+	// display_name gets the same scrutiny as a username beyond length, since it
+	// is rendered wherever a username is (control characters, bidi overrides).
+	// Sanitize BEFORE validateDisplayName: validating the raw JSON let an
+	// HTML-entity-encoded control or bidi character (e.g. "&#x202e;") pass as
+	// ASCII and become the real character later in UserService.UpdateProfile's
+	// cleanText. The raw-byte bound applies too; UserService still bounds
+	// DisplayName/About for non-REST callers, and cleanText's fixpoint output is
+	// stable, so its re-sanitize is a no-op.
 	if req.DisplayName != nil {
 		if len(*req.DisplayName) > service.MaxDisplayNameLen*4 {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name is too long")
@@ -315,8 +268,8 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		req.DisplayName = &trimmed
 	}
 
-	// OC-0192 again: bound the raw colour before anything looks at it. The
-	// longest valid value is 7 bytes; the service does the real validation.
+	// Bound the raw colour first; the longest valid value is 7 bytes and the
+	// service does the real validation.
 	if req.BannerColor != nil && len(*req.BannerColor) > maxBannerColorLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "banner_color is too long")
 		return req, false
@@ -360,18 +313,15 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 		}
 
 		if req.IdentityPublicKey != nil {
-			// Captured into a separate variable rather than reassigned into
-			// updated: on failure below, updated still holds the profile
-			// snapshot that DID commit, so it can still be broadcast instead
-			// of discarded.
+			// Captured separately rather than reassigned into updated: on
+			// failure updated still holds the committed profile snapshot, which
+			// can still be broadcast.
 			withKey, keyErr := svc.Users.UpdateIdentityKey(r.Context(), user.ID, *req.IdentityPublicKey)
 			if keyErr != nil {
-				// The username/avatar/display_name/about write above already
-				// committed — only the identity key failed. Broadcasting the
-				// committed half keeps every other connected client in sync
-				// even though this request reports failure; leaving it
-				// unbroadcast would strand them on the old profile until
-				// their next ready.
+				// The username/avatar/display_name/about write already
+				// committed; only the identity key failed. Broadcasting the
+				// committed half keeps other clients in sync even though this
+				// request reports failure.
 				broadcastUserUpdate(broadcaster, updated)
 				writeServiceError(r.Context(), w, keyErr)
 				return
@@ -385,9 +335,9 @@ func handleUpdateProfile(svc *service.Services, broadcaster ProfileBroadcaster, 
 	}
 }
 
-// broadcastUserUpdate pushes a profile snapshot to every connected client.
-// Every profile mutation goes through it so a new one cannot ship half the
-// fields — user_update replaces the client's copy wholesale.
+// broadcastUserUpdate pushes a profile snapshot to every connected client. Every
+// profile mutation goes through it so a new one cannot ship half the fields:
+// user_update replaces the client's copy wholesale.
 func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
 	if broadcaster == nil || u == nil {
 		return
@@ -404,7 +354,6 @@ func broadcastUserUpdate(broadcaster ProfileBroadcaster, u *db.User) {
 	})
 }
 
-// handleChangePassword processes PUT /api/v1/users/me/password.
 func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -412,7 +361,7 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			return
 		}
 
-		// BUG-111: Per-user lockout to prevent password brute-force via stolen session.
+		// Per-user lockout against password brute-force via a stolen session.
 		lockKey := auth.Key("pw_confirm_lock", user.ID)
 		if limiter.IsLockedOut(lockKey) {
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many failed attempts, try again later")
@@ -429,9 +378,9 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			return
 		}
 
-		// Verify old password using constant-time bcrypt comparison, inside
-		// the one admission slot every password route takes (B4-4): a refused
-		// attempt ran no compare and counts as no failure.
+		// Verify the old password (constant-time bcrypt) inside the one
+		// admission slot every password route takes: a refused attempt ran no
+		// compare and counts as no failure.
 		failKey := auth.Key("pw_confirm_fail", user.ID)
 		matched, admitted := limiter.Admission().CheckPassword(user.PasswordHash, req.OldPassword)
 		if !admitted {
@@ -447,19 +396,16 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		}
 		limiter.Reset(r.Context(), failKey)
 
-		// Reject same old/new password.
 		if req.OldPassword == req.NewPassword {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "new password must be different from old password")
 			return
 		}
 
-		// Validate new password strength.
 		if err := auth.ValidatePasswordStrength(req.NewPassword); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return
 		}
 
-		// Hash new password — bcrypt at full cost, so through the budget too.
 		hash, admitted, err := limiter.Admission().HashPassword(req.NewPassword)
 		if !admitted {
 			writeAuthBusy(w, service.ErrAuthBusy)
@@ -470,7 +416,6 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 			return
 		}
 
-		// Delegate to service for password update + session revocation.
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 		keepSessionID := int64(0)
 		if sess != nil {
@@ -479,19 +424,18 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 
 		res, err := svc.Users.ChangePassword(r.Context(), user.ID, hash, keepSessionID)
 		if err != nil {
-			// Only reachable when the password itself failed to commit.
 			writeServiceError(r.Context(), w, err)
 			return
 		}
-		// The other sessions are gone; drop the account's socket now if it
-		// rode one of them, rather than at the sweep's next tick.
+		// Drop the account's socket now if it rode one of the revoked sessions,
+		// rather than at the next sweep.
 		if res.SessionsRevoked > 0 {
 			disconnectIfSessionRevoked(broadcaster, user.ID)
 		}
 		if res.RevokeFailed {
-			// Partial success: the password IS changed; only revoking the
-			// other sessions failed. A 5xx here would tell the user to retry
-			// with a password that no longer works.
+			// Partial success: the password IS changed; only revoking the other
+			// sessions failed, and a 5xx would tell the user to retry with a
+			// password that no longer works.
 			writeJSON(w, http.StatusOK, map[string]any{
 				"warning":          "password changed, but other sessions could not be revoked; revoke them from the sessions list",
 				"sessions_revoked": res.SessionsRevoked,
@@ -503,7 +447,6 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 	}
 }
 
-// handleListSessions processes GET /api/v1/users/me/sessions.
 func handleListSessions(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -512,7 +455,7 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 		}
 
 		// An API-token principal has a nil session (middleware.go); the list
-		// still works — no row is marked current. Only IsCurrent needs it.
+		// still works, with no row marked current.
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
 		sessions, err := svc.Users.ListSessions(r.Context(), user.ID)
@@ -536,17 +479,16 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 			})
 		}
 
-		// The response carries the flags as they were; this listing is the
-		// acknowledgement (B4-7), except for the caller's own session. An
-		// API-token principal has no session and acknowledges every row.
+		// This listing is the acknowledgement of the response's flags, except
+		// for the caller's own session. An API-token principal has no session
+		// and acknowledges every row.
 		var callerSessionID int64
 		if sess != nil {
 			callerSessionID = sess.ID
 		}
 		if err := svc.Users.MarkSessionsSeen(r.Context(), user.ID, callerSessionID); err != nil {
-			// A failed "seen" write must not discard a successfully built
-			// list: the sessions are still correct, so return them and log the
-			// write failure rather than 500ing (F23).
+			// A failed "seen" write must not discard a successfully built list:
+			// return it and log the write failure rather than 500.
 			slog.WarnContext(r.Context(), "list sessions: failed to mark seen", "err", err)
 		}
 
@@ -554,7 +496,6 @@ func handleListSessions(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleRevokeSession processes DELETE /api/v1/users/me/sessions/{id}.
 func handleRevokeSession(svc *service.Services, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -577,18 +518,16 @@ func handleRevokeSession(svc *service.Services, broadcaster ProfileBroadcaster) 
 	}
 }
 
-// revokeAllSessionsResponse is the JSON shape returned by
-// DELETE /api/v1/users/me/sessions: the count, and an explicit note that the
-// caller's own session was among them, so the client knows to re-authenticate
-// rather than treat the next 401 as an error.
+// revokeAllSessionsResponse carries the count and an explicit note that the
+// caller's own session was among them, so the client re-authenticates rather
+// than treating the next 401 as an error.
 type revokeAllSessionsResponse struct {
 	SessionsRevoked int64 `json:"sessions_revoked"`
 	CurrentRevoked  bool  `json:"current_session_revoked"`
 }
 
-// handleRevokeAllSessions processes DELETE /api/v1/users/me/sessions —
-// sign-out-everywhere. The current session is revoked with the rest, and so
-// are every API token and every live WebSocket the account holds.
+// handleRevokeAllSessions is sign-out-everywhere: the current session, every API
+// token and every live WebSocket of the account are revoked.
 func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, broadcaster ProfileBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -597,7 +536,6 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 		}
 		sess, _ := r.Context().Value(SessionKey).(*db.Session)
 
-		// Per account, not per IP: the principal is authenticated.
 		if !limiter.Allow(auth.Key("revoke_all", user.ID), revokeAllSessionsRateLimitPerMinute, time.Minute) {
 			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many sign-out-everywhere requests, try again later")
 			return
@@ -608,9 +546,8 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 			writeServiceError(r.Context(), w, err)
 			return
 		}
-		// The sessions are gone; drop the sockets they authenticated now
-		// rather than at the sweep's next tick, so "stops working
-		// immediately" holds for a connected device too.
+		// Drop the sockets now rather than at the next sweep, so "stops working
+		// immediately" holds for a connected device.
 		if n > 0 {
 			if d, ok := broadcaster.(SessionDisconnector); ok {
 				d.DisconnectRevokedUser(user.ID)
@@ -624,16 +561,11 @@ func handleRevokeAllSessions(svc *service.Services, limiter *auth.RateLimiter, b
 }
 
 // handleUploadAvatar processes POST /api/v1/users/me/avatar (multipart: `file`).
-//
-// The bytes land in the ordinary attachments table with no channel, and the
-// user's avatar column is pointed at /api/v1/files/{id}. That is what makes
-// the picture readable: an unlinked attachment is private to its uploader, and
-// handleServeFile additionally admits one that some user's avatar currently
-// points at — so an avatar is public exactly while it is in use and stops
-// being readable the moment it is replaced.
-//
-// PATCH /users/me still takes an https:// URL; this route is the other way to
-// set the same field, and both end at the same column.
+// The bytes land in the attachments table with no channel and the avatar column
+// points at /api/v1/files/{id}. An unlinked attachment is private to its
+// uploader and handleServeFile also admits one some user's avatar points at, so
+// an avatar is readable exactly while in use. PATCH /users/me still takes an
+// https:// URL; both end at the same column.
 func handleUploadAvatar(
 	svc *service.Services,
 	store FileStore,
@@ -651,9 +583,8 @@ func handleUploadAvatar(
 			return
 		}
 
-		// Bound the body before the multipart parser touches it: the route
-		// carries MaxBodySize too, but the parser is what turns an unbounded
-		// body into heap, so the handler states its own limit.
+		// Bound the body before the multipart parser: the route has MaxBodySize
+		// too, but the parser is what turns an unbounded body into heap.
 		r.Body = http.MaxBytesReader(w, r.Body, avatarMaxBodySize)
 		if err := r.ParseMultipartForm(avatarMultipartMemoryLimit); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid multipart form")
@@ -679,20 +610,17 @@ func handleUploadAvatar(
 		}
 
 		avatarURL := service.AvatarFileURL(fileID)
-		// Username is deliberately omitted (left at its zero value): user
-		// here is a snapshot AuthMiddleware read at the start of the
-		// request, before the multipart parse / image decode / disk write
-		// above — all of which take long enough for a concurrent
-		// PATCH /users/me rename to land first. Sending that stale value
-		// would revert the rename; UpdateProfile treats an empty Username
-		// as "leave it alone", the same contract DisplayName/About already
-		// have via nil.
+		// Username is deliberately omitted: user is a snapshot AuthMiddleware
+		// read before the multipart parse, image decode and disk write, long
+		// enough for a concurrent PATCH /users/me rename to land first, and
+		// sending the stale value would revert it. UpdateProfile treats an empty
+		// Username as "leave it alone", like nil DisplayName/About.
 		updated, err := svc.Users.UpdateProfile(r.Context(), user.ID, service.ProfilePatch{
 			Avatar: &avatarURL,
 		})
 		if err != nil {
-			// The column never moved, so the file and its row are orphans;
-			// drop the row now so its charge does not wait for the sweep.
+			// The column never moved, so the file and its row are orphans; drop
+			// the row now so its charge does not wait for the sweep.
 			if unErr := svc.Uploads.Unrecord(context.WithoutCancel(r.Context()), fileID, user.ID); unErr != nil {
 				slog.Error("failed to remove orphaned avatar row", "stored_as", fileID, "error", unErr)
 			}
@@ -703,10 +631,10 @@ func handleUploadAvatar(
 			return
 		}
 
-		// The previous avatar's bytes are deliberately left on disk: a message
-		// that was rendered with it may still be cached client-side, and a
-		// blind delete here would race any request already in flight for it.
-		// Reclaiming them is an operator-side sweep, not a request-path action.
+		// The previous avatar's bytes stay on disk on purpose: a message
+		// rendered with it may still be cached client-side, and a delete here
+		// would race in-flight requests. Reclaiming them is an operator-side
+		// sweep.
 		broadcastUserUpdate(broadcaster, updated)
 
 		slog.Info("avatar uploaded", "user_id", user.ID, "id", fileID, "size", written, "mime", mimeType)
@@ -722,12 +650,10 @@ func handleUploadAvatar(
 	}
 }
 
-// avatarStoreAndRecord is the store-and-row stage of handleUploadAvatar:
-// admit the bytes (B5-2 — an avatar is an attachment and counts against its
-// uploader's quota), write them, and record the row that commits the charge.
-// It writes its own error response and reports ok=false. Split out to keep
-// the handler under the funlen limit; the steps and their order are
-// unchanged from before the reservation existed.
+// avatarStoreAndRecord is the store-and-row stage of handleUploadAvatar: admit
+// the bytes (an avatar counts against its uploader's quota), write them, and
+// record the row that commits the charge. It writes its own error response and
+// reports ok=false.
 func avatarStoreAndRecord(ctx context.Context, w http.ResponseWriter, svc *service.Services, store FileStore, userID int64, filename string, raw []byte, mimeType, label string, width, height int) (string, int64, bool) {
 	res, err := svc.Uploads.Reserve(ctx, userID, int64(len(raw)))
 	if err != nil {

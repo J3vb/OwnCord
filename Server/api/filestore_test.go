@@ -62,3 +62,51 @@ func TestSaveReserved_ReleasesTheChargeOnAFailedWrite(t *testing.T) {
 		t.Fatal("saveReserved accepted a nil reservation")
 	}
 }
+
+// ReservedStore is the door the Discord import writes through: it must refuse a
+// write with no reservation and hand a reservation back on a failed write, just
+// as saveReserved does for the handlers.
+func TestReservedStore_RefusesAnUnreservedWriteAndReleasesOnFailure(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := db.Migrate(database); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	uploads := service.NewUploadService(database, nil)
+
+	store := ReservedStore{Store: failingStore{}}
+	if _, err := store.SaveReserved(ctx, nil, "f", bytes.NewReader([]byte("x"))); err == nil {
+		t.Fatal("a write with no reservation was accepted")
+	}
+	res, err := uploads.ReserveHeadroom(ctx, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveReserved(ctx, res, "f", bytes.NewReader([]byte("x"))); err == nil {
+		t.Fatal("a failed write reported success")
+	}
+	// The failed write released the reservation, so settling is a no-op.
+	res.Settle(ctx)
+
+	disk, err := storage.New(t.TempDir(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store = ReservedStore{Store: disk}
+	res, err = uploads.ReserveHeadroom(ctx, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Settle(ctx)
+	n, err := store.SaveReserved(ctx, res, "ok", bytes.NewReader([]byte("hello")))
+	if err != nil || n != 5 {
+		t.Fatalf("SaveReserved = %d, %v; want 5, nil", n, err)
+	}
+	if err := store.Delete("ok"); err != nil {
+		t.Errorf("Delete: %v", err)
+	}
+}

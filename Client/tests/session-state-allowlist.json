@@ -122,7 +122,7 @@
       "reason": "Lookup built from the bundled unicode catalog"
     },
     {
-      "file": "lib/animatedStill.ts",
+      "file": "lib/ui/animatedStill.ts",
       "binding": "stills",
       "category": "reset-elsewhere",
       "reason": "Keyed by image-cache blob: URLs; clearAttachmentCaches clears it with them under the attachments:caches session reset"
@@ -164,31 +164,31 @@
       "reason": "The bundled changelog, not server data"
     },
     {
-      "file": "lib/channel-navigation.ts",
+      "file": "lib/nav/channelNavigation.ts",
       "binding": "reselectListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/formatting.ts",
+      "file": "lib/text/formatting.ts",
       "binding": "parsedTimestampCache",
       "category": "pure-cache",
       "reason": "Parse result keyed by the timestamp string itself"
     },
     {
-      "file": "lib/identity.ts",
+      "file": "lib/net/identity.ts",
       "binding": "identityKeyPairCache",
       "category": "host-keyed",
       "reason": "Keyed by host and user, so a second server never reads the first's pair"
     },
     {
-      "file": "lib/identity.ts",
+      "file": "lib/net/identity.ts",
       "binding": "pinWrites",
       "category": "host-keyed",
       "reason": "In-flight pin writes keyed by host and user; each entry removes itself when its write settles"
     },
     {
-      "file": "lib/legacyKeyMigration.ts",
+      "file": "lib/net/legacyKeyMigration.ts",
       "binding": "unsettled",
       "category": "host-keyed",
       "reason": "Keyed by the legacy storage key; each claim names the host-scoped key that owns it"
@@ -206,19 +206,19 @@
       "reason": "Client diagnostics and log subscribers, not server data"
     },
     {
-      "file": "lib/notificationSound.ts",
+      "file": "lib/media/notificationSound.ts",
       "binding": "ringInterval",
       "category": "transient",
       "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
     },
     {
-      "file": "lib/notificationSound.ts",
+      "file": "lib/media/notificationSound.ts",
       "binding": "ringbackInterval",
       "category": "transient",
       "reason": "Ringtone timer handles; stopped by their own stop functions, not session data"
     },
     {
-      "file": "lib/serverCapabilities.ts",
+      "file": "lib/net/serverCapabilities.ts",
       "binding": "gameActivityPolicyListeners",
       "category": "reset-elsewhere",
       "reason": "Listeners for the game activity switch; each owner (the game activity loop, the Settings pane) removes its own on teardown, and the session reset deliberately keeps them"
@@ -284,31 +284,37 @@
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/screenShare.ts",
+      "file": "lib/voice/screenShare.ts",
       "binding": "pendingVideoEnables",
       "category": "transient",
       "reason": "Request-id keyed bookkeeping for an enable in flight; a newer enable of the same kind supersedes it"
     },
     {
-      "file": "lib/sessionRegistry.ts",
+      "file": "lib/net/sessionRegistry.ts",
       "binding": "entries",
       "category": "app-lifetime",
       "reason": "The registry itself"
     },
     {
-      "file": "lib/themes.ts",
+      "file": "lib/prefs/themes.ts",
       "binding": "roleTextCache",
       "category": "pure-cache",
       "reason": "Keyed by colour and theme, not by server"
     },
     {
-      "file": "lib/themes.ts",
+      "file": "lib/prefs/themes.ts",
       "binding": "systemPaintListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/voiceJoinTrace.ts",
+      "file": "features/custom-themes/customTheme.ts",
+      "binding": "changeListeners",
+      "category": "dom-owned",
+      "reason": "Listeners removed by the abort signal each subscriber passes; the custom theme is per device, not per server"
+    },
+    {
+      "file": "lib/voice/voiceJoinTrace.ts",
       "binding": "lastJoins",
       "category": "app-lifetime",
       "reason": "Join diagnostics, exempt in the 5.2 design note"
@@ -386,25 +392,25 @@
       "reason": "The mounted composers' claims; each composer releases its own claim in destroy, so a session switch unmounts them and the list empties itself"
     },
     {
-      "file": "lib/h264Profile.ts",
+      "file": "lib/voice/h264Profile.ts",
       "binding": "markedTracks",
       "category": "dom-owned",
       "reason": "WeakSet keyed by MediaStreamTrack objects; an entry goes with its track, and a session end unpublishes and stops every track"
     },
     {
-      "file": "lib/h264Profile.ts",
+      "file": "lib/voice/h264Profile.ts",
       "binding": "narrowed",
       "category": "dom-owned",
       "reason": "WeakSet keyed by RTCRtpTransceiver objects; entries go with the closed peer connection, and an unpublished transceiver is restored and removed on the next offer"
     },
     {
-      "file": "lib/videoSurface.ts",
+      "file": "lib/voice/videoSurface.ts",
       "binding": "surfaces",
       "category": "dom-owned",
       "reason": "WeakMap keyed by a native renderer's MediaStreamTrack; the entry goes with the track when its renderer is disposed"
     },
     {
-      "file": "lib/videoSurface.ts",
+      "file": "lib/voice/videoSurface.ts",
       "binding": "shown",
       "category": "dom-owned",
       "reason": "WeakMap keyed by a <video> element; the entry goes with the element"
@@ -416,7 +422,7 @@
       "reason": "WeakMap keyed by the share's RTCRtpSender; a new share is a new sender and a closed one is collected with its entry, so nothing outlives the session that published it"
     },
     {
-      "file": "lib/clipboard.ts",
+      "file": "lib/ui/clipboard.ts",
       "binding": "pendingResets",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the copy button; a pending label reset goes with its button, and an owner's signal drops it on abort"

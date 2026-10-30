@@ -137,7 +137,7 @@ const LOADED_SETTINGS = {
   require_2fa: "true",
 };
 
-describe("Server/admin/static — Settings save (OC-0422)", () => {
+describe("Server/admin/static — Settings save", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {
@@ -240,7 +240,7 @@ async function render(
   return content;
 }
 
-describe("Server/admin/static — Settings page (AO-6)", () => {
+describe("Server/admin/static — Settings page", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {
@@ -504,7 +504,7 @@ describe("Server/admin/static — Settings page (AO-6)", () => {
   });
 });
 
-describe("Server/admin/static — Backups & restore (AO-6)", () => {
+describe("Server/admin/static — Backups & restore", () => {
   let dom: JSDOM | undefined;
 
   afterEach(() => {
@@ -776,7 +776,7 @@ describe("Server/admin/static — Backups & restore (AO-6)", () => {
   });
 });
 
-describe("Server/admin/static — Apply update dialog (AO-6, OP-11)", () => {
+describe("Server/admin/static — Apply update dialog", () => {
   let dom: JSDOM | undefined;
   const UPDATE = {
     current: "1.0.0",
@@ -865,7 +865,7 @@ describe("Server/admin/static — Apply update dialog (AO-6, OP-11)", () => {
     ]);
   });
 
-  it("cannot be closed once the update is sent, and its close buttons are disabled (CLI-02)", async () => {
+  it("cannot be closed once the update is sent, and its close buttons are disabled", async () => {
     const fetchCalls: FetchCall[] = [];
     let release: (() => void) | undefined;
     const { bridge, document } = await openDialog(fetchCalls);
