@@ -52,7 +52,7 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - Custom themes: Settings > Appearance > Custom Themes keeps a list of your own CSS themes, painted on top of the built-in theme. Write one, import or export a `.css` file, copy it to share. A theme cannot load anything from outside (`url()`, `@import`, fonts are refused), and Ctrl+Shift+Backspace turns a custom theme off.
-**Voice**
+  **Voice**
 
 - A voice channel can have a password. Members enter it once the first time they join, and are asked again only if an admin changes it. Administrators and people who manage channels join without it. The desktop app asks for the password the first time you join; other apps get the prompt in a later release.
 
