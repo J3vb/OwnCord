@@ -736,6 +736,7 @@ func TestEpoch1Fixtures(t *testing.T) {
 	}
 	for _, j := range journeys {
 		t.Run(j.name, func(t *testing.T) {
+			t.Parallel()
 			var configure []func(*ws.HubOptions)
 			if f, ok := journeyHubOptions[j.name]; ok {
 				configure = append(configure, f)

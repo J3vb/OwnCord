@@ -411,6 +411,7 @@ func TestRoleRefresh_ReadsFeaturesAtSendTime(t *testing.T) {
 // frame here stands for "a content frame on the forum" to exercise the gate this
 // test is about.
 func TestReconnect_ForumFrameIsNotReplayedToOldClient(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*Hub, string) {
 		t.Helper()
 		database := newTeardownTestDB(t)

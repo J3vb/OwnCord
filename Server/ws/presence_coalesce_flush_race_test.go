@@ -56,7 +56,7 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 
 	raced := make(chan struct{})
 	var hookRan bool
-	presenceFlushRaceHook = func(flushed *Hub) {
+	hook := func(flushed *Hub) {
 		if flushed != h {
 			// A sibling test's leaked AfterFunc: QueuePresence arms a 300ms
 			// flush that nothing disarms, so TestEmitEvents_DirectPresence-
@@ -84,7 +84,8 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 		// sleep costs nothing extra there either way.
 		time.Sleep(20 * time.Millisecond)
 	}
-	defer func() { presenceFlushRaceHook = nil }()
+	presenceFlushRaceHook.Store(&hook)
+	defer presenceFlushRaceHook.Store(nil)
 
 	h.flushPresenceQueue()
 	<-raced

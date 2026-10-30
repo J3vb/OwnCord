@@ -108,6 +108,7 @@ func TestGracefulStop_WithClientsHavingVoiceState(t *testing.T) {
 }
 
 func TestGracefulStop_MultipleClients(t *testing.T) {
+	t.Parallel()
 	hub, database := newCoverageHub(t)
 
 	for i := range 5 {

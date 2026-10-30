@@ -102,6 +102,7 @@ func TestTimeout_IssueAndLiftPushCanSend(t *testing.T) {
 // A timeout that simply runs out is announced too: nothing lifts it, so the
 // refresh NotifyModAction scheduled at issue time is what re-sends can_send.
 func TestTimeout_ExpiryPushesCanSend(t *testing.T) {
+	t.Parallel()
 	f := newTimeoutCanSendFixture(t)
 	ctx := context.Background()
 
@@ -125,6 +126,7 @@ func TestTimeout_ExpiryPushesCanSend(t *testing.T) {
 // that issued it; RearmTimeoutExpiries gives it one, so its expiry still
 // pushes can_send.
 func TestTimeout_RearmedExpiryPushesCanSend(t *testing.T) {
+	t.Parallel()
 	f := newTimeoutCanSendFixture(t)
 	ctx := context.Background()
 

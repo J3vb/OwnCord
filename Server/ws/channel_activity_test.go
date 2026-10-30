@@ -520,6 +520,7 @@ func startActivityHub(t *testing.T, h *Hub) {
 }
 
 func TestChannelActivity_FlushOffDispatch(t *testing.T) {
+	t.Parallel()
 	f := newActivityFixture(t)
 	reader := f.user(t, "reader", permissions.MemberRoleID)
 	watcher := f.user(t, "watcher", permissions.MemberRoleID)
