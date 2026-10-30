@@ -56,8 +56,10 @@ vi.mock("@lib/voice/livekitSession", () => ({
   reconcileVideoFlags: vi.fn(),
   resendWatching: vi.fn(),
 }));
-// voice/wsHandlers loads screenShare lazily on some frames. Left real, that
-// load can finish after this file's environment is torn down.
+// voice/wsHandlers loads screenShare lazily on an error frame that carries an
+// id. afterEach waits for that import: one still pending when the file ends
+// resolves after the mocks are gone and loads the real module into a torn-down
+// environment.
 vi.mock("@lib/voice/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined as "camera" | "screen" | undefined),
 }));
@@ -188,7 +190,8 @@ describe("read pointer through the dispatcher", () => {
     cleanup = wireDispatcher(ws());
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await vi.dynamicImportSettled();
     cleanup();
     setMarkReadSender(null);
     setMarkUnreadSender(null);

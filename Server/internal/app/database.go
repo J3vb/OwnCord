@@ -66,6 +66,13 @@ func initDatabase(log *slog.Logger, cfg *config.Config, database *db.DB, rc *Res
 	} else {
 		log.Info("cleared stale voice states")
 	}
+	// A Discord import still marked running belongs to the process that just
+	// ended. Fail it and delete its half-built channel so it never shows.
+	if n, err := database.FailInterruptedImports(context.Background()); err != nil {
+		log.Warn("failed to clean up interrupted imports", "error", err)
+	} else if n > 0 {
+		log.Info("failed interrupted imports", "count", n)
+	}
 
 	return nil
 }

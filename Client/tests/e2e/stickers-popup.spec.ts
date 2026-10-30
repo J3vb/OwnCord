@@ -90,6 +90,9 @@ test.describe("stickers and the expression popup", () => {
     await expect(popup.locator(".sp-item")).toHaveCount(2);
 
     // The tablist is a proper one: arrows move and select, the tab keeps focus.
+    // The picker focuses its search box a frame after it mounts; focusing the
+    // tab before that lands would lose the arrow keys to the search box.
+    await expect(popup.locator("[data-testid='sticker-search']")).toBeFocused();
     const stickersTab = page.locator("[data-testid='xp-tab-sticker']");
     await stickersTab.focus();
     await page.keyboard.press("ArrowRight");

@@ -137,7 +137,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
-LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.afk = 1 AND c.import_pending = 0
 `
 
 type GetAFKChannelRow struct {
@@ -220,7 +220,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
        CAST(c.password_hash IS NOT NULL AS INTEGER) AS join_locked
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
-LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ?
+LEFT JOIN channel_categories cc ON cc.id = c.category_id WHERE c.id = ? AND c.import_pending = 0
 `
 
 type GetChannelRow struct {
@@ -488,7 +488,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id
-WHERE c.parent_channel_id IS NULL
+WHERE c.parent_channel_id IS NULL AND c.import_pending = 0
 ORDER BY c.position ASC, c.id ASC
 `
 
@@ -518,6 +518,9 @@ type ListChannelsRow struct {
 	JoinLocked                     int64   `json:"joinLocked"`
 }
 
+// import_pending = 0 keeps a channel a Discord import is still building out of
+// every client-facing read (here, GetChannel and GetAFKChannel): nobody can see
+// or address it until the import finishes.
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listChannels)
 	if err != nil {

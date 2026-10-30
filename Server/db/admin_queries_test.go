@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS channels (
     thread_last_activity_at TEXT,
     forum_require_tag INTEGER NOT NULL DEFAULT 0,
     forum_default_auto_archive_minutes INTEGER NOT NULL DEFAULT 4320,
+    import_pending INTEGER NOT NULL DEFAULT 0,
     password_hash TEXT,
     password_version INTEGER NOT NULL DEFAULT 0,
     is_group         INTEGER NOT NULL DEFAULT 0
@@ -96,6 +97,27 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp  TEXT    NOT NULL DEFAULT (datetime('now')),
     mentions_everyone INTEGER NOT NULL DEFAULT 0,
     pinned_at  TEXT
+);
+CREATE TABLE IF NOT EXISTS message_import_authors (
+    message_id      INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    discord_user_id TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    color           TEXT
+);
+CREATE TABLE IF NOT EXISTS import_jobs (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id         INTEGER REFERENCES channels(id) ON DELETE SET NULL,
+    created_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    source_name        TEXT    NOT NULL DEFAULT '',
+    discord_channel_id TEXT    NOT NULL DEFAULT '',
+    status             TEXT    NOT NULL DEFAULT 'running',
+    total              INTEGER NOT NULL DEFAULT 0,
+    imported           INTEGER NOT NULL DEFAULT 0,
+    skipped            INTEGER NOT NULL DEFAULT 0,
+    skipped_attachments INTEGER NOT NULL DEFAULT 0,
+    error              TEXT,
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    finished_at        TEXT
 );
 CREATE TABLE IF NOT EXISTS message_mentions (
     message_id        INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

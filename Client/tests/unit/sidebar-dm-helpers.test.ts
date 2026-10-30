@@ -7,7 +7,7 @@ import {
   buildDmConversations,
   type DmHelperDeps,
 } from "../../src/pages/main-page/SidebarDmHelpers";
-import { channelsStore, setActiveChannel } from "../../src/stores/channels.store";
+import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel, addDmToChannelsStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { uiStore } from "../../src/stores/ui.store";

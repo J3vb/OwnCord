@@ -411,7 +411,7 @@ func (s *AuthService) IssueRecoveryAssist(ctx context.Context, actorID, targetID
 		slog.Error("recovery assist: GetUserByID failed", "err", err, "user_id", targetID)
 		return nil, ErrRecoveryAssistFailed
 	}
-	if target == nil {
+	if target == nil || target.IsSystemAccount() {
 		return nil, ErrRecoveryAssistTarget
 	}
 	if err := s.requireRecoveryTargetBelow(ctx, held, target.ID); err != nil {

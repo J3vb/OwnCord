@@ -52,7 +52,7 @@ func (s *ModerationService) SetNickname(ctx context.Context, actorID, targetID i
 		return nil, err
 	}
 	target, err := s.st.GetUserByID(ctx, targetID)
-	if err != nil || target == nil || target.PendingApproval() {
+	if err != nil || target == nil || target.PendingApproval() || target.IsSystemAccount() {
 		return nil, fmt.Errorf("%w: user not found", ErrNotFound)
 	}
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {

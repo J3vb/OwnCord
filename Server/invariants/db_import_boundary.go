@@ -117,7 +117,7 @@ var DBImportAllow = map[string]DBImportEntry{
 	// The process composition root is internal/app, not main.go: internal/app
 	// owns the handle from open to close, and main.go does not import db.
 	"internal/app/app.go":      {Disposition: "boundary", Note: "the App holds the handle for its lifetime; no calls"},
-	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot, and writes the pre-migration safety copy and the staged-restore audit row", Calls: calls{"BackupToSafe": 1, "ClearAllVoiceStates": 1, "LogAudit": 1, "ResetAllUserStatuses": 1}},
+	"internal/app/database.go": {Disposition: "boundary", Note: "opens the handle, migrates, clears stale state at boot, and writes the pre-migration safety copy and the staged-restore audit row", Calls: calls{"BackupToSafe": 1, "ClearAllVoiceStates": 1, "FailInterruptedImports": 1, "LogAudit": 1, "ResetAllUserStatuses": 1}},
 	"internal/app/erasure.go":  {Disposition: "boundary", Note: "opens the deletion-marker file and replays it against the handle before anything serves (B4-10)", Calls: calls{"CheckpointErasureWAL": 1, "Close": 2}, Hands: calls{"service.NewErasureService": 1, "service.NewRetentionService": 1}},
 	"internal/app/hub.go":      {Disposition: "boundary", Note: "hands the handle to the hub and the service layer it builds", Hands: calls{"auth.NewPersistentRateLimiter": 1, "service.New": 1, "service.NewAuthService": 1, "service.PoolStatsSources": 1, "service.WriterWaitSource": 1, "ws.DBReaders": 1, "ws.HubOptions": 1}},
 	// No import of its own — the start/stop sequence opens the handle

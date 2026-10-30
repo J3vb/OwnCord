@@ -409,6 +409,8 @@ export function voiceWsHandlers(): Array<{ type: string; handler: string }> {
             type: "voice_leave",
             payload: { user_id: 1, channel_id: ch }
           }));
+          // Counted after the echo is handled, so a test can wait it out.
+          globalThis.__mockVoiceLeaveEchoes = (globalThis.__mockVoiceLeaveEchoes || 0) + 1;
         }, 50);
       `,
     },

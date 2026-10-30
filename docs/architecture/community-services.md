@@ -106,7 +106,16 @@ retention, erasure and backup behaviour; no new data class. **Amended 2026-10-27
 identity key):** `085_session_identity_key.sql` adds one nullable column to `sessions`,
 `identity_public_key`: the voice E2EE public key a device sent in its WebSocket auth frame.
 It is part of the session row and shares its ownership, retention, erasure (deleted with the
-session) and backup behaviour; no new data class. **Amended 2026-10-29 (channel
+session) and backup behaviour; no new data class. **Amended 2026-10-29 (Discord
+import):** `087_discord_import.sql` adds `channels.import_pending`, `import_jobs` and
+`message_import_authors`. `message_import_authors` is a side row of an ordinary message
+like `polls`: it holds the Discord display name and colour, no user id, and goes with its
+message by cascade. `import_jobs` is an admin-started job record: `created_by` and
+`channel_id` are cleared, not cascaded, when the admin or the channel is deleted, and the
+row carries counts and an error text, never message content. Imported messages belong to
+one hidden `users` row (`registration_status = 'system'`, created by the first import),
+which has no role, session or token and is outside every member listing, so erasure,
+retention and backup treat its messages as any other message in a channel. **Amended 2026-10-29 (channel
 password):** `086_channel_password.sql` adds `password_hash` and `password_version` to
 `channels` and the table `channel_password_grants(channel_id, user_id, password_version,
 granted_at)`. The hash is channel configuration and never leaves the server; a grant only
