@@ -2,7 +2,7 @@
 // (`src/platform/contracts/notifications.ts`). Written in B7-5 against the
 // in-place seam in `lib/notifications.ts` before the move, so it pins today's
 // behaviour rather than the moved code's. Which notification fires, and the
-// Web Notification fallback, are the caller's — `tests/unit/notifications.test.ts`
+// Web Notification fallback, are the caller's — `tests/unit/notifications/`
 // covers those.
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { Notifier, NotificationTarget } from "../../../src/platform/contracts/notifications";

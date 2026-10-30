@@ -5591,7 +5591,7 @@
       "confidence": "high",
       "fix": {
         "commit": "f3eeaad2edff76a208b4a3d0bee4fb00458f29cc",
-        "test": "Client/tests/unit/notifications.test.ts",
+        "test": "Client/tests/unit/notifications/levelsAndAudio.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Resolve the author name once at notifications.ts:97 the way every other surface does \u2014 `const authorName = memberDisplayName(membersStore.getState().members.get(payload.user.id) ?? { username: payload.user.username, displayName: payload.user.display_name ?? null });` (or reuse resolveAuthor) \u2014 and interpolate authorName into both title branches, leaving the 80-char sanitizeNotif cap unchanged.",
