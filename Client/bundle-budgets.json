@@ -8,7 +8,7 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 126500,
+      "budget": 127000,
       "note": "src/pages/MainPage.ts and what only it imports: the signed-in app shell (channels, messages, members, DMs)."
     },
     "livekit": {
@@ -52,7 +52,7 @@
     "note": "No emitted JS chunk may contain the base64 WASM magic. Generalises decision 10's forbidWasmInStartup: the RNNoise barrel regression (C-07) embeds 1.9 MB of sync WASM in whatever chunk pulls it, which is exactly this marker."
   },
   "css": {
-    "budget": 41500,
+    "budget": 42000,
     "note": "Total gzip of every emitted stylesheet, deduplicated by file (D5, 2026-09-28): its own ratchet, so a CSS-only change does not move the startup JS budget."
   }
 }

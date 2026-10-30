@@ -236,6 +236,113 @@
   color: var(--text-danger);
 }
 
+/* Tapping a voice channel: who is in there, then Join (components/VoiceJoinSheet.ts). */
+.join-sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+}
+.js-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  color: var(--text-positive);
+}
+.js-channel {
+  max-width: 100%;
+  color: var(--header-primary);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.js-count {
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+.js-people {
+  align-self: stretch;
+  max-height: 30dvh;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+}
+.js-person {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.js-person:last-child {
+  border-bottom: none;
+}
+.js-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--on-fill);
+  overflow: hidden;
+}
+.js-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: var(--font-size-md);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.js-marker {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.js-note {
+  color: var(--text-warning);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+.js-note:empty {
+  display: none;
+}
+.js-join {
+  align-self: stretch;
+  min-height: 52px;
+  border-radius: var(--radius-lg);
+  background: var(--green);
+  color: var(--on-fill);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+.js-join:disabled {
+  opacity: 0.5;
+}
+.js-cancel {
+  min-height: 44px;
+  padding: 0 24px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+
 /* The header search box becomes an icon on a phone. */
 .chat-header .ch-tools .search-btn {
   display: none;

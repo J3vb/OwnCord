@@ -64,6 +64,7 @@ and only when it changes something a contributor or fork holder must do
 **Phones and touch screens**
 
 - Message actions, the emoji/GIF/sticker picker and member profiles open as bottom sheets on phones: big reaction buttons, full-width picker, large Message and Call buttons. Swipe down, tap outside or press Back to close. The header search box is a search icon.
+- On phones, a call bar under the header shows the call you are in with mute and leave, and tapping a voice channel asks before joining. The call view's chat now starts closed on a phone
 
 **Desktop UI**
 

@@ -32,6 +32,7 @@ import { createCallChat } from "./callChat";
 import { createVideoModeController } from "./VideoModeController";
 import { createSidebarArea } from "./SidebarArea";
 import { createChatArea } from "./ChatArea";
+import { createVoiceWidgetCallbacks } from "./VoiceCallbacks";
 import { loadMemberLayout, MEMBER_LAYOUT_PREF } from "../../features/members/memberLayout";
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";
 import { createContentNavigator } from "../../features/navigation/contentView";
@@ -295,11 +296,18 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
   st.unsubscribers.push(...ms.sidebar.unsubscribers);
 
   // --- Chat area ---
+  const callBarActions = createVoiceWidgetCallbacks(st.ws, st.limiters);
   ms.chatAreaResult = createChatArea({
     api: st.api,
     getRoot: () => st.root,
     getToast: () => st.toast,
     getChannelCtrl: () => st.channelCtrl,
+    callBar: {
+      isGridUp: () => st.videoModeCtrl?.isGridInWindow() ?? false,
+      onMuteToggle: () => callBarActions.onMuteToggle(),
+      onLeave: () => callBarActions.onDisconnect(),
+      onOpenCall: (channelId) => ms.sidebar.openCall(channelId),
+    },
     subscribeDeletes: (listener) => {
       const offOne = st.ws.on("chat_deleted", (p) => listener(p.channel_id, [p.message_id]));
       const offMany = st.ws.on("chat_bulk_deleted", (p) => listener(p.channel_id, p.ids));
@@ -359,7 +367,10 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
     // The DM call panel hosts the video of its own call (chat stays up).
     panelHost: () => st.callPanelHost,
     chatColumn: ms.chatAreaResult.chatArea,
-    onGridChange: () => st.callChat?.refresh(),
+    onGridChange: () => {
+      st.callChat?.refresh();
+      ms.chatAreaResult.refreshCallBar();
+    },
   });
 
   // Opening the call view selects the voice channel; its chat sits beside the grid.
