@@ -8,6 +8,17 @@
  * Moderation Center, Settings and My reports) becomes unreachable. This turns
  * the sidebar into a drawer the header's menu button opens.
  *
+ * On a phone the server rail joins the drawer: it is the same rail the desktop
+ * shows (one instance, mounted once by MainPage), and this controller only
+ * shows its slot in the drawer's layer while the drawer is open. A search
+ * button under the server name opens the quick switcher.
+ *
+ * Back: a drawer opened with the menu button (or a swipe) claims the Back
+ * button, so Back closes it. In the Android app a guard keeps one history
+ * entry while the drawer is closed, so Back from a chat opens the drawer, and
+ * a drawer opened that way holds no entry: one more Back leaves the app. The
+ * guard goes back up when the drawer closes.
+ *
  * Close paths: Escape, a click/tap outside, and reaching a destination. The
  * destination is detected through the stores one writes (the active channel,
  * the open content view, Settings), so it works whatever control was chosen
@@ -19,9 +30,13 @@
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 import { focusDialog } from "@lib/ui/a11y";
+import { claimBack, holdBackGuard, type BackClaim, type BackGuard } from "@lib/ui/backHistory";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
+import { isAndroidApp } from "../../features/voice/native/platform";
 import { shellText } from "../../i18n/shell";
 
 /** The media query `responsive.css` collapses the sidebar under. Keep in step. */
@@ -36,31 +51,70 @@ export interface SidebarDrawerOptions {
   readonly fallbackFocus?: () => HTMLElement | null;
   /** Called on open, to close a panel that would otherwise paint over it. */
   readonly onOpen?: () => void;
+  /** The server rail's slot, shown beside the channel list while a phone's drawer is open. */
+  readonly rail?: HTMLElement | null;
+  /** Opens the quick switcher; with it the drawer gets a search button on a phone. */
+  readonly onSearch?: () => void;
 }
 
 export interface SidebarDrawer {
+  /** Open as the menu button does. */
+  open(): void;
+  /** Close as a tap outside does. */
+  close(): void;
+  isOpen(): boolean;
   destroy(): void;
 }
 
 export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   const { sidebar, toggle } = opts;
+  const rail = opts.rail ?? null;
   const owner = new Disposable();
   const narrow = window.matchMedia(NARROW_QUERY);
   let open = false;
   let restoreFocusRef: (() => void) | null = null;
+  let backClaim: BackClaim | null = null;
+  // Only the Android app has a Back button to catch (a phone browser has its
+  // own, and leaving the page is what it should do).
+  const backGuard: BackGuard | null = isAndroidApp()
+    ? holdBackGuard(() => openDrawer(false), owner.signal)
+    : null;
 
-  // The backdrop sits just before the sidebar so it shares the drawer's
-  // stacking layer and paints under it, but it is `position: fixed`, so the
-  // parent's own layout is irrelevant.
+  // The backdrop sits just before the sidebar (and the rail beside it) so it
+  // shares the drawer's stacking layer and paints under both, but it is
+  // `position: fixed`, so the parent's own layout is irrelevant.
   const backdrop = createElement("div", {
     class: "sidebar-drawer-backdrop",
     "data-testid": "sidebar-drawer-backdrop",
   });
-  sidebar.before(backdrop);
+  (rail ?? sidebar).before(backdrop);
+
+  // The search button sits under the server name and only shows on a phone
+  // (responsive.css); the quick switcher it opens is the Ctrl+K one.
+  let searchButton: HTMLButtonElement | null = null;
+  const onSearch = opts.onSearch;
+  if (onSearch !== undefined) {
+    const button = createElement("button", {
+      type: "button",
+      class: "sidebar-drawer-search",
+      "data-testid": "sidebar-drawer-search",
+    });
+    button.append(createIcon("search", 16), createElement("span", {}, shellText("sidebar.search")));
+    sidebar.querySelector(".unified-sidebar-header")?.after(button);
+    // Closed first, so the switcher finds the chat and not the drawer behind it.
+    owner.onEvent(button, "click", () => {
+      closeDrawer("destination");
+      onSearch();
+    });
+    searchButton = button;
+  }
 
   function sync(): void {
     sidebar.classList.toggle("drawer-open", open);
+    rail?.classList.toggle("drawer-open", open);
     backdrop.classList.toggle("open", open);
+    // With the drawer shut, Back from a chat has an entry to pop (Android).
+    backGuard?.setActive(!open && narrow.matches && isPhoneLayout());
     // Below the breakpoint the closed sidebar is off-screen, so its controls
     // must not stay tabbable off-screen; above it, the sidebar is in flow and
     // must stay fully interactive.
@@ -75,9 +129,12 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   // button before this controller exists).
   sync();
 
-  function openDrawer(): void {
+  /** `claimsBack`: Back closes the drawer (the menu); false when Back itself opened it. */
+  function openDrawer(claimsBack: boolean): void {
     if (open) return;
     open = true;
+    if (claimsBack && isPhoneLayout())
+      backClaim = claimBack(() => closeDrawer("dismiss"), owner.signal);
     opts.onOpen?.();
     // sync() clears `inert` first: focus cannot move into an inert subtree.
     sync();
@@ -100,11 +157,15 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
     const restoreFn = restoreFocusRef;
     restoreFocusRef = null;
     const focusWasInside = sidebar.contains(document.activeElement);
+    // The guard goes back up before the claim is let go, so the history entry
+    // the claim held carries over instead of being popped and pushed again.
     sync();
+    backClaim?.release();
+    backClaim = null;
     if (reason === "dismiss" || focusWasInside) restoreFn?.();
   }
 
-  toggle.addEventListener("click", () => (open ? closeDrawer("dismiss") : openDrawer()), {
+  toggle.addEventListener("click", () => (open ? closeDrawer("dismiss") : openDrawer(true)), {
     signal: owner.signal,
   });
 
@@ -115,7 +176,8 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
     const target = e.target;
     const inDrawer =
       target === document.body ||
-      (target instanceof Node && (sidebar.contains(target) || toggle.contains(target)));
+      (target instanceof Node &&
+        (sidebar.contains(target) || toggle.contains(target) || rail?.contains(target) === true));
     if (!inDrawer) return;
     e.preventDefault();
     closeDrawer("dismiss");
@@ -154,6 +216,8 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
         // the restore rather than yank it to a hidden button.
         open = false;
         restoreFocusRef = null;
+        backClaim?.release();
+        backClaim = null;
       }
       sync();
     },
@@ -161,11 +225,16 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   );
 
   return {
+    open: () => openDrawer(true),
+    close: () => closeDrawer("dismiss"),
+    isOpen: () => open,
     destroy: () => {
       closeDrawer("dismiss");
       owner.destroy();
       backdrop.remove();
+      searchButton?.remove();
       sidebar.classList.remove("drawer-open");
+      rail?.classList.remove("drawer-open");
     },
   };
 }

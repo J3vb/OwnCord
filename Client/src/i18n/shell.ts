@@ -348,6 +348,7 @@ export const shellText = defineCatalog("shell", {
 
   "sidebar.open": "Open navigation",
   "sidebar.close": "Close navigation",
+  "sidebar.search": "Find or start a conversation",
 
   "toast.dismiss": "Dismiss notification",
 
