@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
@@ -13,17 +14,25 @@ import (
 // NOT_NSFW rather than CONFLICT.
 var ErrNotNSFW = errors.New("channel is not labelled nsfw")
 
+// nsfwStore is what NSFWService reads and writes. *db.DB satisfies it.
+type nsfwStore interface {
+	subjectStore
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	AcknowledgeNSFW(ctx context.Context, userID, channelID int64) (bool, error)
+	RevokeNSFW(ctx context.Context, userID, channelID int64) error
+}
+
 // NSFWService owns the per-user, per-channel acknowledgement row (migration 047):
 // whether a channel's labelled content may reach a reader. See
 // docs/architecture/community-services.md section S4;
 // permissions.CanReadContent is the predicate every content path resolves it into.
 type NSFWService struct {
-	st    Store
+	st    nsfwStore
 	perms *PermissionService
 }
 
 // NewNSFWService creates an NSFWService.
-func NewNSFWService(st Store, perms *PermissionService) *NSFWService {
+func NewNSFWService(st nsfwStore, perms *PermissionService) *NSFWService {
 	return &NSFWService{st: st, perms: perms}
 }
 

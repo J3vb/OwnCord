@@ -30,6 +30,11 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Han
 			return
 		}
 		defer gate.running.Store(false)
+		// A big database takes longer than the server's WriteTimeout to copy and
+		// verify, and nothing is written until it is done: extend the deadline
+		// the way an archive does, bounded by the same hard maximum.
+		deadline := startArchive(w, r, func() {}, archiveProgressTimeout, archiveMaxLifetime)
+		defer deadline.release()
 		if hold := gate.hold.Load(); hold != nil {
 			(*hold)()
 		}
@@ -203,7 +208,7 @@ const restoreCarryTimeout = 10 * time.Second
 // never writes over the open database: the staged copy and a marker (written
 // last) are applied by db.ApplyStagedRestore before the database opens again,
 // and the restart goes through the normal shutdown path.
-func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
+func handleRestoreBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name, target, ok := resolveBackupName(w, r, paths.dir)
 		if !ok {
@@ -220,6 +225,13 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 			return
 		}
 		defer abortRestartSensitiveOp()
+		// The safety copy of a big database outlasts the server's WriteTimeout;
+		// see handleBackup.
+		deadline := startArchive(w, r, func() {}, archiveProgressTimeout, archiveMaxLifetime)
+		defer deadline.release()
+		if hold := gate.hold.Load(); hold != nil {
+			(*hold)()
+		}
 
 		if _, err := os.Stat(target); os.IsNotExist(err) { //nolint:gosec // G703: path sanitized by HasPrefix check above
 			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")

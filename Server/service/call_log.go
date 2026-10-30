@@ -64,12 +64,23 @@ type callLogPending struct {
 	lastLeave time.Time
 }
 
+// callLogServiceStore is what CallLogService reads and writes. *db.DB satisfies it.
+type callLogServiceStore interface {
+	CallLogStore
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]db.VoiceState, error)
+	GetDMDeliveryTargets(ctx context.Context, channelID, senderID int64) (isGroup bool, targets []db.DMDeliveryTarget, err error)
+	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+}
+
 // CallLogService derives one message row per DM call from voice presence. Joins
 // and leaves only post notes; a single worker goroutine owns every write and
 // reconciles a channel's voice_states rows with its live call row, so a missed
 // note heals on the next pass.
 type CallLogService struct {
-	st   Store
+	st   callLogServiceStore
 	dms  *DMService
 	sink atomic.Pointer[CallLogSink]
 
@@ -106,7 +117,7 @@ type CallLogService struct {
 
 // NewCallLogService creates a CallLogService. dms may be nil, in which case a
 // created row reopens no closed DM.
-func NewCallLogService(st Store, dms *DMService) *CallLogService {
+func NewCallLogService(st callLogServiceStore, dms *DMService) *CallLogService {
 	return &CallLogService{
 		st: st, dms: dms,
 		now:      func() time.Time { return time.Now().UTC() },

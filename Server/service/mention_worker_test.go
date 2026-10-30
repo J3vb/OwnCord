@@ -457,7 +457,7 @@ func TestMentionWorker_DeleteBeforeFlushPreservesPriorBadge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed m0: %v", err)
 	}
-	if err := svc.st.IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
+	if err := svc.st.(*db.DB).IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
 		t.Fatalf("seed increment: %v", err)
 	}
 	if got := mentionCount(t, database, 2); got != 1 {
@@ -495,7 +495,7 @@ func TestMentionWorker_PurgeBeforeFlushPreservesPriorBadge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed m0: %v", err)
 	}
-	if err := svc.st.IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
+	if err := svc.st.(*db.DB).IncrementMentionCounts(context.Background(), 10, m0, []int64{2}); err != nil {
 		t.Fatalf("seed increment: %v", err)
 	}
 

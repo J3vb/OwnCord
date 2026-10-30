@@ -53,6 +53,14 @@ and only when it changes something a contributor or fork holder must do
 
 - The Android app is on the release page: download `OwnCord_<version>_arm64.apk` and install it (Android asks once to allow installs from your browser). After that the app updates itself: it shows "Update available", downloads the new version and opens Android's installer, where you tap Install. Your sign-in and settings stay.
 
+**Voice**
+
+- On Linux, one failed connection on the local video preview socket stopped every camera, screen and remote video preview until the call was rejoined — the socket now keeps accepting connections.
+
+**Desktop UI**
+
+- Sign-in checks on incoming server messages in the desktop app no longer read every message in full — they skip messages that cannot be the sign-in reply.
+
 **Phones and touch screens**
 
 - Message actions, the emoji/GIF/sticker picker and member profiles open as bottom sheets on phones: big reaction buttons, full-width picker, large Message and Call buttons. Swipe down, tap outside or press Back to close. The header search box is a search icon.
@@ -78,10 +86,13 @@ and only when it changes something a contributor or fork holder must do
 
 **Admin panel**
 
+- "Back up now" and "Restore" showed an error after 30 seconds on a big database even though the work finished (and a retried backup made a second copy) — both now run to completion.
+- A database error while deciding an appeal told the moderator it was "already decided or withdrawn" — it now reports a server error.
 - Server logs opened slowly once many lines were collected. A full log now opens in a fraction of a second, and the page keeps the last 10,000 lines instead of 2,000.
 
 **Login & connection**
 
+- Very large `event_persistence` numbers in `config.yaml` or the environment could stop the server from starting — they are now brought into range with a warning, like the same settings in the admin panel.
 - The server address was case-sensitive, so `Chat.Example.com` missed the saved `chat.example.com` server and its saved sign-in — the address is now lowercased, and a saved server typed in another case is matched.
 - Phone keyboards capitalised and auto-corrected the server address — the address boxes now turn that off.
 - Pasting a server link such as `https://chat.example.com/` failed with "Invalid host format" — the link's host is used.
@@ -93,6 +104,12 @@ and only when it changes something a contributor or fork holder must do
 **Phones and touch screens**
 
 - Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
+
+### Changed
+
+**Voice**
+
+- The video codec for camera and screen share now defaults to Auto: H.264 when your graphics card can encode it, otherwise VP8. In the Windows app on an NVIDIA or AMD graphics card, Auto now uses the graphics card's H.264 encoder (before, it always ended up on VP8). If you picked a codec yourself in Settings > Voice & Audio, that choice is kept.
 
 ## v2.6.0
 

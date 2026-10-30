@@ -151,7 +151,7 @@ type backupGate struct {
 	// /backup while it is set is refused with 409 BACKUP_RUNNING.
 	running atomic.Bool
 	// hold is a test seam: when set it runs inside the guard, before the
-	// backup starts. Only export_test.go assigns it.
+	// backup or restore starts. Only export_test.go assigns it.
 	hold atomic.Pointer[func()]
 }
 
@@ -442,7 +442,7 @@ func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, d
 	gates.route(r, gateManageBackups, http.MethodPost, "/backup", handleBackup(database, paths, backups))
 	gates.route(r, gateListBackups, http.MethodGet, "/backups", handleListBackups(paths))
 	gates.route(r, gateRestoreBackups, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database, paths))
-	gates.route(r, gateRestoreBackups, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths))
+	gates.route(r, gateRestoreBackups, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths, backups))
 	gates.route(r, gateManageBackups, http.MethodPost, "/backups/{name}/link", handleBackupLink(database, paths))
 	gates.route(r, gateRestoreBackups, http.MethodGet, "/archive", handleArchive(database, setupOpts, paths))
 	gates.route(r, gateRestoreBackups, http.MethodPost, "/archive/link", handleArchiveLink(database))

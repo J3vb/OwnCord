@@ -82,8 +82,9 @@ flowchart TB
 ```
 
 **What this shows.** The layering is `api → service → db`. (D3 removed the
-old `store` layer.) The `service` layer depends on a narrow `service.Store`
-interface that `*db.DB` satisfies. `ws` and `plugin` depend on their own small
+old `store` layer.) Each service depends on a small interface it declares
+beside its own type, which `*db.DB` satisfies; `service.Store` is their union
+and only `service.New` takes it. `ws` and `plugin` depend on their own small
 interfaces (`ws.EventStore`, `plugin.PluginStore`) in the same way. The `db`
 package's query methods call the sqlc-generated `db/dbgen` code, so sqlc is the
 type-checked query layer.
