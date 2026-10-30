@@ -103,8 +103,6 @@ func WriteMigratedFileForTest(tb testing.TB, path string) {
 func writeMigratedAlphaCopy(tb testing.TB, dir string) string {
 	tb.Helper()
 	path := filepath.Join(dir, "alpha-migrated.db")
-	writeImage(tb, &alphaFileImage, func(scratch string) (string, error) {
-		return alphasnap.Copy(scratch)
-	}, path)
+	writeImage(tb, &alphaFileImage, alphasnap.Copy, path)
 	return path
 }
