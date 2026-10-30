@@ -3067,7 +3067,7 @@
       "fix": {
         "commit": "c3837fa",
         "branchCommit": "a100f4e",
-        "test": "Client/tests/unit/voice-audio-tab.test.ts",
+        "test": "Client/tests/unit/voiceAudioTab/processingAndCamera.test.ts",
         "revertProof": "self-reported",
         "pr": 1367
       },
@@ -11915,7 +11915,7 @@
       "suggestedFix": "Show the call camera's own preview socket during a call, and restart the preview when the camera's owner changes.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/voice-audio-tab.test.ts (starts the native preview again when the host closes its socket), Client/src/features/voice/native/videoRenderer.test.ts (hands a host close to its owner instead of reopening, until disposed)",
+        "test": "Client/tests/unit/voiceAudioTab/linuxNative.test.ts (starts the native preview again when the host closes its socket), Client/src/features/voice/native/videoRenderer.test.ts (hands a host close to its owner instead of reopening, until disposed)",
         "revertProof": "pass (the tab test fails without the VoiceAudioTab change)"
       },
       "note": "The Rust side (reusing the call's socket) needs a live room and has no unit test; the laptop re-test covers it.",
