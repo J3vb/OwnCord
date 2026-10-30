@@ -3608,7 +3608,7 @@
       "fix": {
         "commit": "c3837fa",
         "branchCommit": "7b1779a",
-        "test": "Client/tests/unit/search-overlay.test.ts",
+        "test": "Client/tests/unit/searchOverlay/inputAndResults.test.ts",
         "revertProof": "self-reported",
         "pr": 1367
       },
@@ -6231,7 +6231,7 @@
       "suggestedFix": "In SearchOverlay.renderResults, resolve the DM label from the store the rest of the client uses, keeping the '#' form for real channels: `const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id); setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);` (import { dmStore, dmDisplayName } from \"@stores/dm.store\"). Existing search-overlay tests keep passing because dmStore is empty for text-channel hits.",
       "fix": {
         "commit": "ded5fc6",
-        "test": "Client/tests/unit/search-overlay.test.ts",
+        "test": "Client/tests/unit/searchOverlay/inputAndResults.test.ts",
         "revertProof": "self-reported"
       }
     },
