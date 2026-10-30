@@ -289,8 +289,7 @@ async function restricted(code: string, filePath: string): Promise<string[]> {
     .filter((id) => (IMPORT_BANS as readonly string[]).includes(id));
 }
 
-// 5.4e: a *.view.ts draws from a row model and imports no store. These are
-// core rules, so they are checked through the real config, not a flat Linter.
+// 5.4e: a *.view.ts draws from a row model and imports no store.
 describe("view-file store ban", () => {
   const VIEW = "src/features/members/memberRow.view.ts";
   const NON_VIEW = "src/features/members/memberRowModel.ts";
