@@ -223,6 +223,16 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
       expect(postMessageMock(proc)).toHaveBeenCalledWith({ type: "gate", gated: false });
     });
 
+    it("gates on the level alone while the probability input is silent (no RNNoise)", () => {
+      const proc = speechGated();
+      callsUntilMessageOfType(proc, SILENT, "gate", 300);
+      postMessageMock(proc).mockClear();
+      // An exact 0 is not a verdict: RNNoise is not there (a running one
+      // reports at least its floor), so a loud level opens the gate.
+      for (let i = 0; i < 12; i++) proc.process(quantum(LOUD, 0));
+      expect(postMessageMock(proc)).toHaveBeenCalledWith({ type: "gate", gated: false });
+    });
+
     it("a level above the gate that RNNoise stops calling voice closes it after the hold", () => {
       const proc = speechGated();
       for (let i = 0; i < 100; i++) proc.process(quantum(LOUD, 0.9));
@@ -245,12 +255,12 @@ describe("vad-worklet.js VadProcessor timing (128-sample render quanta @48kHz)",
       expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: true });
     });
 
-    it("an unconnected probability input counts as no voice", () => {
+    it("an unconnected probability input gates on the level alone", () => {
       const proc = speechGated();
       callsUntilMessageOfType(proc, SILENT, "gate", 300);
       postMessageMock(proc).mockClear();
-      for (let i = 0; i < 100; i++) proc.process([[frame(LOUD)], []]);
-      expect(postMessageMock(proc)).not.toHaveBeenCalledWith({ type: "gate", gated: false });
+      for (let i = 0; i < 12; i++) proc.process([[frame(LOUD)], []]);
+      expect(postMessageMock(proc)).toHaveBeenCalledWith({ type: "gate", gated: false });
     });
 
     it("turning the rule off reverts to the level alone without restarting the gate", () => {

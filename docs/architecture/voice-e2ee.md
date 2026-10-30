@@ -918,7 +918,10 @@ it a voice (probability ≥ 0.5), and counts as quiet when it drops under the
 close level or RNNoise stops calling it a voice (< 0.15). `MicProcessor`
 keeps RNNoise running for that verdict while Enhanced Noise Suppression is
 off, with the voice routed around it; the manual slider is a pure level gate.
-The native gate does not read the verdict yet. The capture shares the
+A running RNNoise never reports exactly 0, so a silent probability input
+(RNNoise not started, or stopped by a processor error) puts the detector
+back on its level alone rather than leaving the gate shut. The native gate
+does not read the verdict yet. The capture shares the
 playout's watcher (`Watcher` in `playout.rs`): it reopens an input stream the
 sound server tore down, switches back to a chosen microphone once it is listed
 again, and, while "System default" is selected, follows the default source as

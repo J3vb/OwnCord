@@ -17,6 +17,10 @@ const RN_NOISE_INT16_SCALE = 32768;
 // Frames (10 ms) after a start whose speech probability is not reported:
 // the model's state settles in its first ~100 ms and reads as voice.
 const SPEECH_WARMUP_FRAMES = 15;
+// The least a running RNNoise reports: exactly 0 on the speech output means
+// no RNNoise at all (not started, not connected, or stopped by an error, when
+// the node outputs silence), and the voice detector then gates on its level.
+const SPEECH_PROBABILITY_FLOOR = 0.001;
 
 // public/rnnoise.wasm is the module @jitsi/rnnoise-wasm's sync build embeds
 // (dist/rnnoise-sync.js): the current RNNoise model. The package's standalone
@@ -204,7 +208,10 @@ class RNNoiseProcessor extends AudioWorkletProcessor {
 
     const probability = this._process(this._state, this._outputPtr, this._inputPtr);
     this._framesProcessed++;
-    this._speechProbability = this._framesProcessed > SPEECH_WARMUP_FRAMES ? probability : 0;
+    this._speechProbability =
+      this._framesProcessed > SPEECH_WARMUP_FRAMES
+        ? Math.max(SPEECH_PROBABILITY_FLOOR, probability)
+        : 0;
 
     // Write to contiguous buffer
     const writeStart = this._outWritePos * FRAME_SIZE;

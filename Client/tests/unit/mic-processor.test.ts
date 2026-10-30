@@ -237,6 +237,39 @@ describe("createMicProcessor", () => {
       expect(rnnoise.connect).toHaveBeenCalledWith(speech, 1, 0);
     });
 
+    it("a request that changes nothing leaves the live graph alone", async () => {
+      const { processor, ctx, entry } = await started();
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+      const detecting = processor.setSpeechDetection(true);
+      const rnnoise = await ready();
+      await detecting;
+      const rewire = vi.spyOn(entry, "disconnect");
+      rnnoise.disconnect.mockClear();
+
+      await processor.setSpeechDetection(true);
+      await processor.setEnhanced(false);
+      expect(rewire).not.toHaveBeenCalled();
+      expect(rnnoise.disconnect).not.toHaveBeenCalled();
+    });
+
+    it("a destroy during the RNNoise load waits for it and stops the worklet before closing the context", async () => {
+      const { processor, ctx } = await started();
+      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
+      const detecting = processor.setSpeechDetection(true);
+
+      const destroying = processor.destroy();
+      const rnnoise = await ready();
+      await vi.waitFor(() =>
+        expect(rnnoise.port.postMessage).toHaveBeenCalledWith({ type: "destroy" }),
+      );
+      expect(ctx.close).not.toHaveBeenCalled();
+
+      rnnoise.emit({ type: "stopped" });
+      await destroying;
+      expect(ctx.close).toHaveBeenCalledTimes(1);
+      await expect(detecting).resolves.toBe(false);
+    });
+
     it("leaves the gate on its level when RNNoise cannot load", async () => {
       const { processor, entry, ctx } = await started();
 

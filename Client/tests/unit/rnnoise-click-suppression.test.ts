@@ -77,6 +77,8 @@ describe("RNNoise worklet on recorded audio", () => {
     // which read as voice before their state settles and are masked.
     const room = await speechProbabilities(placeInRoomTone(new Float32Array(0), 1, 2));
     expect(Math.max(...room)).toBeLessThan(0.15);
+    // Once running it never reports exactly 0: that reads as no RNNoise.
+    expect(Math.min(...room.slice(Math.round(0.2 * quantaPerSecond)))).toBeGreaterThan(0);
 
     const clip = readAudioFixture("speech.wav");
     const speech = await speechProbabilities(placeInRoomTone(clip, 0.5, 2));

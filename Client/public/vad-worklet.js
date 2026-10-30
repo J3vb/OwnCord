@@ -37,6 +37,10 @@ const CLOSE_RATIO = 10 ** (-HYSTERESIS_DB / 20);
 // RNNoise's probability that a frame is voice: at or above the first it
 // counts toward opening, under the second it counts toward closing. Inside
 // a word the probability dips at stops and pauses; the hold covers those.
+// A running RNNoise never reports exactly 0 (rnnoise-worklet.js's floor):
+// a silent probability input means RNNoise is not there (not yet started,
+// or stopped by an error), and the gate runs on its level alone rather
+// than staying shut.
 const SPEECH_OPEN_PROBABILITY = 0.5;
 const SPEECH_CLOSE_PROBABILITY = 0.15;
 
@@ -144,8 +148,9 @@ class VadProcessor extends AudioWorkletProcessor {
 
     // Gate logic (the setTimeout fallback in audioPipeline.ts mirrors the
     // level rule; it has no RNNoise and so no speech rule)
-    const voiced = !this._speechGate || probability >= SPEECH_OPEN_PROBABILITY;
-    const unvoiced = this._speechGate && probability < SPEECH_CLOSE_PROBABILITY;
+    const speechRuled = this._speechGate && probability > 0;
+    const voiced = !speechRuled || probability >= SPEECH_OPEN_PROBABILITY;
+    const unvoiced = speechRuled && probability < SPEECH_CLOSE_PROBABILITY;
     if (this._gated) {
       if (rms >= this._threshold && voiced) this._speechFrames++;
       else if (this._speechFrames > 0) this._speechFrames--;

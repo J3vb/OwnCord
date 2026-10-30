@@ -127,14 +127,28 @@ export function createMicProcessor(): MicProcessor {
     gain.gain.setTargetAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime, timeConstant);
   }
 
+  /** The RNNoise node the graph was last wired with, and how. */
+  let wired: { rnnoise: RNNoiseNode | null; enhanced: boolean; detecting: boolean } | null = null;
+
   /** Wire entry → (RNNoise →) analyser + delay for the current `enhanced`,
-   *  and RNNoise → speech probability while it runs for either reason. */
+   *  and RNNoise → speech probability while it runs for either reason. A
+   *  request that changes nothing leaves the live graph alone: a rewire is
+   *  a disconnect and a reconnect, between which a render quantum can run. */
   function route(): void {
     if (entry === null || analyser === null || delay === null || speech === null) return;
-    entry.disconnect();
-    if (rnnoise !== null) rnnoise.node.disconnect();
     enhanced = wantEnhanced && rnnoise !== null;
     detecting = wantDetect && rnnoise !== null;
+    if (
+      wired !== null &&
+      wired.rnnoise === rnnoise &&
+      wired.enhanced === enhanced &&
+      wired.detecting === detecting
+    ) {
+      return;
+    }
+    wired = { rnnoise, enhanced, detecting };
+    entry.disconnect();
+    if (rnnoise !== null) rnnoise.node.disconnect();
     if (rnnoise !== null && (enhanced || detecting)) {
       entry.connect(rnnoise.node);
       rnnoise.node.connect(speech, RNNOISE_SPEECH_OUTPUT, 0);
@@ -145,14 +159,15 @@ export function createMicProcessor(): MicProcessor {
   }
 
   /** Load RNNoise once; later callers share the load. Resolves once it is
-   *  loaded, or failed (then `rnnoise` stays null). */
+   *  loaded, or failed (then `rnnoise` stays null). A destroy() during the
+   *  load waits for it, so the node is stopped the same way as one that
+   *  loaded in time. */
   function loadRnnoise(): Promise<void> {
     if (rnnoise !== null || destroyed) return Promise.resolve();
     loadingRnnoise ??= createRNNoiseNode(ctx)
       .then(
         (node) => {
-          if (destroyed) node.destroy();
-          else rnnoise = node;
+          rnnoise = node;
         },
         (err) => {
           // Enhanced Noise Suppression was asked for and is not there: say
@@ -232,6 +247,10 @@ export function createMicProcessor(): MicProcessor {
       if (destroyed) return;
       destroyed = true;
       source?.disconnect();
+      // A load still in flight lands a worklet on this context: wait for
+      // it, so it is stopped below before the context closes, or it would
+      // pin the closed context (and RNNoise's WASM) for the page's lifetime.
+      await loadingRnnoise;
       const rnnoiseStopped = rnnoise === null ? null : workletStopped(rnnoise.node);
       rnnoise?.destroy();
       rnnoise = null;
