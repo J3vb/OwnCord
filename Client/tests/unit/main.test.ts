@@ -221,6 +221,7 @@ vi.mock("@pages/ConnectPage", () => ({
       getRememberPassword: vi.fn(() => false),
       getAutoConnect: vi.fn(() => false),
       getPassword: vi.fn(() => ""),
+      resubmitAfterCertAccept: vi.fn(),
       refreshProfiles: vi.fn(),
       selectServer: vi.fn(),
       applyInviteLink: vi.fn(),
@@ -673,6 +674,9 @@ describe("main.ts pre-auth connection deadline", () => {
     vi.mocked(createCertFirstUseModal).mock.lastCall![0].onAccept();
     await vi.advanceTimersByTimeAsync(10);
     expect(mockInvoke).toHaveBeenCalledWith("ws_connect", expect.anything());
+    expect(latestConnectPage().resubmitAfterCertAccept).toHaveBeenCalledWith(
+      "unpinned.example:8443",
+    );
 
     clearAuth();
   });

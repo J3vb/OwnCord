@@ -86,6 +86,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Login & connection**
+
+- Accepting a new server's certificate left an error on the login screen, and you had to press Connect again; the sign-in now carries on by itself once you accept.
+
 **Messages & files**
 
 - A HEIC or TIFF photo waiting to send showed a broken-image icon in the composer; it now shows the file chip with its name, as does any picture the app cannot draw.

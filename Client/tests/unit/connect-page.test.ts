@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ApiClientError, TransportError } from "../../src/lib/api";
+import { ApiClientError, TLS_CERT_CODE, TransportError } from "../../src/lib/api";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
 import { uiStore, setTransientError } from "../../src/stores/ui.store";
@@ -223,6 +223,81 @@ describe("ConnectPage", () => {
     expect(document.activeElement).toBe(passwordInput);
 
     page.destroy?.();
+  });
+
+  describe("sign-in refused by an unconfirmed certificate", () => {
+    const certRefusal = (): ApiClientError =>
+      new ApiClientError(502, TLS_CERT_CODE, "certificate not confirmed");
+
+    function submitLogin(host: string): void {
+      (container.querySelector("#host") as HTMLInputElement).value = host;
+      (container.querySelector("#username") as HTMLInputElement).value = "testuser";
+      (container.querySelector("#password") as HTMLInputElement).value = "long-enough-password";
+      const form = container.querySelector(".connect-form") as HTMLFormElement;
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    }
+
+    async function refusedThen(
+      onLogin: ConnectPageCallbacks["onLogin"],
+      host: string,
+    ): Promise<ReturnType<typeof createConnectPage>> {
+      const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
+      page.mount(container);
+      submitLogin(host);
+      await vi.waitFor(() => {
+        expect(container.querySelector(".error-banner")!.textContent).not.toBe("");
+      });
+      expect(onLogin).toHaveBeenCalledTimes(1);
+      return page;
+    }
+
+    it("resubmits once when that host's certificate is accepted", async () => {
+      const onLogin = vi
+        .fn<ConnectPageCallbacks["onLogin"]>()
+        .mockRejectedValueOnce(certRefusal())
+        .mockResolvedValue(undefined);
+      const page = await refusedThen(onLogin, "Chat.Example:8443");
+
+      page.resubmitAfterCertAccept("chat.example:8443");
+      await vi.waitFor(() => expect(onLogin).toHaveBeenCalledTimes(2));
+      expect(onLogin).toHaveBeenLastCalledWith(
+        "Chat.Example:8443",
+        "testuser",
+        "long-enough-password",
+      );
+
+      page.resubmitAfterCertAccept("chat.example:8443");
+      await Promise.resolve();
+      expect(onLogin).toHaveBeenCalledTimes(2);
+      page.destroy?.();
+    });
+
+    it("leaves the form alone for another host's certificate or once the host was changed", async () => {
+      const onLogin = vi.fn<ConnectPageCallbacks["onLogin"]>().mockRejectedValue(certRefusal());
+      const page = await refusedThen(onLogin, "chat.example:8443");
+
+      page.resubmitAfterCertAccept("other.example:8443");
+      await Promise.resolve();
+      expect(onLogin).toHaveBeenCalledTimes(1);
+
+      (container.querySelector("#host") as HTMLInputElement).value = "other.example:8443";
+      page.resubmitAfterCertAccept("chat.example:8443");
+      await Promise.resolve();
+      expect(onLogin).toHaveBeenCalledTimes(1);
+      page.destroy?.();
+    });
+
+    it("does not resubmit a sign-in the server refused for another reason", async () => {
+      const onLogin = vi
+        .fn<ConnectPageCallbacks["onLogin"]>()
+        .mockRejectedValue(new ApiClientError(401, "UNAUTHORIZED", "invalid credentials"));
+      const page = await refusedThen(onLogin, "chat.example:8443");
+
+      page.resubmitAfterCertAccept("chat.example:8443");
+      await Promise.resolve();
+      expect(onLogin).toHaveBeenCalledTimes(1);
+      page.destroy?.();
+    });
   });
 
   // ── Saved-password login (OCV-001) ───────────────────────────────────────
