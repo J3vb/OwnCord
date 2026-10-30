@@ -286,12 +286,14 @@ export function createChannelMediaGallery(
       ...(cursor !== "" ? { cursor } : startMonth !== undefined ? { month: startMonth } : {}),
     };
     setStatus(cursor === "" ? mediaGalleryText("loading") : null);
+    let loaded = false;
     try {
       const page = await options.loadPage(query, scope.signal);
       if (scope.signal.aborted) return;
       appendItems(page.items);
       cursor = page.next_cursor;
       hasMore = cursor !== "";
+      loaded = true;
       if (tilesByMessage.size === 0 && !hasMore) {
         setStatus(
           nameQuery !== "" || uploader !== undefined
@@ -308,8 +310,9 @@ export function createChannelMediaGallery(
       if (!scope.signal.aborted) loading = false;
     }
     // A short page can leave the sentinel on screen, where the observer
-    // will not fire again; keep filling until it scrolls away or ends.
-    if (!scope.signal.aborted && hasMore && sentinelVisible()) void loadMore();
+    // will not fire again; keep filling until it scrolls away or ends. A
+    // failed page waits for the Retry button instead of looping.
+    if (loaded && !scope.signal.aborted && hasMore && sentinelVisible()) void loadMore();
   }
 
   function sentinelVisible(): boolean {
