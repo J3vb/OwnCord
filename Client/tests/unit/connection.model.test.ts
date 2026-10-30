@@ -16,7 +16,7 @@
  *     helper the ws-*.test.ts files already use — this is the wire, and
  *     driving it is the only way to exercise ws.ts's own state machine;
  *   - the LiveKit media layer, notifications, toasts and identity publishing,
- *     exactly as dispatcher.test.ts mocks them. `handleParticipantLeft` keeps
+ *     exactly as dispatcher/voice.test.ts mocks them. `handleParticipantLeft` keeps
  *     its one store-visible effect (clearing the departed peer's E2EE
  *     verification) so the verification invariant stays two-sided.
  * Nothing that the invariants describe is mocked: ws.ts's seq watermark,

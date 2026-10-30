@@ -318,7 +318,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/voice.test.ts",
         "revertProof": "pass",
         "branchCommit": "1a47c85a"
       },
@@ -1554,7 +1554,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/errors.test.ts",
         "revertProof": "pass",
         "branchCommit": "4aa9c4fc"
       },
@@ -2625,7 +2625,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8579cb5d",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/errors.test.ts",
         "revertProof": "pass",
         "branchCommit": "38fd7475"
       },
@@ -2992,7 +2992,7 @@
       "fix": {
         "commit": "c3837fa",
         "branchCommit": "d1c104d",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/dmEvents.test.ts",
         "revertProof": "self-reported",
         "pr": 1367
       },
@@ -4233,7 +4233,7 @@
       "confidence": "high",
       "fix": {
         "commit": "d066591a",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/readyResync.test.ts, Client/tests/unit/dispatcher/core.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Add one shared predicate next to the Channel type (e.g. `export const isTextLikeChannel = (ch: {type: ChannelType}) => ch.type === \"text\" || ch.type === \"announcement\";` in Client/src/lib/types.ts) and use it at dispatcher.ts:338, :543, :716 and SidebarArea.ts:474, :565 in place of the inline `ch.type === \"text\"` comparisons. DM channels are handled by separate branches and are unaffected.",
@@ -4670,7 +4670,7 @@
       "confidence": "high",
       "fix": {
         "commit": "4bab1b4b4b8b74baac7a3eb153dd313bb1d02932",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/voice.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Make the rollback tear down the media session, not just the store, in the one shared guard at dispatcher.ts:1117: `if (voiceStore.getState().voiceStatus === \"joining\") { void livekitSession().then(({ isVoiceConnected, leaveVoice }) => { if (isVoiceConnected()) leaveVoice(true); }); leaveVoiceChannel(); }` \u2014 isVoiceConnected is already exported (livekitSession.ts:1803) and leaveVoice(true) both disconnects room A and sends voice_leave so the server/SFU state matches the cleared store. A first-time-join refusal has no live session, so isVoiceConnected() is false and behavior there is unchanged (the existing tests at dispatcher.test.ts:3757/3789/3798 stay green).",
@@ -4855,7 +4855,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "4bab1b4b4b8b74baac7a3eb153dd313bb1d02932",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/voice.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Reconcile voice membership in the same branch that already reconciles moderator audio state (dispatcher.ts:296-306). Snapshot the roster BEFORE the wholesale replace at line 273 \u2014 `const prevPeers = voiceStore.getState().currentChannelId !== null ? new Set(voiceStore.getState().voiceUsers.get(voiceStore.getState().currentChannelId)?.keys() ?? []) : new Set<number>()` \u2014 then, in the `else if (selfVoiceState !== undefined)` branch, for every uid in prevPeers that is absent from payload.voice_states for selfVoiceState.channel_id (and is not our own id), call `void livekitSession().then(({ handleParticipantLeft }) => handleParticipantLeft(uid))`. handleParticipantLeft already prunes/retires the peer key, re-runs the lowest-uid election (self-electing and rotating when appropriate), so one call site covers both the departed-peer rotation and the missed key-holder promotion.",
@@ -4924,7 +4924,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "4bab1b4b4b8b74baac7a3eb153dd313bb1d02932",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/messages.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Stop using \"channel is active\" as a proxy for \"the user is looking at the live tail\". Smallest change: in notifications.ts:56 use the already-exported detached selector \u2014 `if (isWindowFocused() && payload.channel_id === activeChannelId && !isWindowDetached(payload.channel_id)) return;` \u2014 so a detached active channel still notifies. Mirror it at dispatcher.ts:581 (`if ((payload.channel_id !== activeId || isWindowDetached(payload.channel_id)) && !isOwnMessage)`) if the badge is wanted too; that path additionally needs the badge cleared when the channel reattaches (reattachToPresent / setMessages) or the count will linger.",
@@ -5246,7 +5246,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "4bab1b4b4b8b74baac7a3eb153dd313bb1d02932",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/core.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Put the guard in the store, not the caller, so both writers share it: give blocksStore a monotonically increasing `blockedByMeRev` that setUserBlockedByMe bumps on every accepted per-user delta, and change setBlockedByMe to take the revision observed before the fetch \u2014 `setBlockedByMe(userIds, rev)` returns without writing when `rev !== state.blockedByMeRev`. In dispatcher.ts:465-469 snapshot it before the call: `const rev = blocksStore.getState().blockedByMeRev; api.listBlocks().then((r) => setBlockedByMe(r.blocked_user_ids, rev))`. Existing callers of setBlockedByMe in tests pass the current revision (or make the parameter optional = force).",
@@ -5791,7 +5791,7 @@
       "suggestedFix": "Fold the mention bump into updateDmLastMessage so both counters sit behind the one id guard it already computes \u2014 e.g. add an `isMention` boolean parameter and set `mentionCount: isMention && !(updated.lastMessageId !== null && messageId <= updated.lastMessageId) ? updated.mentionCount + 1 : updated.mentionCount` in the same setState (dm.store.ts:136-148), then drop the separate incrementDmMention call at dispatcher.ts:671-673. Do NOT simply add a `messageId <= lastMessageId` check inside incrementDmMention: updateDmLastMessage runs first and has already advanced lastMessageId to that same id, so such a guard would skip every mention.",
       "fix": {
         "commit": "82a57f4",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/dmEvents.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -5879,7 +5879,7 @@
       "suggestedFix": "Reconcile on the falling edge in the one shared function. Capture the pre-update flags before updateVoiceState overwrites them (dispatcher.ts:906-910 calls updateVoiceState first), then extend enforceModeratorAudioState to also take the payload's own muted/deafened and, when a moderator flag goes true->false while the corresponding local flag is still set and the server's self flag is false, call setMuted(false)/setDeafened(false). Scoping it to the true->false transition (rather than to `!serverMuted` generally) keeps an in-flight optimistic self-mute from being flipped back by an unrelated restated voice_state, e.g. one produced by a camera toggle.",
       "fix": {
         "commit": "82a57f4",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/memberTimeouts.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -5945,7 +5945,7 @@
       "suggestedFix": "Stop asking whether a Room object exists and ask whether a session is in flight. Add one accessor in Client/src/lib/livekitSession.ts next to isVoiceConnected() \u2014 e.g. a LiveKitSession method `hasActiveSession(): boolean { return this._state.type !== \"idle\"; }` plus `export function isVoiceSessionActive(): boolean { return session.hasActiveSession(); }` \u2014 and change dispatcher.ts:1192-1194 to `void livekitSession().then(({ isVoiceSessionActive, leaveVoice }) => { if (isVoiceSessionActive()) leaveVoice(true); });`. That single guard covers \"connecting\"/\"reconnecting\"/\"connected\" (leaveVoice() already handles a null _room and sets _state=idle, so the in-flight attempt aborts at checkpoint 1 and calls disconnectSupersededLocalRoom) while preserving the deliberate no-spurious-voice_leave behaviour for a first-time join refusal, where _state is still \"idle\".",
       "fix": {
         "commit": "82a57f4",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/voice.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -5989,7 +5989,7 @@
       "suggestedFix": "Put the guard in the shared writer, mirroring OC-0218 rather than special-casing the caller. In Client/src/stores/emoji.store.ts add an optional `readonly rev?: number` to EmojiState (0 in INITIAL, so pre-existing state literals and tests keep working), have setCustomEmoji take `(list: readonly CustomEmoji[], rev?: number)` and become `emojiStore.setState((prev) => { if (rev !== undefined && rev !== (prev.rev ?? 0)) return prev; return { emoji: next, byShortcode, rev: (prev.rev ?? 0) + 1 }; })`. Then in dispatcher.ts:525-530 snapshot before issuing the fetch: `const emojiRevAtFetch = emojiStore.getState().rev ?? 0; api.listEmoji().then((list) => setCustomEmoji(list, emojiRevAtFetch)).catch(...)`. The EMOJI_UPDATE handler at :850-853 keeps calling setCustomEmoji with no rev (always applies) and its bump is what invalidates an in-flight GET. Since the ready fetch is the only revision-passing caller, every other existing call site (tests, and the WS handler) is unaffected.",
       "fix": {
         "commit": "82a57f4",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/emojiStickers.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -6429,7 +6429,7 @@
       "suggestedFix": "Stop collapsing the two tokens on the wire, then apply the server's rule once on the client's replay path. (1) Add a `mentions_here` bool to chatMessagePayload/chatEditedPayload (Server/ws/messages.go:83 and :149) sourced from mentionSet.HereOnly (plumb it alongside MentionsEveryone through service/message.go's SendResult/EditResult and ws/handlers_chat.go), regenerating protocol/schema.json -> message_types.go/protocolTypes.ts via the protocol-change skill. (2) In Client/src/lib/dispatcher.ts, hoist the existing `isReplayFrame` computation (currently dispatcher.ts:686-690) above the unread/mention block at 634-649 and gate the badge in that one place: treat a frame as a mention only when `payload.mentions.includes(me)` or (`payload.mentions_everyone && !(payload.mentions_here && isReplayFrame)`). That mirrors applyMentionCounts exactly \u2014 a here-only mention delivered in the reconnect burst is by definition one the reader was disconnected for \u2014 and leaves live delivery, @everyone, and direct mentions untouched. No change to mentions.ts's highlightsCurrentUser is needed for highlight rendering; only the badge increment must distinguish the two.",
       "fix": {
         "commit": "6f6d0ae",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/reconnectReplay.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -6701,7 +6701,7 @@
       "fixedDate": "2026-08-22",
       "fix": {
         "commit": "3767be1",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/voice.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7345,7 +7345,7 @@
       "fixed": "2026-08-28",
       "fix": {
         "commit": "a231108f",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/voice.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7437,7 +7437,7 @@
       "fixed": "2026-08-28",
       "fix": {
         "commit": "a231108f",
-        "test": "Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/dispatcher/reconnectReplay.test.ts",
         "revertProof": "pass"
       }
     },
@@ -7735,7 +7735,7 @@
       "fixed": "2026-08-28",
       "fix": {
         "commit": "3e74c968",
-        "test": "Client/tests/unit/channels.store.test.ts, Client/tests/unit/dispatcher.test.ts",
+        "test": "Client/tests/unit/channels.store.test.ts, Client/tests/unit/dispatcher/reconnectReplay.test.ts",
         "revertProof": "pass"
       }
     },
@@ -11638,7 +11638,7 @@
       "suggestedFix": "After the dm_channel_open fan-out of a group add, send each added user the channel's voice states as sequenced voice_state frames; drop a group's voice roster on the client when the group is left or closed.",
       "fix": {
         "commit": "pending",
-        "test": "Server/api/dm_group_voice_roster_test.go (TestAddMembers_AddedUserGetsVoiceRosterAfterOpen, TestAddMembers_NoVoiceRosterWhenNobodyInCall), Server/ws/dm_voice_roster_test.go, Client/tests/unit/voice.store.test.ts (clearChannelVoiceUsers), Client/tests/unit/dispatcher.test.ts (call roster of a closed DM)",
+        "test": "Server/api/dm_group_voice_roster_test.go (TestAddMembers_AddedUserGetsVoiceRosterAfterOpen, TestAddMembers_NoVoiceRosterWhenNobodyInCall), Server/ws/dm_voice_roster_test.go, Client/tests/unit/voice.store.test.ts (clearChannelVoiceUsers), Client/tests/unit/dispatcher/dmEvents.test.ts (call roster of a closed DM)",
         "revertProof": "fail (without the fix the added user receives no voice_state and the roster survives a group leave)"
       },
       "confidence": "high",
@@ -11822,7 +11822,7 @@
       "suggestedFix": "Clear the cache in ChannelController.destroyChannel and on a full-ready resync.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/channel-controller.test.ts (drops cached who-reacted lists when leaving a channel...), Client/tests/unit/dispatcher.test.ts (drops every cached who-reacted list on a second ready...)",
+        "test": "Client/tests/unit/channel-controller.test.ts (drops cached who-reacted lists when leaving a channel...), Client/tests/unit/dispatcher/readyResync.test.ts (drops every cached who-reacted list on a second ready...)",
         "revertProof": "fail (cached list survived both)"
       },
       "confidence": "high",
