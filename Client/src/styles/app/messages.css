@@ -249,6 +249,37 @@
   text-decoration: underline;
   text-decoration-color: currentColor;
 }
+/* An imported author is plain text, not a link to a profile. */
+.message .msg-author--imported {
+  cursor: default;
+}
+.message .msg-author--imported:hover {
+  text-decoration: none;
+}
+/* The name comes from an export, so a long one is clipped on every surface. */
+.imported-name {
+  display: inline-block;
+  vertical-align: bottom;
+  min-width: 0;
+  max-width: min(100%, 32ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.imported-tag {
+  flex-shrink: 0;
+  align-self: center;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: var(--font-size-xxs);
+  font-weight: 600;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 .message .msg-time {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
