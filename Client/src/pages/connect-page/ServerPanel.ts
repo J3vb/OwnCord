@@ -9,6 +9,7 @@ import { createModal } from "@lib/ui/modalFactory";
 import type { Compatibility, HealthStatus, ServerProfile } from "@lib/presence/profiles";
 import { loadCredential } from "@lib/net/credentials";
 import { isValidHost } from "@lib/net/hostValidation";
+import { canonicalServerHost, setAddressInputHints } from "@lib/net/hostNormalize";
 import { createLogger } from "@lib/logger";
 import { connectText } from "../../i18n/connect";
 
@@ -511,6 +512,7 @@ export function createServerPanel(
       type: "text",
       placeholder: "example.com:8443", // i18n-exempt: example host:port, the same in every language
     });
+    setAddressInputHints(hostAddrInput);
     appendChildren(hostGroup, hostLabel, hostAddrInput);
 
     appendChildren(body, nameGroup, hostGroup);
@@ -559,7 +561,7 @@ export function createServerPanel(
 
     function handleSave(): void {
       const name = nameInput.value.trim();
-      const addr = hostAddrInput.value.trim();
+      const addr = canonicalServerHost(hostAddrInput.value);
       if (!name || !addr) return;
       // Validate address: must be a valid host or host:port (DNS name, IPv4,
       // bracketed/bare IPv6) — no paths, no special chars. Shared with
@@ -573,7 +575,7 @@ export function createServerPanel(
       }
       // Credentials are stored per host, so a second profile for the same host
       // would share (and overwrite) the first one's saved sign-in.
-      if (knownProfiles.some((p) => !p.synthetic && p.host.toLowerCase() === addr.toLowerCase())) {
+      if (knownProfiles.some((p) => !p.synthetic && p.host.toLowerCase() === addr)) {
         hostAddrInput.setCustomValidity(connectText("servers.add.duplicateHost"));
         hostAddrInput.reportValidity();
         return;

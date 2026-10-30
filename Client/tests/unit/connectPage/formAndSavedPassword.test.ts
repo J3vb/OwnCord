@@ -221,8 +221,9 @@ describe("ConnectPage", () => {
 
       page.resubmitAfterCertAccept("chat.example:8443");
       await vi.waitFor(() => expect(onLogin).toHaveBeenCalledTimes(2));
+      // The typed capitals are not kept: host names are case-insensitive.
       expect(onLogin).toHaveBeenLastCalledWith(
-        "Chat.Example:8443",
+        "chat.example:8443",
         "testuser",
         "long-enough-password",
       );
