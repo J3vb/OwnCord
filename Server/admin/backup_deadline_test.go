@@ -24,7 +24,7 @@ func slowAdminServer(t *testing.T, h http.Handler, writeTimeout time.Duration) *
 	return srv
 }
 
-func postWithToken(t *testing.T, url, token string) (*http.Response, string) {
+func postWithToken(t *testing.T, url, token string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(""))
 	if err != nil {
@@ -45,7 +45,7 @@ func postWithToken(t *testing.T, url, token string) (*http.Response, string) {
 			break
 		}
 	}
-	return res, sb.String()
+	return res.StatusCode, sb.String()
 }
 
 // A manual backup that takes longer than the server's WriteTimeout still
@@ -55,9 +55,9 @@ func TestManualBackup_OutlivesWriteTimeout(t *testing.T) {
 	admin.SetBackupHoldForTest(f.api, func() { time.Sleep(700 * time.Millisecond) })
 	srv := slowAdminServer(t, f.api, 300*time.Millisecond)
 
-	res, body := postWithToken(t, srv.URL+"/backup", f.owner)
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("POST /backup = %d, want 200; body: %s", res.StatusCode, body)
+	status, body := postWithToken(t, srv.URL+"/backup", f.owner)
+	if status != http.StatusOK {
+		t.Fatalf("POST /backup = %d, want 200; body: %s", status, body)
 	}
 	var got struct{ Path string }
 	if err := json.Unmarshal([]byte(body), &got); err != nil || got.Path == "" {
@@ -78,9 +78,9 @@ func TestRestore_OutlivesWriteTimeout(t *testing.T) {
 	defer restoreHook()
 	srv := slowAdminServer(t, f.handler, 300*time.Millisecond)
 
-	res, body := postWithToken(t, srv.URL+"/backups/"+f.backupName+"/restore", f.token)
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("POST restore = %d, want 200; body: %s", res.StatusCode, body)
+	status, body := postWithToken(t, srv.URL+"/backups/"+f.backupName+"/restore", f.token)
+	if status != http.StatusOK {
+		t.Fatalf("POST restore = %d, want 200; body: %s", status, body)
 	}
 	if _, err := os.Stat(f.dbPath + ".restore-pending.json"); err != nil {
 		t.Errorf("restore response arrived but no marker was staged: %v", err)
