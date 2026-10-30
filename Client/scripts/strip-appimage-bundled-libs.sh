@@ -36,10 +36,29 @@ for lib in squashfs-root/usr/lib/libwayland-*.so*; do
   rm -f "$lib"
   removed=$((removed + 1))
 done
+wayland=$removed
+# The same holds for libraries the media plugins (appimage-gst-plugins.sh)
+# pull in that talk to host parts of their own version: libpipewire loads
+# the host's SPA modules and talks to its daemon, libva and libvdpau load
+# the host's GPU drivers. A host without them only loses those plugins.
+for lib in squashfs-root/usr/lib/libpipewire-*.so* squashfs-root/usr/lib/libva*.so* \
+  squashfs-root/usr/lib/libvdpau*.so*; do
+  [ -e "$lib" ] || continue
+  echo "removing bundled $(basename "$lib")"
+  rm -f "$lib"
+  removed=$((removed + 1))
+done
+if [ "$wayland" -eq 0 ]; then
+  echo "::warning::no bundled libwayland-* found in $APPIMAGE_PATH — linuxdeploy may have stopped bundling it"
+fi
 if [ "$removed" -eq 0 ]; then
-  echo "::warning::no bundled libwayland-* found in $APPIMAGE_PATH — linuxdeploy may have stopped bundling it; strip step is now a no-op"
+  echo "nothing to strip; $APPIMAGE_PATH is unchanged"
   exit 0
 fi
+
+# The extracted tree keeps the image's modes, which can be owner-only;
+# appimagetool refuses to pack a tree other users cannot read.
+chmod -R a+rX squashfs-root
 
 # --appimage-extract-and-run: run without FUSE (CI containers/runners).
 # ARCH is required when repacking on a host arch that differs from the
@@ -47,4 +66,4 @@ fi
 ARCH="$ARCH" "$APPIMAGETOOL" --appimage-extract-and-run --no-appstream \
   squashfs-root "$WORKDIR/repacked.AppImage"
 mv "$WORKDIR/repacked.AppImage" "$APPIMAGE_PATH"
-echo "stripped $removed bundled wayland libs from $(basename "$APPIMAGE_PATH")"
+echo "stripped $removed bundled host-matched libs from $(basename "$APPIMAGE_PATH")"

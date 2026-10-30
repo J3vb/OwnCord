@@ -14,7 +14,7 @@ has more detail there.
 | [Server/](../Server/README.md)    | Go REST and WebSocket server over SQLite, with LiveKit voice. Has a package map.                                                                       |
 | [Client/](../Client/README.md)    | Tauri v2 desktop app: TypeScript frontend and a thin Rust backend.                                                                                     |
 | [protocol/](../protocol/)         | `schema.json`, the source of truth for WebSocket message types. Generated code comes from it.                                                          |
-| [deploy/](../deploy/)             | Deployment files: the systemd unit and the Unraid template.                                                                                            |
+| [deploy/](../deploy/)             | Deployment files: the systemd unit, the Unraid template and the local tracing and metrics stack (`docker/`).                                           |
 | [docs/](README.md)                | Guides, reference pages, architecture notes, dated audits and plans. Start at the index.                                                               |
 | [scripts/](../scripts/)           | Repository checks, the root command runner (`run.mjs`) and the CI selector.                                                                            |
 | [tools/](../tools/)               | Developer tools: the [introspection MCP server](mcp-introspect.md).                                                                                    |
@@ -59,13 +59,13 @@ a passing check.
 | Linux ARM64     | ✅     | ✅ (CI only) |
 
 - **Go 1.27** for the server. `Server/go.mod` sets `go 1.27.0` and pins the
-  toolchain to `go1.27.2`. With `GOTOOLCHAIN=auto` (Go's default), Go downloads
+  toolchain to `go1.27.3`. With `GOTOOLCHAIN=auto` (Go's default), Go downloads
   that toolchain for you.
 - **Node.js 26 and npm 11** for the client and the root scripts.
   `Client/.nvmrc` is the source of truth.
   - Each `package.json` has an `engines` block, and each package's `.npmrc`
     sets `engine-strict=true`. So `npm ci` fails on a different major version.
-  - `node scripts/check-node-policy.mjs` fails the Repository Hygiene job when
+  - `node scripts/checks/check-node-policy.mjs` fails the Repository Hygiene job when
     any other place states a different version.
 - **Rust 1.98.1** for the Tauri client, with `clippy` and `rustfmt`.
   `Client/src-tauri/rust-toolchain.toml` pins it, and rustup installs it for
@@ -203,7 +203,7 @@ The GStreamer runtime libraries already come with WebKitGTK. The `.deb`
 declares them and the camera plugins, and the AppImage bundles its own. Only
 the `-dev` headers are an extra build-time need. They matter only on the same
 Linux Rust builds that compile `webrtc-sys`. Every CI Linux job that builds the
-client installs them, and `scripts/check-workflow-guards.mjs` fails a workflow
+client installs them, and `scripts/checks/check-workflow-guards.mjs` fails a workflow
 whose Tauri build step leaves them out.
 
 **Tests**
@@ -234,7 +234,7 @@ whose Tauri build step leaves them out.
 **Mutation testing in CI.**
 
 - **On a PR:** CI runs a narrow mutation check on `src/lib/permissions.ts`
-  (`Client/stryker.ci.config.mjs`). It is a step in Client Static Checks. It
+  (`Client/tests/mutation/stryker.ci.config.mjs`). It is a step in Client Static Checks. It
   runs only when a PR touches that file, its unit test or the Stryker configs.
 - **Nightly:** the full client baseline is the sharded `mutation` job in
   `.github/workflows/nightly-test-depth.yml`. It covers the base config's
@@ -243,7 +243,7 @@ whose Tauri build step leaves them out.
   ```bash
   cd Client
   STRYKER_SHARD=<livekit|audio-media|transport-auth|lib-rest|stores|safety-moderation> \
-    npx stryker run stryker.shard.config.mjs
+    npx stryker run tests/mutation/stryker.shard.config.mjs
   ```
 
 - `Client/scripts/check-mutation-shards.mjs` proves the shards together still
@@ -417,7 +417,7 @@ Three things to know before you open a PR:
   | `webclient`   | Client E2E (web portal, non-blocking)                                                      | In `Client/`: `npm run test:e2e:web`                                     | No                                                               |
   | `workflows`   | Workflow Security Lint                                                                     | `zizmor --offline .github/workflows/`                                    | No. `actionlint` runs in `check:hygiene` if installed            |
   | `deps`        | Supply-chain Scan                                                                          | `osv-scanner` and `cargo deny`; see `osv-scanner.toml`                   | No                                                               |
-  | `permissions` | The "Permissions mutation hotspot" step of Client Static Checks                            | In `Client/`: `npx stryker run stryker.ci.config.mjs`                    | No                                                               |
+  | `permissions` | The "Permissions mutation hotspot" step of Client Static Checks                            | In `Client/`: `npx stryker run tests/mutation/stryker.ci.config.mjs`     | No                                                               |
   | `changelog`   | The "Changelog gate" step of Server Build & Test (ubuntu-latest); Server Lint & Invariants | In `Server/`: `go test -count=1 -run TestBundledChangelog ./admin/`      | Yes, as part of `check:server`                                   |
 
   Docs & Ledger Consistency and Repository Hygiene always run. A skipped
@@ -737,7 +737,7 @@ on 2026-08-05.
     `.npmrc` sets `engine-strict=true`, so a different major fails the install
     instead of warning.
   - Three things stop those Node statements drifting apart. `Client/.nvmrc` is
-    the single source of truth. `node scripts/check-node-policy.mjs` fails the
+    the single source of truth. `node scripts/checks/check-node-policy.mjs` fails the
     Repository Hygiene job when another statement disagrees. And the
     `node-policy` CI job installs a wrong major on purpose to prove all three
     roots refuse it.

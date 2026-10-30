@@ -1095,7 +1095,7 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("Automatically play cameras is on by default and saves its choice (WP 1B-3)", () => {
+  it("Automatically play cameras is on by default and saves its choice", () => {
     stubNavigator();
     const ac = new AbortController();
     const el = createVoiceAudioTab(ac.signal).build();
@@ -1782,7 +1782,7 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("does not register a new permanent abort listener on every rebuild (OC-0125)", () => {
+  it("does not register a new permanent abort listener on every rebuild", () => {
     // Simulates the settings overlay staying open for a session while the
     // user re-opens the Voice & Video tab (e.g. hide()/show() cycles):
     // SettingsOverlay's single AbortController lives for the whole session,
@@ -2962,7 +2962,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 });
 
-describe("VoiceAudioTab input mode (WP 1D-2)", () => {
+describe("VoiceAudioTab input mode", () => {
   beforeEach(() => {
     localStorage.clear();
     document.body.innerHTML = "";
@@ -3074,7 +3074,7 @@ describe("VoiceAudioTab input mode (WP 1D-2)", () => {
   });
 });
 
-describe("VoiceAudioTab mic test (WP 1D-4)", () => {
+describe("VoiceAudioTab mic test", () => {
   /** The audio elements the tab started playing, newest last. */
   let played: HTMLMediaElement[] = [];
   const pause = vi.fn();
@@ -3230,7 +3230,7 @@ describe("VoiceAudioTab mic test (WP 1D-4)", () => {
     ac.abort();
   });
 
-  it("lets Output Volume go to 200% and shows a saved 150% as 150% (WP 1D-5)", async () => {
+  it("lets Output Volume go to 200% and shows a saved 150% as 150%", async () => {
     localStorage.setItem("owncord:settings:outputVolume", "150");
     const { el, ac } = await mount();
     const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output Volume"]')!;

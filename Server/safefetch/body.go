@@ -132,12 +132,10 @@ func (f *Fetcher) readError(ctx context.Context, err error) error {
 // and as the bytes actually read sniff. A body that declares one type and
 // sniffs as an incompatible one is refused — that mismatch is how a caller
 // expecting JSON is handed an HTML page or an image decoder is handed a script.
-//
-// An empty body has nothing to sniff, so only the declared type is checked.
-// A response with an empty body AND no declared Content-Type passes: there
-// is no content to have a type, which is a normal shape for a 201/204
-// acknowledgement (RFC 8030's push-service response, among others) — this
-// does not relax anything for a body that actually arrived with bytes.
+// An empty body has nothing to sniff, so only the declared type is checked. An
+// empty body with no declared Content-Type passes (a normal shape for a
+// 201/204 acknowledgement, e.g. a push-service response); this does not relax
+// anything for a body that arrived with bytes.
 func (f *Fetcher) checkContentType(declared string, body []byte) (string, string, error) {
 	media := normaliseType(declared)
 	if len(f.policy.ContentTypes) == 0 {
@@ -249,13 +247,10 @@ func normaliseType(v string) string {
 // body streams rather than after it has been buffered.
 //
 // It is the streaming half of the ceiling: it stops an endless body after
-// ceiling+1 bytes so nothing larger ever reaches memory. It is not the whole
-// ceiling — a source that returns its last bytes together with io.EOF is never
-// asked for the read that would report the breach — so readBody checks the
-// final length as well. Both are needed: this one bounds memory, that one
-// makes the limit exact.
-//
-// B5 decision 2's deferred aggregate byte budget is charged here.
+// ceiling+1 bytes. It is not the whole ceiling, since a source that returns
+// its last bytes together with io.EOF is never asked for the read that would
+// report the breach, so readBody checks the final length as well. This one
+// bounds memory, that one makes the limit exact.
 type limitedReader struct {
 	r         io.Reader
 	remaining int64

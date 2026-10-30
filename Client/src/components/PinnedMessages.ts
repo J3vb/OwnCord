@@ -6,8 +6,8 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import type { MountableComponent } from "@lib/safe-render";
-import { parseTimestamp } from "@lib/formatting";
+import type { MountableComponent } from "@lib/text/safeRender";
+import { parseTimestamp } from "@lib/text/formatting";
 import { messagingText } from "../i18n/messaging";
 import { createAvatarElement } from "./message-list/avatar";
 import { renderMessageContent } from "./message-list/content-parser";

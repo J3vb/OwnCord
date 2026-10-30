@@ -596,7 +596,7 @@ describe("MessageInput", () => {
 
   // ── UX-1: per-channel drafts and focus retention ──
 
-  describe("draft capture and restore (UX-1)", () => {
+  describe("draft capture and restore", () => {
     it("captures the typed text, reply target and settled attachment ids", async () => {
       const onUploadFile = vi.fn(async () => ({ id: "srv-1", url: "/f/1", filename: "a.png" }));
       const comp = createMessageInput(makeOptions({ onUploadFile }));
@@ -693,7 +693,7 @@ describe("MessageInput", () => {
     });
   });
 
-  describe("focus retention while gated (UX-1)", () => {
+  describe("focus retention while gated", () => {
     it("keeps the caret and focus when the composer is disabled", () => {
       const comp = createMessageInput(makeOptions());
       comp.mount(container);
@@ -1546,7 +1546,7 @@ describe("MessageInput", () => {
 
   // ── Accessible names for icon-only composer controls (B9-22) ──
 
-  it("names the reply close button (B9-22)", () => {
+  it("names the reply close button", () => {
     const opts = makeOptions();
     const comp = createMessageInput(opts);
     comp.mount(container);
@@ -1559,7 +1559,7 @@ describe("MessageInput", () => {
     comp.destroy?.();
   });
 
-  it("names the attachment remove button with its filename (B9-22)", async () => {
+  it("names the attachment remove button with its filename", async () => {
     const onUploadFile = vi.fn(async () => ({
       id: "srv-1",
       url: "http://x/f.png",

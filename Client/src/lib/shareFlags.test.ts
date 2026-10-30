@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import {
   SHARE_MOTION_POLICIES,
   SHARE_POLICY_VERSION,

@@ -17,7 +17,7 @@ on:
     branches: [dev]
     paths:
       - "protocol/fixtures/**"
-      - "scripts/protocol-n1-compat.mjs"
+      - "scripts/ci/protocol-n1-compat.mjs"
       - "Client/tests/compat/**"
       - ".github/workflows/protocol-compat.yml"
   schedule:
@@ -61,7 +61,7 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
         run: |
           if [ -n "$INPUT_TAG" ]; then
-            node scripts/protocol-n1-compat.mjs --tag "$INPUT_TAG"
+            node scripts/ci/protocol-n1-compat.mjs --tag "$INPUT_TAG"
           else
-            node scripts/protocol-n1-compat.mjs
+            node scripts/ci/protocol-n1-compat.mjs
           fi

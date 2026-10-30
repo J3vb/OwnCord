@@ -11,7 +11,7 @@ import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
 import { sessionDeviceLabel } from "@lib/session-notice";
-import { formatMessageTimestamp } from "@lib/formatting";
+import { formatMessageTimestamp } from "@lib/text/formatting";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/userStatus";
@@ -50,7 +50,7 @@ import {
   usernameProblemText,
   MAX_DISPLAY_NAME_LEN,
   MAX_USERNAME_LEN,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 import { RestErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("AccountTab");

@@ -69,7 +69,7 @@ function setMessages(messages: readonly Message[]): void {
   });
 }
 
-describe("MessageList — a removed sticker leaves loaded rows (WP 8.8)", () => {
+describe("MessageList — a removed sticker leaves loaded rows", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
 

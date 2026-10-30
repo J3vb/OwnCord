@@ -232,8 +232,8 @@ vi.mock("../../src/features/voice/native/videoRenderer", () => ({
 }));
 
 const prefs = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/preferences")>()),
+vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/preferences")>()),
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
@@ -568,7 +568,7 @@ describe("LiveKitSession on the Linux native backend", () => {
     }
   });
 
-  describe("a share running when the connection drops (WP 1C-6)", () => {
+  describe("a share running when the connection drops", () => {
     const toasts = { show: vi.fn(() => () => {}) };
     beforeEach(() => {
       vi.useFakeTimers();

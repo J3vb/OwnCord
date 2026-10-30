@@ -102,7 +102,7 @@ Inventories and design records:
   content and moderation services, with abuse cases and data ownership
 - [rich-content-inventory.md](architecture/rich-content-inventory.md): every
   place OwnCord fetches outside content, and its limits
-- [b9-ui-contract.md](architecture/b9-ui-contract.md): the shared UI rules
+- [ui-contract.md](architecture/ui-contract.md): the shared UI rules
   (colours, focus, keyboard, announcements, motion)
 
 Target state, not shipped behaviour:
@@ -147,6 +147,6 @@ page. Each kind of status has one owner:
 
 A CI job checks the counts in a few current summaries against the live
 ledger. To add a summary to that check, add its document to the allow-list in
-`scripts/check-doc-counts.mjs`. Dated baselines and signed scorecards keep the
+`scripts/checks/check-doc-counts.mjs`. Dated baselines and signed scorecards keep the
 numbers they measured at their source commits. Never change them to make the
 live count check pass.

@@ -18,14 +18,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// ─── Backup Handlers ─────────────────────────────────────────────────────────
-
 // handleBackup takes a manual backup. Only one runs at a time on this API: a
 // second POST while one is in flight is a 409 BACKUP_RUNNING that starts no
-// second VACUUM and leaves no partial file (WP 8.4c). The scheduled
-// maintenance backup is a separate path and does not take this guard: its
-// files have their own names and BackupToSafe publishes by atomic rename, so
-// the two cannot collide.
+// second VACUUM and leaves no partial file. The scheduled maintenance backup
+// does not take this guard: its files have their own names and BackupToSafe
+// publishes by atomic rename, so the two cannot collide.
 func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !gate.running.CompareAndSwap(false, true) {
@@ -49,12 +46,11 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Han
 			return
 		}
 
-		// Detached like the restore path's safety backup. BackupToSafe runs
-		// the VACUUM on the reader pool and publishes the result with an
-		// atomic rename, so an interrupted backup leaves a .tmp the listing
-		// ignores rather than a truncated .db it would present as restorable.
-		// It is rooted at the configured backup dir (SetupOptions.BackupDir), not
-		// the historical hardcoded default.
+		// Detached like the restore path's safety backup. BackupToSafe runs the
+		// VACUUM on the reader pool and publishes by atomic rename, so an
+		// interrupted backup leaves a .tmp the listing ignores rather than a
+		// truncated .db it would present as restorable. Rooted at the
+		// configured backup dir (SetupOptions.BackupDir).
 		if err := database.BackupToSafe(context.WithoutCancel(r.Context()), backupPath, backupDir); err != nil {
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError, "backup failed")
 			return
@@ -174,19 +170,17 @@ func handleDeleteBackup(database *db.DB, paths backupPaths) http.Handler {
 // database, writing the error response itself. It runs before the pre-restore
 // safety copy and before anything is closed.
 func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target string) bool {
-	// Refuse to overwrite the live database with a file SQLite itself
-	// rejects — a truncated pre-crash backup, a stray non-database .db.
-	// The pre-restore safety copy would make this survivable, but "restore
-	// succeeded" followed by a broken server is still the worst UX here.
+	// Refuse to overwrite the live database with a file SQLite itself rejects
+	// (a truncated pre-crash backup, a stray non-database .db): "restore
+	// succeeded" followed by a broken server is the worst outcome here.
 	if err := db.CheckBackupIntegrity(context.WithoutCancel(r.Context()), target); err != nil {
 		slog.Error("restore refused: backup failed integrity check", "backup", name, "err", err)
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup file failed integrity verification")
 		return false
 	}
 
-	// Refuse a backup a NEWER server wrote (REL-02): restoring it would put
-	// this older binary on a schema it has never seen, and it would then
-	// boot silently on it.
+	// Refuse a backup a NEWER server wrote: restoring it would put this older
+	// binary on a schema it has never seen, and it would boot silently on it.
 	ahead, err := db.CheckBackupSchemaAhead(context.WithoutCancel(r.Context()), target)
 	if err != nil {
 		slog.Error("restore refused: could not read backup schema version", "backup", name, "err", err)
@@ -216,11 +210,11 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 			return
 		}
 
-		// Serialize against a concurrent update apply (which stages a new
-		// binary and then restarts) and an already-requested restart. The
-		// deferred release is a busy→idle CAS, so it covers every failure
-		// return below and harmlessly no-ops once a branch has promoted the
-		// state to restart-pending via commitRestartPending.
+		// Serialize against a concurrent update apply (which stages a new binary
+		// and restarts) and an already-requested restart. The deferred release is
+		// a busy-to-idle CAS, so it covers every failure return below and no-ops
+		// once a branch has promoted the state to restart-pending via
+		// commitRestartPending.
 		if !beginRestartSensitiveOp() {
 			writeRestartConflict(w)
 			return
@@ -240,10 +234,10 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 		ctx := context.WithoutCancel(r.Context())
 
 		actor := actorFromContext(r)
-		// Audit the restore BEFORE the pre-restore safety copy is taken, and
+		// Audit the restore BEFORE the pre-restore safety copy, and
 		// synchronously (LogAudit, not WriteAudit), so the row is durable in the
-		// live database and in the safety copy. Best-effort per policy D8: a
-		// failed write is logged, never a reason to refuse the restore.
+		// live database and in the safety copy. Best-effort: a failed write is
+		// logged, never a reason to refuse the restore.
 		if err := database.LogAudit(ctx, actor, "backup_restore", "server", 0,
 			fmt.Sprintf("restoring backup %s", name)); err != nil {
 			slog.Error("audit log write failed", "action", "backup_restore", "actor_id", actor, "error", err)
@@ -254,9 +248,9 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 		// not a cwd-relative path, so it lands beside the rest of the backups.
 		preRestore := filepath.Join(paths.dir, PreRestoreBackupPrefix+time.Now().UTC().Format("20060102_150405")+".db")
 		if err := database.BackupToSafe(ctx, preRestore, paths.dir); err != nil {
-			// Fail closed. The admin panel promises "a pre-restore backup will
-			// be created"; proceeding without one takes away the safety net the
-			// operator was shown, exactly when they need it.
+			// Fail closed. The panel promises "a pre-restore backup will be
+			// created"; proceeding without one removes the safety net exactly
+			// when it is needed.
 			slog.Error("pre-restore backup failed — aborting restore", "err", err)
 			writeErr(w, http.StatusInternalServerError, httperr.CodeInternalError,
 				"could not create the pre-restore safety backup — restore aborted, database untouched")
@@ -306,11 +300,10 @@ func handleRestoreBackup(database *db.DB, paths backupPaths) http.Handler {
 
 		slog.Warn("restore staged — the next start applies it", "actor_id", actor, "backup", name)
 
-		// The marker is committed. Trim old safety copies, protecting the new
-		// one and the restore source (an operator undoing a bad restore
-		// restores from a pre_restore_ copy). A prune failure is logged and
-		// never changes the outcome. The staged copy is not in backup.dir, so
-		// it can never be pruned.
+		// The marker is committed. Trim old safety copies, protecting the new one
+		// and the restore source (an operator undoing a bad restore restores from
+		// a pre_restore_ copy). A prune failure is logged and never changes the
+		// outcome. The staged copy is not in backup.dir, so it is never pruned.
 		if removed, pruneErr := PruneSafetyCopies(paths.dir, SafetyCopiesKept, preRestore, target); pruneErr != nil {
 			slog.Warn("could not prune old safety copies", "dir", paths.dir, "error", pruneErr)
 		} else if len(removed) > 0 {

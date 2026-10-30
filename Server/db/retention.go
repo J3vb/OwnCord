@@ -17,22 +17,17 @@ import (
 // window in days; 0 (the default, seeded by migration 039) keeps everything.
 const RetentionDaysKey = "retention_days"
 
-// RetentionMaxDays is the largest window ServerRetentionDays and the
-// per-channel override read back before treating the row as malformed
-// (OC-0393): converted into the sweep's cutoff (-time.Duration(days) *
-// 24 * time.Hour, service/retention.go), a day count past this overflows
-// the multiplication and the cutoff wraps into the future, matching every
-// unpinned message as "old" instead of none. service.RetentionMaxDays is
-// this same constant — the two write paths that validate a day count
-// before it is stored (SetChannelPolicy, Patch) live in service and import
-// db already, so it is defined once here and mirrored there, not
-// duplicated: a value this file forgot to raise in step could otherwise
-// silently truncate a legitimately larger window an admin just set.
+// RetentionMaxDays is the largest day count ServerRetentionDays and the
+// per-channel override accept. Converted into the sweep's cutoff
+// (-time.Duration(days) * 24 * time.Hour), a larger count overflows and the
+// cutoff wraps into the future, matching every unpinned message as old.
+// service.RetentionMaxDays mirrors this constant, since the write paths that
+// validate before storing live in service; defining it once avoids truncating
+// a legitimately larger window if the two drifted.
 const RetentionMaxDays = 3650
 
-// ChannelRetention is a per-channel retention policy (B4-11, owner decision
-// 4): days overrides the server window in either direction, 0 meaning keep
-// forever.
+// ChannelRetention is a per-channel retention policy: days overrides the
+// server window in either direction, 0 meaning keep forever.
 type ChannelRetention struct {
 	ChannelID int64  `json:"channel_id"`
 	Days      int    `json:"days"`
@@ -51,7 +46,7 @@ type RetentionWindow struct {
 }
 
 // ServerRetentionDays reads the server-wide window; a missing, malformed or
-// out-of-range row is 0, keep forever — a typo must never start deleting.
+// out-of-range row is 0 (keep forever), so a typo never starts deleting.
 func (d *DB) ServerRetentionDays(ctx context.Context) (int, error) {
 	v, err := d.GetSetting(ctx, RetentionDaysKey)
 	if err != nil {
@@ -126,10 +121,8 @@ func (d *DB) DeleteChannelRetention(ctx context.Context, channelID int64) (bool,
 }
 
 // RetentionWindows returns the effective policy of every non-DM channel that
-// has one: the channel override where present (a thread's being its
-// parent's, 6.9c), else the server window;
-// channels with an effective 0 are omitted. DMs are never in scope (owner
-// decision 4).
+// has one: the channel override where present (a thread inherits its parent's),
+// else the server window. Channels with an effective 0 are omitted.
 func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	serverDays, err := d.ServerRetentionDays(ctx)
 	if err != nil {
@@ -155,13 +148,11 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 		case override != nil && *override <= RetentionMaxDays:
 			w.Days, w.Source = *override, "channel"
 		case override != nil:
-			// Out-of-range like ServerRetentionDays above: SetChannelRetention
-			// itself has no upper bound, only SetChannelPolicy's caller-side
-			// check does, so a direct write or a restored/migrated row can
-			// carry anything. The explicit-override semantics (0 = keep
-			// forever, overriding the server window) are what a malformed
-			// override should fail safe into, not a silent fall-back to the
-			// server's window.
+			// Out-of-range like ServerRetentionDays: SetChannelRetention has no upper
+			// bound (only SetChannelPolicy's caller does), so a direct write or restored
+			// row can carry anything. A malformed override fails safe into the
+			// explicit-override meaning (0 = keep forever), not a silent fall-back to the
+			// server window.
 			w.Days, w.Source = 0, "channel"
 		default:
 			w.Days, w.Source = serverDays, "server"
@@ -173,14 +164,14 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	return out, rows.Err()
 }
 
-// retentionCandidates is the WHERE clause of everything retention may
-// remove in a channel: older than the cutoff (messages.timestamp is UTC
-// 'YYYY-MM-DD HH:MM:SS', compared bytewise, so the cutoff is formatted the
-// same way), never a pinned message (owner decision 4), tombstones included.
+// retentionCandidates is the WHERE clause of everything retention may remove
+// in a channel: older than the cutoff (messages.timestamp is UTC
+// 'YYYY-MM-DD HH:MM:SS', compared bytewise, so format the cutoff the same
+// way), never pinned, tombstones included.
 const retentionCandidates = `channel_id = ? AND pinned = 0 AND timestamp < ?`
 
-// CountRetentionCandidates is the preview: how many messages a sweep of
-// channelID with this cutoff would remove.
+// CountRetentionCandidates previews how many messages a sweep of channelID
+// with this cutoff would remove.
 func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error) {
 	var n int64
 	if err := d.reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE `+retentionCandidates,
@@ -190,25 +181,23 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 	return n, nil
 }
 
-// SweepRetention hard-deletes up to limit of the oldest messages in
-// channelID older than cutoff (pinned exempt) in one transaction: the
-// mention counts those messages raised are reversed first (OC-0294), their
-// attachment rows go and the stored_as names come back for the caller's
-// file journal, and the messages_ad trigger drops the FTS entries. Returns
-// the ids of the messages removed — the caller takes their frames out of
-// the replay tiers (DeleteEventsForMessages, ws.Hub.PurgeMessagesFromReplay)
-// — and the files; fewer ids than limit means the channel is swept for this
-// cutoff.
+// SweepRetention hard-deletes up to limit of the oldest messages in channelID
+// older than cutoff (pinned exempt) in one transaction: their mention counts
+// are reversed first, attachment rows go with the stored_as names returned for
+// the caller's file journal, and the messages_ad trigger drops the FTS
+// entries. It returns the removed ids, whose frames the caller takes out of
+// the replay tiers (DeleteEventsForMessages, ws.Hub.PurgeMessagesFromReplay),
+// and the files; fewer ids than limit means the channel is swept.
 func (d *DB) SweepRetention(ctx context.Context, channelID int64, cutoff time.Time, limit int) ([]int64, []string, error) {
 	_, ids, files, err := d.sweepRetention(ctx, 0, channelID, cutoff, limit, false, false)
 	return ids, files, err
 }
 
-// SweepRetentionJournaled is the retention service's crash-safe batch. The
-// run row, deleted message ids and attachment filenames commit in the same
-// transaction as the message deletion. If runID is zero, the run is opened
-// lazily only when the batch finds something to delete. countChannel adds one
-// to the run's channel count when this is its first non-empty batch.
+// SweepRetentionJournaled is the retention service's crash-safe batch: the run
+// row, deleted message ids and attachment filenames commit in the same
+// transaction as the deletion. A zero runID opens the run lazily, only when
+// the batch finds something. countChannel adds one to the run's channel count
+// on its first non-empty batch.
 func (d *DB) SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error) {
 	return d.sweepRetention(ctx, runID, channelID, cutoff, limit, true, countChannel)
 }
@@ -278,9 +267,9 @@ func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff 
 }
 
 // appendRetentionRunBatch records every handle needed after message and
-// attachment rows disappear. It must stay in the deletion transaction: a
-// separate write after Commit leaves a process-kill window with no durable
-// way to purge replay frames or unlink the attachment blobs.
+// attachment rows disappear. It must stay in the deletion transaction: a write
+// after Commit leaves a process-kill window with no durable way to purge
+// replay frames or unlink the blobs.
 func appendRetentionRunBatch(ctx context.Context, tx *sql.Tx, runID int64, ids []int64, files []string, countChannel bool) error {
 	var encodedFiles, encodedPending string
 	if err := tx.QueryRowContext(ctx, `SELECT files, purge_pending FROM retention_runs WHERE id = ?`, runID).
@@ -336,13 +325,12 @@ func placeholdersFor(ids []int64) (string, []any) {
 }
 
 // reverseMentionCountsForMessages is erasureReverseMentionCounts for an
-// explicit message set: the read_states.mention_count bumps these messages
-// made are taken back, with the same guards (counted per mention_receipts,
+// explicit message set, with the same guards (counted per mention_receipts,
 // undeleted, past the reader's last_message_id, not from a blocked author),
 // before the rows go.
 func reverseMentionCountsForMessages(ctx context.Context, tx *sql.Tx, channelID int64, in string, args []any) error {
-	// The placeholder list is spliced by Replace, not concatenation: it
-	// holds "?" markers only and every id is bound below.
+	// The placeholder list is spliced by Replace, not concatenation: it holds "?"
+	// markers only and every id is bound below.
 	query := strings.Replace(`UPDATE read_states
 		 SET mention_count = MAX(0, mention_count - (
 		     SELECT COUNT(*)
@@ -367,9 +355,9 @@ func reverseMentionCountsForMessages(ctx context.Context, tx *sql.Tx, channelID 
 	return nil
 }
 
-// collectAndDeleteAttachments returns the stored_as names of the
-// attachments on the given messages and deletes their rows; the caller
-// removes the files from its journal.
+// collectAndDeleteAttachments returns the stored_as names of the attachments
+// on the given messages and deletes their rows; the caller removes the files
+// from its journal.
 func collectAndDeleteAttachments(ctx context.Context, tx *sql.Tx, in string, args []any) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `DELETE FROM attachments WHERE message_id IN (`+in+`) RETURNING stored_as`, args...) //nolint:gosec // G202: placeholders only
 	if err != nil {
@@ -386,8 +374,6 @@ func collectAndDeleteAttachments(ctx context.Context, tx *sql.Tx, in string, arg
 	}
 	return files, rows.Err()
 }
-
-// ─── retention_runs: the sweep log and its file journal ─────────────────────
 
 // RetentionRun is one sweep's row.
 type RetentionRun struct {
@@ -413,9 +399,9 @@ func (d *DB) StartRetentionRun(ctx context.Context) (int64, error) {
 	return res.LastInsertId()
 }
 
-// RecordRetentionRunFiles journals the files a run's sweeps unlinked — the
-// only handle left on the blobs — and its counts, before any file is
-// removed. Idempotent per run: each call replaces the list.
+// RecordRetentionRunFiles journals the files a run's sweeps unlinked (the only
+// handle left on the blobs) and its counts, before any file is removed.
+// Idempotent per run: each call replaces the list.
 func (d *DB) RecordRetentionRunFiles(ctx context.Context, runID int64, channels, deleted int, files []string) error {
 	if files == nil {
 		files = []string{}
@@ -433,9 +419,9 @@ func (d *DB) RecordRetentionRunFiles(ctx context.Context, runID int64, channels,
 }
 
 // RecordRetentionRunPurge journals the swept message ids whose replay purge
-// is outstanding (the ring buffer and the events rows): written before the
-// purge, replaced by the empty list after it, so a purge that fails or is
-// interrupted is retried from the run on the next tick. nil clears it.
+// (ring buffer and events rows) is outstanding: written before the purge and
+// replaced by the empty list after it, so a failed or interrupted purge is
+// retried on the next tick. nil clears it.
 func (d *DB) RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int64) error {
 	if ids == nil {
 		ids = []int64{}
@@ -451,23 +437,24 @@ func (d *DB) RecordRetentionRunPurge(ctx context.Context, runID int64, ids []int
 	return nil
 }
 
-// EventNamesMessagePredicate is the SQL that decides whether a persisted
-// replay event is about one of a set of messages, bound to a JSON array of
-// message ids as ?1: a message-family frame (chat_message, chat_edited,
-// chat_deleted, chat_bulk_deleted, reaction_update, poll_update — the ones that carry a
-// message's content or name it) whose payload.id, payload.referenced_message.id (a reply's embedded parent
-// snippet), payload.message_id or one of payload.ids is in the set. ws.eventNamesMessage is the same rule over
-// the bytes in the ring buffer; the two must stay in step.
+// EventNamesMessagePredicate is the SQL deciding whether a persisted replay
+// event is about one of a set of messages, bound to a JSON array of ids as ?1:
+// a message-family frame (chat_message, chat_edited, chat_deleted,
+// chat_bulk_deleted, reaction_update, poll_update) whose payload.id,
+// payload.referenced_message.id (a reply's embedded parent snippet),
+// payload.message_id or one of payload.ids is in the set.
+// ws.eventNamesMessage is the same rule over the ring buffer's bytes; the two
+// must stay in step.
 const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update', 'poll_update')
 	 AND (json_extract(payload, '$.payload.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.referenced_message.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.message_id') IN (SELECT value FROM json_each(?1))
 	   OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.ids') AS named WHERE named.value IN (SELECT value FROM json_each(?1)))))`
 
-// DeleteEventsForMessages removes every persisted replay event about the
-// given messages — the retention sweep's persisted tier (B4-11): a swept
-// message's chat_message frame would otherwise stay replayable, content
-// included, until the events pruner reached it. Returns rows deleted.
+// DeleteEventsForMessages removes every persisted replay event about the given
+// messages, the sweep's persisted tier: a swept message's chat_message frame
+// would otherwise stay replayable, content included, until the events pruner
+// reached it. It returns rows deleted.
 func (d *DB) DeleteEventsForMessages(ctx context.Context, ids []int64) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -502,9 +489,9 @@ func (d *DB) FinishRetentionRun(ctx context.Context, runID int64, filesRemoved i
 	return nil
 }
 
-// ListUnfinishedRetentionRuns returns runs with work outstanding — not
-// finished, files_removed short of the journal, or a replay purge still
-// pending — oldest first, for the resume at start-up and on each tick.
+// ListUnfinishedRetentionRuns returns runs with work outstanding (not
+// finished, files_removed short of the journal, or a replay purge pending),
+// oldest first, for the resume at start-up and on each tick.
 func (d *DB) ListUnfinishedRetentionRuns(ctx context.Context) ([]RetentionRun, error) {
 	rows, err := d.reader.QueryContext(ctx,
 		`SELECT id, started_at, finished_at, channels, messages_deleted, files, files_removed, purge_pending, COALESCE(last_error, '')

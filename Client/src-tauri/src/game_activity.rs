@@ -307,7 +307,7 @@ impl Proc {
 ///
 /// The drive letter is ignored on purpose (`C:\Games\a.exe` and `D:\Games\a.exe`
 /// are the same program here). The frontend's `pathKey` in
-/// `lib/gameActivityPrefs.ts` does the same and must stay identical.
+/// `lib/prefs/gameActivityPrefs.ts` does the same and must stay identical.
 fn normalize_path(raw: &str) -> String {
     let lower = raw
         .trim()

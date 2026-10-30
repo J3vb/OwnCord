@@ -16,15 +16,15 @@
  * closure.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon, type IconName } from "@lib/icons";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
-import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/formatting";
+import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/avatar";
-import { readableRoleColor } from "@lib/themes";
-import type { MountableComponent } from "@lib/safe-render";
+import { readableRoleColor } from "@lib/prefs/themes";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import type { ApiClient } from "@lib/api";
 import type { MessageUser } from "@lib/types";

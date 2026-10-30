@@ -5,21 +5,18 @@ import (
 	"fmt"
 )
 
-// One predicate per security property (B2-5). Each is a pure function over a
-// Subject the caller has already resolved — no context, no store — so a call
-// site cannot drift by re-deriving half the rule: ready's can_send, the
-// composer refresh, typing, the send path and the plugin gate all ask
-// CanSendMessage the same question. A nil result is "allowed"; a non-nil one
-// is a sentinel from this package (or wraps ErrPermissionDenied with the
-// missing bit's name) so each call site keeps mapping denials to its own
-// status codes and messages.
+// One predicate per security property. Each is a pure function over an
+// already-resolved Subject (no context, no store), so call sites cannot drift
+// by re-deriving half the rule. A nil result is "allowed"; a non-nil one is a
+// sentinel from this package (or wraps ErrPermissionDenied with the missing
+// bit's name) so each caller keeps mapping denials to its own status codes.
 
 // ErrArchived is returned for a write to, or a client surface for, an archived
 // channel. History stays readable, so read paths do not consult it.
 var ErrArchived = errors.New("channel is archived")
 
 // ErrThreadLocked is returned for a post or reaction in a locked thread by a
-// member without MANAGE_MESSAGES (6.9c).
+// member without MANAGE_MESSAGES.
 var ErrThreadLocked = errors.New("thread is locked")
 
 // ErrBlocked is returned when either DM party has blocked the other.
@@ -30,17 +27,14 @@ var ErrBlocked = errors.New("user is blocked")
 var ErrNotVoiceChannel = errors.New("not a voice channel")
 
 // ErrNSFWUnacknowledged is returned by CanReadContent for a labelled channel
-// the subject has not acknowledged (decision 13, BG-18's server half, B5-7).
-// Every content path — REST reads, search, live/replayed socket delivery,
-// attachment bytes — reports this identically; the caller maps it to its own
-// status code (403 NSFW_ACKNOWLEDGEMENT_REQUIRED on the REST/attachment
-// surfaces; the socket and search simply withhold the content).
+// the subject has not acknowledged. Every content path reports it identically;
+// the caller maps it to its own status (403 NSFW_ACKNOWLEDGEMENT_REQUIRED on
+// REST/attachments; the socket and search simply withhold the content).
 var ErrNSFWUnacknowledged = errors.New("nsfw content not acknowledged")
 
 // ErrTimedOut is returned by CanSendMessage, CanAddReaction and CanJoinVoice
-// for a subject with an active timeout row (B5-9, decision 6): a time-boxed
-// restriction distinct from a ban, checked through the predicates like every
-// other property rather than a scattered per-handler check.
+// for a subject with an active timeout row: a time-boxed restriction distinct
+// from a ban.
 var ErrTimedOut = errors.New("user is timed out")
 
 // Subject is everything a channel predicate consults: the actor's role bits,
@@ -68,19 +62,15 @@ type Subject struct {
 	DMParticipant bool
 	DMBlocked     bool
 	// NSFWAcknowledged is consulted only when Channel.NSFW is set: whether
-	// THIS subject has a row acknowledging the channel's label (B5-7). The
-	// caller resolves it live, never from a cache — CanReadContent's whole
-	// point is that a revocation takes effect on the very next read.
+	// THIS subject has acknowledged the channel's label. The caller resolves it
+	// live, never from a cache, so a revocation takes effect on the next read.
 	NSFWAcknowledged bool
-	// TimedOut ("an active timeout row exists for this subject") is filled
-	// by permissions.Checker.Subject from a live lookup and by
-	// service.PermissionService.Subject from its active-timeout mirror,
-	// reloaded by every timeout write and judged against the clock (P5-O02)
-	// — never from the 30s permission cache, and never for an Administrator
-	// (B5-9, decision 6). It gates
-	// CanSendMessage, CanAddReaction and CanJoinVoice independent of every
-	// channel-scoped bit: a timeout is a restriction on the subject, not a
-	// property of any one channel.
+	// TimedOut ("an active timeout row exists for this subject") is filled from
+	// a live lookup by permissions.Checker.Subject and from the active-timeout
+	// mirror by service.PermissionService.Subject, never from the 30s
+	// permission cache and never for an Administrator. It gates CanSendMessage,
+	// CanAddReaction and CanJoinVoice independent of every channel-scoped bit:
+	// a timeout restricts the subject, not any one channel.
 	TimedOut bool
 }
 
@@ -137,14 +127,12 @@ func CanViewChannel(s Subject) error {
 	return nil
 }
 
-// IsChannelPrivate is the channel-level lock verdict (3D-6): a channel is
-// private when the default role cannot read it. defaultRolePerms is the
-// default (is_default) role's base permissions and o the channel's override
-// for that role; only the role layer applies — a per-member override is
-// per-viewer, and the verdict is the same for every recipient. It is
-// Subject.Has, so an Administrator default role is never private and an
-// override's allow still beats its deny. An archived channel is judged on its
-// permissions alone: the lock describes who may read, not whether it is listed.
+// IsChannelPrivate reports whether a channel is private: the default role
+// cannot read it. defaultRolePerms is the default (is_default) role's base
+// permissions and o the channel's override for that role; only the role layer
+// applies, since a per-member override is per-viewer. It is Subject.Has, so an
+// Administrator default role is never private and an override's allow still
+// beats its deny. An archived channel is judged on permissions alone.
 func IsChannelPrivate(defaultRolePerms int64, o ChannelOverride) bool {
 	return !Subject{
 		RolePerms: defaultRolePerms,
@@ -189,16 +177,14 @@ func CanSendMessage(s Subject) error {
 	return nil
 }
 
-// CanType is CanSendMessage (S-01): a typing indicator announces a post, so a
+// CanType is CanSendMessage: a typing indicator announces a post, so a
 // member who cannot post cannot announce one.
 func CanType(s Subject) error { return CanSendMessage(s) }
 
 // CanAddReaction is ADD_REACTIONS in the channel (with READ_MESSAGES), never
-// while timed out; for a DM, membership and no block. AddReaction/
-// RemoveReaction route through this instead of a bare HasChannelPerm bitmask
-// check (B5-9), so reacting gets the same timeout restriction a send does —
-// today's survey found the reaction handler resolved this bit inside
-// effective perms with no predicate of its own.
+// while timed out; for a DM, membership and no block. Reactions route through
+// this rather than a bare bitmask check so they get the same timeout
+// restriction a send does.
 func CanAddReaction(s Subject) error {
 	if s.TimedOut {
 		return ErrTimedOut
@@ -266,12 +252,11 @@ func CanPinMessage(s Subject) error {
 	return nil
 }
 
-// CanMentionRole is the @role ping policy (WP 6.3f-1): a role may be pinged
-// when it is flagged mentionable, or when the author holds READ_MESSAGES and
-// MENTION_EVERYONE in the channel (the same bits an @everyone needs). A refusal
-// is not an error for the message: the caller leaves the token as plain text,
-// raises no badge and lists the role nowhere. mentionable is the role's own
-// flag, read by the caller.
+// CanMentionRole is the @role ping policy: a role may be pinged when it is
+// flagged mentionable, or when the author holds READ_MESSAGES and
+// MENTION_EVERYONE in the channel. A refusal is not an error for the message:
+// the caller leaves the token as plain text, raises no badge and lists the
+// role nowhere. mentionable is the role's own flag, read by the caller.
 func CanMentionRole(s Subject, mentionable bool) error {
 	if mentionable || s.Has(ReadMessages|MentionEveryone) {
 		return nil
@@ -280,15 +265,13 @@ func CanMentionRole(s Subject, mentionable bool) error {
 }
 
 // CanJoinVoice gates the LiveKit credential: CONNECT_VOICE in the channel
-// (required for DM calls too — the role bit was always demanded on top of
-// membership, so this can only ever narrow), READ_MESSAGES for a non-DM
-// channel so a room hidden from a member (CanViewChannel) is not joinable, a
-// channel that has a room, for a DM membership plus no block, and no archive
-// for either kind — the admin
-// PATCH accepts `archived` for any channel type, and an evicted participant
-// must not rejoin the archived room. Applies at join and to the target
-// of a moderator move; a member already in the room (token refresh, the
-// stale-voice sweep) is held to CanStayInVoice, which ignores the timeout.
+// (required for DM calls too, so this can only narrow), READ_MESSAGES for a
+// non-DM channel so a room hidden from the member is not joinable, a channel
+// that has a room, for a DM membership plus no block, and no archive for
+// either kind (an evicted participant must not rejoin an archived room).
+// Applies at join and to the target of a moderator move; a member already in
+// the room (token refresh, stale-voice sweep) is held to CanStayInVoice, which
+// ignores the timeout.
 func CanJoinVoice(s Subject) error {
 	if s.TimedOut {
 		return ErrTimedOut
@@ -317,26 +300,24 @@ func CanJoinVoice(s Subject) error {
 	return nil
 }
 
-// CanStayInVoice is CanJoinVoice for a member already in the room: every
-// rule of the join gate except the timeout. A timeout's voice half is a
-// server-mute applied only when the moderator could moderate voice
-// (service.ModerationService.Timeout), so a timed-out member who is already
-// in a room is not evicted — they cannot JOIN one (CanJoinVoice), but the
-// session they hold ends only for a reason that would refuse it on its own:
-// a lost CONNECT_VOICE or READ_MESSAGES, a ban or block, an archived or
-// deleted channel. Used by the stale-voice sweep and the token refresh.
+// CanStayInVoice is CanJoinVoice for a member already in the room: every rule
+// of the join gate except the timeout. A timeout's voice half is a server-mute
+// applied only when the moderator could moderate voice
+// (service.ModerationService.Timeout), so a timed-out member already in a room
+// is not evicted; their session ends only for a reason that would refuse it on
+// its own (lost CONNECT_VOICE or READ_MESSAGES, ban or block, archived or
+// deleted channel). Used by the stale-voice sweep and the token refresh.
 func CanStayInVoice(s Subject) error {
 	s.TimedOut = false
 	return CanJoinVoice(s)
 }
 
-// CanModerate is the report queue and B5-9's moderator-action gate:
-// MODERATE_MEMBERS or Administrator, server-wide. Deliberately independent of
-// s.Has/EffectiveChannelPerms — moderation authority is not a channel
-// property, and a channel override must never be able to grant or strip it.
-// This is the canonical predicate path B5-8/B5-9 route through
-// (Server/invariants/authz_chokepoint.go forbids a raw permissions.HasServerPerm
-// call anywhere else for this decision).
+// CanModerate is the report queue and moderator-action gate: MODERATE_MEMBERS
+// or Administrator, server-wide. Deliberately independent of
+// s.Has/EffectiveChannelPerms: moderation authority is not a channel property,
+// and a channel override must never grant or strip it. Server/invariants/
+// authz_chokepoint.go forbids a raw permissions.HasServerPerm call elsewhere
+// for this decision.
 func CanModerate(s Subject) error {
 	if HasAdmin(s.RolePerms) || HasPerm(s.RolePerms, ModerateMembers) {
 		return nil
@@ -345,11 +326,11 @@ func CanModerate(s Subject) error {
 }
 
 // CanManageChannels is the gate on everything that edits the channel list and
-// on the channel_categories view (WP 6.5a): MANAGE_CHANNELS or Administrator,
+// on the channel_categories view: MANAGE_CHANNELS or Administrator,
 // server-wide. Like CanModerate it reads the role only; a per-channel override
 // can neither grant nor strip it. The ws hub asks it at send time to decide
-// which connected clients may be told the full category list, empty and
-// hidden categories included.
+// which clients may be told the full category list, empty and hidden
+// categories included.
 func CanManageChannels(s Subject) error {
 	if HasAdmin(s.RolePerms) || HasPerm(s.RolePerms, ManageChannels) {
 		return nil
@@ -357,11 +338,11 @@ func CanManageChannels(s Subject) error {
 	return missing(ManageChannels)
 }
 
-// CanModerateVoice is the actor's authority in the TARGET's channel:
-// effective MUTE_MEMBERS there (so a per-channel deny holds — SEC-02), and
-// READ_MESSAGES so a moderator can only act in a room they can see; a DM call
-// additionally requires the actor to be a participant. Rank is not a
-// permission and stays with the caller (the strict-outranks check).
+// CanModerateVoice is the actor's authority in the TARGET's channel: effective
+// MUTE_MEMBERS there (so a per-channel deny holds) and READ_MESSAGES so a
+// moderator can only act in a room they can see; a DM call also requires the
+// actor to be a participant. Rank stays with the caller (the strict-outranks
+// check).
 func CanModerateVoice(s Subject) error {
 	if s.Channel.Type == "dm" {
 		if err := dmMember(s); err != nil {
@@ -375,16 +356,13 @@ func CanModerateVoice(s Subject) error {
 }
 
 // AuthorizeVoiceModerator is the base-bit gate every voice-moderation call
-// site needs ahead of CanModerateVoice, combined with the predicate itself
-// into one canonical check (round 4, Codex review Part C — the pair was
-// duplicated between ws.voiceModTarget and the timeout voice half's own
-// authorization, each with its own raw HasServerPerm call). The actor's
-// BASE role must hold MUTE_MEMBERS (or Administrator) on its own:
-// CanModerateVoice's s.Has(MuteMembers) is a channel-scoped OR that a
-// channel override CAN satisfy even when the base role lacks the bit
-// (deliberate — B2-5, matching CanSendMessage's announcement-channel
-// precedent) — but a channel-scoped allow must never be able to manufacture
-// voice-moderation authority the actor's base role never held at all.
+// site needs ahead of CanModerateVoice, combined with it into one canonical
+// check. The actor's BASE role must hold MUTE_MEMBERS (or Administrator) on its
+// own: CanModerateVoice's s.Has(MuteMembers) is a channel-scoped OR that an
+// override can satisfy even when the base role lacks the bit (deliberate,
+// matching CanSendMessage's announcement-channel precedent), but a
+// channel-scoped allow must never manufacture voice-moderation authority the
+// base role never held.
 func AuthorizeVoiceModerator(s Subject) error {
 	if !HasServerPerm(s.RolePerms, MuteMembers) {
 		return missing(MuteMembers)
@@ -394,11 +372,10 @@ func AuthorizeVoiceModerator(s Subject) error {
 
 // CanMoveVoice is the actor's authority to move a member out of the TARGET's
 // channel: effective MOVE_MEMBERS there (so a per-channel deny holds) and
-// READ_MESSAGES so the room is visible to the mover; a DM call additionally
-// requires the actor to be a participant. Rank is deliberately not part of
-// it: a mover may move any member. An Administrator ignores channel
-// overrides here as everywhere; that the base role holds the bit explicitly
-// is AuthorizeVoiceMover's VoiceMoverBase half.
+// READ_MESSAGES so the room is visible to the mover; a DM call also requires
+// the actor to be a participant. Rank is deliberately not part of it. An
+// Administrator ignores channel overrides here as everywhere; that the base
+// role holds the bit explicitly is VoiceMoverBase's half.
 func CanMoveVoice(s Subject) error {
 	if s.Channel.Type == "dm" {
 		if err := dmMember(s); err != nil {
@@ -411,11 +388,10 @@ func CanMoveVoice(s Subject) error {
 	return nil
 }
 
-// AuthorizeVoiceMover is the only authorizer of the move command: the
-// actor's BASE role must hold MOVE_MEMBERS explicitly on its own, and
-// CanMoveVoice must pass in the channel. A channel-scoped allow cannot
-// manufacture move authority the base role never held. Neither MUTE_MEMBERS
-// nor ADMINISTRATOR opens a move.
+// AuthorizeVoiceMover is the only authorizer of the move command: the actor's
+// BASE role must hold MOVE_MEMBERS explicitly and CanMoveVoice must pass in the
+// channel. A channel-scoped allow cannot manufacture move authority the base
+// role never held. Neither MUTE_MEMBERS nor ADMINISTRATOR opens a move.
 func AuthorizeVoiceMover(s Subject) error {
 	if err := VoiceMoverBase(s.RolePerms); err != nil {
 		return err
@@ -424,10 +400,10 @@ func AuthorizeVoiceMover(s Subject) error {
 }
 
 // VoiceMoverBase is AuthorizeVoiceMover's base-role half on its own: the
-// actor's roles hold MOVE_MEMBERS explicitly (ADMINISTRATOR is not enough).
-// A caller that has not resolved the channel yet uses it to know the move
-// path is open; the channel verdict still comes from AuthorizeVoiceMover on
-// the resolved subject, since READ_MESSAGES may come from a channel allow.
+// actor's roles hold MOVE_MEMBERS explicitly (ADMINISTRATOR is not enough). A
+// caller that has not resolved the channel yet uses it to know the move path
+// is open; the channel verdict still comes from AuthorizeVoiceMover, since
+// READ_MESSAGES may come from a channel allow.
 func VoiceMoverBase(rolePerms int64) error {
 	if !HasPerm(rolePerms, MoveMembers) {
 		return missing(MoveMembers)
@@ -446,7 +422,7 @@ func CanChangeOwnerGrantOnly(rolePerms, topRoleID int64, topRolePosition int) bo
 }
 
 // CanManageBackups reports whether a principal may create a backup, list
-// backups and issue a backup download link (and redeem it): the owner (by role
+// backups and issue or redeem a backup download link: the owner (by role
 // identity, see IsOwner, no bit needed) or anyone whose effective roles hold
 // MANAGE_BACKUPS (an Administrator passes like for every bit). Restore,
 // delete, the full archive, the backup policy, updates, tokens and config are
@@ -456,18 +432,15 @@ func CanManageBackups(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return IsOwner(topRoleID, topRolePosition) || HasServerPerm(rolePerms, ManageBackups)
 }
 
-// CanReadContent is CanViewChannel plus B5-7's NSFW consent gate: a labelled
-// channel returns no content — message bodies and metadata that carries them
-// (history, around, pins, reaction users, search hits, live and replayed
-// chat_message/chat_edited/reaction_update frames) and attachment bytes —
-// until the subject's own row exists. It is CanViewChannel's caller that
-// decides whether a channel is visible at all; this only adds the narrower
-// consent question on top, so a channel that is not visible is still
+// CanReadContent is CanViewChannel plus the NSFW consent gate: a labelled
+// channel returns no content (message bodies and metadata carrying them, live
+// and replayed frames, attachment bytes) until the subject's own
+// acknowledgement row exists. A channel that is not visible is still
 // ErrNotDMParticipant/missing(ReadMessages)/ErrArchived, never this sentinel.
 //
-// Decision 13: no bit and no admin bypass skips this — a moderator or
-// administrator acknowledges like anyone else, so the caller resolves
-// NSFWAcknowledged from the row the same way for every subject.
+// No bit and no admin bypass skips this: a moderator or administrator
+// acknowledges like anyone else, so the caller resolves NSFWAcknowledged from
+// the row the same way for every subject.
 func CanReadContent(s Subject) error {
 	if err := CanViewChannel(s); err != nil {
 		return err

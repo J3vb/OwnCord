@@ -12,7 +12,7 @@ import (
 // same reason auth.ValidateUsername has one — a display name stands in for a
 // username on every message row, so a bidi override, a control character or a
 // stack of combining marks in one is a spoof or a layout break. The caller has
-// already sanitized and collapsed spaces (OC-0197 order).
+// already sanitized and collapsed spaces (sanitize, then validate).
 func validateDisplayName(name string) error {
 	if err := auth.ValidateVisibleText(name); err != nil {
 		return fmt.Errorf("display_name %w", err)

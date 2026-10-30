@@ -281,7 +281,7 @@ describe("createMessageJumper", () => {
     expect(messagesStore.getState().detachedChannels.has(1)).toBe(false);
   });
 
-  it("says a message the store knows is deleted is gone, without the around fetch (WP 3A-8)", async () => {
+  it("says a message the store knows is deleted is gone, without the around fetch", async () => {
     setMessages(1, [response(41), response(42)], false);
     deleteMessage({ channel_id: 1, message_id: 42 });
     const { ctrl, scrollToMessage } = fakeCtrl(1);

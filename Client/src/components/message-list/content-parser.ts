@@ -12,7 +12,7 @@
 import { createElement, setText } from "@lib/dom";
 import { navigateToChannel, findChannelByName, findChannelById } from "@lib/channel-navigation";
 import { parseInviteLink, parseMessageLink } from "@lib/deep-link";
-import { getChannelMutesHost } from "@lib/channel-mutes";
+import { getChannelMutesHost } from "@lib/prefs/channelMutes";
 import { normalizeHostForCertCompare } from "@lib/hostNormalize";
 import { requestInviteJoin } from "@lib/invite-navigation";
 import { jumpToMessage } from "@lib/message-navigation";
@@ -29,7 +29,7 @@ import {
   isEveryoneToken,
   resolveMentionUserId,
   type MentionInfo,
-} from "@lib/mentions";
+} from "@lib/text/mentions";
 import { isSafeUrl } from "./attachments";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./custom-emoji";
 import {
@@ -44,7 +44,7 @@ import {
   splitCodeFences,
   type InlineNode,
   type InlineStyle,
-} from "@lib/markdown";
+} from "@lib/text/markdown";
 import { highlightCode, resolveLanguage, type CodeToken } from "./syntax-highlight";
 import { copyThenRelabel } from "@lib/clipboard";
 
@@ -57,7 +57,7 @@ export const URL_REGEX = /https?:\/\/[^\s<>"']+/g;
 export const MASKED_LINK_REGEX = /\[[^\]\n]+\]\((?:[^()\s]|\([^()\s]*\))+\)/g;
 /**
  * `||hidden||` — used to keep spoilered URLs from spawning embeds. Mirrors
- * the tokeniser in `@lib/markdown`: the span closes at the first `||` after
+ * the tokeniser in `@lib/text/markdown`: the span closes at the first `||` after
  * its opener, holds at least one character (so `||||` is not a spoiler), may
  * span lines and blank lines (the tokeniser keeps an open spoiler together
  * across a paragraph break), a lone `|` is text, and a backslash escape

@@ -7,12 +7,12 @@ const { mockGetActiveThemeName } = vi.hoisted(() => ({
 // Only the theme *selection* is stubbed. applyTheme/applyThemeByName and
 // restoreAccent() stay real, because the assertions below are about what they
 // actually write to the document.
-vi.mock("@lib/themes", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/themes")>()),
+vi.mock("@lib/prefs/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
 }));
 
-import { applyStoredAppearance } from "@lib/appearance";
+import { applyStoredAppearance } from "@lib/prefs/appearance";
 import { syncOsMotionListener } from "@lib/os-motion";
 
 /** jsdom has no matchMedia; startup syncs with the OS by default (B9-2, Q1). */
@@ -69,7 +69,7 @@ describe("applyStoredAppearance", () => {
     expect(document.documentElement.classList.contains("reduced-motion")).toBe(false);
   });
 
-  it("follows the OS reduced-motion setting when nothing is stored (B9-2, Q1)", () => {
+  it("follows the OS reduced-motion setting when nothing is stored", () => {
     stubOsReducedMotion(true);
 
     applyStoredAppearance();

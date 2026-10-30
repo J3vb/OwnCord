@@ -16,9 +16,9 @@ import {
   roleColorVar,
   shouldGroup,
   userRoleColorVar,
-} from "../../src/lib/formatting";
-import { saveTimeFormat } from "../../src/lib/timeFormat";
-import { savePref } from "../../src/lib/preferences";
+} from "../../src/lib/text/formatting";
+import { saveTimeFormat } from "../../src/lib/text/timeFormat";
+import { savePref } from "../../src/lib/prefs/preferences";
 import { resetChannelsStore, setRoles } from "../../src/stores/channels.store";
 import { resetMembersStore, setMembers } from "../../src/stores/members.store";
 import type { Message } from "../../src/stores/messages.store";

@@ -15,8 +15,8 @@ const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoist
   showToast: vi.fn(),
 }));
 
-vi.mock("../../src/lib/preferences", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/preferences")>()),
+vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/prefs/preferences")>()),
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
@@ -30,7 +30,7 @@ const { alertIncomingCall, alertMissedCall, alertSupersededCall, clearIncomingCa
   await import("../../src/features/direct-messages/callAlerts");
 const { startRingChime, stopRingChime, playNotificationSound, startRingback, stopRingback } =
   await import("../../src/lib/notificationSound");
-const { setChannelMutesHost } = await import("../../src/lib/channel-mutes");
+const { setChannelMutesHost } = await import("../../src/lib/prefs/channelMutes");
 const { dmStore } = await import("../../src/stores/dm.store");
 
 /** Every frequency the app's audio graph was asked to play, in order. */

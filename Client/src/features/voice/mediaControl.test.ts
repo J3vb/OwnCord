@@ -50,7 +50,7 @@ vi.mock("../../stores/voice.store", () => ({
   setShareDenied: vi.fn(),
   bumpLocalCameraRev: vi.fn(),
 }));
-vi.mock("../../lib/preferences", () => ({
+vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: vi.fn(),
 }));
@@ -98,7 +98,7 @@ import {
   setShareDenied,
   bumpLocalCameraRev,
 } from "../../stores/voice.store";
-import { savePref } from "../../lib/preferences";
+import { savePref } from "../../lib/prefs/preferences";
 import {
   enableCamera,
   disableCamera,
@@ -277,7 +277,7 @@ describe("microphonePublishingAllowed", () => {
   });
 });
 
-describe("syncShareGrant (WP 1C-3)", () => {
+describe("syncShareGrant", () => {
   it("marks share denied only when the grant leaves screen share out", () => {
     syncShareGrant(fakeRoom());
     expect(setShareDenied).toHaveBeenLastCalledWith(false);

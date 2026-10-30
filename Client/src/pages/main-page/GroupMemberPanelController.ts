@@ -13,7 +13,7 @@
  */
 
 import { ApiClientError, type ApiClient } from "@lib/api";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import type { Member } from "@stores/members.store";
 import { membersStore } from "@stores/members.store";
 import { getActiveChannel } from "@stores/channels.store";
@@ -22,7 +22,7 @@ import { openUserProfilePopup } from "../../features/profiles/openUserProfilePop
 import type { GroupDmMemberPanelComponent } from "@components/GroupDmMemberPanel";
 import type * as GroupMembers from "../../features/direct-messages/groupMembers";
 import { createMemberPickerModal } from "./MemberPickerModal";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { RestErrorCode } from "@lib/protocolTypes";
 
 /** Saved preference: the group member panel opens with the conversation. */

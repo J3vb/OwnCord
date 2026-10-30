@@ -11,7 +11,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Group DM icon routes (WP 3B-10c). The upload follows the avatar rules
+// Group DM icon routes. The upload follows the avatar rules
 // (handleUploadAvatar): the same size, type and dimension checks, the same
 // storage quota, stored as an unlinked attachment. What differs is where the
 // id lands (channels.dm_icon, with a group_icon row in the same transaction)
@@ -75,7 +75,6 @@ func handleUploadGroupIcon(svc *service.Services, broadcaster DMBroadcaster, sto
 	}
 }
 
-// discardGroupIconUpload removes an uploaded icon whose transaction failed.
 func discardGroupIconUpload(ctx context.Context, svc *service.Services, store FileStore, fileID string, userID int64) {
 	ctx = context.WithoutCancel(ctx)
 	if err := svc.Uploads.Unrecord(ctx, fileID, userID); err != nil {

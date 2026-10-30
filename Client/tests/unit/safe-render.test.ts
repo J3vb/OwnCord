@@ -4,7 +4,7 @@ import {
   renderFallback,
   installGlobalErrorHandlers,
   type MountableComponent,
-} from "../../src/lib/safe-render";
+} from "../../src/lib/text/safeRender";
 import { setLogLevel } from "../../src/lib/logger";
 import { expectConsole } from "../helpers/console";
 

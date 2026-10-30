@@ -7,7 +7,7 @@ const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockSavePref: vi.fn(),
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, defaultVal: unknown) => mockLoadPref(key, defaultVal),
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
@@ -1035,7 +1035,7 @@ describe("DeviceManager", () => {
       expect(newRoom.switchActiveDevice).not.toHaveBeenCalled();
     });
 
-    it("switches back while muted without re-enabling the mic (OC-0474)", async () => {
+    it("switches back while muted without re-enabling the mic", async () => {
       prefs.set("audioInputDevice", "headset-mic");
       mockVoiceState.localMuted = true;
       await fireDeviceChange();

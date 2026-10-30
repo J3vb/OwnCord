@@ -170,7 +170,7 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/formatting.ts",
+      "file": "lib/text/formatting.ts",
       "binding": "parsedTimestampCache",
       "category": "pure-cache",
       "reason": "Parse result keyed by the timestamp string itself"
@@ -296,16 +296,22 @@
       "reason": "The registry itself"
     },
     {
-      "file": "lib/themes.ts",
+      "file": "lib/prefs/themes.ts",
       "binding": "roleTextCache",
       "category": "pure-cache",
       "reason": "Keyed by colour and theme, not by server"
     },
     {
-      "file": "lib/themes.ts",
+      "file": "lib/prefs/themes.ts",
       "binding": "systemPaintListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the disposer each subscriber holds"
+    },
+    {
+      "file": "features/custom-themes/customTheme.ts",
+      "binding": "changeListeners",
+      "category": "dom-owned",
+      "reason": "Listeners removed by the abort signal each subscriber passes; the custom theme is per device, not per server"
     },
     {
       "file": "lib/voiceJoinTrace.ts",

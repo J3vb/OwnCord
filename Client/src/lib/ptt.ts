@@ -1,5 +1,5 @@
 import { voiceText } from "../i18n/voice";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 
 /**
  * Push-to-Talk display helpers. The PTT service itself — Rust-side

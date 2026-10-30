@@ -9,7 +9,7 @@ import (
 
 var _ UserNoteStore = (*db.DB)(nil)
 
-// MaxUserNoteRunes caps a private profile note (migration 069, WP 6.11a).
+// MaxUserNoteRunes caps a private profile note (migration 069).
 const MaxUserNoteRunes = 256
 
 // UserNoteStore is the data access the note service needs. *db.DB satisfies

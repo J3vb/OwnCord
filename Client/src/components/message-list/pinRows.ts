@@ -6,7 +6,7 @@
 // same wording as channels (design note 6.12, section 1).
 import { resolveDisplayName } from "@lib/avatar";
 import { createElement, setText } from "@lib/dom";
-import { resolveAuthor } from "@lib/formatting";
+import { resolveAuthor } from "@lib/text/formatting";
 import type { Message } from "@stores/messages.store";
 import type { MessageListOptions } from "../MessageList";
 import { messagingText } from "../../i18n/messaging";

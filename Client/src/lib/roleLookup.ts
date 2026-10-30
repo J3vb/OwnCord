@@ -2,7 +2,7 @@
  * Role id by name, for a server that sends no `role_ids`: its user
  * names one role and nothing else.
  *
- * A leaf on purpose. Mention matching (lib/mentions.ts, in the startup chunk)
+ * A leaf on purpose. Mention matching (lib/text/mentions.ts, in the startup chunk)
  * needs the answer, but it sits below the stores and must not import the
  * roster, and any module that imports the stores' code from here would change
  * how the bundler splits them. The channels store registers the lookup when it

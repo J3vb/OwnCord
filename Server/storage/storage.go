@@ -14,11 +14,9 @@ import (
 	"time"
 )
 
-// ErrIO marks a Save failure caused by the server's own filesystem — disk
-// full, permissions, a read-only mount — as opposed to the uploaded content
-// being invalid. Handlers use it to return a 5xx instead of blaming the
-// client with a 400, so infrastructure failures are distinguishable in any
-// status-class dashboard.
+// ErrIO marks a Save failure caused by the server's own filesystem (disk full,
+// permissions, read-only mount) rather than invalid content, so handlers
+// return a 5xx instead of blaming the client with a 400.
 var ErrIO = errors.New("storage io failure")
 
 // blockedMagic maps format names to their magic byte signatures. Files whose
@@ -115,13 +113,11 @@ func (s *Storage) resolvedPath(name string) (string, error) {
 // The caller is responsible for generating a UUID filename.
 func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 	if s.maxSizeMB < 0 {
-		// A negative limit must never reach io.LimitReader: it treats a
-		// negative N as "read nothing", so io.Copy would report a clean
-		// (0, nil) and the over-size probe below (gated on
-		// written == maxBytes) would never fire for a negative maxBytes —
-		// silently discarding every uploaded byte while claiming success.
-		// Config validation should never hand this function a negative
-		// value, but fail loudly here rather than trust that invariant.
+		// A negative limit must never reach io.LimitReader: it treats negative
+		// N as "read nothing", so io.Copy would report a clean (0, nil), the
+		// over-size probe (gated on written == maxBytes) would never fire, and
+		// every uploaded byte would be discarded while claiming success. Fail
+		// loudly rather than trust config validation.
 		return 0, fmt.Errorf("invalid storage max size: %d MB", s.maxSizeMB)
 	}
 	if err := sanitizeFilename(uuid); err != nil {
@@ -238,11 +234,10 @@ func (s *Storage) OpenThumb(uuid string) (File, error) {
 	return os.Open(p)
 }
 
-// SaveThumb stores data as the thumbnail of the original named uuid; empty
-// data records that the original has no thumbnail. The
-// write is atomic (a temporary file renamed into place), so a reader never
-// sees a partial thumbnail. If the original is gone once the thumbnail is in
-// place — deleted while it was being generated — the thumbnail is removed
+// SaveThumb stores data as the thumbnail of the original named uuid; empty data
+// records that the original has no thumbnail. The write is atomic (a temporary
+// file renamed into place), so a reader never sees a partial thumbnail. If the
+// original is gone once the thumbnail is in place, the thumbnail is removed
 // again and fs.ErrNotExist returned, so it never outlives its original.
 func (s *Storage) SaveThumb(uuid string, data []byte) error {
 	p, err := s.thumbPath(uuid)
@@ -281,10 +276,10 @@ type Entry struct {
 }
 
 // List returns every regular file in the storage directory with its
-// modification time, in name order. Subdirectories and anything that is
-// not a plain file are skipped. It is the storage side of the reconciliation
-// pass (docs/architecture/data-lifecycle.md, O3 A3): a file no database row
-// names is stranded, and only a directory listing can find it.
+// modification time, in name order; subdirectories and non-regular files are
+// skipped. It is the storage side of the reconciliation pass
+// (docs/architecture/data-lifecycle.md): a file no database row names is
+// stranded, and only a directory listing can find it.
 func (s *Storage) List() ([]Entry, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -308,11 +303,9 @@ func (s *Storage) List() ([]Entry, error) {
 }
 
 // File is what serving a stored blob requires of an opened file. Seeking is
-// load-bearing, not incidental: both serve paths hand the file to
-// http.ServeContent, which needs io.ReadSeeker for range requests — the
-// exact capability that makes a remote backend (e.g. S3) the hard part of
-// any future storage swap. Stat provides size and modtime the same way.
-// *os.File satisfies it.
+// load-bearing: both serve paths hand the file to http.ServeContent, which
+// needs io.ReadSeeker for range requests, which is what makes a remote backend
+// (e.g. S3) the hard part of any storage swap. *os.File satisfies it.
 type File interface {
 	io.Reader
 	io.Seeker

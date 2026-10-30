@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { formatMessageTimestamp, formatDmRowTime } from "../../src/lib/formatting";
+import { formatMessageTimestamp, formatDmRowTime } from "../../src/lib/text/formatting";
 import { formatDate } from "../../src/i18n/format";
 
 /**

@@ -23,7 +23,7 @@ const child = spawn(
       ? custom
       : [
           "--config",
-          "playwright.config.native.ts",
+          "tests/e2e/config/playwright.config.native.ts",
           "--project",
           "native-updater",
           "--output",

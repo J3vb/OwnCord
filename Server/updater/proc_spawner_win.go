@@ -23,14 +23,12 @@ import (
 // LiveKit inherits it and one close stops both.
 //
 // A server started from a console window restarts into that same window: the
-// replacement inherits the console and the standard streams, and this process
-// waits for it. A console host that tracks the process it started (Windows
-// Terminal closes a tab whose process exits) keeps the window open, and a
-// shell that started the server keeps waiting rather than printing its prompt
-// over the replacement's log. The waiter leaves Ctrl+C to the replacement,
-// which drains as usual; closing the window stops both. A live waiter keeps
-// its image locked, which is why an update moves the running binary aside
-// under a unique .old-* name.
+// replacement inherits the console and standard streams and this process waits
+// for it, so a console host that tracks the process (Windows Terminal) keeps
+// the window open and a starting shell does not print its prompt over the
+// replacement's log. The waiter leaves Ctrl+C to the replacement, which drains
+// as usual. A live waiter keeps its image locked, which is why an update moves
+// the running binary aside under a unique .old-* name.
 func SpawnReplacement(exePath string, args []string) (wait func() int, err error) {
 	if hasConsole() {
 		cmd := exec.Command(exePath, args...) //nolint:gosec // G204: exePath is the server's own binary path, validated by the caller

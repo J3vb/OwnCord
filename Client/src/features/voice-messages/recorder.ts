@@ -13,11 +13,12 @@
 
 import { Disposable } from "@lib/disposable";
 import { setOwnedTimeout } from "@lib/dom";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { publicAssetUrl } from "@lib/publicAssets";
 import { clipFilename, pickRecorderMime } from "./mime";
 import { encodeWaveform, reducePeaks, WAVEFORM_BARS } from "./waveform";
 import { encodeWav } from "./wav";
+import { isLinuxDesktop } from "../voice/native/platform";
 
 /** A recording ends on its own here. */
 export const MAX_DURATION_MS = 300_000;
@@ -59,6 +60,8 @@ export interface RecorderEnv {
   MediaRecorder?: typeof MediaRecorder | undefined;
   AudioContext?: typeof AudioContext | undefined;
   now?: () => number;
+  /** The picked microphone as a webview device id, "" for the default. */
+  micDeviceId?: () => Promise<string>;
 }
 
 export interface VoiceRecorderOptions {
@@ -83,14 +86,23 @@ export interface VoiceRecorder {
   readonly state: "idle" | "starting" | "recording" | "stopping" | "done";
 }
 
-/** The microphone request: the device picked in Voice & Audio settings, if any. */
-function audioConstraints(useDefaultDevice: boolean): MediaStreamConstraints {
-  const deviceId = loadPref<string>("audioInputDevice", "");
+/** The device picked in Voice & Audio settings, on Linux. The saved id there
+ *  is the native audio host's, which the webview does not know, so it is
+ *  looked up again by the device's name. */
+async function linuxMicDeviceId(): Promise<string> {
+  const saved = loadPref<string>("audioInputDevice", "");
+  if (saved === "") return "";
+  const { webviewMicId } = await import("./linuxMic");
+  return webviewMicId(saved);
+}
+
+/** The microphone request: `deviceId`, or the system default when "". */
+function audioConstraints(deviceId: string): MediaStreamConstraints {
   return {
     audio: {
       echoCancellation: loadPref("echoCancellation", true),
       noiseSuppression: loadPref("noiseSuppression", true),
-      ...(deviceId === "" || useDefaultDevice ? {} : { deviceId: { exact: deviceId } }),
+      ...(deviceId === "" ? {} : { deviceId: { exact: deviceId } }),
     },
   };
 }
@@ -196,8 +208,12 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
         ? (c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c)
         : undefined);
     if (getUserMedia === undefined) throw new VoiceRecordError("unsupported");
+    const lookup = env.micDeviceId ?? (isLinuxDesktop() ? linuxMicDeviceId : null);
+    const deviceId =
+      lookup === null ? loadPref<string>("audioInputDevice", "") : await lookup().catch(() => "");
+    if (state !== "starting") throw new VoiceRecordError("cancelled");
     try {
-      return await getUserMedia(audioConstraints(false));
+      return await getUserMedia(audioConstraints(deviceId));
     } catch (err) {
       const name = errorName(err);
       if (name === "NotAllowedError" || name === "SecurityError") {
@@ -205,9 +221,9 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
       }
       // The picked device is unplugged: the system default still works.
       if (name === "OverconstrainedError" || name === "NotFoundError") {
-        if (loadPref<string>("audioInputDevice", "") !== "") {
+        if (deviceId !== "") {
           try {
-            return await getUserMedia(audioConstraints(true));
+            return await getUserMedia(audioConstraints(""));
           } catch (retry) {
             const retryName = errorName(retry);
             if (retryName === "NotAllowedError" || retryName === "SecurityError") {

@@ -46,7 +46,7 @@ function authFrames(): Array<{ last_seq: number }> {
     .map((m) => m.payload);
 }
 
-describe("cseq gap detection (WP 2A-5)", () => {
+describe("cseq gap detection", () => {
   let client: ReturnType<typeof createWsClient>;
   let sample = 0;
 

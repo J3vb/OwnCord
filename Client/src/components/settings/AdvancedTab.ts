@@ -15,7 +15,7 @@ import {
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
-import { removeStored, storedKeys } from "@lib/preferences";
+import { removeStored, storedKeys } from "@lib/prefs/preferences";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
 import { settingsText as t } from "../../i18n/settings";

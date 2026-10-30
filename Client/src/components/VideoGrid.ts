@@ -3,7 +3,7 @@
  * Replaces the chat area when cameras are active.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { openMenuOnKeyboard } from "@lib/context-menu";
@@ -22,11 +22,11 @@ import {
   setUserVolume,
 } from "@lib/livekitSession";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import { syncVideoSurface, videoSurfaceOf } from "@lib/videoSurface";
 import { bindVideoZoom } from "@lib/zoomPan";
 import type { ZoomPan } from "@lib/zoomPan";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { voiceText } from "../i18n/voice";
 import { viewersLabel } from "./video-grid/viewers";
 import type { StreamInfo } from "./video-grid/stream-info";

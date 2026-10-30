@@ -50,7 +50,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => mockListen(...args),
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => {
     testPrefs.set(key, value);
@@ -544,7 +544,7 @@ describe("updatePttKey", () => {
 // Tests: updatePttKey gates an already-hot mic when bound mid-call (OC-0162)
 // ---------------------------------------------------------------------------
 
-describe("updatePttKey gates the mic when binding a key mid-call (OC-0162)", () => {
+describe("updatePttKey gates the mic when binding a key mid-call", () => {
   beforeEach(async () => {
     resetAll();
     // The module-level `listening` flag is not reset by resetAll() (it lives
@@ -1392,7 +1392,7 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
 // started, and can lose it again.
 // ---------------------------------------------------------------------------
 
-describe("PTT on the portal backend (LP-9b)", () => {
+describe("PTT on the portal backend", () => {
   const portalStatus = (ptt: string | null) => ({
     backend: "portal",
     portalVersion: 2,

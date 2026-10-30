@@ -5,7 +5,7 @@
 // session totals, and the screen-share state carried by the button itself.
 //
 // jsdom never applies app.css, so the visual rules are pinned separately in
-// b9-voice-polish-css.test.ts; here we pin the DOM the redesign produces.
+// voice-polish-css.test.ts; here we pin the DOM the redesign produces.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const connectionStatsMock = vi.hoisted(() => ({

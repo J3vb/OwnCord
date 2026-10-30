@@ -9,51 +9,42 @@ import (
 	"github.com/J3vb/OwnCord/Server/db/dbgen"
 )
 
-// ─── DM Models ──────────────────────────────────────────────────────────────
-
-// MaxGroupDMParticipants is the total participant ceiling for a group DM,
-// creator included. Discord's is 10; matching it keeps the fan-out per message
-// bounded and keeps a "group DM" from becoming an unmoderated guild.
+// MaxGroupDMParticipants is the participant ceiling for a group DM, creator
+// included. It bounds per-message fan-out and keeps a group DM from becoming
+// an unmoderated guild.
 const MaxGroupDMParticipants = 10
 
 // DMChannelInfo holds a DM channel summary for the channel list.
 type DMChannelInfo struct {
 	ChannelID int64 `json:"channel_id"`
-	// Recipient is the OTHER participant of a two-person DM. It is retained
-	// for backward compatibility with clients that predate group DMs and is
-	// only meaningful when IsGroup is false; for a group it carries the
-	// lowest-id other participant so such a client still renders something.
+	// Recipient is the other participant of a two-person DM, kept for clients that
+	// predate group DMs. It is meaningful only when IsGroup is false; for a group
+	// it carries the lowest-id other participant.
 	Recipient DMUser `json:"recipient"`
-	// Recipients is every participant except the viewer. This is the field
-	// group-aware clients read; for a 1:1 DM it holds exactly Recipient.
+	// Recipients is every participant except the viewer, which group-aware clients
+	// read; for a 1:1 DM it holds exactly Recipient.
 	Recipients []DMUser `json:"recipients"`
-	// Name is the optional group name (channels.name). Always "" for a 1:1 DM
-	// — a two-person DM is named by who is in it, not by a title.
+	// Name is the optional group name (channels.name), always "" for a 1:1 DM.
 	Name string `json:"name"`
-	// IsGroup is channels.is_group: decided once when the DM is created and
-	// never recomputed from the live participant count, so a group that people
-	// have left stays a group (see migration 028).
+	// IsGroup is channels.is_group, decided at creation and never recomputed from
+	// the live participant count, so a group people left stays a group.
 	IsGroup bool `json:"is_group"`
-	// OwnerID is the group's owner (channels.dm_owner_id), a current member.
-	// Set for groups only and omitted for a 1:1 DM, so a client can read its
-	// presence as "this server has group owners".
+	// OwnerID is the group's owner (channels.dm_owner_id), a current member. Set
+	// for groups only and omitted for a 1:1 DM.
 	OwnerID int64 `json:"owner_id,omitempty"`
-	// Icon is the group's icon as a file URL (/api/v1/files/{id}), "" when it
-	// has none and for a 1:1 DM. Always present on the wire.
+	// Icon is the group's icon as a file URL (/api/v1/files/{id}), "" when none
+	// and for a 1:1 DM. Always present on the wire.
 	Icon          string `json:"icon"`
 	LastMessageID *int64 `json:"last_message_id"`
 	LastMessage   string `json:"last_message"`
 	LastMessageAt string `json:"last_message_at"`
 	UnreadCount   int    `json:"unread_count"`
-	// MentionCount is read_states.mention_count for this DM, carried by the
-	// GetUserDMChannels query so every path that builds a DM summary (GET
-	// /dms and the ready payload) reports the same badge.
+	// MentionCount is read_states.mention_count for this DM, carried by
+	// GetUserDMChannels so GET /dms and the ready payload report the same badge.
 	MentionCount int `json:"mention_count"`
-	// LastReadMessageID is the viewer's read pointer (read_states
-	// .last_message_id), 0 when they have never read the DM. Only
-	// GetUserDMChannels fills it; a frame built without that query (the
-	// dm_channel_open event, NewDMChannelInfo) leaves it nil so the field is
-	// omitted instead of claiming 0.
+	// LastReadMessageID is the viewer's read pointer (read_states.last_message_id),
+	// 0 when they never read the DM. Only GetUserDMChannels fills it; frames built
+	// without that query leave it nil so the field is omitted instead of claiming 0.
 	LastReadMessageID *int64 `json:"last_read_message_id,omitempty"`
 }
 
@@ -63,21 +54,16 @@ type DMUser struct {
 	Username string `json:"username"`
 	Avatar   string `json:"avatar"`
 	Status   string `json:"status"`
-	// DisplayName is the participant's chosen nickname, "" when unset. Clients
-	// fall back to Username, exactly as they do everywhere else.
+	// DisplayName is the participant's nickname, "" when unset.
 	DisplayName string `json:"display_name"`
 }
 
 // NewDMChannelInfo assembles the payload shape for one DM from its channel id,
-// optional group name, group flag and full participant list (the viewer
-// included), as seen by viewerID. ownerID is the group owner, 0 for a 1:1 DM
-// and for a group whose owner is unknown. iconID is the attachment id of the
-// group's icon, "" for none and for a 1:1 DM.
-//
-// It is the single place that answers "which of these is the recipient", so
-// the REST list, the ready payload and the dm_channel_open event cannot
-// disagree about a channel — a disagreement that would show up as a DM whose
-// name changes depending on which event drew it.
+// optional group name, group flag and full participant list (viewer included),
+// as seen by viewerID. ownerID is 0 for a 1:1 DM or an unknown owner; iconID is
+// "" for none. It is the single place that decides which participant is the
+// recipient, so the REST list, the ready payload and dm_channel_open cannot
+// disagree.
 func NewDMChannelInfo(channelID int64, name string, isGroup bool, ownerID int64, iconID string, participants []DMUser, viewerID int64) DMChannelInfo {
 	others := make([]DMUser, 0, len(participants))
 	for i := range participants {
@@ -102,42 +88,32 @@ func NewDMChannelInfo(channelID int64, name string, isGroup bool, ownerID int64,
 	return info
 }
 
-// ─── GetOrCreateDMChannel ───────────────────────────────────────────────────
-
 // GetOrCreateDMChannel finds or creates a DM channel between two users,
-// opening it for both unconditionally. Returns the channel, whether it was
-// newly created, and any error. Used where there is no first-contact gate to
-// apply (cmd/seed's demo data) — service/dm.go's CreateDM goes through
-// GetOrCreateDMChannelGated instead.
+// opening it for both unconditionally, and returns the channel and whether it
+// was created. It is for callers with no first-contact gate (cmd/seed);
+// service/dm.go's CreateDM uses GetOrCreateDMChannelGated.
 func (d *DB) GetOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64) (*Channel, bool, error) {
 	ch, created, _, _, err := d.getOrCreateDMChannel(ctx, user1ID, user2ID, false)
 	return ch, created, err
 }
 
-// GetOrCreateDMChannelGated is GetOrCreateDMChannel's gated variant for a
-// caller-initiated one-to-one DM (service/dm.go's CreateDM): on the create
-// branch it decides whether to open the recipient's side (does the
-// recipient already trust callerID?) and writes dm_open_state accordingly —
-// INSIDE the same transaction as the trust check, with no separate
-// CloseDM step afterward. Codex review round 2, P1: the old shape (create
-// both sides open, then CloseDM the recipient's side in a later call) left
-// a window where a cancellation or a failed CloseDM left the recipient open,
-// and where a CloseDM built from a stale "not trusted" read could close a DM
-// the recipient had meanwhile accepted (the trust write racing the read).
-// recipientOpened is only meaningful when created is true — an existing
-// channel's recipient side is whatever it already was, untouched here.
+// GetOrCreateDMChannelGated is the gated variant for a caller-initiated 1:1
+// DM (service/dm.go's CreateDM): on the create branch it decides whether to
+// open the recipient's side (does the recipient already trust callerID?) and
+// writes dm_open_state inside the same transaction as the trust check. A
+// separate CloseDM afterwards could leave the recipient open on a cancellation
+// or close a DM the recipient had meanwhile accepted. recipientOpened is
+// meaningful only when created is true.
 func (d *DB) GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *Channel, created bool, recipientOpened bool, accepted *MessageRequest, err error) {
 	return d.getOrCreateDMChannel(ctx, callerID, recipientID, true)
 }
 
-// getOrCreateDMChannel is the shared implementation. user1ID is always the
-// caller (the one whose side always ends up open); gateRecipient controls
-// whether user2ID's side is conditioned on trust (true) or opened
-// unconditionally like user1ID's (false). The entire lookup+create is
-// wrapped in a single SERIALIZABLE transaction to prevent a TOCTOU race
-// where two concurrent requests both see ErrNoRows and each create a
-// separate DM channel for the same user pair — and, when gated, to keep the
-// trust check and the dm_open_state write atomic.
+// getOrCreateDMChannel is the shared implementation. user1ID is the caller,
+// whose side always ends up open; gateRecipient makes user2ID's side depend on
+// trust instead of opening unconditionally. Lookup and create share one
+// SERIALIZABLE transaction so two concurrent requests cannot each create a
+// channel for the same pair, and so the trust check and dm_open_state write
+// stay atomic.
 func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, gateRecipient bool) (*Channel, bool, bool, *MessageRequest, error) {
 	tx, err := d.writer.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
@@ -146,14 +122,11 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel begin tx: %w", err)
 	}
 
-	// Check for an existing DM channel inside the transaction.
-	//
-	// The is_group clause is what keeps group DMs out of this lookup. Without
-	// it a group that happens to contain both users matches the join, and
-	// "message Bob" would silently drop the message into a five-person group.
-	// It is the stored flag rather than a live participant count because a
-	// group people have left can have exactly two members and must still not
-	// answer "the DM between these two".
+	// Look for an existing DM inside the transaction. The is_group clause keeps
+	// group DMs out of the lookup, or "message Bob" could land in a group that
+	// contains both users. It is the stored flag, not a live participant count,
+	// because a group people left can have two members and must still not answer
+	// "the DM between these two".
 	var existingID int64
 	err = tx.QueryRow(
 		`SELECT dp1.channel_id FROM dm_participants dp1
@@ -165,19 +138,17 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 	).Scan(&existingID)
 
 	if err == nil {
-		// Existing channel found — ensure the calling user has it open (re-open
-		// is idempotent). Without this, a user who previously closed the DM would
-		// not see it in their sidebar after the other party re-initiates. The
-		// recipient's own side is untouched — recipientOpened is meaningless
-		// here (created is false) so it is reported true for backward
-		// compatibility with callers checking it unconditionally.
+		// Existing channel: ensure the caller has it open (idempotent), so a user who
+		// closed the DM sees it again when the other party re-initiates. The
+		// recipient's side is untouched; recipientOpened is reported true for callers
+		// that check it unconditionally.
 		_, _ = tx.Exec(
 			`INSERT OR IGNORE INTO dm_open_state (user_id, channel_id) VALUES (?, ?)`,
 			user1ID, existingID,
 		)
-		// A recipient opening the DM themselves while the other user's request
-		// is still undecided is an acceptance: same trust, open state and state
-		// transition AcceptMessageRequest writes, in this transaction.
+		// A recipient opening the DM themselves while the other user's request is
+		// undecided is an acceptance: same trust, open state and transition as
+		// AcceptMessageRequest, in this transaction.
 		var accepted *MessageRequest
 		if gateRecipient {
 			var acceptErr error
@@ -203,9 +174,6 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel lookup: %w", err)
 	}
 
-	// No existing DM — create one inside the same transaction.
-
-	// Insert channel with type 'dm' and empty name.
 	res, err := tx.Exec(
 		`INSERT INTO channels (name, type) VALUES ('', 'dm')`,
 	)
@@ -219,7 +187,6 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel last insert id: %w", err)
 	}
 
-	// Insert both participants.
 	_, err = tx.Exec(
 		`INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?), (?, ?)`,
 		channelID, user1ID, channelID, user2ID,
@@ -229,10 +196,8 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 		return nil, false, false, nil, fmt.Errorf("GetOrCreateDMChannel insert participants: %w", err)
 	}
 
-	// Test seam (package db only, no exported setter): lets a same-package
-	// test simulate a failure/cancellation in the exact window the old
-	// two-step create-then-CloseDM shape used to leave open, and confirm the
-	// whole transaction rolls back instead of landing the recipient open.
+	// Test seam (package db only): simulates a failure in the window where the
+	// recipient would otherwise land open, to prove the transaction rolls back.
 	if hook := d.afterDMParticipantsInsertHook; hook != nil {
 		if hookErr := hook(); hookErr != nil {
 			_ = tx.Rollback()
@@ -240,9 +205,8 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 		}
 	}
 
-	// Decide user2ID's (the recipient's) visibility and write dm_open_state
-	// in the SAME transaction — see getOrCreateDMChannel's doc comment
-	// (Codex review round 2, P1) for why this must not be a separate step.
+	// Decide the recipient's visibility and write dm_open_state in this same
+	// transaction (see getOrCreateDMChannel).
 	recipientOpened, err := decideAndOpenRecipientDM(tx, user1ID, user2ID, channelID, gateRecipient)
 	if err != nil {
 		_ = tx.Rollback()
@@ -261,10 +225,10 @@ func (d *DB) getOrCreateDMChannel(ctx context.Context, user1ID, user2ID int64, g
 }
 
 // acceptUndecidedRequestOnOpen accepts the pending, ignored or deleted request
-// that senderID holds against recipientID (the caller opening the DM), if any:
-// TrustSender, then the transition to accepted. The recipient's dm_open_state
-// row is already written by the caller. Returns nil when there is no such
-// request. q must be bound to the caller's transaction.
+// senderID holds against recipientID (the caller opening the DM): TrustSender,
+// then the transition to accepted. The recipient's dm_open_state row is
+// already written. It returns nil when there is no such request; q must be
+// bound to the caller's transaction.
 func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipientID, senderID int64) (*MessageRequest, error) {
 	row, err := q.GetMessageRequestByPair(ctx, dbgen.GetMessageRequestByPairParams{SenderID: senderID, RecipientID: recipientID})
 	if errors.Is(err, sql.ErrNoRows) {
@@ -273,10 +237,9 @@ func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipie
 	if err != nil {
 		return nil, fmt.Errorf("get request: %w", err)
 	}
-	// Deleted is server-side identical to ignored (service.Delete): the
-	// recipient dismissed the request without deciding about the sender, and
-	// opening the conversation themselves is the decision. Accepted and
-	// blocked rows stay as they are.
+	// Deleted is server-side identical to ignored: the recipient dismissed the
+	// request undecided, and opening the conversation is the decision. Accepted
+	// and blocked rows stay.
 	switch row.State {
 	case "pending", "ignored", "deleted":
 	default:
@@ -296,11 +259,10 @@ func acceptUndecidedRequestOnOpen(ctx context.Context, q *dbgen.Queries, recipie
 }
 
 // decideAndOpenRecipientDM decides (when gateRecipient) whether user2ID
-// already trusts user1ID and writes dm_open_state for the freshly created
-// channelID accordingly, both against tx — so it commits or rolls back as
-// one unit with the caller's transaction. Split out of getOrCreateDMChannel
-// only to keep that function's statement count down; it owns no transaction
-// lifecycle of its own (the caller rolls back on a non-nil error).
+// already trusts user1ID and writes dm_open_state for channelID against tx, so
+// it commits or rolls back with the caller's transaction. It is split out of
+// getOrCreateDMChannel only to keep that function short and owns no
+// transaction lifecycle.
 func decideAndOpenRecipientDM(tx *sql.Tx, user1ID, user2ID, channelID int64, gateRecipient bool) (recipientOpened bool, err error) {
 	recipientOpened = true
 	if gateRecipient {
@@ -331,10 +293,10 @@ func decideAndOpenRecipientDM(tx *sql.Tx, user1ID, user2ID, channelID int64, gat
 	return recipientOpened, nil
 }
 
-// FindDMChannelIDBetween returns the id of the 1:1 DM channel the two users
-// share, or ok=false when none exists. It never creates anything, and group
-// DMs never match — blocks do not gate them, so side effects keyed off a
-// block (like voice eviction) must not reach a group call.
+// FindDMChannelIDBetween returns the id of the 1:1 DM the two users share, or
+// ok=false. It never creates anything, and group DMs never match: blocks do
+// not gate them, so block-keyed side effects (voice eviction) must not reach a
+// group call.
 func (d *DB) FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error) {
 	id, err := d.q.FindDMChannelIDBetween(ctx, dbgen.FindDMChannelIDBetweenParams{
 		UserID:   user1ID,
@@ -349,21 +311,15 @@ func (d *DB) FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64)
 	return id, true, nil
 }
 
-// ─── GetUserDMChannels ──────────────────────────────────────────────────────
-
 // GetUserDMChannels returns all open DM channels for a user with the full
-// participant list, last message preview, and unread count. Ordered by most
-// recent activity.
+// participant list, last message preview and unread count, most recent
+// activity first.
 //
-// It is two queries, not one: dm_participants holds N users per channel, so a
-// single joined query returns one row per (channel, participant) pair and the
-// caller has to de-duplicate anyway. Fetching the participants for every open
-// DM in one extra pass keeps the cost at O(1) queries rather than the O(n) a
-// per-channel participant lookup would cost.
-//
-// Note: the JOIN on dm_open_state already restricts results to DM channels
-// (dm_open_state only contains rows for DM channels), and the explicit
-// "c.type = 'dm'" predicate provides a defensive second check.
+// It is two queries because dm_participants holds N users per channel, so one
+// join would return a row per (channel, participant); fetching participants
+// for every open DM in one extra pass keeps it O(1) queries. The JOIN on
+// dm_open_state already restricts to DM channels; "c.type = 'dm'" is a
+// defensive second check.
 func (d *DB) GetUserDMChannels(ctx context.Context, userID int64) ([]DMChannelInfo, error) {
 	rows, err := d.q.GetUserDMChannels(ctx, userID)
 	if err != nil {
@@ -425,8 +381,7 @@ func (d *DB) CountDMParticipants(ctx context.Context, channelID int64) (int, err
 }
 
 // IsGroupDM reports whether a DM channel was created as a group. False for a
-// non-existent channel and for anything that is not a DM, which is what every
-// caller wants: "treat it as a 1:1" is the conservative answer.
+// missing channel or a non-DM, the conservative "treat it as 1:1" answer.
 func (d *DB) IsGroupDM(ctx context.Context, channelID int64) (bool, error) {
 	flag, err := d.q.IsGroupDM(ctx, channelID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -458,12 +413,9 @@ func (d *DB) GetDMParticipants(ctx context.Context, channelID, viewerID int64) (
 	return out, nil
 }
 
-// ─── OpenDM / CloseDM ──────────────────────────────────────────────────────
-
-// OpenDM adds a DM channel to a user's open list (idempotent). The bool
-// reports whether the DM was actually (re)opened by this call — false when it
-// was already open, via the INSERT OR IGNORE's affected-row count — so a
-// caller can distinguish a genuine open from a no-op on an already-open DM.
+// OpenDM adds a DM channel to a user's open list (idempotent). The bool is
+// false when it was already open (INSERT OR IGNORE's affected-row count), so
+// a caller can tell a genuine open from a no-op.
 func (d *DB) OpenDM(ctx context.Context, userID, channelID int64) (bool, error) {
 	rows, err := d.q.OpenDM(ctx, dbgen.OpenDMParams{
 		UserID:    userID,
@@ -476,8 +428,7 @@ func (d *DB) OpenDM(ctx context.Context, userID, channelID int64) (bool, error) 
 }
 
 // OpenDMIfParticipant is OpenDM that writes nothing unless userID is a current
-// participant of channelID, checked in the same statement. The bool reports a
-// genuine (re)open, as for OpenDM.
+// participant of channelID, checked in the same statement.
 func (d *DB) OpenDMIfParticipant(ctx context.Context, userID, channelID int64) (bool, error) {
 	rows, err := d.q.OpenDMIfParticipant(ctx, dbgen.OpenDMIfParticipantParams{
 		UserID:    userID,
@@ -500,8 +451,6 @@ func (d *DB) CloseDM(ctx context.Context, userID, channelID int64) error {
 	return nil
 }
 
-// ─── Participant helpers ────────────────────────────────────────────────────
-
 // IsDMParticipant checks if a user is a participant in a DM channel.
 func (d *DB) IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error) {
 	_, err := d.q.IsDMParticipant(ctx, dbgen.IsDMParticipantParams{
@@ -517,10 +466,9 @@ func (d *DB) IsDMParticipant(ctx context.Context, userID, channelID int64) (bool
 	return true, nil
 }
 
-// GetUserDMChannelIDs returns the channel IDs of all DMs the user has open.
-// It reads only the dm_open_state primary key, so callers that just need the
-// ID set (access computation, search scoping) skip the recipient/preview/
-// unread work GetUserDMChannels pays for.
+// GetUserDMChannelIDs returns the channel IDs of all DMs the user has open,
+// reading only the dm_open_state primary key so access computation and search
+// scoping skip GetUserDMChannels' recipient, preview and unread work.
 func (d *DB) GetUserDMChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	ids, err := d.q.GetUserDMChannelIDs(ctx, userID)
 	if err != nil {

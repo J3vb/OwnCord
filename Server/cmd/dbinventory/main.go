@@ -3,21 +3,19 @@
 // functions and sentinels, method calls on a *db.DB value, and the places the
 // bare handle is passed on to somebody else.
 //
-// It is the measurement behind docs/architecture/server-boundaries.md (B3-0)
-// and prints a Markdown table so the document can be regenerated:
+// It is the measurement behind docs/architecture/server-boundaries.md and
+// prints a Markdown table so the document can be regenerated:
 //
 //	cd Server && go run ./cmd/dbinventory
 //
-// The analysis is syntactic (go/parser + go/ast, no type information) and
-// lives in Server/invariants so the guard and this command measure the same
-// thing: see DBHandleVars, DBHandleFields and DBHandleCalls.
+// The analysis is syntactic (go/parser + go/ast) and lives in Server/invariants
+// so the guard and this command measure the same thing: see DBHandleVars,
+// DBHandleFields and DBHandleCalls.
 //
-// Use, not import (B6-14). The handle is stored on a struct field — Hub.db,
-// App.database — so any file in those packages can call it without importing
-// db at all, and until B6-14 the walk skipped every such file and the
-// inventory said nothing about them. A file in a package that declares a
-// *db.DB field is now analysed whatever it imports, and becomes a row as soon
-// as it calls the handle or hands it on.
+// It measures use, not import: the handle is stored on a struct field
+// (Hub.db, App.database), so any file in that package can call it without
+// importing db. A file in a package that declares a *db.DB field is analysed
+// whatever it imports, and becomes a row once it calls the handle or hands it on.
 package main
 
 import (
@@ -39,10 +37,9 @@ import (
 	"github.com/J3vb/OwnCord/Server/invariants"
 )
 
-// layerDirs are the top-level packages that may import db freely and are
-// therefore not inventoried. Matched on the root-relative path, so a nested
-// directory that happens to share a name (api/service/) is still inventoried
-// — the same rule db-import-boundary applies.
+// layerDirs are the top-level packages that may import db freely and are not
+// inventoried. Matched on the root-relative path, so a nested directory sharing
+// a name (api/service/) is still inventoried, as db-import-boundary does.
 var layerDirs = map[string]bool{"db": true, "service": true}
 
 // skipNames are never code at any depth: fixtures and vendored JS.
@@ -81,9 +78,8 @@ func main() {
 }
 
 // inventory returns one row per production file under root that imports db,
-// sorted by path. Split out of main so the doc gate
-// (TestServerBoundariesDocIsCurrent) can render the same block the command
-// prints without shelling out to it.
+// sorted by path. It is split out of main so the doc gate
+// (TestServerBoundariesDocIsCurrent) can render the same block.
 func inventory(root string) ([]fileUse, error) {
 	fset := token.NewFileSet()
 	dbKinds, err := declKinds(fset, filepath.Join(root, "db"))
@@ -96,11 +92,10 @@ func inventory(root string) ([]fileUse, error) {
 		return nil, err
 	}
 
-	// Pass 1: parse everything, collect per package the struct fields typed
-	// *db.DB and the package-level functions that return one — the two ways a
-	// file with no import of its own can be holding the handle. A constructor
-	// is kept with the position of its *db.DB result, because that is what
-	// decides which name on the left receives the handle.
+	// Pass 1: parse everything, collecting per package the struct fields typed
+	// *db.DB and the functions that return one, the two ways a file with no
+	// import can hold the handle. A constructor keeps the position of its
+	// *db.DB result, which decides which name on the left receives it.
 	parsed := map[string]*ast.File{}
 	fieldsByPkg := map[string]map[string]bool{}
 	ctorsByPkg := map[string]map[string]int{}
@@ -126,9 +121,8 @@ func inventory(root string) ([]fileUse, error) {
 	}
 
 	// Pass 2: per-file uses. A file with no import is analysed anyway when its
-	// package carries the handle on a field or opens it through a constructor
-	// of its own — that is the shape B6-14 was about — and becomes a row only
-	// if it actually uses it.
+	// package carries the handle on a field or opens it through a constructor,
+	// and becomes a row only if it uses it.
 	var rows []fileUse
 	for _, rel := range files {
 		f := parsed[rel]
@@ -307,22 +301,22 @@ func sum(m map[string]int) int {
 
 // printTable renders the Markdown block between the dbinventory markers in
 // docs/architecture/server-boundaries.md and returns the number of problems
-// found -- nonzero means the command exits 1, and
-// TestServerBoundariesDocIsCurrent fails before it compares anything.
+// found; nonzero makes the command exit 1, and TestServerBoundariesDocIsCurrent
+// fails before it compares anything.
 //
-// The classes, and what each one means:
+// The problem classes:
 //
-//   - UNLISTED: the file imports db and has no row (B3-0's original).
+//   - UNLISTED: the file imports db and has no row.
 //   - UNLISTED BY USE: the file imports nothing but reaches the handle through
-//     a package field, and has no row. This is the shape B6-14 found: a call
-//     the guard could not see because there was no import to see it by.
+//     a package field, and has no row.
 //   - ADAPTER ROW USES THE HANDLE: an adapter, move or remove row that
-//     measures a call or a hand-off. Its disposition says it makes none.
+//     measures a call or a hand-off, though its disposition says it makes none.
 //   - CALLS DRIFTED / HANDS DRIFTED: a boundary row whose pinned multiset is
 //     not what the tree measures, in either direction. Raising a count is an
 //     edit to DBImportAllow, never a side effect of editing the file.
 //   - STALE: a row whose file no longer uses db at all.
 //
+// allow is a parameter so unit tests can drive each class from a fixture.
 // allow is a parameter rather than invariants.DBImportAllow directly so the
 // unit tests can drive each class from a fixture instead of the live tree.
 func printTable(w io.Writer, rows []fileUse, allow map[string]invariants.DBImportEntry) int {
@@ -385,9 +379,9 @@ func printTable(w io.Writer, rows []fileUse, allow map[string]invariants.DBImpor
 	return problems
 }
 
-// classify compares one measured row against the entry that claims it, and
-// returns a line per problem found -- naming the file, the measured multiset
-// and the pinned one, because "drifted" without both is not actionable.
+// classify compares one measured row against the entry that claims it and
+// returns a line per problem, naming the file, the measured multiset and the
+// pinned one.
 func classify(r fileUse, entry invariants.DBImportEntry, listed bool) []string {
 	if !listed {
 		if r.imports {

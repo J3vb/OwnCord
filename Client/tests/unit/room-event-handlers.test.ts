@@ -1098,7 +1098,7 @@ describe("handleEncryptionError", () => {
   // REMOTE sender. Those frames are dropped, never played in clear, and the
   // failures stop once the offer lands. Only a streak that outlasts the grace
   // window is a real failure.
-  describe("receive-side decrypt failures (OC-0452)", () => {
+  describe("receive-side decrypt failures", () => {
     const bob = { identity: "bob", isLocal: false } as Participant;
     const decryptFailed = () =>
       new Error(

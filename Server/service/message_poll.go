@@ -18,9 +18,8 @@ import (
 )
 
 // PollStore is the slice of the database the poll commands use beyond Store: a
-// poll's own row (does this message have one), its block as a viewer sees it,
-// and the vote and end writes. *db.DB satisfies it. It is a slice interface declared here
-// so Store, whose size is pinned, does not grow.
+// poll's own row, its block as a viewer sees it, and the vote and end writes.
+// *db.DB satisfies it; declared here so Store, whose size is pinned, does not grow.
 type PollStore interface {
 	GetPollMeta(ctx context.Context, messageID int64) (*db.PollMeta, error)
 	GetPollInfo(ctx context.Context, messageID, viewerID int64) (*db.PollInfo, error)
@@ -36,9 +35,9 @@ type PollInfo = db.PollInfo
 // PollCount is one answer's vote count in a poll_update.
 type PollCount = db.PollCount
 
-// pollDeps is what the poll commands need beyond Store. store is read through a
-// slice interface (nil disables polls). wake, when set, tells the expirer that a
-// poll was created, so it re-reads its next deadline.
+// pollDeps is what the poll commands need beyond Store: store (nil disables polls)
+// and wake, which tells the expirer a poll was created so it re-reads its next
+// deadline.
 type pollDeps struct {
 	store PollStore
 	wake  func()
@@ -56,9 +55,8 @@ const (
 	maxPollAnswerRunes   = 55
 )
 
-// pollCreateLimit and pollCreateWindow cap polls per user on top of the send
-// rate gate: a poll is a long-lived object with a timer row, and no honest user
-// posts more than this.
+// pollCreateLimit and pollCreateWindow cap polls per user on top of the send rate
+// gate: a poll is a long-lived object with a timer row.
 const (
 	pollCreateLimit  = 5
 	pollCreateWindow = 10 * time.Minute
@@ -103,15 +101,14 @@ func (p PollCreateParams) fingerprint() (string, error) {
 	return string(b), nil
 }
 
-// CreatePoll posts a poll as an ordinary message by the caller: its content is
-// a readable fallback of the question and answers, and the poll rows commit
-// with the message and its receipt. Creating is sending, so the send gates
-// apply unchanged. A poll never pings, and no channel push is sent. Callers emit
-// the events, exactly as for SendMessage, from the same SendMessageResult.
-//
-// The order is: the rate gate and a receipt lookup (a retry of an accepted poll
-// is answered from its receipt before anything else), the poll limiter,
-// validation, the send gates, slow mode, then commit.
+// CreatePoll posts a poll as an ordinary message by the caller: its content is a
+// readable fallback of the question and answers, and the poll rows commit with the
+// message and its receipt. Creating is sending, so the send gates apply unchanged.
+// A poll never pings and no channel push is sent. Callers emit the events from the
+// SendMessageResult, as for SendMessage.
+// Order: the rate gate and a receipt lookup (a retry of an accepted poll is answered
+// from its receipt first), the poll limiter, validation, the send gates, slow mode,
+// then commit.
 func (s *MessageService) CreatePoll(ctx context.Context, p PollCreateParams) (*SendMessageResult, error) {
 	ctx, done := traceCall(ctx, "service/message", "MessageService.CreatePoll",
 		telemetry.Int64("user_id", p.UserID),
@@ -170,10 +167,9 @@ func (s *MessageService) CreatePoll(ctx context.Context, p PollCreateParams) (*S
 }
 
 // pollResult builds the SendMessageResult of a committed poll and runs its
-// post-commit work: the poll block read-back, the DM side effects (a
-// first-contact request is staged for an untrusted 1:1 recipient instead of
-// delivering) and, for a DM only, push. No mention badge and no channel push:
-// nothing was mentioned.
+// post-commit work: the poll block read-back, DM side effects (a first-contact
+// request is staged for an untrusted 1:1 recipient instead of delivering) and, for
+// a DM only, push. No mention badge or channel push.
 func (s *MessageService) pollResult(ctx context.Context, sp SendMessageParams, msg *db.Message, content string, ch *db.Channel) *SendMessageResult {
 	isDM := ch.Type == "dm"
 	result := &SendMessageResult{
@@ -216,9 +212,9 @@ func (s *MessageService) pushDMParticipants(ctx context.Context, sp SendMessageP
 	})
 }
 
-// validatePoll sanitises and bounds a poll, and builds the fallback text the
-// message stores: "📊 <question>" then one "- [<emoji> ]<answer>" line per
-// answer. The text has no words of any language, so nothing needs translating.
+// validatePoll sanitises and bounds a poll and builds the fallback text the message
+// stores: "📊 <question>" then one "- [<emoji> ]<answer>" line per answer. The text
+// has no words of any language, so nothing needs translating.
 func validatePoll(p PollCreateParams) (*db.PollInput, string, error) {
 	if !slices.Contains(pollDurationsHours, p.DurationHours) {
 		return nil, "", fmt.Errorf("%w: duration_hours must be one of %v", ErrBadRequest, pollDurationsHours)
@@ -260,8 +256,8 @@ func validatePoll(p PollCreateParams) (*db.PollInput, string, error) {
 }
 
 // pollReadBackTimeout bounds the post-commit read of the new poll's block. The
-// handler runs on the connection's read pump, so a stalled read must not hold
-// it for long; a miss only costs the live block.
+// handler runs on the connection's read pump, so a stalled read must not hold it
+// long; a miss only costs the live block.
 const pollReadBackTimeout = 2 * time.Second
 
 // pollBreakRune reports a rune that would break the one-line-per-field

@@ -1,10 +1,7 @@
-// Phase B Step 8 — declared application metrics.
-//
-// Instruments are constructed lazily against the global Provider so callers
-// don't need to thread a Meter through every constructor. Hot-path callers
-// should cache the returned instrument in a struct field rather than calling
-// these helpers per request — they take a sync.RWMutex to read the global
-// provider and the cost adds up at high throughput.
+// Declared application metrics. Instruments are constructed lazily against the
+// global Provider so callers need not thread a Meter through constructors.
+// Hot-path callers should cache the returned instrument in a struct field:
+// these helpers take a sync.RWMutex to read the global provider.
 
 package telemetry
 
@@ -41,13 +38,12 @@ var (
 )
 
 // NewAppMetrics returns a process-wide AppMetrics, lazily constructed against
-// the current global provider. Calling it multiple times returns the same
-// instance until resetAppMetricsForInit() is called (which Init uses after
-// swapping the global provider so instruments re-bind to the new meter).
+// the current global provider. Repeated calls return the same instance until
+// resetAppMetricsForInit() is called (Init does so after swapping the global
+// provider, so instruments re-bind).
 //
-// The steady-state path is a single atomic load — service-method defers call
-// this per request, so it must not take a mutex once the bundle exists. A
-// plain sync.Once would give the same fast path but cannot be re-armed by
+// The steady-state path is a single atomic load, because service-method defers
+// call this per request. A plain sync.Once cannot be re-armed by
 // resetAppMetricsForInit, hence the pointer + construction mutex.
 func NewAppMetrics() *AppMetrics {
 	if m := appMetricsInst.Load(); m != nil {

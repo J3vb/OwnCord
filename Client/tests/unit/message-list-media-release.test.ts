@@ -33,7 +33,7 @@ vi.mock("../../src/features/content-consent/external", async (importOriginal) =>
 // No native host: the GIF stays loading, so the suite sees only the observer.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => new Promise(() => {}) }));
 
-vi.mock("@lib/media-visibility", () => ({
+vi.mock("@lib/prefs/mediaVisibility", () => ({
   observeMedia: observeMediaMock,
   discardMedia: discardMediaMock,
 }));

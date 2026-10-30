@@ -8,18 +8,15 @@ import (
 	"sync"
 )
 
-// A fresh in-memory database used to run every migration on each Migrate.
-// Under the race detector that costs about a second per call, and the test
-// suites open hundreds of in-memory databases, so it dominated CI. A fresh
-// private ":memory:" database now receives a copy of one migrated image
-// instead, built once per process by the same migration path. File databases
-// and shared-cache memory URIs never take this path (a copy would detach a
-// shared-cache connection from the cache), so production always runs the
-// migrations themselves.
-//
-// Two differences from a database migrated in place, neither read by anything
-// today: schema_versions.applied_at is when the image was built, and the copy
-// is an SQLite memdb, which caps the database at 1 GiB.
+// A fresh in-memory database used to run every migration on each Migrate,
+// about a second per call under the race detector, which dominated CI because
+// tests open hundreds. A fresh private ":memory:" database instead receives a
+// copy of one migrated image built once per process by the same migration
+// path. File databases and shared-cache memory URIs never take this path (a
+// copy would detach a shared-cache connection from the cache), so production
+// always runs the migrations. Two differences from in-place migration, neither
+// read today: schema_versions.applied_at is when the image was built, and the
+// copy is an SQLite memdb capped at 1 GiB.
 
 type rawSerializer interface{ Serialize() ([]byte, error) }
 type rawDeserializer interface{ Deserialize(buf []byte) error }
@@ -105,10 +102,9 @@ func restoreFreshMemory(database *DB) bool {
 		return false
 	}
 	// Deserialize resets the per-schema PRAGMAs (cache_size, synchronous,
-	// mmap_size) to SQLite's defaults, so openMemory's set is applied again.
-	// A failure here leaves a migrated database with default tuning, which
-	// is still correct, so the copy stands.
-	// It runs on the pinned connection: the pool holds only that one.
+	// mmap_size) to defaults, so openMemory's set is applied again. A failure
+	// leaves a correct database with default tuning, so the copy stands. It runs on
+	// the pinned connection, the only one in the pool.
 	for _, p := range memoryPragmas {
 		if _, err := conn.ExecContext(ctx, p.stmt); err != nil {
 			break

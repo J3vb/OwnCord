@@ -6,7 +6,7 @@
  */
 
 import type { IconName } from "../../lib/icons";
-import type { MountableComponent } from "../../lib/safe-render";
+import type { MountableComponent } from "../../lib/text/safeRender";
 import type { PeerVerification } from "../../stores/voice.store";
 import { rePinPeerIdentity, peerAnnouncedIdentityKey } from "../../lib/livekitSession";
 import { showToast } from "../../lib/toast";

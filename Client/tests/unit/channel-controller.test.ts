@@ -364,7 +364,7 @@ import {
 } from "@lib/pendingMessages";
 import type { ChannelControllerOptions } from "../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
-import { loadLastChannel } from "@lib/last-channel";
+import { loadLastChannel } from "@lib/prefs/lastChannel";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
 import { Disposable } from "@lib/disposable";
 import { messagingText } from "../../src/i18n/messaging";
@@ -379,7 +379,7 @@ import {
   setNsfwAcknowledged,
 } from "@stores/channels.store";
 import { createMessageList } from "@components/MessageList";
-import { loadSavedDraft, saveDraft } from "@lib/savedDrafts";
+import { loadSavedDraft, saveDraft } from "@lib/prefs/savedDrafts";
 import {
   clearReactionUsersCache,
   getCachedReactionUsers,
@@ -540,7 +540,7 @@ describe("createChannelController", () => {
     expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
   });
 
-  describe("with the server's read pointer (WP 3D-5d)", () => {
+  describe("with the server's read pointer", () => {
     beforeEach(() => {
       applyReadyCapabilities({ read_pointer: true });
       mockLeaveChannel.mockClear();
@@ -625,7 +625,7 @@ describe("createChannelController", () => {
 
   // UX-8: the ready-time auto-select no longer clears a badge (selecting is
   // not viewing), so mounting the channel is what clears it.
-  describe("mount clears the unread badge (UX-8)", () => {
+  describe("mount clears the unread badge", () => {
     it("clears the mounted channel's unread and mention counts", () => {
       setChannels([
         {
@@ -657,7 +657,7 @@ describe("createChannelController", () => {
     });
   });
 
-  describe("per-channel composer drafts (UX-1)", () => {
+  describe("per-channel composer drafts", () => {
     it("captures the outgoing channel's draft before destroying it", () => {
       const opts = makeOpts();
       mockGetDraft.mockReturnValue({
@@ -794,7 +794,7 @@ describe("createChannelController", () => {
       );
     });
 
-    it("restores the pre-edit draft after a channel switch mid-edit (P1-08)", () => {
+    it("restores the pre-edit draft after a channel switch mid-edit", () => {
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
@@ -1119,7 +1119,7 @@ describe("createChannelController", () => {
     expect(ctrl.messageList).toBeNull();
   });
 
-  describe("MessageList callbacks (P4-12 delete confirmation dialog)", () => {
+  describe("MessageList callbacks (delete confirmation dialog)", () => {
     function deleteModal(): HTMLElement | null {
       return document.querySelector("[data-testid='msg-delete-modal']");
     }
@@ -1227,7 +1227,7 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
-    it("keeps the CLI-08 gate: confirming while disconnected shows one error and sends nothing", () => {
+    it("keeps the delivery gate: confirming while disconnected shows one error and sends nothing", () => {
       mockGetChannelMessages.mockReturnValue([
         { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
       ]);
@@ -1406,7 +1406,7 @@ describe("createChannelController", () => {
       return { opts, ctrl, beforeFloorId, handler };
     }
 
-    it("reconciles a pre-restore draft whose retry the server deduplicates (OC-0476)", async () => {
+    it("reconciles a pre-restore draft whose retry the server deduplicates", async () => {
       const { opts, ctrl, beforeFloorId, handler } = await retryPreFloorDraft();
 
       handler("chat_send_ok")(
@@ -1419,7 +1419,7 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
-    it("does not resend a pre-restore retry the server refuses (OC-0476)", async () => {
+    it("does not resend a pre-restore retry the server refuses", async () => {
       const { opts, ctrl, handler } = await retryPreFloorDraft();
 
       handler("error")(
@@ -1460,7 +1460,7 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
-    it("preserves submission order between a persisted plain-text send and a synchronous reply/attachment send (OC-0433)", async () => {
+    it("preserves submission order between a persisted plain-text send and a synchronous reply/attachment send", async () => {
       // A plain text send (no reply, no attachment) with dedup support takes
       // an async path: it awaits savePendingText's persistence round-trip
       // before handing the frame to the socket. A send with a reply or
@@ -1679,7 +1679,7 @@ describe("createChannelController", () => {
       expect(mockSetDisabled).toHaveBeenLastCalledWith("Not connected");
     });
 
-    it("composer shows the timeout with the server-supplied expiry and re-enables on lift (B9-15)", async () => {
+    it("composer shows the timeout with the server-supplied expiry and re-enables on lift", async () => {
       const opts = makeOpts();
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
@@ -3026,7 +3026,7 @@ describe("createChannelController", () => {
       expect(mockSetSendGate).toHaveBeenLastCalledWith(null);
     });
 
-    it("does not gate the newly mounted channel with a late ack for a message sent in the previous channel (OC-0059)", () => {
+    it("does not gate the newly mounted channel with a late ack for a message sent in the previous channel", () => {
       // Channel A has slow mode; channel B does too, with a different value,
       // so a misattributed ack is unmistakable.
       setChannels([
@@ -3610,7 +3610,7 @@ describe("createChannelController", () => {
       expect(opts.reactionCtrl.destroy).toHaveBeenCalled();
     });
 
-    it("invalidates the torn-down channel's loaded window, so a bare destroyChannel (not a channel-to-channel switch) does not leave it stale (OC-0247)", () => {
+    it("invalidates the torn-down channel's loaded window, so a bare destroyChannel (not a channel-to-channel switch) does not leave it stale", () => {
       // The NSFW gate's "Go Back" and a resync-driven setActiveChannel(null)
       // both tear down via a bare destroyChannel() with no next mountChannel
       // to invalidate the outgoing channel via the previousChannelId path.
@@ -4089,7 +4089,7 @@ describe("createChannelController", () => {
   // a moderator convinced the message was gone. Track each frame's envelope id
   // (like reactions), resolve it on the echo, and report one error if the
   // socket refuses it — restoring an edit's text so it can be retried.
-  describe("edit/delete delivery tracking (CLI-08)", () => {
+  describe("edit/delete delivery tracking", () => {
     /** The onSendFailure listener the controller registered. */
     function sendFailureListener(
       opts: ChannelControllerOptions,
@@ -4616,7 +4616,7 @@ describe("unsent attachments (2A-3)", () => {
   });
 });
 
-describe("a forum channel (WP 6.9d)", () => {
+describe("a forum channel", () => {
   const FORUM = 5151;
   const TEXT = 5152;
   const destinations = NAVIGATION_DESTINATIONS as {

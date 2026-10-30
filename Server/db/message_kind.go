@@ -1,7 +1,7 @@
 package db
 
 // The stored values of messages.kind. 0 is a message a user wrote, 1 a call
-// log row (WP 3B-9) and 2 to 6 the group DM event rows (WP 3B-10), 7 a pin row (WP 6.12), 8 a welcome row (WP 8.6).
+// log row and 2 to 6 the group DM event rows, 7 a pin row, 8 a welcome row.
 // MessageKindName gives their wire names (protocol enum chat_message.kind).
 const (
 	MessageKindUser        int64 = 0

@@ -1295,7 +1295,7 @@ describe("mapToPinnedMessage", () => {
     expect(a.avatarColor).not.toBe(b.avatarColor);
   });
 
-  it("renders the live membersStore nickname, not the raw payload username (OC-0330)", () => {
+  it("renders the live membersStore nickname, not the raw payload username", () => {
     setMembers([
       {
         id: 101,

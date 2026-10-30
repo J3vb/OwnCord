@@ -11,7 +11,7 @@ import {
 } from "../helpers/fakeAudioContext";
 
 const prefs = vi.hoisted(() => new Map<string, unknown>());
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) => (prefs.has(key) ? prefs.get(key) : fallback),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
@@ -574,7 +574,7 @@ describe("AudioPipeline", () => {
       expect(ctx.latest("source").track.id).toBe("mic-2");
     });
 
-    it("restarts on the system default while the saved mic is unplugged (DP-31)", async () => {
+    it("restarts on the system default while the saved mic is unplugged", async () => {
       prefs.set("audioInputDevice", "usb-mic");
       const pipeline = new AudioPipeline();
       const track = micTrack();

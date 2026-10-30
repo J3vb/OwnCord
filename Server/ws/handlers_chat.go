@@ -55,7 +55,6 @@ func handleChatSendV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 // the participant-addressed chat_message. Sharing it is what makes a forward's
 // fan-out literally the send path's.
 func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, channelID int64, replyTo *int64, reply []byte, result *service.SendMessageResult) Result {
-	// Build attachment data for broadcast.
 	attData := make([]map[string]any, 0, len(result.Attachments))
 	for _, ai := range result.Attachments {
 		attData = append(attData, map[string]any{
@@ -94,7 +93,6 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		return channelSendResult(reply, broadcast, channelID, info.UserID, result)
 	}
 
-	// DM path: build dm_channel_open events + sequenced message.
 	var events []Event
 	if len(result.OpenedDMFor) > 0 {
 		// One payload per recipient, not one for all of them: `recipient` and
@@ -122,7 +120,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 		}
 	}
 
-	// B5-6: one dm_request per recipient a first-contact request was just
+	// one dm_request per recipient a first-contact request was just
 	// created for. Skipped (not a fallback shape) when the sender lookup
 	// failed — SenderUser nil means the frame has no profile to carry, and
 	// the recipient still recovers the request from GET /api/v1/dm-requests.
@@ -143,7 +141,7 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 	return Result{Reply: reply, Events: events}
 }
 
-// handleChatForwardV2 processes a chat_forward command (WP 6.9a) via the
+// handleChatForwardV2 processes a chat_forward command via the
 // MessageService. The reply is chat_forward_ok; the events are the send path's.
 func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(ChatDeps)
@@ -166,7 +164,7 @@ func handleChatForwardV2(ctx context.Context, cmd Command, info ClientInfo, deps
 	return sendResultEvents(d, info, fwd.ClientMessageID, fwd.ChannelID, nil, reply, result)
 }
 
-// handleForumPostCreateV2 processes a forum_post_create (WP 6.9d) via the
+// handleForumPostCreateV2 processes a forum_post_create via the
 // MessageService. The reply is forum_post_create_ok; the events are the send
 // path's, addressed to the new post's thread: its opening chat_message, and a
 // thread note that tells the forum's viewers (thread_changed, coalesced). A
@@ -273,11 +271,10 @@ func handleChatDeleteV2(ctx context.Context, cmd Command, info ClientInfo, deps 
 	return Result{Events: events}
 }
 
-// dmEventOrFallback returns the participant-targeted DM event, falling back
-// to the channel-topic broadcast when the participant list is empty — the
-// degraded shape a failed post-commit participant lookup leaves behind. A
-// sequenced frame addressed to nobody would consume a seq and reach no one;
-// the topic fallback still reaches whoever has the DM focused.
+// dmEventOrFallback returns the participant-targeted DM event, falling back to the
+// channel-topic broadcast when the participant list is empty (the shape a failed
+// post-commit participant lookup leaves). A sequenced frame addressed to nobody would
+// consume a seq and reach no one; the fallback still reaches whoever has the DM focused.
 func dmEventOrFallback(dmEvent, fallback Event, participantIDs []int64) Event {
 	if len(participantIDs) == 0 {
 		return fallback
@@ -309,7 +306,7 @@ func serviceErrorToResult(err error) Result {
 	case errors.Is(err, service.ErrCallNeedsAcceptance):
 		return Result{Error: ClientError{Code: ErrCodeCallRequiresAcceptance, Message: err.Error()}}
 	case errors.Is(err, permissions.ErrThreadLocked):
-		// A locked thread (WP 6.9c) refuses a post, reaction, pin or change
+		// A locked thread refuses a post, reaction, pin or change
 		// with its own code; it wraps ErrForbidden, so this precedes it.
 		return Result{Error: ClientError{Code: ErrCodeThreadLocked, Message: err.Error()}}
 	case errors.Is(err, service.ErrForbidden), errors.Is(err, service.ErrBlocked):

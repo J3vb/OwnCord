@@ -23,10 +23,10 @@
 import { channelsStore } from "../../stores/channels.store";
 import { dmStore } from "../../stores/dm.store";
 import { followedThreadsStore } from "../../stores/followedThreads.store";
-import { isChannelMuted } from "../../lib/channel-mutes";
-import { channelLevelResolver } from "../../lib/notificationLevel";
+import { isChannelMuted } from "../../lib/prefs/channelMutes";
+import { channelLevelResolver } from "../../lib/prefs/notificationLevel";
 import { Disposable } from "../../lib/disposable";
-import { loadPref, onPrefChange } from "../../lib/preferences";
+import { loadPref, onPrefChange } from "../../lib/prefs/preferences";
 import type { Notifier } from "../../platform/contracts/notifications";
 
 /**

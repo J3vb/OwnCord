@@ -118,7 +118,7 @@ describe("paintBanner", () => {
     expect(card.style.getPropertyValue("--upp-banner-h")).toBe("");
   });
 
-  it("plays an animated banner, and shows its first frame under reduced motion (WP 8.7)", async () => {
+  it("plays an animated banner, and shows its first frame under reduced motion", async () => {
     const STILL = "data:image/png;base64,U1RJTEw=";
     const animated: BannerImages = { ...images, still: () => Promise.resolve(STILL) };
     fetchImageAsObjectUrl.mockResolvedValue("blob:anim");

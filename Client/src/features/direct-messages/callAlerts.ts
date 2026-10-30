@@ -7,9 +7,9 @@
  * Clicking either notification opens the DM through the same target path a
  * message notification uses, so a call from another server is dropped there.
  */
-import { loadPref } from "../../lib/preferences";
+import { loadPref } from "../../lib/prefs/preferences";
 import { loadUserStatus } from "../../lib/userStatus";
-import { getChannelMutesHost } from "../../lib/channel-mutes";
+import { getChannelMutesHost } from "../../lib/prefs/channelMutes";
 import { showToast } from "../../lib/toast";
 import { createLogger } from "../../lib/logger";
 import type { RingState } from "../../lib/call-ring";

@@ -16,7 +16,7 @@ import {
   noteWatchingResync,
   clearPeerWatching,
 } from "../../stores/voice.store";
-import { focusPayload } from "../../lib/last-channel";
+import { focusPayload } from "../../lib/prefs/lastChannel";
 import { deleteCredential } from "../../lib/credentials";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";

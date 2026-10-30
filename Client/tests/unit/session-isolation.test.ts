@@ -27,7 +27,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
-vi.mock("@lib/appearance", () => ({ applyStoredAppearance: vi.fn() }));
+vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
 vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
@@ -43,7 +43,9 @@ vi.mock("@lib/credentials", () => ({
   deleteCredential: vi.fn().mockResolvedValue(undefined),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/window-state", () => ({ initWindowState: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("@lib/prefs/windowState", () => ({
+  initWindowState: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
@@ -350,7 +352,7 @@ async function quickSwitchTo(host: string): Promise<void> {
   await vi.advanceTimersByTimeAsync(10);
 }
 
-describe("one live connection across a profile switch (B7-13)", () => {
+describe("one live connection across a profile switch", () => {
   it("never holds two transports and closes A's before B's opens", async () => {
     await loginWithPassword(A, 1);
     expect(authStore.getState().isAuthenticated).toBe(true);
@@ -373,7 +375,7 @@ describe("one live connection across a profile switch (B7-13)", () => {
   });
 });
 
-describe("profile switch teardown (B7-13)", () => {
+describe("profile switch teardown", () => {
   it("resets the domain stores, permissions, voice and notification audio", async () => {
     await loginWithPassword(A, 1);
     // What A's `ready` would have delivered: its role list and active channel.
@@ -407,7 +409,7 @@ describe("profile switch teardown (B7-13)", () => {
   });
 });
 
-describe("a server switch leaves nothing of the old server behind (5.2a)", () => {
+describe("a server switch leaves nothing of the old server behind", () => {
   it("ends the API session before any domain reset runs", async () => {
     await loginWithPassword(A, 1);
     const calls: string[] = [];
@@ -453,7 +455,7 @@ describe("a server switch leaves nothing of the old server behind (5.2a)", () =>
   });
 });
 
-describe("quick switch keeps each server's saved sign-in (B7-13)", () => {
+describe("quick switch keeps each server's saved sign-in", () => {
   it("keeps the departed credential and does not revoke its session", async () => {
     await loginWithPassword(A, 1);
 

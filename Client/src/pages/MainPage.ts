@@ -10,7 +10,7 @@ import {
 } from "../features/server-rail/joinInvite";
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { UserStatus } from "@lib/types";
@@ -44,7 +44,7 @@ import {
   globalKeysErrorCode,
   portalBoundBefore,
 } from "@lib/globalKeys";
-import { loadPref, onPrefChange, savePref } from "@lib/preferences";
+import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { createPresenceSender, setActivePresenceSender } from "@lib/presence";
 import { startAutoIdle, type AutoIdleController } from "@lib/autoIdle";
 import type { GameActivityLoop } from "@lib/gameActivity";
@@ -90,7 +90,7 @@ import { createNotesContext, setNotesContextSource } from "../features/profiles/
 import { markAllRead, setMarkReadSender } from "@lib/read-state";
 import { setMarkUnreadSender } from "@components/message-list/mark-unread";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
-import { setChannelMutesHost } from "@lib/channel-mutes";
+import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { setAudioVolumeHost } from "@lib/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
@@ -1612,7 +1612,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     // Timed mutes: redraws the sidebars when one ends. Page-owned, so a socket
     // reconnect leaves it alone and a server switch remounts a fresh one.
     // Loaded on demand; the same !tornDown guard as the badge below.
-    void import("@lib/channel-mute-expiry").then((expiry) => {
+    void import("@lib/prefs/channelMuteExpiry").then((expiry) => {
       if (!tornDown) unsubscribers.push(expiry.startMuteExpiryWatch());
     });
 

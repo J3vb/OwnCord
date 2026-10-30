@@ -164,7 +164,7 @@ describe("reset button", () => {
   });
 });
 
-describe("local Mute (WP 1D-5)", () => {
+describe("local Mute", () => {
   function muteItem(): HTMLElement | null {
     return document.querySelector<HTMLElement>('.user-vol-menu [data-action="local-mute"]');
   }
@@ -270,7 +270,7 @@ describe("dismissal", () => {
     expect(menuEl()).toBeNull();
   });
 
-  it("[B3-4] ties the parent-signal abort bridge to the menu's own dismiss signal, so it does not outlive a dismissed menu", () => {
+  it("ties the parent-signal abort bridge to the menu's own dismiss signal, so it does not outlive a dismissed menu", () => {
     // Without a { signal } option, this bridge listener (and the closure
     // retaining a detached .user-vol-menu subtree) survives every future
     // right-click for the parent's entire lifetime — the outside-click and
@@ -342,7 +342,7 @@ describe("re-opening", () => {
   });
 });
 
-describe("moderation section with only Move to (WP 8.4b)", () => {
+describe("moderation section with only Move to", () => {
   const actions = (): string[] =>
     [...document.querySelectorAll<HTMLElement>(".user-vol-menu [data-action]")].map(
       (el) => el.dataset.action ?? "",

@@ -12,13 +12,13 @@
 
 import { createElement, appendChildren, setOwnedTimeout, setText } from "@lib/dom";
 import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
-import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/gameActivityPrefs";
+import { displayName, loadGamePrefs, toDetectPrefs } from "@lib/prefs/gameActivityPrefs";
 import {
   hasReceivedReady,
   onGameActivityPolicy,
   serverSupportsGameActivity,
 } from "@lib/serverCapabilities";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import { desktop } from "../../platform/desktop";
 import { gameActivityText as t } from "../../i18n/gameActivity";
 import { buildGamesSection } from "./GameActivityGames";

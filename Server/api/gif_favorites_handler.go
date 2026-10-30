@@ -30,7 +30,6 @@ type gifFavoriteJSON struct {
 	Title      string `json:"title"`
 }
 
-// allowedGIFFavoriteURL reports whether raw is an https Klipy CDN URL.
 func allowedGIFFavoriteURL(raw string) bool {
 	if raw == "" || len(raw) > gifFavMaxURLLen {
 		return false

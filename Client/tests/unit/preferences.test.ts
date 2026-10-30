@@ -9,11 +9,11 @@ import {
   storedKeys,
   STORAGE_PREFIX,
   writeStored,
-} from "../../src/lib/preferences";
+} from "../../src/lib/prefs/preferences";
 import { expectConsole } from "../helpers/console";
 
 /**
- * Tests for src/lib/preferences.ts — localStorage preference helpers.
+ * Tests for src/lib/prefs/preferences.ts — localStorage preference helpers.
  * Covers loadPref (cache miss, hit, type mismatch, corrupted JSON, null value),
  * savePref (write, custom event dispatch, quota exceeded), and the STORAGE_PREFIX constant.
  */

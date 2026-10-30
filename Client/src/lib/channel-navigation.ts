@@ -12,9 +12,9 @@ import {
 } from "@stores/channels.store";
 import { addDmToChannelsStore, clearDmUnread, dmStore, dmDisplayName } from "@stores/dm.store";
 import { isCategoryCollapsed, setActiveDmUser, uiStore } from "@stores/ui.store";
-import { isChannelMuted } from "./channel-mutes";
+import { isChannelMuted } from "./prefs/channelMutes";
 import { visibleCategories } from "./permissions";
-import { hiddenByMute } from "./hide-muted-channels";
+import { hiddenByMute } from "./prefs/hideMutedChannels";
 import { hasUnread } from "./read-state";
 
 const reselectListeners = new Set<(channelId: number) => void>();

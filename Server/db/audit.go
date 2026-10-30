@@ -67,8 +67,8 @@ type AsyncEntryAuditor interface {
 // write back onto the request path and only a benchmark would notice.
 var _ AsyncEntryAuditor = (*DB)(nil)
 
-// WriteAuditEntry is WriteAudit for an entry that carries a subject token
-// (B4-10): an erasure's own rows name the subject by token, never by id.
+// WriteAuditEntry is WriteAudit for an entry that carries a subject token:
+// an erasure's own rows name the subject by token, never by id.
 // Same best-effort policy, same async fast path when a writer is installed;
 // an Auditor without the entry forms gets the token-less write.
 func WriteAuditEntry(ctx context.Context, a Auditor, e AuditEntry) {

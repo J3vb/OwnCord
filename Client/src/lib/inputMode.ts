@@ -1,4 +1,4 @@
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 
 /** How the microphone decides when to transmit: the sensitivity gate
  *  (Voice Activity) or a held key (Push to Talk). */

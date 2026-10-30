@@ -33,7 +33,7 @@ vi.mock("@lib/icons", () => ({
     return el;
   },
 }));
-vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
 vi.mock("@stores/auth.store", () => ({
   getToken: () => "session-token",

@@ -19,7 +19,7 @@ vi.mock("@stores/voice.store", () => ({
 
 const { attachGlobalKeybinds } = await import("../../src/pages/main-page/GlobalKeybinds");
 const { saveGlobalShortcutVk } = await import("../../src/lib/voiceShortcuts");
-const { parseKeybinds, saveKeybind } = await import("../../src/lib/keybinds");
+const { parseKeybinds, saveKeybind } = await import("../../src/lib/prefs/keybinds");
 
 function makeHandlers(): {
   onSearch: Mock<() => void>;
@@ -105,7 +105,7 @@ describe("global keybinds", () => {
     expect(upload.defaultPrevented).toBe(true);
   });
 
-  describe("from the thread panel's composer (WP 6.9c)", () => {
+  describe("from the thread panel's composer", () => {
     function panelComposer(): HTMLTextAreaElement {
       const panel = document.createElement("div");
       panel.className = "thread-panel";

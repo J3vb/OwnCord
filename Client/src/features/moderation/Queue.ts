@@ -44,7 +44,7 @@
  * its read is authorized again like any other.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import {
   ApiClientError,
   errorText,
@@ -55,7 +55,7 @@ import {
 } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setNsfwAcknowledged } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";

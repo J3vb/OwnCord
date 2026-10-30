@@ -9,7 +9,7 @@ import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { showContextMenu, type ContextMenuItem } from "@lib/context-menu";
 import { createPromptModal, type ModalInstance } from "@lib/modalFactory";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import type { ServerProfile } from "@lib/profiles";
 import {
   FOLDER_COLORS,
@@ -32,13 +32,13 @@ import {
   type ItemRef,
   type RailItem,
   type RailLayout,
-} from "@lib/serverRailLayout";
+} from "@lib/prefs/serverRailLayout";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
 import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
-import { CHANNEL_MUTE_CHANGED } from "@lib/channel-mutes";
+import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
-import { formatBadgeCount } from "@lib/formatting";
+import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../i18n/serverRail";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
 

@@ -18,81 +18,60 @@ import (
 )
 
 // The container leg of the rehearsal. Only this file knows Docker exists: the
-// phases in upgrade.go run unchanged against it through the target seam, with
-// the same fixture and the same assertions as the standalone leg.
-//
-// Server/scripts/docker-smoke.sh already solves the container lifecycle for the
-// boot smoke, and this leg mirrors it deliberately — the same run flags, the
-// same health probe, the same two drain assertions — rather than re-deriving a
-// second set of answers that could drift from it.
+// phases in upgrade.go run unchanged against it through the target seam. It
+// mirrors Server/scripts/docker-smoke.sh (run flags, health probe, drain
+// assertions) so the two cannot drift.
 
 const (
-	// containerData is the mount point the Dockerfile declares as VOLUME and
-	// the default data_dir resolves to (cwd /app + data_dir "data").
+	// containerData is the mount point the Dockerfile declares as VOLUME; the
+	// default data_dir resolves to it (cwd /app + "data").
 	containerData = "/app/data"
-	// containerConfig is where the server loads its configuration from:
-	// config.DefaultPath is "config.yaml", resolved against the image's
-	// WORKDIR. It is NOT in the volume, so a copy of the volume does not
-	// contain it — which is why it is handled separately everywhere below.
-	// The image would put its own there on first boot; this leg shadows that
-	// with the operator-owned bind mount the compose file describes (see
-	// writeMountedConfig), so the file at this path is a host file.
+	// containerConfig is where the server loads its configuration from
+	// (config.DefaultPath resolved against WORKDIR). It is not in the volume,
+	// so it is handled separately: this leg shadows the image's own with the
+	// operator-owned bind mount the compose file describes (see
+	// writeMountedConfig).
 	containerConfig = "/app/config.yaml"
-	// containerUser is the image's USER. Files this harness pushes into the
-	// volume must be owned by it or the server cannot read its own data.
+	// containerUser is the image's USER; files pushed into the volume must be
+	// owned by it.
 	containerUser = 65532
-	// containerPublish publishes the port defaultBaseURL names, on loopback
-	// only. The fixture's owner password is a literal in this repository, so
-	// a 0.0.0.0 publish would put a throwaway owner account on the LAN for
-	// the length of the run; docker-smoke.sh needs no publish at all because
-	// it never speaks HTTP.
+	// containerPublish publishes the fixture's port on loopback only: its owner
+	// password is a literal in this repository, so a 0.0.0.0 publish would put a
+	// throwaway owner account on the LAN.
 	containerPublish = "127.0.0.1:8443:8443"
 )
 
 // dockerTarget rehearses the same upgrade as containers on a named volume: the
-// deployment Server/docker-compose.yml describes, with the same minimal
-// privilege posture docs/deployment.md tells owners to run.
-//
-// The split between the volume and config.yaml is the compose file's, not an
-// invention of this harness: owncord-data:/app/data carries the state, and
-// ./config.yaml:/app/config.yaml is an operator-owned host file. So the volume
-// is what archive/restore copy, and config.yaml is a host file this harness
-// writes, mounts and copies directly.
+// deployment Server/docker-compose.yml describes, with the minimal privilege
+// posture docs/deployment.md tells owners to run. As in the compose file,
+// owncord-data:/app/data carries the state (what archive/restore copy) and
+// ./config.yaml:/app/config.yaml is an operator-owned host file.
 type dockerTarget struct {
 	oldImage string
 	newImage string
 	vol      string // named volume mapped at containerData; docker creates it on the first mount
-	// dir is the host side of the install: the bind-mounted config.yaml plus
-	// a snapshot of the volume under data/. See installDir.
+	// dir is the host side of the install: the bind-mounted config.yaml plus a
+	// snapshot of the volume under data/ (see installDir).
 	dir     string
 	name    string // the container that exists right now; "" = none
 	image   string // the image that container runs
 	version string // "old" | "new"
 	running bool
 	runs    int // one container name per launch, so a stale one cannot be reused
-	// tmpfs mounts a size-limited tmpfs at containerData INSTEAD of the named
-	// volume, which is what phase D needs: a filesystem that can be filled to
-	// the wall without filling the runner's own disk, in the deployment shape a
-	// container actually has. A Dockerfile-declared VOLUME is overridden by an
-	// explicit mount, so this is the volume's replacement rather than an
-	// addition to it.
+	// tmpfs mounts a size-limited tmpfs at containerData instead of the named
+	// volume (an explicit mount overrides the Dockerfile VOLUME), so phase D
+	// can fill a filesystem without filling the runner's disk.
 	tmpfs bool
-	// extraEnv is appended to the container's environment as -e pairs, the
-	// container half of start()'s extraEnv on the process leg: the same
-	// OWNCORD_<SECTION>_<KEY> override channel, so a phase changes a setting
-	// without rewriting the config.yaml that is bind-mounted read-only-in-
-	// practice (see writeMountedConfig).
+	// extraEnv is appended to the container's environment as -e pairs: the
+	// container half of start()'s extraEnv, so a phase changes a setting
+	// without rewriting the bind-mounted config.yaml.
 	extraEnv []string
 }
 
 // newDockerTarget prepares the operator-owned config.yaml and the volume name
-// start() will mount. The images are checked here rather than at first use, for
-// the same reason serverBinary stats the binaries: "no such image" arriving as a
-// failed phase 1 reads like the rehearsal found something.
-//
-// Building or pulling the images is the caller's job (the workflow's), not
-// this harness's: it rehearses two given images and never decides what they
-// should contain.
+// start() will mount. The images are checked here, as serverBinary stats the
+// binaries, so "no such image" does not read like a rehearsal finding. Building
+// or pulling them is the caller's job.
 func newDockerTarget(oldImage, newImage string) (*dockerTarget, error) {
 	for _, ref := range []string{oldImage, newImage} {
 		if _, err := docker("image", "inspect", ref); err != nil {
@@ -113,48 +92,31 @@ func newDockerTarget(oldImage, newImage string) (*dockerTarget, error) {
 		t.cleanup()
 		return nil, err
 	}
-	// The volume is deliberately NOT created here. `docker run -v <name>:<path>`
-	// creates a named volume on first mount, and restore() removes and recreates
-	// it anyway, so a create here only ever produced a volume that start() might
-	// never mount: the tmpfs leg mounts a tmpfs at containerData INSTEAD (see
-	// t.tmpfs), which left this harness creating a named volume no container
-	// attached to and cleanup() removing.
+	// No volume is created here: docker run -v creates one on first mount and
+	// restore() recreates it anyway; the tmpfs leg mounts no volume at all.
 	return t, nil
 }
 
-// writeMountedConfig writes the config.yaml the containers bind-mount.
+// writeMountedConfig writes the config.yaml the containers bind-mount. It is
+// minimal, as docs/deployment.md tells a Docker owner; everything else comes
+// from the compiled-in defaults, and copying the generated template would
+// drift from config.defaultYAML.
 //
-// It is hand-written and minimal because that is what docs/deployment.md tells
-// a Docker owner to do ("Create a minimal config.yaml") and what the compose
-// file mounts. Everything else comes from the compiled-in defaults: port 8443,
-// self-signed TLS, data_dir "data" — which resolves to the volume — and
-// voice.auto_download_livekit off. Copying the generated default template
-// instead would make this file a second copy of config.defaultYAML, drifting
-// the first time that template changes.
+// 0644, not the harness's usual 0600: the container runs as uid 65532 and
+// cannot read a file the harness user owns 0600. These lines hold no secret
+// (copyFile keeps the standalone leg's generated config.yaml at 0600).
 //
-// 0644, not the 0600 the rest of this harness uses: the container runs as uid
-// 65532 and cannot read a file the harness user owns 0600. These four lines
-// hold no secret — the generated config.yaml of the standalone leg does, and
-// copyFile keeps that one at 0600.
+// This weakens the config assertion: compare() fails on "config.yaml changed",
+// which in the standalone leg catches any rewrite. Here config.Save writes a
+// temp file and renames it over the target, and a rename over a single-file
+// bind mount is refused by the kernel, so only an in-place rewrite is caught
+// and a green phase 5 is not evidence that the upgrade left config.yaml alone.
 //
-// WHAT THIS COSTS THE ASSERTION, because a reader of compare() cannot see it
-// from there. compare() fails on "config.yaml changed: <hash> -> <hash>", and
-// in the STANDALONE leg that catches any rewrite: the file is the server's own
-// generated default and config.Save can replace it. In THIS leg it cannot
-// fail for a rename: config.Save writes a temp file and renames it over the
-// target, and a rename over a single-file bind mount is refused by the kernel
-// ("device or resource busy"). So the container leg's config assertion catches
-// an in-place rewrite and nothing else, and a green phase 5 here is NOT
-// evidence that the upgrade left config.yaml alone.
-//
-// That is a property of the documented deployment rather than of this
-// harness — Server/docker-compose.yml mounts the file :ro, so a Docker owner
-// cannot save settings into it either, and the setup wizard's attempt shows up
-// as a 201 with a warning and one ERROR line in the container log. The mount
-// here is deliberately read-WRITE anyway: :ro would move the weakening from
-// the assertion to the mount, where nothing could ever be caught. Note too
-// that this leg therefore never hashes a config.yaml the server itself wrote;
-// it hashes these four lines.
+// That follows the documented deployment, whose compose file mounts the file
+// :ro so a Docker owner cannot save settings either (the setup wizard shows a
+// 201 with a warning and one ERROR line). The mount here is read-write anyway:
+// :ro would move the weakening to the mount, where nothing could be caught.
+// This leg also never hashes a config.yaml the server itself wrote.
 func writeMountedConfig(path string) error {
 	const minimal = "# OwnCord upgrade rehearsal — the operator-owned config.yaml that\n" +
 		"# Server/docker-compose.yml bind-mounts at /app/config.yaml.\n" +
@@ -167,17 +129,14 @@ func (t *dockerTarget) configPath() string { return filepath.Join(t.dir, "config
 
 func (t *dockerTarget) baseURL() string { return defaultBaseURL }
 
-// start runs the requested version as a NEW container on the same volume.
+// start runs the requested version as a new container on the same volume.
 //
-// Swapping the version REPLACES the container — docker rm plus docker run,
-// never docker start — for two reasons. First, `docker start` reuses the
-// container's own writable layer, so the rehearsal would pass even if the
-// volume were never mounted, which is the property phases 4-5 exist to prove
-// (docker-smoke.sh phase 5 replaces for exactly this reason). Second,
-// replacement is the only upgrade path OwnCord supports in Docker: the binary
-// is image content, `docker compose pull && up -d` is the documented upgrade
-// (docs/deployment.md:160), and the in-place self-update endpoint answers 503
-// CONTAINER_DEPLOYMENT in a container.
+// Swapping versions replaces the container (docker rm plus docker run, never
+// docker start). docker start reuses the container's writable layer, so the
+// rehearsal would pass even if the volume were never mounted, which phases 4-5
+// exist to prove; and replacement is the only upgrade path OwnCord supports in
+// Docker (docs/deployment.md), since the self-update endpoint answers 503
+// CONTAINER_DEPLOYMENT.
 func (t *dockerTarget) start(version string) error {
 	image, err := pickVersion(version, t.oldImage, t.newImage)
 	if err != nil {
@@ -190,20 +149,16 @@ func (t *dockerTarget) start(version string) error {
 		return err
 	}
 	t.runs++
-	// Recorded BEFORE the run, not after it: `docker run -d` creates the
-	// container and only then fails — a port conflict on 8443 is the case
-	// this harness is most exposed to, with both legs binding it — and a name
-	// this target never learned is a container cleanup() cannot remove.
+	// Recorded before the run: docker run -d creates the container and only
+	// then fails (a port conflict on 8443 is the likeliest), and a name this
+	// target never learned is a container cleanup() cannot remove.
 	t.name = fmt.Sprintf("owncord-upgrade-%d-%d-%s", os.Getpid(), t.runs, version)
-	// The flags are docker-smoke.sh's start(), plus the published port the
-	// fixture needs and the LiveKit override every launch in this rehearsal
-	// gets. Anything more (a user override, an extra capability) would test a
-	// posture no owner is told to run.
+	// The flags are docker-smoke.sh's start() plus the published port and the
+	// LiveKit override; more would test a posture no owner is told to run.
 	data := []string{"-v", t.vol + ":" + containerData}
 	if t.tmpfs {
-		// The size and the uid are the tmpfs task 4 mounts for the standalone
-		// leg, expressed as the container's own mount: 24 MiB, owned by the
-		// image's user, so the server can write its database into it.
+		// The tmpfs the standalone leg mounts (24 MiB), owned by the image's
+		// user so the server can write its database into it.
 		data = []string{"--tmpfs", containerData + ":size=24m,uid=" + strconv.Itoa(containerUser) + ",gid=" + strconv.Itoa(containerUser)}
 	}
 	args := []string{"run", "-d", "--name", t.name}
@@ -214,8 +169,8 @@ func (t *dockerTarget) start(version string) error {
 		"--cap-drop=ALL",
 		"--security-opt=no-new-privileges:true",
 		"-e", noLiveKitDownload,
-		// The image now bundles LiveKit and would start it; the rehearsal
-		// compares data-dir state byte for byte, so keep voice off.
+		// The image bundles LiveKit; the rehearsal compares data-dir state byte
+		// for byte, so keep voice off.
 		"-e", "OWNCORD_VOICE_LIVEKIT_BINARY=")
 	for _, kv := range t.extraEnv {
 		args = append(args, "-e", kv)
@@ -228,9 +183,8 @@ func (t *dockerTarget) start(version string) error {
 }
 
 // waitHealthy mirrors docker-smoke.sh's wait_healthy: the binary's own
-// healthcheck subcommand, which is the only probe a distroless image can
-// answer, plus docker inspect so a container that died during boot is reported
-// immediately instead of after the whole timeout.
+// healthcheck subcommand (the only probe a distroless image answers) plus
+// docker inspect, so a container that died during boot is reported at once.
 func (t *dockerTarget) waitHealthy(phase string) error {
 	deadline := time.Now().Add(bootTimeout)
 	for attempt := 1; time.Now().Before(deadline); attempt++ {
@@ -248,11 +202,10 @@ func (t *dockerTarget) waitHealthy(phase string) error {
 	return t.annotate(phase, fmt.Errorf("never reported healthy within %s", bootTimeout))
 }
 
-// drain stops the container the way an owner does and makes docker-smoke.sh's
-// two assertions, for the reason its drain() states: docker stop escalates to
-// SIGKILL after the timeout and a killed container exits 137, so the exit code
-// is what proves the server shut itself down; the elapsed time keeps a drain
-// that merely crawls under the wire from passing.
+// drain stops the container as an owner does and makes docker-smoke.sh's two
+// assertions: docker stop escalates to SIGKILL (exit 137), so exit code 0
+// proves the server shut itself down, and the elapsed time keeps a drain that
+// merely crawls under the wire from passing.
 func (t *dockerTarget) drain() error {
 	if !t.running {
 		return errors.New("drain: no container is running")
@@ -275,12 +228,10 @@ func (t *dockerTarget) drain() error {
 	if elapsed > drainBudget {
 		return t.annotate(phase, fmt.Errorf("took %s, budget is %s", elapsed.Round(time.Millisecond), drainBudget))
 	}
-	// The standalone leg's "the healthcheck stops passing", asked through the
-	// published port instead of the binary: `docker exec` into a stopped
-	// container cannot succeed, so asserting it there would be theatre. The
-	// port is where it can still fail for a real reason — a leftover container
-	// from an earlier run, or the standalone leg's own server, holding 8443
-	// would let every later phase measure the wrong server and still pass.
+	// The standalone leg's "healthcheck stops passing", asked through the
+	// published port: docker exec into a stopped container cannot succeed. A
+	// leftover container or the standalone leg's server holding 8443 would let
+	// later phases measure the wrong server and still pass.
 	if serving(t.baseURL()) {
 		return t.annotate(phase, errors.New("something still answers /health on "+t.baseURL()+" after the container stopped"))
 	}
@@ -288,8 +239,7 @@ func (t *dockerTarget) drain() error {
 	return nil
 }
 
-// serving reports whether anything answers /health at baseURL. Unauthenticated
-// and side-effect free, the same endpoint the binary's healthcheck probes.
+// serving reports whether anything answers /health at baseURL.
 func serving(baseURL string) bool {
 	req, err := http.NewRequest(http.MethodGet, baseURL+"/health", nil) //nolint:noctx // bounded by the client Timeout
 	if err != nil {
@@ -303,39 +253,27 @@ func serving(baseURL string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// installDir hands captureState a host directory shaped like an install —
-// config.yaml at its root, data/ beneath — because a named volume is not such
-// a path and captureState walks a real filesystem.
+// installDir hands captureState a host directory shaped like an install,
+// config.yaml at its root and data/ beneath, since a named volume is not a
+// walkable path.
 //
-// config.yaml is the live bind-mounted file, not a copy: the container reads
-// the very bytes hashed here, so that half cannot go stale at all.
+// config.yaml is the live bind-mounted file. data/ is a snapshot for
+// inspection, refreshed on every call: each phase calls installDir()
+// immediately before capturing with the container running, so a snapshot
+// taken once and reused would compare phase 1's bytes with themselves.
 //
-// data/ is a SNAPSHOT FOR INSPECTION, not the live install: nothing written
-// here reaches the volume. It is refreshed on every call, and that is the
-// invariant the phases depend on — each of them calls installDir() immediately
-// before capturing, with the container running, so the capture is of the state
-// the container has at that moment. A snapshot taken once and reused would
-// make phase 5 and phase 8 compare phase 1's bytes with themselves and pass
-// over nothing.
+// The copy is taken while the server runs, which is safe: captureState hashes
+// config.yaml, the three credential files and data/uploads, never
+// data/chatserver.db (see fixture.token). The archive, which does carry the
+// database, is taken from a stopped container.
 //
-// The copy is taken while the server is running, and that is safe for what is
-// read from it: captureState hashes config.yaml, the three credential files
-// and data/uploads. It never hashes data/chatserver.db — by design (see
-// fixture.token) — so a torn copy of a live SQLite database is not something
-// any assertion reads. The archive, which does carry the database, is taken
-// from a STOPPED container instead.
-//
-// A snapshot that fails FAILS THE PHASE, and that is why this returns an
-// error rather than reporting one somewhere. The dangerous case is the quiet
-// one: if the removal below fails — a Windows file lock, an antivirus scanner
-// — the directory still holds the previous phase's snapshot, and a capture
-// taken from it would compare an earlier phase's bytes with themselves and
-// pass every assertion. Re-taking the copy would not help; the operation that
-// failed IS the removal.
+// A failed snapshot fails the phase rather than being reported elsewhere: if
+// the removal below fails (a Windows file lock, an antivirus scanner) the
+// directory still holds the previous phase's snapshot, and a capture from it
+// would compare earlier bytes with themselves and pass.
 func (t *dockerTarget) installDir() (string, error) {
-	// Removed rather than copied over: a file the container deleted must
-	// disappear from the snapshot too, or the capture reports state that no
-	// longer exists.
+	// Removed rather than copied over, so a file the container deleted
+	// disappears from the snapshot too.
 	if err := os.RemoveAll(filepath.Join(t.dir, "data")); err != nil {
 		return "", fmt.Errorf("clearing the previous state snapshot: %w", err)
 	}
@@ -346,13 +284,10 @@ func (t *dockerTarget) installDir() (string, error) {
 }
 
 // archive copies out what the rollback documentation tells an owner to keep.
-// THE CONTAINER MUST BE STOPPED, for the reason standaloneTarget.archive
-// states: this carries data/chatserver.db, and a hot copy of a live SQLite
-// database and its WAL is not a consistent snapshot.
-//
-// /app/data is copied WHOLESALE rather than as a list of names, so anything
-// that lives only in the volume — a file a later version adds, a directory
-// this harness has never heard of — cannot be silently missed.
+// The container must be stopped, as for standaloneTarget.archive: this carries
+// data/chatserver.db, and a hot copy of a live SQLite database and its WAL is
+// not consistent. /app/data is copied wholesale, so anything living only in
+// the volume cannot be silently missed.
 func (t *dockerTarget) archive(dir string) error {
 	if t.running {
 		return errors.New("archive: the container is still running")
@@ -366,10 +301,8 @@ func (t *dockerTarget) archive(dir string) error {
 	if err := tightenModes(filepath.Join(dir, "data")); err != nil {
 		return fmt.Errorf("archiving the data directory: %w", err)
 	}
-	// config.yaml is archived separately because it is not volume content:
-	// the image puts it at /app/config.yaml, in the container layer, and the
-	// compose file replaces that with an operator-owned host file. A copy of
-	// the volume therefore does not contain it, and an owner's backup that
+	// config.yaml is archived separately because it is not volume content (the
+	// compose file replaces the image's copy with a host file); a backup that
 	// forgot it would restore a server with somebody else's configuration.
 	if err := copyFile(t.configPath(), filepath.Join(dir, "config.yaml"), 0o600); err != nil {
 		return fmt.Errorf("archiving config.yaml: %w", err)
@@ -377,16 +310,14 @@ func (t *dockerTarget) archive(dir string) error {
 	return nil
 }
 
-// restore puts the archive back. Same precondition as archive — THE CONTAINER
-// MUST BE STOPPED — and the same no-merge rule as standaloneTarget.restore:
-// the volume is REPLACED, not copied into.
+// restore puts the archive back. The container must be stopped and the volume
+// is replaced, not merged, as for standaloneTarget.restore.
 //
 // docker cp can only add files, so the volume is recreated to empty it. That
-// costs a container: a volume with any container attached cannot be removed,
-// and an empty volume needs a container for docker cp to extract into. The
-// scratch container is created and never started — it exists only so the
-// daemon has a mount namespace to write through — and is removed immediately;
-// the restored data stays in the volume, which is the whole point.
+// costs a container: a volume with a container attached cannot be removed, and
+// an empty volume needs one for docker cp to extract into. The scratch
+// container is created, never started, and removed immediately; the restored
+// data stays in the volume.
 func (t *dockerTarget) restore(dir string) error {
 	if t.running {
 		return errors.New("restore: the container is still running")
@@ -400,14 +331,10 @@ func (t *dockerTarget) restore(dir string) error {
 	if _, err := docker("volume", "create", t.vol); err != nil {
 		return err
 	}
-	// The image is irrelevant here — the container never runs — so the one
-	// the last container used is reused rather than picking a version and
-	// implying it matters. It is not entirely inert, though: Docker seeds an
-	// EMPTY named volume from the image's directory when a container mounts
-	// it, so this create would merge image content into the restore. It is
-	// safe only because Server/Dockerfile:33 ships /app/data empty. If that
-	// directory ever gains seed content, this becomes the half-alpha.4,
-	// half-HEAD merge Ruling C forbids, silently.
+	// The container never runs, so the last container's image is reused.
+	// Docker seeds an empty named volume from the image's directory on first
+	// mount, so this is safe only because Server/Dockerfile ships /app/data
+	// empty; seed content would silently merge image content into the restore.
 	scratch := fmt.Sprintf("owncord-upgrade-%d-%d-restore", os.Getpid(), t.runs)
 	if _, err := docker("create", "--name", scratch, "-v", t.vol+":"+containerData, t.image); err != nil {
 		return err
@@ -416,20 +343,17 @@ func (t *dockerTarget) restore(dir string) error {
 	if err := t.copyIn(scratch, filepath.Join(dir, "data")); err != nil {
 		return fmt.Errorf("restoring the data directory: %w", err)
 	}
-	// The host side of the mount, restored as a plain file for the same
-	// reason archive() copied it that way — the next container bind-mounts
-	// this path, so writing it here is what puts it back.
-	// 0o644, not the 0o600 the standalone leg uses: the next container
-	// bind-mounts this path and reads it as uid 65532.
+	// The host side of the mount, restored as a plain file as archive() copied
+	// it. 0o644, not the standalone leg's 0o600: the next container bind-mounts
+	// this path and reads it as uid 65532.
 	if err := copyFile(filepath.Join(dir, "config.yaml"), t.configPath(), 0o644); err != nil {
 		return fmt.Errorf("restoring config.yaml: %w", err)
 	}
 	return nil
 }
 
-// removeContainer drops the container this target currently owns, if any, and
-// forgets its name. Both start() (replacing the version) and restore()
-// (detaching from the volume so it can be recreated) begin with it.
+// removeContainer drops the container this target owns, if any, and forgets
+// its name; start() and restore() (detaching from the volume) begin with it.
 func (t *dockerTarget) removeContainer() error {
 	if t.name == "" {
 		return nil
@@ -441,14 +365,10 @@ func (t *dockerTarget) removeContainer() error {
 	return nil
 }
 
-// annotate attaches the container's log to a phase failure, the way
-// server.annotate does for a process. Between a drain and the next boot the
-// container still exists, so unlike the standalone leg there is a log to read
-// even then — a stopped container keeps its logs until it is removed.
-//
-// Which is the limit of it: restore() removes the container and clears t.name
-// before it touches the volume, so a phase-7 failure on this leg arrives bare
-// too. Phases 3 and 6 are the ones that keep their tail here.
+// annotate attaches the container's log to a phase failure, as server.annotate
+// does for a process. A stopped container keeps its logs until removed, but
+// restore() removes it and clears t.name before touching the volume, so a
+// phase-7 failure arrives bare; phases 3 and 6 keep their tail.
 func (t *dockerTarget) annotate(phase string, cause error) error {
 	if t.name == "" {
 		return fmt.Errorf("%s: %w", phase, cause)
@@ -474,29 +394,13 @@ func (t *dockerTarget) cleanup() {
 	}
 }
 
-// --- docker cp, without ever handing docker a host path ----------------------
-//
-// MSYS_NO_PATHCONV=1 is what docker-smoke.sh needs for the CONTAINER side of
-// every docker argument, and its have_file comment records the trap: the
-// setting is global to a command, so it also stops Git Bash converting the HOST
-// side, and `docker cp c:/f /tmp/x` then reaches the native Windows docker.exe
-// as `D:\tmp\x` and fails with "directory does not exist" — a false negative
-// indistinguishable from a missing file.
-//
-// This harness calls docker from Go, so os/exec hands argv to CreateProcess
-// with no MSYS layer in between and no conversion happens in either direction.
-// That removes the trap; it does not remove the reason to avoid host paths.
-// The two functions below stream a tar through docker's stdin/stdout, so the
-// only path docker is ever given is a container path — which keeps this code
-// correct if it is ever invoked from a shell, and sidesteps docker cp's own
-// host-side semantics (drive letters, ownership mapping) entirely.
-//
-// The one host path docker does get is the config.yaml bind mount in start():
-// a mount has no tar equivalent, it is the mount the compose file documents,
-// and os/exec passes it through untouched.
-
 // copyOut streams a container path into dstDir. The tar the daemon produces is
 // rooted at the source's base name, so copying /app/data yields dstDir/data/…
+//
+// copyOut and copyIn stream a tar through docker's stdin/stdout so docker is
+// only ever given a container path, never a host path: that sidesteps docker
+// cp's host-side semantics (drive letters, ownership mapping) and the Git Bash
+// path conversion that turns `c:/f` into a false "directory does not exist".
 func (t *dockerTarget) copyOut(containerPath, dstDir string) error {
 	cmd := exec.Command("docker", "cp", t.name+":"+containerPath, "-")
 	var stderr bytes.Buffer
@@ -509,8 +413,8 @@ func (t *dockerTarget) copyOut(containerPath, dstDir string) error {
 		return err
 	}
 	extractErr := extractTar(stdout, dstDir)
-	// Drain whatever is left before waiting, or docker blocks on a full pipe
-	// when extraction stopped early and this deadlocks instead of reporting.
+	// Drain the rest before waiting, or docker blocks on a full pipe when
+	// extraction stopped early.
 	_, _ = io.Copy(io.Discard, stdout)
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("docker cp %s: %w: %s", containerPath, err, strings.TrimSpace(stderr.String()))
@@ -519,8 +423,7 @@ func (t *dockerTarget) copyOut(containerPath, dstDir string) error {
 }
 
 // copyIn streams srcDir into the container as /app/data. -a preserves the
-// uid/gid this harness writes into the tar headers, which must be the image's
-// user: a data directory the server cannot read is not a restore.
+// image user's uid/gid written into the tar headers.
 func (t *dockerTarget) copyIn(container, srcDir string) error {
 	cmd := exec.Command("docker", "cp", "-a", "-", container+":/app")
 	var stderr bytes.Buffer
@@ -554,9 +457,8 @@ func extractTar(r io.Reader, dst string) error {
 		if err != nil {
 			return err
 		}
-		// The stream comes from the local daemon, so this is a guard against
-		// a bug rather than an attacker — but an extractor that can write
-		// outside its destination is a bug class not worth carrying.
+		// The stream comes from the local daemon, so this guards against a bug
+		// rather than an attacker.
 		rel, err := filepath.Localize(path.Clean(header.Name))
 		if err != nil {
 			return fmt.Errorf("refusing tar entry %q: %w", header.Name, err)
@@ -572,8 +474,7 @@ func extractTar(r io.Reader, dst string) error {
 				return err
 			}
 		default:
-			// Anything else is state this harness would copy wrong, and a
-			// silent skip is how an archive quietly loses something.
+			// A silent skip is how an archive quietly loses something.
 			return fmt.Errorf("%s is a tar type %q, which this copy does not handle", header.Name, header.Typeflag)
 		}
 	}
@@ -595,9 +496,8 @@ func writeTarFile(r io.Reader, target string) error {
 }
 
 // writeTar walks root and writes it as a tar rooted at prefix, owned by the
-// image's user. Modes are the server's own: 0700 for directories, 0600 for
-// files — the archive on the host was already tightened to those, and Windows
-// cannot report them anyway.
+// image's user. Modes are the server's own (0700 directories, 0600 files); the
+// host archive was already tightened and Windows cannot report them.
 func writeTar(w io.Writer, root, prefix string) error {
 	tw := tar.NewWriter(w)
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -642,10 +542,8 @@ func writeTar(w io.Writer, root, prefix string) error {
 	return tw.Close()
 }
 
-// docker runs one docker command and returns its stdout. A failure carries the
-// command and docker's own stderr: "exit status 1" alone is not a reason.
-// log is everything the container has printed, stdout and stderr together:
-// the setup token is on stderr, which docker() drops.
+// log is everything the container has printed, stdout and stderr together; the
+// setup token is on stderr, which docker() drops.
 func (t *dockerTarget) log() (string, error) {
 	out, err := exec.Command("docker", "logs", t.name).CombinedOutput()
 	if err != nil {
@@ -654,6 +552,8 @@ func (t *dockerTarget) log() (string, error) {
 	return string(out), nil
 }
 
+// docker runs one docker command and returns its stdout. A failure carries the
+// command and docker's own stderr: "exit status 1" alone is not a reason.
 func docker(args ...string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("docker", args...)

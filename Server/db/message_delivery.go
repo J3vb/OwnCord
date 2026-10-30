@@ -47,19 +47,19 @@ type MessageDeliveryParams struct {
 	// set, 0 for none. It is stored as a message_mentions row flagged reply_ping.
 	ReplyPingUserID  int64
 	MentionsEveryone bool
-	// Forward, when set, makes this send a forward (WP 6.9a): the message is
+	// Forward, when set, makes this send a forward: the message is
 	// the snapshot, AttachmentIDs are the sender's own clones of the original's
 	// files, and the transaction re-checks the original before it writes.
 	Forward *ForwardRow
-	// Poll, when set, makes this send a poll (WP 6.9b): the poll row and its
+	// Poll, when set, makes this send a poll: the poll row and its
 	// answers commit with the message and the receipt. Content is the readable
 	// fallback text the service built from the same fields.
 	Poll *PollInput
-	// Sticker, when set, makes this send a sticker message (WP 8.8a): the
+	// Sticker, when set, makes this send a sticker message: the
 	// message_stickers row commits with the message and the receipt. Content is
 	// the readable fallback the service built.
 	Sticker *StickerRef
-	// ForumPost, when set, makes this send a forum post (WP 6.9d-a2).
+	// ForumPost, when set, makes this send a forum post.
 	// ChannelID is the forum: the receipt is keyed on it, but the message is
 	// written into a thread the transaction creates under the forum, so the
 	// post, its opening message, its tags and the receipt commit or fail

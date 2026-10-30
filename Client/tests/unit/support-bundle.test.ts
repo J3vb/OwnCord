@@ -12,7 +12,7 @@ const { desktop } = vi.hoisted(() => ({
   },
 }));
 
-import { STORAGE_PREFIX } from "../../src/lib/preferences";
+import { STORAGE_PREFIX } from "../../src/lib/prefs/preferences";
 import {
   SETTINGS_PREFIX,
   buildSupportBundle,
@@ -192,7 +192,7 @@ describe("buildSupportBundle", () => {
     });
   });
 
-  it("records OS and webview in app.json, and no server version (CLI-03, decision 7)", () => {
+  it("records OS and webview in app.json, and no server version", () => {
     const entries = readZip(buildSupportBundle(sources()));
     const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));
     expect(app).toEqual({

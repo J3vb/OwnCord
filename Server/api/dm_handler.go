@@ -14,65 +14,52 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// DMBroadcaster is the interface needed to send WebSocket events from REST
-// handlers. Satisfied by *ws.Hub.
+// DMBroadcaster sends WebSocket events from REST handlers; satisfied by *ws.Hub.
 type DMBroadcaster interface {
 	SendToUser(userID int64, msg []byte) bool
 }
 
 // dmVisibilityMarker is an optional DMBroadcaster capability: bump the hub's
-// visibility watermark after an unsequenced, targeted event so a client that
-// warm-reconnects across the gap takes the full-ready path instead of a
-// sequenced-only replay that can never redeliver it. Reached by type
-// assertion rather than being added to DMBroadcaster directly so the
-// SendToUser-only test doubles in this package keep working. Satisfied in
-// production by ws.Hub.MarkVisibilityChanged, which forwards to the same
-// bumpVisibilityWatermark the WS-side dm_channel_open emitter uses
-// (ws/emit.go).
+// visibility watermark after an unsequenced, targeted event, so a client that
+// warm-reconnects across the gap takes the full-ready path instead of a seq
+// replay that can never redeliver it. Reached by type assertion so
+// SendToUser-only test doubles keep working; ws.Hub.MarkVisibilityChanged
+// satisfies it (ws/emit.go).
 type dmVisibilityMarker interface {
 	MarkVisibilityChanged()
 }
 
 // The production broadcaster must keep satisfying it: a type assertion that
-// silently stops matching would turn the watermark bump back into the no-op
-// this fixed, with nothing failing to say so — mirrors the dmVoiceEvictor
-// assertion below for its sibling capability.
+// silently stops matching turns the bump into a no-op with nothing failing (as
+// with the dmVoiceEvictor assertion below).
 var _ dmVisibilityMarker = (*ws.Hub)(nil)
 
-// markDMVisibilityChanged bumps the visibility watermark if broadcaster
-// supports it. dm_channel_open/close are unsequenced and targeted, so a
-// client that misses one via a dropped connection and then warm-reconnects
-// never gets it redelivered by the ordinary seq-replay path — mirroring why
-// the WS emitter of the same event (ws/emit.go DMChannelOpenEvent) forces
-// this bump unconditionally, regardless of whether the send itself
-// succeeded. Also called by nsfw_handler.go (P2-8): nsfw_ack is the same
-// shape of unsequenced, targeted event.
+// markDMVisibilityChanged bumps the visibility watermark if broadcaster supports
+// it. dm_channel_open/close are unsequenced and targeted, so a client that
+// misses one and warm-reconnects never gets it from seq-replay; the WS emitter
+// (ws/emit.go DMChannelOpenEvent) bumps unconditionally for the same reason.
+// nsfw_handler.go uses it for nsfw_ack.
 func markDMVisibilityChanged(broadcaster DMBroadcaster) {
 	if vm, ok := broadcaster.(dmVisibilityMarker); ok {
 		vm.MarkVisibilityChanged()
 	}
 }
 
-// dmVoiceEvictor is the DMBroadcaster capability used to evict a user's
-// voice-call connection for one specific channel, leaving an unrelated call
-// they may currently be in untouched (which the unconditional
-// DisconnectFromVoice would not). It is kept out of DMBroadcaster itself and
-// reached by type assertion so the handler stays usable with the
-// SendToUser-only test doubles the package already has.
+// dmVoiceEvictor evicts a user's voice connection for ONE channel, leaving an
+// unrelated call untouched (unlike DisconnectFromVoice). Reached by type
+// assertion so SendToUser-only test doubles keep working.
 type dmVoiceEvictor interface {
 	DisconnectFromVoiceInChannel(ctx context.Context, userID, channelID int64, reason string) bool
 }
 
-// The production broadcaster must keep satisfying it: a type assertion that
-// silently stops matching would turn the eviction back into the no-op this
-// fixed, with nothing failing to say so.
+// The production broadcaster must keep satisfying it, or eviction silently
+// becomes a no-op.
 var _ dmVoiceEvictor = (*ws.Hub)(nil)
 
-// MountDMRoutes registers DM-related routes onto r.
-// All routes require authentication.
-// hub is used to send real-time WebSocket events on DM close. store may be nil,
-// in which case the group icon upload route is not registered: with nowhere to
-// put the bytes, a route that 500s on every call is worse than one that 404s.
+// MountDMRoutes registers the authenticated DM routes. hub sends real-time
+// events on DM close. store may be nil, in which case the group icon upload
+// route is not registered: a route that 500s on every call is worse than one
+// that 404s.
 func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter, store FileStore) {
 	r.Route("/api/v1/dms", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
@@ -91,7 +78,6 @@ func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaste
 		}
 	})
 
-	// User blocking routes — prevent DM creation and messaging.
 	r.Route("/api/v1/blocks", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListBlocks(svc))
@@ -100,35 +86,29 @@ func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaste
 	})
 }
 
-// createDMRequest is the JSON body for POST /api/v1/dms.
 type createDMRequest struct {
 	RecipientID int64 `json:"recipient_id"`
 }
 
-// createDMResponse is the JSON response for POST /api/v1/dms.
 type createDMResponse struct {
 	ChannelID int64     `json:"channel_id"`
 	Recipient db.DMUser `json:"recipient"`
 	Created   bool      `json:"created"`
 }
 
-// createGroupDMRequest is the JSON body for POST /api/v1/dms/group.
 type createGroupDMRequest struct {
 	RecipientIDs []int64 `json:"recipient_ids"`
 	Name         string  `json:"name"`
 }
 
-// renameDMRequest is the JSON body for PATCH /api/v1/dms/{channelId}.
 type renameDMRequest struct {
 	Name string `json:"name"`
 }
 
-// listDMsResponse is the JSON response for GET /api/v1/dms.
 type listDMsResponse struct {
 	DMChannels []db.DMChannelInfo `json:"dm_channels"`
 }
 
-// handleCreateDM creates or retrieves a DM channel with a recipient.
 func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -149,18 +129,14 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 
 		// A brand-new 1:1 DM has dm_open_state pre-seeded for BOTH users by
 		// GetOrCreateDMChannel (db/dm_queries.go), so the recipient's first
-		// OpenDM call — fired later from the sender's first message — finds
-		// the row already present and reports opened=false. Without this,
-		// nothing ever tells the recipient the DM exists: no live event, and
-		// no visibility-watermark bump for a warm reconnect either. Only the
-		// creation path needs this — CreateDM re-opening an existing DM for
-		// the caller only touches the caller's own dm_open_state row, which
-		// the caller obviously already knows about.
+		// OpenDM finds the row present and reports opened=false; without this
+		// nothing tells the recipient the DM exists (no live event, no watermark
+		// bump). Only creation needs it: re-opening an existing DM touches only
+		// the caller's row.
 		// RecipientOpened is false when the recipient does not yet trust the
-		// caller (B5-6): GetOrCreateDMChannelGated decides the recipient's
-		// side inside its own transaction and opens only the caller's, so no
-		// dm_channel_open goes out — the request frame from the first
-		// message is their only signal until they accept.
+		// caller: GetOrCreateDMChannelGated opens only the caller's side, so no
+		// dm_channel_open goes out and the request frame from the first message
+		// is their only signal until they accept.
 		if result.Created && result.RecipientOpened {
 			broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, []int64{result.Recipient.ID})
 		}
@@ -177,10 +153,10 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		if result.Recipient.DisplayName != nil {
 			displayName = *result.Recipient.DisplayName
 		}
-		// PresentableStatus applies the live-status rule ws/serve_ready.go's
-		// presentableMembers documents — StatusForViewer on the row alone
-		// would ship a disconnected recipient's saved idle/dnd verbatim
-		// (OC-0304) or a connected one's not-yet-flushed "offline".
+		// PresentableStatus applies the live-status rule documented at
+		// ws/serve_ready.go presentableMembers; StatusForViewer alone would ship
+		// a disconnected recipient's saved idle/dnd or a connected one's
+		// not-yet-flushed "offline".
 		dmUser := db.DMUser{
 			ID:          result.Recipient.ID,
 			Username:    result.Recipient.Username,
@@ -201,7 +177,6 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 	}
 }
 
-// handleListDMs returns all open DM channels for the authenticated user.
 func handleListDMs(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -218,7 +193,6 @@ func handleListDMs(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleCloseDM removes a DM channel from the authenticated user's open list.
 func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -237,35 +211,30 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 			return
 		}
 
-		// Notify via WebSocket so sidebar updates immediately.
 		if broadcaster != nil {
-			// dm_channel_close is unsequenced and targeted like
-			// dm_channel_open — see markDMVisibilityChanged. Bump BEFORE the
-			// send, same ordering broadcastDMOpen and the NSFW handlers use: a
-			// socket that warm-reconnects in the gap between these two calls
-			// must already observe the bumped watermark, since the close frame
-			// itself can never be redelivered by seq replay.
+			// dm_channel_close is unsequenced and targeted (see
+			// markDMVisibilityChanged). Bump BEFORE the send, as broadcastDMOpen
+			// and the NSFW handlers do: a socket warm-reconnecting between the
+			// two calls must already see the bumped watermark, since seq replay
+			// can never redeliver the close frame.
 			markDMVisibilityChanged(broadcaster)
 			closeMsg := fmt.Appendf(nil, `{"type":%q,"payload":{"channel_id":%d}}`, ws.MsgTypeDMChannelClose, channelID)
 			if ok := broadcaster.SendToUser(user.ID, closeMsg); !ok {
 				slog.Debug("handleCloseDM: user not connected", "user_id", user.ID, "channel_id", channelID)
 			}
-			// A group leave changes the membership everyone else renders, so
-			// the survivors get a refreshed dm_channel_open (it carries the new
-			// owner_id when the leaver owned the group) rather than being left
-			// showing a member who has gone, then the group_leave row.
+			// A group leave changes the membership everyone renders, so
+			// survivors get a refreshed dm_channel_open (carrying the new
+			// owner_id if the leaver owned the group) before the group_leave
+			// row.
 			if result.Left && !result.ChannelDeleted {
 				fanOutGroupChange(r.Context(), svc, broadcaster, channelID, result.RemainingParticipantIDs, result.Rows)
 			}
-			// Leaving a group DM removes the caller from its membership but,
-			// without this, leaves them connected to its live voice call —
-			// they keep hearing and speaking to a room they are no longer a
-			// member of. Scoped to this channel so a leaver currently on an
-			// unrelated voice call is untouched. This also covers the
-			// last-participant case (ChannelDeleted): the row is already gone
-			// by now, so CleanupVoiceForChannel would read an FK-cascaded
-			// empty voice_states and do nothing, while the leaver — the only
-			// participant left — is evicted here.
+			// Without this a leaver stays connected to the group's live voice
+			// call, hearing a room they no longer belong to. Scoped to this
+			// channel so an unrelated call is untouched. It also covers the
+			// last-participant case (ChannelDeleted): the row is gone, so
+			// CleanupVoiceForChannel would read an FK-cascaded empty
+			// voice_states and do nothing.
 			if result.Left {
 				if ve, ok := broadcaster.(dmVoiceEvictor); ok {
 					ve.DisconnectFromVoiceInChannel(context.WithoutCancel(r.Context()), user.ID, channelID, ws.VoiceLeaveReasonDMLeave)
@@ -278,29 +247,23 @@ func handleCloseDM(svc *service.Services, broadcaster DMBroadcaster) http.Handle
 }
 
 // broadcastDMOpen sends a per-viewer dm_channel_open for channelID to each of
-// targetIDs. The payload differs per addressee (`recipient`/`recipients` are
-// relative to who is reading), so it is rebuilt inside the loop.
-//
-// Failures are logged and skipped, never surfaced: the mutation that prompted
-// this has already committed, and a client that misses the event re-derives
-// the same state from its next `ready`.
+// targetIDs; the payload is relative to the reader, so it is rebuilt per target.
+// Failures are logged and skipped: the mutation has committed and a client that
+// misses the event re-derives the state from its next `ready`.
 func broadcastDMOpen(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, channelID int64, targetIDs []int64) {
 	if broadcaster == nil || len(targetIDs) == 0 {
 		return
 	}
-	// The mutation that led here has already committed, so this fan-out must
-	// survive the caller's request context being cancelled after that point
-	// (client disconnect mid-handler) — otherwise every DMSummaryFor lookup
-	// below fails with context.Canceled and no participant, including ones
-	// otherwise unaffected by the cancellation, ever receives the open.
+	// The mutation has already committed, so the fan-out must survive the
+	// request context being cancelled (client disconnect); otherwise every
+	// DMSummaryFor lookup fails with context.Canceled and no participant gets
+	// the open.
 	ctx = context.WithoutCancel(ctx)
-	// dm_channel_open is unsequenced and targeted — a recipient who is
-	// offline or drops the connection right now can never have it replayed
-	// to them by the ordinary seq-based resume path, so a warm reconnect must
-	// be forced onto the full-ready path instead. Bumped once per call,
-	// unconditionally (not per-recipient SendToUser result): the ws emitter
-	// of this same event does the same (ws/emit.go), and this covers every
-	// caller — group create, rename refresh, and the group-leave refresh.
+	// dm_channel_open is unsequenced and targeted, so a recipient who drops now
+	// cannot get it from seq resume; force warm reconnects onto the full-ready
+	// path. Bumped once per call, unconditionally (not per SendToUser result),
+	// like the ws emitter (ws/emit.go); this covers group create, the rename
+	// refresh and the group-leave refresh.
 	markDMVisibilityChanged(broadcaster)
 	for _, pid := range targetIDs {
 		summary, pErr := svc.DMs.DMSummaryFor(ctx, pid, channelID)
@@ -322,7 +285,6 @@ func broadcastDMOpen(ctx context.Context, svc *service.Services, broadcaster DMB
 	}
 }
 
-// handleCreateGroupDM creates a group DM between the caller and 2..8 others.
 func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -341,9 +303,9 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 			return
 		}
 
-		// Everyone gets the DM in their sidebar immediately, the creator
-		// included — the REST response is only the creator's copy, and a
-		// second window of theirs needs the event just as much as the others.
+		// Everyone, the creator included, gets the DM in their sidebar
+		// immediately: the REST response is only the creator's copy and a second
+		// window needs the event too.
 		broadcastDMOpen(r.Context(), svc, broadcaster, result.Channel.ID, result.ParticipantIDs)
 
 		writeJSON(w, http.StatusCreated,
@@ -351,8 +313,8 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster) http.
 	}
 }
 
-// handleRenameGroupDM sets or clears a group DM's name. Any member may rename.
-// A changed name leaves a group_rename row; an unchanged one sends nothing.
+// handleRenameGroupDM sets or clears a group DM's name (any member). A changed
+// name leaves a group_rename row; an unchanged one sends nothing.
 func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -379,12 +341,10 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 			return
 		}
 
-		// The rename has already committed at this point, so the fan-out runs on
-		// a context detached from the request (client disconnect mid-handler),
-		// and participants would keep rendering the stale name with no
-		// compensating resync otherwise, since dm_channel_open is
-		// unsequenced/targeted and can't be replayed. An unchanged name wrote no
-		// row and changed nothing for anyone, so it sends nothing.
+		// The rename has committed, so the fan-out runs on a context detached
+		// from the request; otherwise participants keep the stale name, since
+		// dm_channel_open is unsequenced/targeted and can't be replayed. An
+		// unchanged name wrote no row and sends nothing.
 		if len(result.Rows) > 0 {
 			fanOutGroupChange(r.Context(), svc, broadcaster, channelID, result.Audience, result.Rows)
 		}
@@ -393,7 +353,6 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 	}
 }
 
-// handleBlockUser blocks a user.
 func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -417,19 +376,14 @@ func handleBlockUser(svc *service.Services, broadcaster DMBroadcaster) http.Hand
 	}
 }
 
-// evictBlockedUserFromVoice evicts targetID from the pair's shared 1:1 DM
-// voice call, if any — the post-block step both PUT /api/v1/blocks/{id} and
-// POST /api/v1/dm-requests/{id}/block (B5-6, Codex P1-3) owe once BlockUser
-// itself has committed. Callers pass a context detached from the request
-// (context.WithoutCancel): the block has already committed by the time this
-// runs, so a client disconnecting mid-handler must not silently skip it.
-//
-// Revocation must evict a live session, not merely block the next join (the
-// same invariant the voice sweep states): without this, a blocked user
-// already in the pair's 1:1 DM voice call stays in it indefinitely — the
-// block gate otherwise runs only on voice_join and voluntary
-// voice_token_refresh, both of which the blocked client controls. Group DM
-// calls are deliberately untouched, matching RequireDMReachable's group
+// evictBlockedUserFromVoice evicts targetID from the pair's shared 1:1 DM voice
+// call, the post-block step PUT /api/v1/blocks/{id} and POST
+// /api/v1/dm-requests/{id}/block owe once BlockUser commits. Callers pass a
+// context detached from the request (context.WithoutCancel) so a disconnect
+// cannot skip it.
+// Revocation must evict a live session, not just block the next join: the block
+// gate runs only on voice_join and voice_token_refresh, which the blocked client
+// controls. Group DM calls are untouched, matching RequireDMReachable's group
 // exemption.
 func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broadcaster DMBroadcaster, blockerID, targetID int64) {
 	ve, evictable := broadcaster.(dmVoiceEvictor)
@@ -447,7 +401,6 @@ func evictBlockedUserFromVoice(ctx context.Context, svc *service.Services, broad
 	}
 }
 
-// handleUnblockUser unblocks a user.
 func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)
@@ -468,7 +421,6 @@ func handleUnblockUser(svc *service.Services) http.HandlerFunc {
 	}
 }
 
-// handleListBlocks returns all blocked user IDs.
 func handleListBlocks(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := requireUser(w, r)

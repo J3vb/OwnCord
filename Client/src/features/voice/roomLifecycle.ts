@@ -7,7 +7,7 @@
 import { Room, RoomEvent, Track, type LocalAudioTrack } from "livekit-client";
 import type { WsClient } from "../../lib/ws";
 import { setLocalCamera, setLocalScreenshare, setVoiceStatus } from "../../stores/voice.store";
-import { loadPref } from "@lib/preferences";
+import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "../../lib/logger";
 import { micProcessingOptions, type AudioPipeline } from "../../lib/audioPipeline";
 import type { AudioElements } from "../../lib/audioElements";

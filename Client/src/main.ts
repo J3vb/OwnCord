@@ -6,14 +6,14 @@ import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
 
-import { installGlobalErrorHandlers } from "@lib/safe-render";
+import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { installGlobalGuards } from "./app/globalGuards";
 
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { openNotificationTarget } from "@lib/notifications";
-import { settleNotificationLevelDefault } from "@lib/notificationLevel";
+import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { wireConnectionStatus } from "@lib/dispatcher";
 import { markActiveChannelReadOnUnload } from "@lib/read-state";
@@ -21,13 +21,17 @@ import { registerSessionReset } from "@lib/sessionRegistry";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
-import { applyStoredAppearance } from "@lib/appearance";
+import { applyStoredAppearance } from "@lib/prefs/appearance";
+import {
+  applyStoredCustomTheme,
+  installCustomThemeEscape,
+} from "./features/custom-themes/customTheme";
 import { startZoom } from "./features/zoom/zoomKeys";
 import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/inputMode";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
-import { initWindowState } from "@lib/window-state";
+import { initWindowState } from "@lib/prefs/windowState";
 import { createProfileManager, createTauriBackend } from "@lib/profiles";
 import { saveUserStatus } from "@lib/userStatus";
 import { getActivePresenceSender } from "@lib/presence";
@@ -64,8 +68,12 @@ void initLogPersistence();
 
 // Apply stored theme/font/compact preferences before first render
 applyStoredAppearance();
+// After the built-in theme and accent: a custom theme paints on top of them.
+applyStoredCustomTheme();
 // Native webview zoom: the stored level now, and the zoom keys everywhere.
 startZoom(() => import("./features/zoom").then((m) => m.appZoom), new Disposable().signal);
+// Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
+installCustomThemeEscape(new Disposable().signal);
 
 // A profile from before automatic sensitivity keeps a tuned slider.
 migrateAutoInputSensitivity();

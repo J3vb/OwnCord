@@ -8,7 +8,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// ThreadDeps holds dependencies for the thread handlers (WP 6.9c).
+// ThreadDeps holds dependencies for the thread handlers.
 type ThreadDeps struct {
 	Limiter    *auth.RateLimiter
 	ThreadSvc  *service.ThreadService

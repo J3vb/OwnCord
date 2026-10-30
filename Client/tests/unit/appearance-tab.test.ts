@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { buildAppearanceTab } from "@components/settings/AppearanceTab";
-import { refreshTimeFormat } from "@lib/timeFormat";
+import { refreshTimeFormat } from "@lib/text/timeFormat";
 
 const { mockGetActiveThemeName, mockRestoreTheme } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
@@ -11,8 +11,8 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: vi.fn(),
 }));
 
-vi.mock("@lib/themes", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/themes")>()),
+vi.mock("@lib/prefs/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
   restoreTheme: mockRestoreTheme,
 }));
@@ -423,7 +423,7 @@ describe("AppearanceTab — Accessibility", () => {
 
   // --- Renders all 10 accent swatches ---
 
-  it("names the custom accent input and describes the Q8 readability fallback (B9-2)", () => {
+  it("names the custom accent input and describes the Q8 readability fallback", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 

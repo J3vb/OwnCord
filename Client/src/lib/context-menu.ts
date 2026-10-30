@@ -8,7 +8,7 @@
  * nested submenu.
  */
 
-import { isImeCommit } from "./ime";
+import { isImeCommit } from "./text/ime";
 import { Disposable } from "./disposable";
 import { createElement, setOwnedTimeout } from "./dom";
 import { setRovingTabindex } from "./a11y";

@@ -34,6 +34,9 @@ const clickTab = (root: HTMLElement, label: string) => {
   tab.click();
 };
 
+const clickGoLive = (root: HTMLElement) =>
+  root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
+
 const openWithAudio = async () => {
   const picking = showScreenSharePicker({
     sources,
@@ -108,6 +111,29 @@ describe("showScreenSharePicker", () => {
     expect(off.getAttribute("aria-checked")).toBe("false");
     second.root.querySelector<HTMLButtonElement>('[data-testid="screen-share-go-live"]')!.click();
     await expect(second.picking).resolves.toMatchObject({ audio: false });
+  });
+
+  it("says a window shares only its app's sound on X11, and all sound behind the portal", async () => {
+    const x11 = await openWithAudio();
+    expect(x11.root.querySelector("#ssp-audio-hint")?.textContent).toBe(
+      "A screen shares all sound except OwnCord's own. One window shares only its app's sound.",
+    );
+    clickGoLive(x11.root);
+    await x11.picking;
+    await vi.waitFor(() => expect(dialog()).toBeNull());
+    const portalPick = showScreenSharePicker({
+      sources: [],
+      portal: true,
+      audioAvailable: true,
+      defaultQuality: "high",
+      defaultFps: 30,
+    });
+    const portal = await mounted();
+    expect(portal.querySelector("#ssp-audio-hint")?.textContent).toBe(
+      "All sound playing on this computer, except OwnCord's own.",
+    );
+    clickGoLive(portal);
+    await portalPick;
   });
 
   it("toggles the share-audio switch with Space and Enter", async () => {
@@ -441,7 +467,7 @@ describe("showScreenSharePicker", () => {
     await expect(picking).resolves.toEqual({ source: "os", quality: "source", fps: 60 });
   });
 
-  it("on Windows says what 120 fps needs, only while 120 is chosen (M-2)", async () => {
+  it("on Windows says what 120 fps needs, only while 120 is chosen", async () => {
     const picking = showScreenSharePicker({
       sources: [],
       portal: false,

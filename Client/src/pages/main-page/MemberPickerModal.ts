@@ -16,7 +16,7 @@ import { showToast } from "@lib/toast";
 import type { ModalInstance } from "@lib/modalFactory";
 import { Disposable } from "@lib/disposable";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
 import { createAvatarElement, pickAvatarColor } from "../../components/message-list/avatar";
@@ -31,7 +31,7 @@ import {
   lineHintText,
   runeCount,
   MAX_GROUP_DM_NAME_LEN,
-} from "@lib/nameLimits";
+} from "@lib/text/nameLimits";
 
 // ---------------------------------------------------------------------------
 // Types

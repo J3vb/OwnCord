@@ -76,6 +76,14 @@ test("the pattern matches the quarantined test and escapes regex metacharacters"
   assert.ok(!re.test("tests/e2e/native/native-extra.spec.ts:287:1 › a different test"));
 });
 
+test("the pattern matches the spec path from the root config and from tests/e2e/config", () => {
+  const re = quarantinePattern([entry()]);
+  const title = "F5 and Ctrl+R never reload the app and a release build opens no DevTools";
+  assert.ok(re.test(`tests/e2e/native/native-extra.spec.ts:287:1 › ${title}`));
+  assert.ok(re.test(`../native/native-extra.spec.ts:287:1 › ${title}`));
+  assert.ok(!re.test(`../native/other-native-extra.spec.ts:287:1 › ${title}`));
+});
+
 test("an empty list yields no pattern", () => {
   assert.equal(quarantinePattern([]), undefined);
 });

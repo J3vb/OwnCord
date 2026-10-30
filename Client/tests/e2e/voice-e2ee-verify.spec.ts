@@ -194,7 +194,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     expect(pins[0]).toMatchObject({ userId: "2", pin: peer.identityPublicKeyB64 });
   });
 
-  test("[F-11] your own row's shield shows your own safety number to compare", async ({ page }) => {
+  test("your own row's shield shows your own safety number to compare", async ({ page }) => {
     const peer = await makePeerCrypto(2);
     await mockE2EEVoiceSession(page, { peerIdentityKeyB64: peer.identityPublicKeyB64 });
     await page.goto("/");
@@ -355,7 +355,7 @@ test.describe("Voice E2EE identity verification (§7)", () => {
     expect(pins[0]).toMatchObject({ userId: "2", pin: `${oldPin}_${peer.identityPublicKeyB64}` });
   });
 
-  test("an unreadable pin store fails closed: distinct 'could not check' badge, nothing pinned (DC-08)", async ({
+  test("an unreadable pin store fails closed: distinct 'could not check' badge, nothing pinned", async ({
     page,
   }) => {
     const peer = await makePeerCrypto(2);

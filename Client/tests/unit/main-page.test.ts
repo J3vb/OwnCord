@@ -335,7 +335,7 @@ vi.mock("../../src/pages/main-page/ChatArea", () => ({
   },
 }));
 
-import { savePref } from "../../src/lib/preferences";
+import { savePref } from "../../src/lib/prefs/preferences";
 
 // The remembered-open pref must never leak between tests, whatever their order.
 afterEach(() => {
@@ -607,7 +607,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(capturedChatAreaRef.current!.slots.messagesSlot.style.display).toBe("");
   });
 
-  it("opening the call view of a voice channel selects it and keeps its chat beside the grid (WP 6.1b)", () => {
+  it("opening the call view of a voice channel selects it and keeps its chat beside the grid", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(1, textChannel(1, "general"));
@@ -643,7 +643,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(chatArea.classList.contains("chat-area--call-chat")).toBe(false);
   });
 
-  it("opening another voice channel's chat while in a call dismisses the grid (WP 6.1d)", () => {
+  it("opening another voice channel's chat while in a call dismisses the grid", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(1, textChannel(1, "general"));
@@ -671,7 +671,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(slots.messagesSlot.style.display).toBe("");
   });
 
-  it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged (OC-0207)", () => {
+  it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(1, textChannel(1, "general"));
@@ -858,7 +858,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(slots.messagesSlot.style.display).toBe("none");
   });
 
-  it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename (OC-0227)", () => {
+  it("relabels a remote video tile with the member's display name, not the raw username, and keeps it in sync with a mid-call rename", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(1, textChannel(1, "general"));
@@ -936,7 +936,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(videoGrid.setLabel).toHaveBeenCalledWith(200, "Robert", "Robert");
   });
 
-  it('keeps "(You)" on the self-view tile when the server echoes our own voice_state (OC-0375)', () => {
+  it('keeps "(You)" on the self-view tile when the server echoes our own voice_state', () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(1, textChannel(1, "general"));
@@ -983,7 +983,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(videoGrid.setLabel).toHaveBeenCalledWith(1, "alice (You)", "alice");
   });
 
-  it("brackets a bare IPv6 host when building the auto-updater URL (OC-0332)", () => {
+  it("brackets a bare IPv6 host when building the auto-updater URL", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(1, textChannel(1, "general"));
@@ -1004,7 +1004,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  it("leaves a DNS host unbracketed in the auto-updater URL (OC-0332)", () => {
+  it("leaves a DNS host unbracketed in the auto-updater URL", () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(1, textChannel(1, "general"));
@@ -1020,7 +1020,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  describe("DM profile panel is open by default and remembered (WP 3B-3)", () => {
+  describe("DM profile panel is open by default and remembered", () => {
     const panel = (): HTMLElement | null =>
       capturedChatAreaRef.current!.dmProfileSlot.querySelector<HTMLElement>(
         '[data-testid="dm-profile-sidebar"]',
@@ -1891,7 +1891,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     supported.mockRestore();
   });
 
-  describe("Wayland portal keys (LP-9b)", () => {
+  describe("Wayland portal keys", () => {
     const portal = {
       backend: "portal" as const,
       portalVersion: 2,
@@ -2311,7 +2311,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
-  it("a group call is declined once every online callee declined; offline members are not waited on (D-12)", async () => {
+  it("a group call is declined once every online callee declined; offline members are not waited on", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     openOneToOneDm(50);
@@ -2399,7 +2399,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
-  it("calling an offline 1:1 contact says so at once instead of ringing back for 30 s (D-14)", async () => {
+  it("calling an offline 1:1 contact says so at once instead of ringing back for 30 s", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     openOneToOneDm(50);
@@ -2426,7 +2426,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
-  describe("ringing the callee (D-01, D-02, D-05)", () => {
+  describe("ringing the callee", () => {
     const rings = (ws: FakeWsClient): unknown[] =>
       vi.mocked(ws.send).mock.calls.filter(([m]) => (m as { type: string }).type === "call_ring");
 
@@ -2633,7 +2633,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  it("a ring refused because the callee has not accepted ends the outgoing call at once (D-03)", async () => {
+  it("a ring refused because the callee has not accepted ends the outgoing call at once", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     openOneToOneDm(50);
@@ -2821,7 +2821,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page.destroy?.();
   });
 
-  it("shows the caller's nickname on the incoming-call banner, not the raw username (OC-0303)", () => {
+  it("shows the caller's nickname on the incoming-call banner, not the raw username", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     membersStore.setState(() => ({
@@ -2854,7 +2854,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(title.textContent).toBe("Ali is calling");
   });
 
-  it("falls back to the raw username on the incoming-call banner when the caller isn't in the members store (OC-0303)", () => {
+  it("falls back to the raw username on the incoming-call banner when the caller isn't in the members store", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
@@ -2867,7 +2867,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(title.textContent).toBe("stranger is calling");
   });
 
-  it("does not cancel an incoming ring when a fellow group-DM callee declines, only when the actual ringer does (OC-0114)", () => {
+  it("does not cancel an incoming ring when a fellow group-DM callee declines, only when the actual ringer does", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
@@ -2896,7 +2896,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).toBe("none");
   });
 
-  it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer (OC-0011)", async () => {
+  it("does not cancel an incoming ring on a voice_leave for a different channel from the ringer", async () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
@@ -2927,7 +2927,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(vi.mocked(alertMissedCall).mock.calls[0]![0]).toMatchObject({ channelId: 50 });
   });
 
-  it("does not cancel a group-DM ring when the ringer leaves voice but another callee is still in the call (OC-0235)", () => {
+  it("does not cancel a group-DM ring when the ringer leaves voice but another callee is still in the call", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
 
@@ -2976,7 +2976,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.style.display).not.toBe("none");
   });
 
-  it("stops a group ring when the last person leaves after the ringer did (D-06)", () => {
+  it("stops a group ring when the last person leaves after the ringer did", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     page = createMainPage({ ws, api: fakeApi() });
@@ -3192,14 +3192,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(uiStore.getState().settingsOpen).toBe(false);
   });
 
-  it("scopes per-user volume prefs to the connected host, like channel mutes and the NSFW gate (B3-6)", () => {
+  it("scopes per-user volume prefs to the connected host, like channel mutes and the NSFW gate", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
 
     expect(mockSetAudioVolumeHost).toHaveBeenCalledWith("");
   });
 
-  it("closes an open image lightbox on destroy so it doesn't survive onto the next page (B6-15)", () => {
+  it("closes an open image lightbox on destroy so it doesn't survive onto the next page", () => {
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
 
@@ -3211,7 +3211,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(document.body.querySelector(".image-lightbox")).toBeNull();
   });
 
-  it("clears every external-content cache on sign-out so one server's previews never reach the next (B7-16)", async () => {
+  it("clears every external-content cache on sign-out so one server's previews never reach the next", async () => {
     const preview = vi.spyOn(desktop.externalContent, "preview").mockResolvedValue({
       ok: true,
       value: { title: "T", description: null, siteName: null, image: null },
@@ -3272,7 +3272,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }
   });
 
-  it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate (OC-0143)", async () => {
+  it("scopes DM profile notes to the connected host, like channel mutes and the NSFW gate", async () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(60, dmChannel(60, "dm-carol"));
@@ -3336,7 +3336,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }
   });
 
-  it("surfaces the server's partial-success warning on a password change instead of an unqualified success (OC-0314)", async () => {
+  it("surfaces the server's partial-success warning on a password change instead of an unqualified success", async () => {
     // PUT /users/me/password answers 200 + warning (not 204) when the
     // password changed but the other sessions could not be revoked. The
     // warning is the only thing telling the user to revoke them by hand,
@@ -3400,7 +3400,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(container.textContent).not.toContain("Password changed successfully.");
   });
 
-  it("shows Signed in elsewhere on SESSION_REPLACED, and Use here reconnects this device (B7-14)", async () => {
+  it("shows Signed in elsewhere on SESSION_REPLACED, and Use here reconnects this device", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
     page = createMainPage({ ws, api: fakeApi("chat.example.com") });
@@ -3424,7 +3424,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(uiStore.getState().sessionReplaced).toBe(false);
   });
 
-  it("shows an actionable connection notice on disconnect and Retry redials (B9-25)", async () => {
+  it("shows an actionable connection notice on disconnect and Retry redials", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
     page = createMainPage({ ws, api: fakeApi("chat.example.com") });
@@ -3446,7 +3446,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.connect).toHaveBeenCalledWith({ host: "chat.example.com", token: "tok-here" });
   });
 
-  it("keeps Reconnecting... until a dial fails, then offers Retry (B9-25)", async () => {
+  it("keeps Reconnecting... until a dial fails, then offers Retry", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
     page = createMainPage({ ws, api: fakeApi("chat.example.com") });
@@ -3474,7 +3474,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     uiStore.setState((prev) => ({ ...prev, connectionDialFailed: false }));
   });
 
-  it("holds one unreachable notice and Retry across repeated failed dials (B9-25)", async () => {
+  it("holds one unreachable notice and Retry across repeated failed dials", async () => {
     const socket = createMockWsClient();
     const unwire = wireConnectionStatus(socket);
     const ws = fakeWs();
@@ -3530,7 +3530,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     }
   });
 
-  it("re-renders the notice on network loss and return without redialing (B9-25)", async () => {
+  it("re-renders the notice on network loss and return without redialing", async () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
     page = createMainPage({ ws, api: fakeApi("chat.example.com") });
@@ -3560,7 +3560,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.connect).not.toHaveBeenCalled();
   });
 
-  it("does not clear a pending restart countdown on a network flap (B9-25)", () => {
+  it("does not clear a pending restart countdown on a network flap", () => {
     const ws = fakeWs();
     authStore.setState((prev) => ({ ...prev, token: "tok-here" }));
     page = createMainPage({ ws, api: fakeApi("chat.example.com") });
@@ -3590,7 +3590,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(banner.classList.contains("visible")).toBe(true);
   });
 
-  it("clears local auth when sign-out-everywhere revoked this device's session (B7-14)", async () => {
+  it("clears local auth when sign-out-everywhere revoked this device's session", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
       getSession: () => ({ signal: new AbortController().signal }),
@@ -3620,7 +3620,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  it("toasts a sign-in not yet reviewed from the listing made on mount (B7-14)", async () => {
+  it("toasts a sign-in not yet reviewed from the listing made on mount", async () => {
     const hostedApi = {
       getConfig: () => ({ host: "chat.example.com" }),
       getSession: () => ({ signal: new AbortController().signal }),
@@ -3646,7 +3646,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  it("keeps the open DM profile panel's status and name live, like the chat header does (OC-0309)", async () => {
+  it("keeps the open DM profile panel's status and name live, like the chat header does", async () => {
     channelsStore.setState((prev) => {
       const ch = new Map(prev.channels);
       ch.set(70, dmChannel(70, "dm-bob"));
@@ -3749,7 +3749,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     });
   });
 
-  it("the DM row menu's Profile on a DM that is not active shows that DM's panel (WP 3B-2)", async () => {
+  it("the DM row menu's Profile on a DM that is not active shows that DM's panel", async () => {
     const { slot } = mountOnDm();
     const bob = dmStore.getState().channels[0]!;
     dmStore.setState(() => ({
@@ -3839,7 +3839,7 @@ describe("MainPage — presence", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
   });
 
-  it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever (OC-0111)", () => {
+  it("retries the return-to-online presence_update once the limiter's window reopens instead of dropping it forever", () => {
     const ws = fakeWs();
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
@@ -3894,7 +3894,7 @@ describe("MainPage — server restart banner", () => {
     vi.useRealTimers();
   });
 
-  it("re-syncs to the real (connected) status instead of counting down to a fake Reconnecting on an update_aborted cancel (OC-0164)", () => {
+  it("re-syncs to the real (connected) status instead of counting down to a fake Reconnecting on an update_aborted cancel", () => {
     const ws = fakeWs();
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
@@ -3926,7 +3926,7 @@ describe("MainPage — server restart banner", () => {
   });
 });
 
-describe("MainPage — mark-all-read teardown (OC-0418)", () => {
+describe("MainPage — mark-all-read teardown", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
@@ -4070,7 +4070,7 @@ describe("MainPage — account deletion", () => {
   });
 });
 
-describe("MainPage — B9-4 content view wiring", () => {
+describe("MainPage — content view wiring", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
@@ -4395,7 +4395,7 @@ describe("MainPage — focus fallback when the channel is declined", () => {
   });
 });
 
-describe("MainPage — destroy isolates every teardown step (ARCH-012)", () => {
+describe("MainPage — destroy isolates every teardown step", () => {
   /** Live subscriptions on a store: every subscribe minus its unsubscribe. */
   function trackSubscriptions(store: {
     subscribe: (...a: never[]) => () => void;

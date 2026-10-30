@@ -9,112 +9,84 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// broadcastMsg is an internal message queued for delivery.
+// broadcastMsg is a message queued for delivery.
 type broadcastMsg struct {
 	channelID int64 // 0 = send to all connected clients
 	msg       []byte
-	// recipients, when non-nil, replaces topic fan-out with direct delivery to
-	// exactly these user IDs. Used by voice_state/voice_leave: they are global
-	// in scope (every sidebar shows them) but must not disclose a channel the
-	// recipient's role may not READ, and the audience is resolved off the hub
-	// goroutine so deliverBroadcast stays free of permission queries.
+	// recipients, when non-nil, replaces topic fan-out with direct delivery to these
+	// user IDs. Used by voice_state/voice_leave, which are global in scope but must
+	// not disclose a channel the recipient cannot READ; the audience is resolved off
+	// the hub goroutine so deliverBroadcast stays free of permission queries.
 	recipients []int64
 	// excludeUserID, when non-zero, is omitted from a global (channelID == 0)
-	// broadcast's live delivery. Used for the public half of an invisible
-	// user's presence (see BroadcastToAllExcept): everyone else must see it,
-	// but the owner's own view comes from a separate, synchronous, targeted
-	// send, and the two racing would let the async global broadcast overwrite
-	// it. Ignored outside the channelID == 0 branch of deliverBroadcast.
+	// broadcast. Used for the public half of an invisible user's presence
+	// (BroadcastToAllExcept): the owner's view comes from a separate synchronous
+	// targeted send, and the async global broadcast racing it could overwrite it.
 	excludeUserID int64
-	// senderID, when non-zero, is the user whose request produced this
-	// channel frame; the topic limiter then counts it against that sender
-	// alone (allowTopicFrame). Zero for server-originated frames.
+	// senderID, when non-zero, is the user whose request produced this channel frame;
+	// the topic limiter counts it against that sender alone (allowTopicFrame).
 	senderID int64
-	// barrier, when non-nil, makes this entry a dispatch barrier rather than
-	// a broadcast: dispatch closes it and sequences nothing. Because
-	// h.broadcast is FIFO on one dispatch goroutine, and a barrier waits for
-	// any frame enqueued before it that is still parked on its content gate
-	// (hub_content_gate.go), whoever waits on it knows every broadcast
-	// enqueued earlier has been sequenced, buffered and handed to the
-	// persister (awaitDispatch).
+	// barrier, when non-nil, makes this entry a dispatch barrier: dispatch closes it
+	// and sequences nothing. h.broadcast is FIFO on one dispatch goroutine and a
+	// barrier waits for earlier frames still parked on their content gate
+	// (hub_content_gate.go), so a waiter knows every earlier broadcast has been
+	// sequenced, buffered and handed to the persister (awaitDispatch).
 	barrier chan struct{}
-	// enqueuedAt stamps the enqueue site so deliverBroadcast can record
-	// enqueue→fanout latency. Zero on test-constructed messages; skipped then.
+	// enqueuedAt stamps the enqueue site for enqueue-to-fanout latency; zero on test messages.
 	enqueuedAt time.Time
-	// nsfwChannelID, when non-zero, marks this entry as a content-bearing
-	// channel event (chat_message, chat_edited, reaction_update,
-	// plugin_broadcast — see contentBearingKinds) whose B5-7 gate is resolved
-	// at DISPATCH time rather than by the caller at enqueue time. It carries
-	// the channel identity and nothing else: the label and the recipient's
-	// acknowledgement are read once the event is dequeued, off the dispatch
-	// goroutine (hub_content_gate.go), so a revocation or a relabelling that
-	// completed while it waited is honoured by the event itself (OC-0449).
-	//
-	// The alternative — resolving at enqueue and handing over a precomputed
-	// allow-list — is what this replaced, and it is unsound in both
-	// directions: a consent revocation landing after the enqueue was invisible
-	// to the queued frame, and a frame enqueued while the channel was still
-	// unlabelled carried no filter at all, so labelling the channel before it
-	// dispatched delivered it to every subscriber and to the plugin sink. A
-	// precomputed list is also stale by construction in a way a live one is
-	// not, because the enqueue happens on a request handler that can be
-	// arbitrarily far ahead of the dispatch loop (P2-4/P2-5).
+	// nsfwChannelID, when non-zero, marks a content-bearing channel event (see
+	// contentBearingKinds) whose NSFW gate is resolved at dispatch time, not by the
+	// caller at enqueue (hub_content_gate.go). It carries only the channel identity;
+	// the label and acknowledgement are read after dequeue, so a revocation or
+	// relabel that completed while the event waited is honoured. A list precomputed
+	// at enqueue is unsound both ways: a later revocation is invisible to the queued
+	// frame, and a frame enqueued while the channel was unlabelled carries no filter
+	// and would reach every subscriber and the plugin sink if labelled before dispatch.
 	nsfwChannelID int64
-	// laneChannelID, on a global frame (channelID == 0), names the channel
-	// whose parked content it must not overtake (BroadcastChannelDelete).
-	// Ordering only: delivery is unchanged.
+	// laneChannelID, on a global frame, names the channel whose parked content it must
+	// not overtake (BroadcastChannelDelete). Ordering only; delivery is unchanged.
 	laneChannelID int64
-	// presence, droppable and presenceSnapshot carry presence_batch and the
-	// presence drop policy; see hub_presence.go.
+	// presence, droppable and presenceSnapshot carry presence_batch and its drop policy (hub_presence.go).
 	presence         map[int64]pendingPresence
 	droppable        bool
 	presenceSnapshot bool
 }
 
-// BroadcastToChannel enqueues msg for delivery to all clients subscribed to
-// channelID. When channelID is 0 the message is sent to every connected client.
-// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
+// BroadcastToChannel enqueues msg for clients subscribed to channelID (0 means
+// every client). Non-blocking: a full broadcast channel drops it with a warning.
 func (h *Hub) BroadcastToChannel(channelID int64, msg []byte) {
 	h.enqueue(broadcastMsg{channelID: channelID, msg: msg}, "message")
 }
 
-// BroadcastToAll enqueues msg for delivery to every connected client.
-// Non-blocking: if the broadcast channel is full the message is dropped with a warning.
+// BroadcastToAll enqueues msg for every connected client. Non-blocking: a full
+// channel drops it with a warning.
 func (h *Hub) BroadcastToAll(msg []byte) {
 	h.enqueue(broadcastMsg{channelID: 0, msg: msg}, "global message")
 }
 
-// BroadcastToAllExcept enqueues msg for delivery to every connected client
-// except excludeUserID. Non-blocking, like BroadcastToAll: if the broadcast
-// channel is full the message is dropped with a warning.
+// BroadcastToAllExcept enqueues msg for every connected client except
+// excludeUserID. Non-blocking like BroadcastToAll.
 //
-// Routes through the SAME h.broadcast channel — and so the same single-
-// goroutine hub dispatch loop and seqMu-serialized deliverBroadcast — as
-// BroadcastToAll and every other normal-priority global broadcast. That
-// shared serialization is what gives two broadcasts about the same user (say,
-// a connect/disconnect presence frame and this one) their correct relative
-// order at each observer: whichever enqueues onto h.broadcast first is also
-// delivered to c.send first. A caller that instead published straight to
-// pub/sub, bypassing this queue, would reintroduce exactly that kind of
-// reordering from the other direction (OC-0003).
+// It goes through the same h.broadcast queue, single dispatch goroutine and
+// seqMu-serialized deliverBroadcast as other global broadcasts, which gives two
+// broadcasts about one user (e.g. a connect presence frame and this one) their
+// correct relative order at each observer. Publishing straight to pub/sub would
+// reintroduce reordering.
 func (h *Hub) BroadcastToAllExcept(excludeUserID int64, msg []byte) {
 	h.enqueue(broadcastMsg{channelID: 0, excludeUserID: excludeUserID, msg: msg}, "global message")
 }
 
-// broadcastChannelScoped enqueues msg for exactly the connected clients whose
-// current role may READ channelID, tagged with that channel id so reconnect
-// replay filters it too (EventsSinceFiltered replays a channelID of 0
-// unconditionally). kind only labels the drop warning.
+// broadcastChannelScoped enqueues msg for exactly the clients whose current role
+// may READ channelID, tagged with the channel id so replay filters it too
+// (EventsSinceFiltered replays channelID 0 unconditionally). kind only labels the
+// drop warning.
 func (h *Hub) broadcastChannelScoped(ctx context.Context, channelID int64, msg []byte, kind string) {
 	h.broadcastChannelScopedTo(channelID, msg, h.channelReadAudience(ctx, channelID), kind)
 }
 
-// broadcastChannelScopedTo enqueues msg for a pre-resolved audience. Callers
-// that fan out several messages for the same channel in one operation
-// (CleanupVoiceForChannel) resolve the audience once via channelReadAudience
-// and reuse it here, instead of re-running the role/override lookups per
-// message. recipients is only read after enqueue, so sharing one slice across
-// messages is safe.
+// broadcastChannelScopedTo enqueues msg for a pre-resolved audience, so callers
+// fanning out several messages for one channel (CleanupVoiceForChannel) resolve it
+// once. recipients is only read after enqueue, so sharing the slice is safe.
 func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients []int64, kind string) {
 	h.enqueue(broadcastMsg{
 		channelID:  channelID,
@@ -123,22 +95,16 @@ func (h *Hub) broadcastChannelScopedTo(channelID int64, msg []byte, recipients [
 	}, kind)
 }
 
-// BroadcastChannelCreate sends a channel_create message to the connected
-// clients whose current role may READ ch. It used to go out via BroadcastToAll,
-// which handed every authenticated client the name, category and topic of a
-// channel that channel_overrides hides from their role — metadata the ready
-// payload (buildReady/VisibleChannelIDs) deliberately withholds.
+// BroadcastChannelCreate sends channel_create to the clients whose current role
+// may READ ch; a global send would hand every client the name, category and topic
+// of a channel that overrides hide from their role.
 //
-// Each recipient gets its own frame carrying its channelAffordances
-// verdicts for the new channel, the same targeted form
-// RefreshChannelVisibility sends: a brand-new channel has no earlier verdict
-// for an absent field to leave unchanged. Like RefreshChannelVisibility the
-// sends bypass the sequenced replay path, so begin/endTargetedFanout force a
-// reconnect that registers during or resumes across them onto a full ready.
-//
-// The admin HubBroadcaster interface carries no context, so — like
-// RefreshChannelVisibility — the audience is resolved against Background: the
-// fan-out must complete regardless of the triggering request.
+// Each recipient gets its own frame with its channelAffordances verdicts (a new
+// channel has no earlier verdict for an absent field to leave unchanged), the
+// form RefreshChannelVisibility sends. The sends bypass the sequenced replay path,
+// so begin/endTargetedFanout force a reconnect during or across them onto a full
+// ready. The audience is resolved against Background because the admin
+// HubBroadcaster interface carries no context and the fan-out must complete.
 func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 	h.beginTargetedFanout()
 	defer h.endTargetedFanout()
@@ -159,82 +125,63 @@ func (h *Hub) BroadcastChannelCreate(ch *db.Channel) {
 	}
 }
 
-// BroadcastChannelUpdate sends a channel_update message to the connected
-// clients whose current role may READ ch. Same disclosure as
-// BroadcastChannelCreate, as one shared sequenced frame.
+// BroadcastChannelUpdate sends channel_update to the clients whose current role
+// may READ ch, as one shared sequenced frame.
 func (h *Hub) BroadcastChannelUpdate(ch *db.Channel) {
 	ctx := context.Background()
 	h.broadcastChannelScoped(ctx, ch.ID, buildChannelUpdate(ch, h.channelIsPrivate(ctx, ch.ID, ch.Type)), "channel_update")
 }
 
-// BroadcastChannelDelete sends a channel_delete message to all connected clients.
+// BroadcastChannelDelete sends channel_delete to all connected clients.
 //
-// Deliberately unfiltered: the payload is the bare channel id, with none of the
-// metadata create/update carry, and by the time the admin handler calls this the
-// channel row — and with it the ON DELETE CASCADE'd channel_overrides — is
-// already gone, so a permission check here would answer from base role perms
-// and could drop the delete for exactly the users who saw the channel via a
-// positive override, stranding it in their sidebar.
-//
-// laneChannelID keeps it behind any of the channel's content still waiting on
-// its gate, so a client never sees a message for a channel it already removed.
+// Deliberately unfiltered: the payload is the bare id, and by now the channel row
+// and its cascaded channel_overrides are gone, so a permission check would use
+// base role perms and could drop the delete for users who saw the channel via a
+// positive override, stranding it in their sidebar. laneChannelID keeps it behind
+// the channel's content still waiting on its gate, so a client never sees a
+// message for a channel it already removed.
 func (h *Hub) BroadcastChannelDelete(channelID int64) {
 	h.enqueue(broadcastMsg{msg: buildChannelDelete(channelID), laneChannelID: channelID}, "global message")
 }
 
-// refreshChannelVisibilityRaceHook, when non-nil, runs once per connected
-// user after RefreshChannelVisibility resolves that user's visibility for ch
-// but before it re-resolves and acts on the live client. Test-only (always
-// nil in production): the window it pins spans one or two DB round trips per
-// client (the permission lookup below), too fast to land a real reconnect
-// goroutine inside reliably, so tests use this hook to reproduce a reconnect
-// racing in at exactly that point deterministically. Mirrors the established
-// voiceJoinPostTokenRaceHook / cleanupVoiceRaceClearHook pattern.
+// refreshChannelVisibilityRaceHook, when non-nil, runs once per connected user
+// after RefreshChannelVisibility resolves visibility but before it re-resolves
+// the live client. Test-only: the window is one or two DB round trips per client,
+// too fast to land a real reconnect in, so tests use it to race one in
+// deterministically.
 var refreshChannelVisibilityRaceHook func(userID int64)
 
-// BroadcastRolesUpdate sends the full role list to every connected client so
-// name colors and permission-gated affordances converge without a reconnect.
-//
-// Unfiltered on purpose: the role list is already in every client's ready
-// payload, so it discloses nothing a connected client cannot already read.
+// BroadcastRolesUpdate sends the full role list to every connected client.
+// Unfiltered: the list is already in every ready payload.
 func (h *Hub) BroadcastRolesUpdate(roles []*db.Role) {
 	h.BroadcastToAll(buildRolesUpdate(roles))
 }
 
-// BroadcastEmojiUpdate sends the full custom-emoji set to every connected
-// client so a newly uploaded (or deleted) emoji renders in messages, the
-// picker and reaction pills without a reconnect.
-//
-// Unfiltered, like BroadcastRolesUpdate: emoji are server-wide with no channel
-// scope, and every client may already GET the same list.
+// BroadcastEmojiUpdate sends the full custom-emoji set to every connected client.
+// Unfiltered: emoji are server-wide and every client may already GET the list.
 func (h *Hub) BroadcastEmojiUpdate(list []*db.Emoji) {
 	h.BroadcastToAll(buildEmojiUpdate(list))
 }
 
-// BroadcastChatBulkDeleted sends one chat_bulk_deleted message carrying every
-// purged message id to the subscribers of channelID, replacing the N separate
-// chat_deleted broadcasts a loop of single deletes would produce. Fan-out goes
-// through the ordinary sequenced channel path, so the event replays on
-// reconnect exactly like chat_deleted does.
+// BroadcastChatBulkDeleted sends one chat_bulk_deleted carrying every purged
+// message id to channelID's subscribers instead of N chat_deleted frames. It uses
+// the sequenced channel path, so it replays on reconnect like chat_deleted.
 func (h *Hub) BroadcastChatBulkDeleted(channelID int64, messageIDs []int64) {
 	h.BroadcastToChannel(channelID, buildChatBulkDeleted(channelID, messageIDs))
 	h.noteIfThread(channelID)
 }
 
-// BroadcastMemberBan sends a member_ban message to all connected clients
-// and immediately disconnects the banned user's WebSocket connection (BUG-113).
+// BroadcastMemberBan sends member_ban to all clients and disconnects the banned user.
 func (h *Hub) BroadcastMemberBan(userID int64) {
 	h.BroadcastToAll(buildMemberBan(userID))
 	h.DisconnectUser(userID)
 }
 
-// BroadcastMemberUnban is the mirror of BroadcastMemberBan: member_ban
-// hard-deletes the row on every connected client, so an unban must re-add it
-// or clients connected through the ban permanently disagree with freshly
-// connecting ones. Fans out the same member_join a fresh connect would
-// (clients map it to addMember — no protocol change), satisfying the admin
-// package's memberUnbanBroadcaster capability; admin's hub_wiring_test.go
-// pins that at compile time. (OC-0058)
+// BroadcastMemberUnban mirrors BroadcastMemberBan: member_ban hard-deletes the
+// row on every connected client, so an unban re-adds it with the member_join a
+// fresh connect would send, or connected clients disagree with fresh ones. It
+// satisfies admin's memberUnbanBroadcaster capability (pinned by
+// hub_wiring_test.go).
 func (h *Hub) BroadcastMemberUnban(userID int64) {
 	ctx := context.Background()
 	user, err := h.readers.Members.GetUserByID(ctx, userID)
@@ -247,12 +194,10 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 	if role, err := h.readers.Members.GetMemberRoles(ctx, userID); err == nil && role != nil {
 		roleName, roleIDs = role.Top.Name, role.IDs
 	}
-	// A lapsed temporary ban lets the user reconnect while users.banned is
-	// still 1, so they can be online at unban time. Report the live status
-	// their connection stamped or chose, never the row: with no stamped
-	// connection it is offline whatever the row says, and with one the row
-	// can still lag the batched connect stamp (serve_ready's
-	// presentableMembers rules). buildMemberJoin hides invisible.
+	// A lapsed temporary ban lets the user reconnect while users.banned is still 1,
+	// so they can be online at unban time. Report the live stamped status, never the
+	// row (offline with no stamped connection; the row can lag the batched connect
+	// stamp). buildMemberJoin hides invisible.
 	if live := h.LiveStatus(userID); live != "" {
 		user.Status = live
 	} else {
@@ -261,44 +206,35 @@ func (h *Hub) BroadcastMemberUnban(userID int64) {
 	h.BroadcastToAll(buildMemberJoin(user, roleName, roleIDs))
 }
 
-// BroadcastUserUpdate sends a user_update message to all connected clients
-// when a user changes their profile (username, avatar, display name, about,
-// identity key).
+// BroadcastUserUpdate sends user_update to all clients when a user changes their profile.
 func (h *Hub) BroadcastUserUpdate(u UserUpdate) {
 	h.BroadcastToAll(buildUserUpdate(u))
 }
 
-// BroadcastMemberUpdate sends a member_update message to all connected clients
-// and re-evaluates the reassigned user's live channel subscriptions.
+// BroadcastMemberUpdate sends member_update to all clients and re-evaluates the
+// reassigned user's live channel subscriptions.
 func (h *Hub) BroadcastMemberUpdate(userID int64, roleName string) {
 	h.BroadcastToAll(buildMemberUpdate(userID, roleName, nil))
 	h.revokeUnreadableChannels(userID)
 }
 
 // revokeUnreadableChannels drops the channel-topic subscriptions the user's new
-// role may no longer READ. READ_MESSAGES is checked once, at channel_focus, and
-// then becomes a durable pub/sub subscription, so without this a demoted user
-// keeps receiving every chat_message / chat_edited / reaction_update posted in
-// the channels their old role could read for as long as the socket stays open.
+// role may no longer READ. READ_MESSAGES is checked once, at channel_focus, then
+// becomes a durable subscription, so a demoted user would keep receiving
+// channel traffic while the socket stays open.
 //
-// The per-client work mirrors RefreshChannelVisibility, the channel_overrides
-// equivalent: targeted, unsequenced channel_delete + Unsubscribe (a replayed
-// channel_delete would be filtered by the allowed set computed at replay time),
-// then a visibilityChangeSeq bump so a client resuming across this change takes
-// the full-ready path instead of replay.
-//
-// Only the topics the socket actually holds are examined — a blanket sweep over
-// every channel would disclose the full channel-ID list to a demoted user.
+// Per-client work mirrors RefreshChannelVisibility: targeted unsequenced
+// channel_delete + Unsubscribe, then a visibilityChangeSeq bump so a resuming
+// client takes the full-ready path. Only topics the socket actually holds are
+// examined: a blanket sweep would disclose the full channel-ID list to a demoted user.
 //
 // revokeUnreadableChannelsPreActRaceHook, when non-nil, runs once per revoked
-// topic immediately before the live-client re-resolve. Test-only (nil in
-// production); pins the replaced-mid-loop hazard deterministically — same
-// pattern as refreshChannelVisibilityRaceHook.
+// topic just before the live-client re-resolve. Test-only; pins the
+// replaced-mid-loop hazard deterministically.
 var revokeUnreadableChannelsPreActRaceHook func(userID int64)
 
-// SendToUser delivers msg directly to every live connection of userID (each
-// of the user's devices). Returns true if at least one connection was found and
-// queued the message.
+// SendToUser delivers msg to every live connection of userID. Returns true if at
+// least one connection queued it.
 func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	queued := false
 	for _, c := range h.clientsOf(userID) {
@@ -309,8 +245,8 @@ func (h *Hub) SendToUser(userID int64, msg []byte) bool {
 	return queued
 }
 
-// SendToUserHigh sends a high-priority message to every connection of a
-// specific user. Returns false when the user has none.
+// SendToUserHigh sends a high-priority message to every connection of userID.
+// Returns false when the user has none.
 func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 	conns := h.clientsOf(userID)
 	for _, c := range conns {
@@ -319,11 +255,9 @@ func (h *Hub) SendToUserHigh(userID int64, msg []byte) bool {
 	return len(conns) > 0
 }
 
-// SendToUserLow sends a low-priority message to every connection of a specific
-// user. Unlike SendToUserHigh, an overflow is silently dropped rather than
-// disconnecting the client — the targeted-delivery sibling of
-// broadcastExcludeLow, for events (e.g. DM typing indicators) that need
-// direct-to-user routing but are ephemeral and safely droppable (OC-0260).
+// SendToUserLow sends a low-priority message to every connection of userID.
+// Unlike SendToUserHigh an overflow is dropped rather than disconnecting the
+// client; for ephemeral events (e.g. DM typing) that need direct routing.
 func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 	conns := h.clientsOf(userID)
 	for _, c := range conns {
@@ -332,18 +266,17 @@ func (h *Hub) SendToUserLow(userID int64, msg []byte) bool {
 	return len(conns) > 0
 }
 
-// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the
-// replay buffer under channelID, and fans the wrapped payload out to the
-// provided users on the normal-priority queue.
+// sendSequencedToUsers stamps msg with a monotonic seq, stores it in the replay
+// buffer under channelID and sends the wrapped payload to userIDs on the
+// normal-priority queue.
 //
-// Sequenced frames must all share one per-client FIFO: writePump drains
-// sendHigh before send, so a seq-stamped frame on the high queue would reach
-// the socket ahead of lower-seq frames still queued in send. The client acks
-// max(seq) and replay is strictly seq > last_seq, so a disconnect in that
-// window would silently lose the overtaken events. The high queue remains for
-// unsequenced targeted messages only.
+// Sequenced frames must share one per-client FIFO: writePump drains sendHigh
+// before send, so a seq-stamped frame on the high queue would overtake
+// lower-seq frames still in send. The client acks max(seq) and replay is strictly
+// seq > last_seq, so a disconnect then would silently lose the overtaken events.
+// The high queue is for unsequenced targeted messages only.
 func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte) {
-	// The replay copy's JSON work happens before the lock (SV-04).
+	// The replay copy's JSON work happens before the lock.
 	rs := newReplaySplice(msg)
 	h.seqMu.Lock()
 	start := time.Now()
@@ -364,25 +297,22 @@ func (h *Hub) sendSequencedToUsers(channelID int64, userIDs []int64, msg []byte)
 	}
 }
 
-// deliverGated stamps bm.msg with a monotonic sequence number, stores it in
-// the replay buffer, and sends it to the appropriate clients via pub/sub. g is
-// B5-7's content gate for the frame, already resolved off the dispatch
-// goroutine (hub_content_gate.go); the zero gateResult is "unfiltered", which
-// is what every non-content frame carries.
+// deliverGated stamps bm.msg with a monotonic seq, stores it in the replay buffer
+// and sends it via pub/sub. g is the NSFW gate resolved off the dispatch goroutine
+// (hub_content_gate.go); the zero gateResult is unfiltered, as for every
+// non-content frame.
 func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 	contentFilter, labelled, gateUnconfirmed := g.allow, g.labelled, g.unconfirmed
 
-	// The replay copy's JSON work happens before seqMu (SV-04). A presence
-	// window builds its frame under the lock and never carries a reply
-	// snippet, so it has nothing to precompute.
+	// The replay copy's JSON work happens before seqMu. A presence window builds its
+	// frame under the lock and carries no reply snippet, so has nothing to precompute.
 	var rs *replaySplice
 	if bm.presence == nil {
 		rs = newReplaySplice(bm.msg)
 	}
 
-	// The channel-broadcast debug log is emitted after seqMu is released
-	// (below) so a slow logging sink never extends the critical section that
-	// serializes every broadcast.
+	// The channel-broadcast debug log is emitted after seqMu is released so a slow
+	// sink never extends the critical section that serializes every broadcast.
 	seq, delivered, channelSend, pluginMsg := func() (seq uint64, delivered int, channelSend bool, pluginMsg []byte) {
 		h.seqMu.Lock()
 		start := time.Now()
@@ -390,17 +320,15 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		defer h.observeSeqMuHold(start)
 		defer h.applyQueueContentDrops()
 
-		// Channel-scoped sends consult the topic limiter BEFORE a seq is
-		// allocated: a shed frame that consumed a seq would sit in the replay
-		// buffer as a number no client ever saw live, and since clients ack
-		// only max(seq), it could never be requested back. allowTopicFrame
-		// owns the shed handling (count + watermark, SRV-03).
+		// Consult the topic limiter before a seq is allocated: a shed frame that consumed
+		// a seq would sit in the replay buffer as a number no client saw live, and since
+		// clients ack only max(seq) it could never be requested back. allowTopicFrame owns
+		// the shed handling (count + watermark).
 		if !h.allowTopicFrame(bm) {
 			return 0, 0, false, nil
 		}
 
-		// A window's presence_batch names many users: an erased one loses
-		// only its own entry.
+		// A window's presence_batch names many users: an erased one loses only its own entry.
 		var private map[int64][]byte
 		if bm.presence != nil {
 			bm.msg, private = h.buildPresenceBatch(bm.presence)
@@ -409,9 +337,8 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 			}
 		}
 
-		// A frame naming an erased user, produced by a request that read
-		// its rows before the erasure and reached the hub after the purge,
-		// must not be sequenced: nothing it describes exists any more.
+		// A frame naming an erased user, produced by a request that read its rows before
+		// the erasure and reached the hub after the purge, must not be sequenced.
 		if h.dropsForTombstones(bm.msg) {
 			return 0, 0, false, nil
 		}
@@ -419,45 +346,36 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		seq = h.nextSeq()
 		msg := wrapWithSeq(bm.msg, seq)
 		if gateUnconfirmed {
-			// The deny-all gate withheld this frame from subscribers it may
-			// not have been meant to skip: a resume at or behind it must
-			// take the full-ready path, and a connected one must resync.
+			// The deny-all gate withheld this frame from subscribers it may not have meant to
+			// skip: a resume at or behind it must take the full-ready path, a connected one resync.
 			h.bumpVisibilityWatermark()
 			h.markLoss(lossRoute{channelID: bm.channelID, recipients: bm.recipients})
 		}
 
-		// Store in replay buffer for reconnection recovery.
 		stored := storedCopy(rs, bm.msg, msg, seq)
 		h.replayBuf.Push(seq, bm.channelID, stored)
 		h.persistEvent(seq, bm.channelID, stored)
 
-		// Plugin fan-out (Phase C Step 9) is captured here and called after
-		// seqMu is released, on this same dispatch goroutine, so sink order
-		// still equals seq order. skipPluginSink (B5-7 decision 13): a
-		// labelled channel's content-bearing frame never reaches the sink.
+		// Plugin fan-out is captured here and called after seqMu is released, on this same
+		// dispatch goroutine, so sink order equals seq order. A plugin has no NSFW
+		// acknowledgement, so a labelled channel's content never reaches the sink.
 		if h.pluginSink.Load() != nil && !labelled {
 			pluginMsg = msg
 		}
 
 		switch {
 		case bm.recipients != nil:
-			// Visibility-filtered fan-out: the audience was resolved by the caller.
 			for _, userID := range bm.recipients {
 				h.SendToUser(userID, msg)
 			}
 		case bm.channelID == 0:
-			// Global broadcast — deliver to every connected client, minus
-			// excludeUserID when the caller set one (see BroadcastToAllExcept).
 			h.publishGlobal(bm, msg, seq, private)
 		default:
-			// Channel-scoped broadcast — deliver to subscribers of the channel
-			// topic. The rate limiter already passed above, before the seq
-			// was allocated. contentFilter (B5-7) narrows delivery to the
-			// subset of THIS LIVE subscriber list it approves, resolved
-			// against the label and acknowledgements read after the frame
-			// was dequeued rather than by the caller — so a concurrent
-			// reconnect's registration (also under seqMu) can never land in a
-			// gap between "who was asked" and "who actually got it".
+			// Delivers to the channel topic's subscribers. The limiter already passed above.
+			// contentFilter narrows delivery to the subset of this live subscriber list it
+			// approves, using the label and acknowledgements read after dequeue, so a
+			// concurrent reconnect's registration (also under seqMu) cannot land in a gap
+			// between who was asked and who got it.
 			if contentFilter != nil {
 				delivered = h.pubsub.PublishFiltered(ChannelTopic(bm.channelID), msg, contentFilter)
 			} else {
@@ -472,10 +390,8 @@ func (h *Hub) deliverGated(bm broadcastMsg, g gateResult) {
 		h.dispatchToPlugins(pluginMsg)
 	}
 
-	// Instrumentation runs after seqMu is released: a metrics provider must
-	// never extend the critical section serializing every broadcast. The
-	// in-process histogram records the same latency as the OTel-only one.
-	// seq == 0 means the topic limiter shed the frame.
+	// Instrumentation runs after seqMu is released so a metrics provider never extends
+	// the critical section. seq == 0 means the topic limiter shed the frame.
 	if seq != 0 {
 		m := telemetry.NewAppMetrics()
 		m.WSMessagesTotal.Add(context.Background(), 1)

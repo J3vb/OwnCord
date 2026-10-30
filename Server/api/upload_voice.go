@@ -14,7 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Voice message limits (WP 8.9). A voice message is an ordinary attachment that
+// Voice message limits. A voice message is an ordinary attachment that
 // also carries its length and a small waveform, so a client can draw the player
 // before it has downloaded the file.
 const (
@@ -92,7 +92,6 @@ func parseVoiceWaveform(s string) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// voiceMimeAllowed reports whether a sniffed type can be a voice recording.
 func voiceMimeAllowed(mimeType string) bool {
 	base, _, _ := strings.Cut(mimeType, ";")
 	base = strings.ToLower(strings.TrimSpace(base))
@@ -121,8 +120,6 @@ func (v voiceMeta) checkStored(w http.ResponseWriter, store FileStore, stored st
 	return false
 }
 
-// record builds the attachment row of a stored upload, with the voice fields
-// when this is a voice upload.
 func (v voiceMeta) record(userID int64, filename string, stored storedUpload) service.AttachmentRecord {
 	rec := service.AttachmentRecord{
 		ID:         stored.id,

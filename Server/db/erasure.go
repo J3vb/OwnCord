@@ -12,11 +12,11 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
-// ErasureJob is the durable file half of an account erasure (migration 037):
-// one row per subject, written inside the erasure transaction with the
-// stored_as names of every file the subject owned. The runner removes the
-// files after commit and marks the job done; unfinished jobs are resumed at
-// startup and on every maintenance tick (service.ErasureService).
+// ErasureJob is the durable file half of an account erasure: one row per
+// subject, written in the erasure transaction with the stored_as names of
+// every file the subject owned. The runner removes the files after commit;
+// unfinished jobs resume at startup and on each maintenance tick
+// (service.ErasureService).
 type ErasureJob struct {
 	ID           int64
 	UserID       int64
@@ -25,9 +25,9 @@ type ErasureJob struct {
 	FilesRemoved int
 	Attempts     int
 	LastError    string
-	// ReplayPurged records that the subject's frames were taken out of the
-	// replay pipeline after the member_ban broadcast; false keeps the job
-	// listed for Resume even once its files are gone.
+	// ReplayPurged records that the subject's frames were taken out of the replay
+	// pipeline after the member_ban broadcast; false keeps the job listed for
+	// Resume even once its files are gone.
 	ReplayPurged bool
 }
 
@@ -38,57 +38,49 @@ const (
 )
 
 // EraseAccount hard-deletes every data class attributable to userID
-// (docs/architecture/data-lifecycle.md, classes 1–20; class 21, the audit
-// history, is B4-10's) in three stages on the writer connection — lock, drain
-// in chunks, finish (erasure_chunks.go) — each a short transaction with
-// PRAGMA secure_delete on, so the erased rows' bytes do not survive in freed
-// pages (HP-4 decision 2), and truncates the WAL after the last commit. The last-admin guard and the OC-0294/OC-0293 mention-count
-// reversal are kept from the anonymising deletion this replaces.
+// (docs/architecture/data-lifecycle.md, classes 1-20; class 21, the audit
+// history, is unlinked) in three short transactions on the writer connection:
+// lock, drain in chunks, finish (erasure_chunks.go). PRAGMA secure_delete is on
+// so erased bytes do not survive in freed pages, and the WAL is truncated after
+// the last commit.
 //
-// Children are deleted before the users row: messages.user_id,
-// invites.created_by, emoji.uploaded_by and stickers.uploaded_by carry no ON DELETE action,
-// so with foreign_keys=ON the users DELETE passes only once they are gone.
-// The subject's invites are deleted (an unused code stops working, and who
-// invited whom is what the erasure removes); invites the subject redeemed
-// keep their row with redeemed_by cleared; emoji are server-wide assets and
-// are reassigned to the oldest remaining admin-class account, or to any
-// remaining account, or deleted (their files join the job) when the subject
-// was the only account.
+// Children are deleted before the users row, because messages.user_id,
+// invites.created_by, emoji.uploaded_by and stickers.uploaded_by carry no ON
+// DELETE action. The subject's invites are deleted; invites they redeemed keep
+// their row with redeemed_by cleared; emoji are server-wide and are reassigned
+// to the oldest remaining admin-class account, else any account, else deleted
+// (their files join the job).
 //
 // The stored_as names of the subject's attachments (the avatar is one) are
 // captured before the rows go and written to erasure_jobs in the same
-// transaction: the returned job is the only handle left on the blobs, and
-// the caller removes them (a missing file counts as removed).
+// transaction; the returned job is the only handle left on the blobs, and the
+// caller removes them (a missing file counts as removed).
 //
-// subjectToken is the deletion marker's token for the subject (B4-10): the
-// audit rows the subject appears in keep their action, time and order but
-// lose the id — actor_id / target_id become 0, detail is cleared — and carry
-// the token instead. An empty token unlinks the rows without one.
+// subjectToken is the deletion marker's token: audit rows the subject appears
+// in keep action, time and order but lose the id (actor_id / target_id become
+// 0, detail cleared) and carry the token; an empty token unlinks without one.
 //
-// Returns ErrLastAdmin when the subject is the last admin-class account and
-// ErrNotFound when no such user exists. Nothing is logged here by username.
+// It returns ErrLastAdmin when the subject is the last admin-class account and
+// ErrNotFound when no such user exists. Nothing is logged by username.
 func (d *DB) EraseAccount(ctx context.Context, userID int64, subjectToken string) (*ErasureJob, error) {
 	return d.eraseAccount(ctx, userID, subjectToken, true)
 }
 
-// ReplayEraseAccount is EraseAccount for a deletion-marker replay (B4-10,
-// MarkerStore.ReplayAccounts): the same transaction without the last-admin
-// guard. The guard is a live-operation rule — an administrator may not
-// delete the last administrator — and the erasure a marker records passed
-// it when it ran; at replay the subject is present only because a backup
-// from before the erasure was restored, and a backup from before the admin
-// handover would otherwise keep the subject for good. The caller says so
-// when no admin-class account remains (service.ErasureService).
+// ReplayEraseAccount is EraseAccount for a deletion-marker replay
+// (MarkerStore.ReplayAccounts), without the last-admin guard. That guard is a
+// live-operation rule and the recorded erasure passed it; at replay the
+// subject is present only because a pre-erasure backup was restored, and a
+// backup from before an admin handover would otherwise keep the subject for
+// good. The caller says so when no admin-class account remains.
 func (d *DB) ReplayEraseAccount(ctx context.Context, userID int64, subjectToken string) (*ErasureJob, error) {
 	return d.eraseAccount(ctx, userID, subjectToken, false)
 }
 
-// EraseAccountPreflight runs EraseAccount's refusals — the user exists, the
-// last-admin guard — outside the transaction, on the reader, so a caller
-// can write the deletion marker before the transaction (B4-10) without
-// writing one for an erasure that would be refused: a pending marker is
-// applied on the next open whether or not the transaction ran. The
-// transaction checks again; this only closes the window.
+// EraseAccountPreflight runs EraseAccount's refusals (user exists, last-admin
+// guard) on the reader outside the transaction, so a caller can write the
+// deletion marker without writing one for an erasure that would be refused;
+// a pending marker is applied on the next open whether or not the transaction
+// ran. The transaction checks again; this only narrows the window.
 func (d *DB) EraseAccountPreflight(ctx context.Context, userID int64) error {
 	tx, err := d.reader.BeginTx(ctx, nil)
 	if err != nil {
@@ -105,9 +97,9 @@ func (d *DB) EraseAccountPreflight(ctx context.Context, userID int64) error {
 	return deleteAccountAdminGuard(ctx, tx, userID)
 }
 
-// CountAdminClassAccounts counts the accounts the last-admin guard would
-// protect: not banned, holding the seeded Owner or Admin role or a custom
-// role with the Administrator bit — deleteAccountAdminGuard's criteria.
+// CountAdminClassAccounts counts the accounts the last-admin guard protects:
+// not banned, holding the Owner or Admin role or a role with the Administrator
+// bit.
 func (d *DB) CountAdminClassAccounts(ctx context.Context) (int, error) {
 	var n int
 	if err := d.reader.QueryRowContext(ctx,
@@ -121,52 +113,46 @@ func (d *DB) CountAdminClassAccounts(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// erasureStatements are the per-class deletes, children before parents, all
-// bound to the subject's id once. Mentions naming the subject go first
-// (CASCADE would take them with the users row, but that row goes last);
-// attachments before messages, because the message delete would only SET
-// NULL their message_id (migration 030) and the rows are class 12.
+// erasureStatements are the per-class deletes, children before parents, each
+// bound to the subject's id. Mentions naming the subject go first (CASCADE
+// would take them with the users row, which goes last); attachments go before
+// messages because the message delete would only SET NULL their message_id.
+// Where a users-row CASCADE would also remove a class, the explicit statement
+// is kept so the inventory's zero is proved against it.
 var erasureStatements = []struct {
 	label string
 	query string
 }{
 	{"message_mentions", `DELETE FROM message_mentions WHERE mentioned_user_id = ?`},
-	// The upload byte counter (migration 044, B5-2, class 12a): a counter
-	// keyed by user_id that survived would be a residue naming the subject.
-	// The users delete below would cascade it too; this is the explicit
-	// statement the inventory's zero is proved against.
+	// Upload byte counter (class 12a): a surviving counter keyed by user_id would
+	// name the subject.
 	{"user_storage", `DELETE FROM user_storage WHERE user_id = ?`},
 	{"attachments", `DELETE FROM attachments WHERE uploader_id = ?1 OR message_id IN (SELECT id FROM messages WHERE user_id = ?1)`},
-	// The messages_ad trigger (migration 001) drops each row from the FTS
-	// index; message_mentions and reactions on these rows cascade.
+	// The messages_ad trigger drops each row from the FTS index; message_mentions
+	// and reactions on these rows cascade.
 	{"messages", `DELETE FROM messages WHERE user_id = ?`},
-	// Group event rows naming the subject (migration 065, WP 3B-10). A row the
-	// subject authored went with the statement above. A row another member
-	// authored that names the subject as its target (added, removed) would
-	// survive the users delete below as a message with a dangling target.
+	// Group event rows naming the subject (migration 065). Rows the subject
+	// authored went above; rows another member authored that name the subject as
+	// target would otherwise survive with a dangling target.
 	{"group events naming the subject", `DELETE FROM messages WHERE id IN (SELECT message_id FROM message_group_events WHERE target_user_id = ?)`},
-	// Call log participation (migration 064). Call rows the subject authored cascade with messages.
+	// Call log participation. Call rows the subject authored cascade with messages.
 	{"message_call_participants", `DELETE FROM message_call_participants WHERE user_id = ?`},
 	{"message_delivery_receipts", `DELETE FROM message_delivery_receipts WHERE user_id = ?`},
 	{"reactions", `DELETE FROM reactions WHERE user_id = ?`},
-	// Poll votes (migration 073, WP 6.9b). Votes on polls the subject authored
-	// went with those messages above. Counts are always recomputed, so the
-	// polls the subject voted in read exactly on the next update or read.
-	// The version bump comes first, in the same transaction, so a client that
-	// refetches after the votes went reads counts that are newer than any copy
-	// it holds, and a merge that keeps the higher version takes them.
+	// Poll votes. Votes on the subject's own polls went with those messages.
+	// Counts are recomputed, so polls the subject voted in read exactly next time.
+	// The version bump comes first in the same transaction, so a client that
+	// refetches after the votes went holds an older version and takes the new
+	// counts on merge.
 	{"poll versions", `UPDATE polls SET version = version + 1 WHERE message_id IN (SELECT DISTINCT message_id FROM poll_votes WHERE user_id = ?)`},
 	{"poll_votes", `DELETE FROM poll_votes WHERE user_id = ?`},
 	{"read_states", `DELETE FROM read_states WHERE user_id = ?`},
-	// Mention ledger (migration 063): receipts naming the subject as the
-	// recipient. Receipts for the subject's own messages go with those messages
-	// through the cascade above.
+	// Mention ledger receipts naming the subject as recipient; receipts for the
+	// subject's own messages go with those messages.
 	{"mention_receipts", `DELETE FROM mention_receipts WHERE user_id = ?`},
 	{"sessions", `DELETE FROM sessions WHERE user_id = ?`},
-	// Web Push subscriptions (migration 045, B5-4, class 2a): the users
-	// delete below would cascade this too, but a surviving endpoint is a
-	// live channel to a person who left, so it gets its own explicit
-	// statement the inventory's zero is proved against.
+	// Web Push subscriptions (class 2a): a surviving endpoint is a live channel to
+	// a person who left.
 	{"push_subscriptions", `DELETE FROM push_subscriptions WHERE user_id = ?`},
 	{"api_tokens", `DELETE FROM api_tokens WHERE user_id = ?`},
 	{"partial_auth_challenges", `DELETE FROM partial_auth_challenges WHERE user_id = ?`},
@@ -175,80 +161,63 @@ var erasureStatements = []struct {
 	{"totp_recovery_codes", `DELETE FROM totp_recovery_codes WHERE user_id = ?`},
 	{"recovery_kits", `DELETE FROM recovery_kits WHERE user_id = ?`},
 	{"recovery_assists", `DELETE FROM recovery_assists WHERE user_id = ?`},
-	// Credentials the subject issued to others stay valid; the issuer link
-	// becomes the system actor, as audit rows do.
+	// Credentials the subject issued to others stay valid; the issuer link becomes
+	// the system actor, as audit rows do.
 	{"recovery_assists issuer", `UPDATE recovery_assists SET issued_by = 0 WHERE issued_by = ?`},
 	{"voice_states", `DELETE FROM voice_states WHERE user_id = ?`},
-	// Retention policy setter (migration 039, B4-11): no FK, so the id
-	// otherwise outlives the erasure. The policy stays in effect — only the
-	// link to who set it is cut, as with the recovery_assists issuer above.
+	// Retention policy setter: no FK, so the id would outlive the erasure. The
+	// policy stays in effect; only the link to who set it is cut.
 	{"channel_retention setter", `UPDATE channel_retention SET updated_by = 0 WHERE updated_by = ?`},
-	// Private profile notes (migration 069, class 16a): notes the subject keeps
-	// and notes others keep about the subject. The users delete below would
-	// cascade both, but this is the explicit statement the inventory's zero is
-	// proved against.
+	// Private profile notes (class 16a): notes the subject keeps and notes others
+	// keep about the subject.
 	{"user_notes", `DELETE FROM user_notes WHERE owner_id = ?1 OR target_id = ?1`},
-	// DM privacy settings (migration 070, class 16b): one row per user, keyed
-	// by the owner. The users delete below would cascade it, but this is the
-	// explicit statement the inventory's zero is proved against.
+	// DM privacy settings (class 16b), one row per user.
 	{"user_privacy", `DELETE FROM user_privacy WHERE user_id = ?1`},
 	{"user_blocks", `DELETE FROM user_blocks WHERE blocker_id = ?1 OR blocked_id = ?1`},
 	{"channel_user_overrides", `DELETE FROM channel_user_overrides WHERE user_id = ?`},
-	// Category permission templates (migration 076, class 18c): the per-member
-	// rows of a category's template. The users delete below would cascade them,
-	// but this is the explicit statement the inventory's zero is proved against.
+	// Category permission templates (class 18c): the per-member rows of a
+	// category's template.
 	{"category_user_overrides", `DELETE FROM category_user_overrides WHERE user_id = ?`},
-	// Thread follows (migration 079, class 18d): the subject's membership rows.
-	// The users delete below would cascade them, but this is the explicit
-	// statement the inventory's zero is proved against.
+	// Thread follows (class 18d): the subject's membership rows.
 	{"thread_members", `DELETE FROM thread_members WHERE user_id = ?`},
-	// Message requests and trusted senders (migration 046, B5-6, classes 14c
-	// and 14d): both tables name a sender and a recipient, so an erasure of
-	// either party needs both columns — the users delete below would cascade
-	// these too, but a surviving row across the cascade boundary is exactly
-	// the silent-pass shape TestEraseAccount_EveryInventoryClassIsZero exists
-	// to catch, so they get their own explicit statements before it runs.
+	// Message requests and trusted senders (classes 14c, 14d): both tables name a
+	// sender and a recipient, so both columns are needed. A surviving row across
+	// the cascade boundary is the silent-pass shape
+	// TestEraseAccount_EveryInventoryClassIsZero exists to catch.
 	{"message_requests", `DELETE FROM message_requests WHERE sender_id = ?1 OR recipient_id = ?1`},
 	{"trusted_senders", `DELETE FROM trusted_senders WHERE recipient_id = ?1 OR sender_id = ?1`},
-	// NSFW acknowledgements (migration 047, B5-7, class 18a): a consent
-	// record naming the subject. The users delete below would cascade this
-	// too, but decision 13 binds it to decision 7's erasure rule, so it gets
-	// its own explicit statement the inventory's zero is proved against —
-	// the channel half needs none (ON DELETE CASCADE on channel_id).
+	// NSFW acknowledgements (class 18a): a consent record naming the subject. The
+	// channel half needs no statement (ON DELETE CASCADE on channel_id).
 	{"nsfw_acknowledgements", `DELETE FROM nsfw_acknowledgements WHERE user_id = ?`},
 	{"gif_favorites", `DELETE FROM gif_favorites WHERE user_id = ?`},
 	{"dm_participants", `DELETE FROM dm_participants WHERE user_id = ?`},
-	// Group DM owner (migration 065): hand the group to its lowest remaining
-	// member who is not banned, the same rule a leave applies (lowestMemberSQL),
-	// so dm_owner_id keeps naming a current member. A group with no member left
-	// gets NULL.
+	// Group DM owner: hand the group to its lowest remaining non-banned member,
+	// the same rule a leave applies (lowestMemberSQL), so dm_owner_id keeps naming
+	// a current member. A group with no member left gets NULL.
 	{"group DM owner", `UPDATE channels SET dm_owner_id = ` + lowestMemberSQL("channels.id") + ` WHERE dm_owner_id = ?`},
 	{"dm_open_state", `DELETE FROM dm_open_state WHERE user_id = ?`},
 	{"invites created", `DELETE FROM invites WHERE created_by = ?`},
 	{"invites redeemed", `UPDATE invites SET redeemed_by = NULL WHERE redeemed_by = ?`},
-	// Invite redemption history (migration 055): a redemption row the subject
-	// spent survives with its invite (and use_count) so the owner keeps the
-	// count, but the link to the erased account is cut. Rows for the subject's
-	// OWN invites are already gone via the invite_id cascade above.
+	// Invite redemption history: a redemption the subject spent survives with its
+	// invite (and use_count) so the owner keeps the count, with the link to the
+	// erased account cut. Rows for the subject's own invites went via the
+	// invite_id cascade above.
 	{"invite redemptions", `UPDATE invite_redemptions SET user_id = NULL WHERE user_id = ?`},
-	// Replay events naming the subject (HP-4 decision 1) are not here: the
-	// drain walks the whole table in key windows, and the finish stage sweeps
-	// only what was written since the lock (eraseSubjectRows), because a JSON
-	// predicate over every row is the slowest statement of the lot.
+	// Replay events naming the subject are not here: the drain walks the table in
+	// key windows and the finish stage sweeps only rows written since the lock
+	// (eraseSubjectRows), because a JSON predicate over every row is the slowest
+	// statement.
 }
 
-// EventNamesUserPredicate is the SQL that decides whether a persisted replay
-// event names a user, bound to the user's id as ?1. A persisted row is the
-// wire envelope the hub sent, `{"seq":…,"type":…,"payload":{…}}`
-// (ws.wrapWithSeq), so every lookup goes through $.payload: state frames
-// carry user_id (presence, typing, reactions, voice, member_ban), message
-// frames carry the author as user.id, chat frames list the mentioned ids
-// under mentions, a call log row lists the people who joined under
-// call.participants, a group add or remove row names its target as
-// group_event.target_user_id, a relayed E2EE offer names its sender as from_user_id, and
-// a presence_batch lists each user under updates[].user_id.
-// ws.eventNamesUser is the same rule over the bytes in the ring buffer; the
-// two must stay in step.
+// EventNamesUserPredicate is the SQL deciding whether a persisted replay event
+// names a user, bound to the user's id as ?1. A persisted row is the wire
+// envelope `{"seq":...,"type":...,"payload":{...}}` (ws.wrapWithSeq), so every
+// lookup goes through $.payload: state frames carry user_id, message frames the
+// author as user.id, chat frames the mentioned ids under mentions, call log
+// rows the joiners under call.participants, group add/remove rows
+// group_event.target_user_id, a relayed E2EE offer from_user_id, and a
+// presence_batch updates[].user_id. ws.eventNamesUser is the same rule over
+// the ring buffer's bytes; the two must stay in step.
 const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?1
 	 OR json_extract(payload, '$.payload.user.id') = ?1
 	 OR json_extract(payload, '$.payload.from_user_id') = ?1
@@ -258,10 +227,9 @@ const EventNamesUserPredicate = `(json_extract(payload, '$.payload.user_id') = ?
 	 OR json_extract(payload, '$.payload.group_event.target_user_id') = ?1
 	 OR EXISTS (SELECT 1 FROM json_each(payload, '$.payload.updates') WHERE json_extract(json_each.value, '$.user_id') = ?1))`
 
-// DeleteEventsForUser removes every persisted replay event naming userID —
-// the erasure's own statement, run again after the member_ban broadcast and
-// the persister flush so nothing queued or notified after the transaction
-// survives (data-lifecycle O1 A4, O5). Returns rows deleted.
+// DeleteEventsForUser removes every persisted replay event naming userID. It
+// runs again after the member_ban broadcast and persister flush so nothing
+// queued after the transaction survives. It returns rows deleted.
 func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, error) {
 	res, err := d.writer.ExecContext(ctx, `DELETE FROM events WHERE `+EventNamesUserPredicate, userID)
 	if err != nil {
@@ -275,8 +243,8 @@ func (d *DB) DeleteEventsForUser(ctx context.Context, userID int64) (int64, erro
 }
 
 // erasureCollectFiles lists the stored_as names of every attachment the
-// erasure is about to delete — uploaded by the subject (the avatar is one)
-// or attached to a message the subject wrote — before the rows go.
+// erasure will delete (uploaded by the subject, the avatar included, or
+// attached to their messages) before the rows go.
 func erasureCollectFiles(ctx context.Context, tx *sql.Tx, userID int64) ([]string, error) {
 	rows, err := tx.QueryContext(ctx,
 		`SELECT DISTINCT stored_as FROM attachments
@@ -300,21 +268,17 @@ func erasureCollectFiles(ctx context.Context, tx *sql.Tx, userID int64) ([]strin
 	return files, nil
 }
 
-// erasureReverseMentionCounts reverses the read_states.mention_count bumps
-// the subject's own messages made, before those rows are deleted.
-// DeleteMessage and PurgeMessages do this on every other message-removal
-// path via DecrementMentionCounts (OC-0275); the erasure must too (OC-0294),
-// or a mention badge from a message that no longer exists survives forever —
-// mention_count is a stored counter nothing else ever zeroes. Inline rather
-// than DecrementMentionCounts, which opens its own writer transaction.
+// erasureReverseMentionCounts reverses the read_states.mention_count bumps the
+// subject's own messages made, before those rows are deleted; otherwise a
+// badge from a vanished message survives forever, since nothing else zeroes
+// the counter. It is inline rather than DecrementMentionCounts, which opens
+// its own writer transaction.
 //
-// The subquery mirrors DecrementMentionCounts' guard: the readers each
-// message's mention_receipts say it counted, undeleted messages past the
-// recipient's last_message_id (a reader who has since marked the
-// channel read is left alone), excluding mentions to a user who has blocked
-// the departing author — mentionEntries (service/mentions.go) never
-// counted those (OC-0293), so reversing them would wipe a genuine, unrelated
-// badge on the same row. MAX(0, …) keeps the result monotonic.
+// The subquery mirrors DecrementMentionCounts' guard: undeleted messages past
+// the recipient's last_message_id whose mention_receipts say they counted
+// (a reader who marked the channel read is left alone), excluding mentions to
+// a user who blocked the author, which mentionEntries never counted and whose
+// reversal would wipe an unrelated badge. MAX(0, ...) keeps it monotonic.
 func erasureReverseMentionCounts(ctx context.Context, tx *sql.Tx, userID int64) error {
 	_, err := tx.ExecContext(ctx,
 		`UPDATE read_states
@@ -343,10 +307,10 @@ func erasureReverseMentionCounts(ctx context.Context, tx *sql.Tx, userID int64) 
 	return nil
 }
 
-// erasureDeleteLockouts removes the subject's rate-lockout keys (class 6):
-// every key is "<prefix>:<value>" (auth.Key), the value the user id or the
-// case-folded username. Matched on the exact suffix, not LIKE, so a username
-// holding a wildcard character cannot widen the match.
+// erasureDeleteLockouts removes the subject's rate-lockout keys (class 6),
+// keyed "<prefix>:<value>" (auth.Key) with the user id or case-folded
+// username. It matches the exact suffix, not LIKE, so a username holding a
+// wildcard cannot widen the match.
 func erasureDeleteLockouts(ctx context.Context, tx *sql.Tx, userID int64, username string) error {
 	id := strconv.FormatInt(userID, 10)
 	_, err := tx.ExecContext(ctx,
@@ -360,10 +324,9 @@ func erasureDeleteLockouts(ctx context.Context, tx *sql.Tx, userID int64, userna
 	return nil
 }
 
-// erasureReassignAssets moves the subject's emoji — server-wide assets — to
-// the oldest remaining admin-class account, else to the oldest remaining
-// account; with nobody left to own them the rows are deleted and their files
-// returned for removal.
+// erasureReassignAssets moves the subject's server-wide emoji to the oldest
+// remaining admin-class account, else the oldest remaining account; with
+// nobody left the rows are deleted and their files returned for removal.
 func erasureReassignAssets(ctx context.Context, tx *sql.Tx, userID int64) ([]string, error) {
 	var heir int64
 	err := tx.QueryRowContext(ctx,
@@ -399,9 +362,8 @@ func erasureReassignAssets(ctx context.Context, tx *sql.Tx, userID int64) ([]str
 	}
 }
 
-// erasureDeleteAssetRows deletes the subject's rows of one server-wide asset
-// table (emoji or stickers, both with a filename and an uploaded_by column) and
-// returns their stored file names. table is a fixed literal chosen by the caller.
+// erasureDeleteAssetRows deletes the subject's rows of one asset table (emoji
+// or stickers) and returns their stored file names. table is a fixed literal.
 func erasureDeleteAssetRows(ctx context.Context, tx *sql.Tx, table string, userID int64) ([]string, error) {
 	// G202: table is a fixed literal from the caller, never request data.
 	rows, err := tx.QueryContext(ctx, `DELETE FROM `+table+` WHERE uploaded_by = ? RETURNING filename`, userID) //nolint:gosec
@@ -500,10 +462,9 @@ func (d *DB) CompleteErasureJob(ctx context.Context, id int64, filesRemoved int)
 	return nil
 }
 
-// ReferencedStoredFiles reports which of names are still referenced by a
-// row — an attachment's stored_as, an emoji's filename or a sticker's filename — for
-// the storage reconciliation pass (data-lifecycle O3 A3): a file in the
-// upload directory that no row names is stranded and may be removed.
+// ReferencedStoredFiles reports which of names are still referenced by a row
+// (an attachment's stored_as, an emoji or sticker filename) for storage
+// reconciliation: a file no row names is stranded and may be removed.
 func (d *DB) ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error) {
 	referenced := make(map[string]bool, len(names))
 	const chunk = 200

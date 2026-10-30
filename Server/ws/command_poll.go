@@ -11,7 +11,7 @@ type PollAnswerCmd struct {
 	Emoji string
 }
 
-// PollCreateCmd represents a poll_create message (WP 6.9b): post a poll as a
+// PollCreateCmd represents a poll_create message: post a poll as a
 // message in ChannelID. The text fields are raw; the service sanitises and
 // bounds them.
 type PollCreateCmd struct {

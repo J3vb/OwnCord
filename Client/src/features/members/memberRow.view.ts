@@ -9,7 +9,7 @@
  */
 
 import { createElement, appendChildren, setText } from "../../lib/dom";
-import { readableRoleColor } from "../../lib/themes";
+import { readableRoleColor } from "../../lib/prefs/themes";
 import type { UserStatus } from "../../lib/types";
 import { statusLabel } from "../../i18n/shell";
 import { createIcon, type IconName } from "../../lib/icons";

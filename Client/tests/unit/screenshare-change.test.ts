@@ -30,7 +30,7 @@ vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   h264GpuPublish: (codec: string) => codec === "h264",
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: (...args: unknown[]) => savePref(...args) as unknown,
 }));
@@ -63,6 +63,8 @@ function mst(id: string): FakeMst {
     },
     removeEventListener: (type: string, cb: EventListener) => listeners.get(type)?.delete(cb),
     fire: (type: string) => {
+      // Copy first: a listener that removes itself must not skip the next one.
+      // oxlint-disable-next-line unicorn/no-useless-spread
       for (const cb of [...(listeners.get(type) ?? [])]) cb(new Event(type));
     },
   };
@@ -417,7 +419,7 @@ describe("setScreenshareQuality", () => {
     });
   });
 
-  it("a quality change on a 120 fps share keeps balanced degradation (M-2)", async () => {
+  it("a quality change on a 120 fps share keeps balanced degradation", async () => {
     const rig = setup(false);
     rig.state.fps = 120;
     rig.video.publishOptions = { ...rig.video.publishOptions, degradationPreference: "balanced" };

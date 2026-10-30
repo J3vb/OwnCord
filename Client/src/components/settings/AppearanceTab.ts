@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { readStored } from "@lib/preferences";
+import { readStored } from "@lib/prefs/preferences";
 import {
   THEMES,
   applyAccent,
@@ -15,21 +15,22 @@ import {
   resolveSystemTheme,
   restoreTheme,
   type ThemeName,
-} from "@lib/themes";
+} from "@lib/prefs/themes";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import {
   applyFontSize,
   effectiveFontSize,
   MIN_FONT_SIZE_PX,
   MAX_FONT_SIZE_PX,
-} from "@lib/appearance";
-import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/timeFormat";
+} from "@lib/prefs/appearance";
+import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/text/timeFormat";
 import {
   loadMemberLayout,
   MEMBER_LAYOUT_PREF,
   type MemberLayout,
 } from "../../features/members/memberLayout";
 import { appZoom, ZOOM_LEVELS, zoomIndex } from "../../features/zoom";
+import { buildCustomThemeSection } from "../../features/custom-themes/customThemeSection";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";
@@ -435,6 +436,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
   appendChildren(hexInputRow, hexPrefix, hexInput);
   appendChildren(section, accentHeader, swatchesRow, hexInputRow, accentNote);
+  section.appendChild(buildCustomThemeSection(signal));
 
   // An OS light/dark flip under "Sync with computer" changes the default
   // accent; with no stored accent the controls must follow it.

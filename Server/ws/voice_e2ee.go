@@ -12,26 +12,22 @@ import (
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
-// Voice E2EE rate limits. Both the announce and offer relays fan out to every
-// other voice participant (and an offer can force a key rotation / disconnect
-// for peers), so a single user must not be able to spam them. Mirrors the
-// named-constant Limiter idiom used by the voice control handlers.
+// Voice E2EE rate limits. Announce and offer relays fan out to every other voice
+// participant (an offer can force a peer's key rotation or disconnect), so one user
+// must not be able to spam them.
 const (
 	voiceE2EERateLimit = 5
 	voiceE2EEWindow    = time.Second
-	// voiceE2EEOfferRateLimit budgets a whole key rotation, which is a burst of
-	// one offer per peer fired on join/leave and on the periodic re-key. It is
-	// therefore sized well above any realistic voice channel rather than at
-	// voiceE2EERateLimit, which suits announces (one frame per rotation).
+	// voiceE2EEOfferRateLimit budgets a whole key rotation, a burst of one offer per
+	// peer on join/leave and the periodic re-key, so it is sized well above any
+	// realistic voice channel rather than at voiceE2EERateLimit (announces send one
+	// frame per rotation).
 	voiceE2EEOfferRateLimit = 64
 )
 
-// validateBase64Loose checks that s is valid padded (StdEncoding) or unpadded
-// (RawStdEncoding) standard-alphabet base64. ECDH public keys exported from
-// WebCrypto omit '=' padding; we accept both forms to avoid breaking existing
-// clients.
-// Note: URL-safe base64 (alphabet '-_') is not accepted; clients must use the
-// standard alphabet ('+/').
+// validateBase64Loose accepts padded (StdEncoding) or unpadded (RawStdEncoding)
+// standard-alphabet base64: WebCrypto ECDH public keys omit '=' padding. URL-safe
+// base64 is not accepted.
 func validateBase64Loose(s string) error {
 	if _, err := base64.StdEncoding.DecodeString(s); err == nil {
 		return nil
@@ -40,12 +36,10 @@ func validateBase64Loose(s string) error {
 	return err
 }
 
-// updateKeyHolder scans connected clients to find the one with the lowest
-// userID currently in channelID, and records them as the key holder.
-// If no clients remain in the channel the entry is deleted.
-// Must NOT be called while h.mu or h.keyHolderMu is held.
-// Lock order: keyHolderMu (write) → h.mu (read). Holding keyHolderMu for
-// the entire scan+write prevents two concurrent calls from racing and
+// updateKeyHolder records the connected client with the lowest userID in channelID
+// as key holder, deleting the entry if none remain. Must NOT be called while h.mu
+// or h.keyHolderMu is held. Lock order: keyHolderMu (write) then h.mu (read);
+// holding keyHolderMu across the scan and write stops two concurrent calls
 // overwriting each other with a stale result.
 func (h *Hub) updateKeyHolder(channelID int64) {
 	h.keyHolderMu.Lock()
@@ -71,12 +65,9 @@ func (h *Hub) updateKeyHolder(channelID int64) {
 	}
 }
 
-// IsVoiceKeyHolder reports whether userID is the current key holder for channelID.
-// Satisfies the KeyHolderChecker interface.
-//
-// NOTE: When called from a V2 handler (via deps), there is a TOCTOU window
-// between this check and the subsequent event delivery in EmitEvents. See the
-// comment on handleVoiceE2EEOfferV2 for details.
+// IsVoiceKeyHolder reports whether userID is the current key holder for channelID
+// (KeyHolderChecker). From a V2 handler there is a TOCTOU window between this
+// check and delivery in EmitEvents; see handleVoiceE2EEOfferV2.
 func (h *Hub) IsVoiceKeyHolder(channelID, userID int64) bool {
 	h.keyHolderMu.RLock()
 	kh, ok := h.voiceKeyHolders[channelID]
@@ -84,10 +75,9 @@ func (h *Hub) IsVoiceKeyHolder(channelID, userID int64) bool {
 	return ok && kh == userID
 }
 
-// computeIsKeyHolder determines whether userID will become the key holder when
-// joining channelID. Returns true if no connected client in that channel has a
-// lower userID. This is used before calling setState so the result can be
-// included in the voice_token message sent to the joiner.
+// computeIsKeyHolder reports whether userID will become key holder on joining
+// channelID (no connected client there has a lower userID). Used before setState so
+// the result can go in the joiner's voice_token.
 func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -99,9 +89,8 @@ func (h *Hub) computeIsKeyHolder(channelID, userID int64) bool {
 	return true
 }
 
-// handleVoiceE2EEAnnounceV2 is the V2 (pure) handler for voice_e2ee_announce.
-// It validates the public key and returns a SetE2EEAnnounce mutation plus a
-// VoiceE2EEAnnounceEvent for relay to other voice channel participants.
+// handleVoiceE2EEAnnounceV2 handles voice_e2ee_announce: it validates the public key
+// and returns SetE2EEAnnounce plus a VoiceE2EEAnnounceEvent relaying to peers.
 func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	announceCmd := cmd.(VoiceE2EEAnnounceCmd)
@@ -128,9 +117,9 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 		return Result{Error: ClientError{Code: ErrCodeBadPayload, Message: "public_key is not valid base64"}}
 	}
 
-	// signature (F3 TOFU) is optional — legacy clients omit it and the
-	// receiving client enforces the fail-closed posture. When present it is
-	// validated and carried verbatim: the server relays, never verifies.
+	// The signature is optional (legacy clients omit it; the receiving client enforces
+	// the fail-closed posture). When present it is validated and carried verbatim: the
+	// server relays, never verifies.
 	sig := announceCmd.Signature
 	if sig != "" {
 		if len(sig) > 128 {
@@ -141,12 +130,10 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 		}
 	}
 
-	// video_decode (WP M-4) is optional and never fatal: a malformed list is
-	// dropped and the announce (the key) is still accepted.
-	// The device key the announce itself names wins: unlike the auth frame it
-	// can be sent on the first connection of an app start, when the user id that
-	// scopes the key was not yet known. Without one (older client, or an invalid
-	// value the parser dropped) the connection's auth-frame key is used.
+	// video_decode is optional and never fatal: a malformed list is dropped and the
+	// key still accepted. A device key named by the announce itself wins: unlike the
+	// auth frame it can be sent on the first connection of an app start, before the
+	// user id scoping the key is known. Otherwise the auth-frame key is used.
 	identityKey := announceCmd.IdentityKey
 	if identityKey == "" {
 		identityKey = info.IdentityKey
@@ -163,10 +150,9 @@ func handleVoiceE2EEAnnounceV2(_ context.Context, cmd Command, info ClientInfo, 
 	}
 }
 
-// announceIdentityKey returns the device identity key a voice_e2ee_announce
-// payload carried, or "" when it carried none or an invalid one. An invalid key
-// is logged and ignored, never an error: it must not cost the announce (the
-// ephemeral key), and the connection's auth-frame key is used instead.
+// announceIdentityKey returns the device identity key a voice_e2ee_announce carried,
+// or "" if none or invalid. An invalid key is logged and ignored, never an error:
+// it must not cost the announce, and the auth-frame key is used instead.
 func announceIdentityKey(userID int64, raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
@@ -190,10 +176,9 @@ const (
 )
 
 // sanitizeVideoDecode validates the announced video decode list: at most
-// maxVideoDecodeEntries entries, each 1..maxVideoDecodeNameLen characters of
-// [a-z0-9]. On any violation it returns nil (the whole field is dropped; the
-// announce itself is kept). Values are otherwise opaque. The result is a copy
-// and never aliases the input.
+// maxVideoDecodeEntries entries of 1..maxVideoDecodeNameLen characters of
+// [a-z0-9]. Any violation returns nil (the field is dropped, the announce kept).
+// The result never aliases the input.
 func sanitizeVideoDecode(in []string) []string {
 	if len(in) == 0 || len(in) > maxVideoDecodeEntries {
 		return nil
@@ -214,19 +199,16 @@ func sanitizeVideoDecode(in []string) []string {
 	return out
 }
 
-// handleVoiceE2EEOfferV2 is the V2 (pure) handler for voice_e2ee_offer.
-// It validates the payload and key holder status, then returns a
-// VoiceE2EEOfferGuardedEvent for atomic check-and-send delivery.
+// handleVoiceE2EEOfferV2 handles voice_e2ee_offer: it validates the payload and key
+// holder status, then returns a VoiceE2EEOfferGuardedEvent for atomic
+// check-and-send delivery.
 //
-// KNOWN RACE: There is a window between the IsVoiceKeyHolder check below
-// and the sendToUserIfInVoiceChannel delivery in EmitEvents where the key
-// holder map can change (e.g. the real key holder leaves voice). This is
-// accepted because VoiceChannelGuardedEvent uses atomic check-and-send
-// under h.mu.RLock, guaranteeing the target is still in the voice channel
-// at delivery time. The worst case is a stale "not key holder" rejection
-// that the client retries.
-// TODO: consider re-checking key-holder status inside sendToUserIfInVoiceChannel
-// under the same h.mu.RLock to close the TOCTOU window completely.
+// Known race: the key holder map can change (the real holder leaves) between the
+// IsVoiceKeyHolder check and delivery in EmitEvents. Accepted: the guarded event
+// checks under h.mu.RLock that the target is still in the channel at delivery, and
+// the worst case is a stale "not key holder" rejection the client retries.
+// TODO: re-check key-holder status inside sendToUserIfInVoiceChannel under the
+// same lock to close the window.
 func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
 	d := deps.(VoiceDeps)
 	offerCmd := cmd.(VoiceE2EEOfferCmd)
@@ -260,24 +242,21 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 		return Result{Error: ClientError{Code: ErrCodeNotKeyHolder, Message: "only the key holder may send key offers"}}
 	}
 
-	// Rate limit last, and let no unvalidated client input allocate limiter
-	// state. RateLimiter.Allow inserts a live map entry per distinct key, reaped
-	// only ~20 minutes later, and the key used to interpolate target_user_id —
-	// attacker-controlled JSON — before any check ran. One authenticated socket
-	// that was neither in voice nor a key holder could therefore spray unbounded
-	// entries into the process-wide limiter until the server ran out of memory.
-	//
-	// The outer budget is keyed on (sender, voice channel), server-held state
-	// only, and sized for a whole rotation. Passing it is now the precondition
-	// for creating any per-target entry, so limiter growth is bounded by real,
-	// permission-checked voice joins rather than by attacker-chosen integers.
+	// Rate limit last, and let no unvalidated client input allocate limiter state.
+	// RateLimiter.Allow inserts a live map entry per distinct key, reaped ~20 minutes
+	// later, and the key used to interpolate the attacker-controlled target_user_id
+	// before any check; one authenticated socket not in voice or not a key holder could
+	// spray unbounded entries until the server ran out of memory. The outer budget is
+	// keyed on (sender, voice channel), server-held state only, and sized for a whole
+	// rotation; passing it is the precondition for any per-target entry, so growth is
+	// bounded by real permission-checked joins.
 	ratKey := auth.Key(auth.Key("voice_e2ee_offer", info.UserID), voiceChID)
 	if d.Limiter != nil && !d.Limiter.Allow(ratKey, voiceE2EEOfferRateLimit, voiceE2EEWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
 	}
-	// Inner budget keeps the W1-2 per-victim cap: an offer can force the target
-	// to re-key or disconnect, so repeated offers at one peer stay capped even
-	// though a full rotation across many peers passes.
+	// The inner budget keeps the per-victim cap: an offer can force the target to
+	// re-key or disconnect, so repeated offers at one peer stay capped even though a
+	// full rotation across many peers passes.
 	targetKey := auth.Key(ratKey, targetUserID)
 	if d.Limiter != nil && !d.Limiter.Allow(targetKey, voiceE2EERateLimit, voiceE2EEWindow) {
 		return Result{Error: ClientError{Code: ErrCodeRateLimited, Message: "too many e2ee offers"}}
@@ -293,25 +272,23 @@ func handleVoiceE2EEOfferV2(_ context.Context, cmd Command, info ClientInfo, dep
 	}
 }
 
-// sendToUserIfInVoiceChannel atomically verifies that targetUserID is in the
-// given voice channel and sends the message — all under a single h.mu.RLock.
-// This prevents TOCTOU races where the target leaves voice between the check
-// and the send. Used by VoiceChannelGuardedEvent (voice_e2ee_offer).
+// sendToUserIfInVoiceChannel atomically verifies targetUserID is in the voice
+// channel and sends, all under one h.mu.RLock, preventing a TOCTOU where the target
+// leaves between check and send. Used by VoiceChannelGuardedEvent (voice_e2ee_offer).
 func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	targets := h.clients[targetUserID]
 	if len(targets) == 0 {
-		// Undeliverable key offer can leave the peer unable to decrypt — the
-		// payload is dropped, but log (IDs only, never the encrypted key) so
-		// the failure is diagnosable rather than silent.
+		// An undeliverable key offer can leave the peer unable to decrypt. Log (IDs only,
+		// never the encrypted key) so the failure is diagnosable.
 		slog.Debug("e2ee: key offer dropped, target not connected",
 			"target_user_id", targetUserID, "voice_channel_id", voiceChannelID)
 		return
 	}
-	// The offer is for the device that holds the call; the user's other
-	// connections have no slot in it and never see the wrapped key.
+	// The offer is for the device holding the call; the user's other connections have
+	// no slot in it and never see the wrapped key.
 	delivered := false
 	for _, target := range targets {
 		if target.voice.channel() == voiceChannelID {
@@ -325,23 +302,19 @@ func (h *Hub) sendToUserIfInVoiceChannel(voiceChannelID, targetUserID int64, msg
 	}
 }
 
-// sendToVoiceChannelExcept sends a message to all clients in the given voice
-// channel except the one identified by excludeUserID.
-//
-// Delivery goes through the voice pub/sub topic (joined at voice_join,
-// dropped at voice_leave/disconnect) rather than scanning every connected
-// client under h.mu: publishWithPriority snapshots the subscriber set and
-// sends outside the lock, so this costs O(participants) and never nests
-// h.mu with each client's own mutex. Key-offer delivery keeps the stricter
-// TOCTOU-guarded sendToUserIfInVoiceChannel path.
+// sendToVoiceChannelExcept sends to all clients in the voice channel except
+// excludeUserID, through the voice pub/sub topic (joined at voice_join, dropped at
+// leave/disconnect) rather than scanning clients under h.mu:
+// publishWithPriority snapshots subscribers and sends outside the lock, costing
+// O(participants) and never nesting h.mu with a client's mutex. Key-offer delivery
+// keeps the stricter sendToUserIfInVoiceChannel path.
 func (h *Hub) sendToVoiceChannelExcept(channelID int64, excludeUserID int64, msg []byte) {
 	h.pubsub.Publish(VoiceTopic(channelID), msg, excludeUserID)
 }
 
-// getClientE2EEAnnounce returns the stored announce (ECDH public key, identity
-// signature, video decode list) for a connected user; the zero value if none.
+// getClientE2EEAnnounce returns the stored announce for a connected user; zero if none.
 func (h *Hub) getClientE2EEAnnounce(userID int64) e2eeAnnounce {
-	// The announce lives on the connection that holds the call.
+	// The announce lives on the connection holding the call.
 	c := h.voiceClient(userID)
 	if c == nil {
 		return e2eeAnnounce{}
@@ -349,14 +322,13 @@ func (h *Hub) getClientE2EEAnnounce(userID int64) e2eeAnnounce {
 	return c.getE2EEAnnounce()
 }
 
-// GetClientE2EEPubKeyForTest is an exported wrapper for tests.
+// GetClientE2EEPubKeyForTest is an exported test wrapper.
 func (h *Hub) GetClientE2EEPubKeyForTest(userID int64) string {
 	return h.getClientE2EEAnnounce(userID).key
 }
 
-// voiceChannelPeerUserIDs returns the user IDs of every currently connected
-// client in channelID, excluding excludeUserID. Callers must not already
-// hold h.mu (this takes h.mu.RLock itself).
+// voiceChannelPeerUserIDs returns the user IDs of every connected client in
+// channelID except excludeUserID. Takes h.mu.RLock itself; callers must not hold h.mu.
 func (h *Hub) voiceChannelPeerUserIDs(channelID, excludeUserID int64) []int64 {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -375,24 +347,14 @@ func (h *Hub) voiceChannelPeerUserIDs(channelID, excludeUserID int64) []int64 {
 	return ids
 }
 
-// sendVoicePeerKeys sends c the current stored ECDH public key (and its F3
-// TOFU identity signature) for every other client currently in channelID.
-//
-// This is the server's only re-sync path for a client's local peer-key map,
-// factored out of voiceJoinComplete's per-participant relay loop
-// (voice_join.go) so both a brand-new voice_join AND a WS reconnect/resume
-// can use it. voice_e2ee_announce itself is delivered as an unsequenced
-// pub/sub frame (sendToVoiceChannelExcept -> h.pubsub.Publish, bypassing
-// deliverBroadcast entirely) — it never gets a seq, is never pushed to
-// h.replayBuf, and is never persisted, so neither reconnect replay tier
-// (buffer or DB) can ever redeliver one that was queued for a socket that
-// was down when it was sent. Before this existed, a client that blipped and
-// resumed permanently lost every peer key (or mid-call key rotation)
-// announced while its socket was down — its voice roster (voice_state,
-// which IS sequenced and replayed) stayed correct while its E2EE peer-key
-// map silently desynced from it (OC-0276). See registerNow
-// (hub.go), which calls this for every WS (re)registration that leaves the
-// client in a voice channel.
+// sendVoicePeerKeys sends c the stored ECDH public key (and identity signature)
+// for every other client in channelID. It is the server's only re-sync path for a
+// client's peer-key map, shared by a brand-new voice_join and a WS reconnect
+// (registerNow). voice_e2ee_announce is an unsequenced pub/sub frame: never given a
+// seq, pushed to h.replayBuf or persisted, so neither replay tier can redeliver one
+// sent while a socket was down. Without this a resumed client would permanently
+// lose every peer key or mid-call rotation announced meanwhile, its E2EE map
+// desynced from its (replayed) voice roster.
 func (h *Hub) sendVoicePeerKeys(c *Client, channelID int64) {
 	for _, uid := range h.voiceChannelPeerUserIDs(channelID, c.userID) {
 		if a := h.getClientE2EEAnnounce(uid); a.key != "" {

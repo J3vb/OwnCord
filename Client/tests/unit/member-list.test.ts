@@ -16,7 +16,7 @@ import { setMemberTimeouts } from "../../src/features/moderation/store";
 import { claimComposer } from "../../src/features/messaging/activeComposer";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { pickAvatarColor } from "@components/message-list/avatar";
-import { applyThemeByName } from "@lib/themes";
+import { applyThemeByName } from "@lib/prefs/themes";
 import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
 import { openUserProfilePopup } from "../../src/features/profiles/openUserProfilePopup";
 
@@ -938,7 +938,7 @@ describe("MemberList", () => {
   // firing — and keeps the row (and everything it closed over) reachable —
   // for the component's entire lifetime, exactly the defect already fixed in
   // ChannelSidebar (renderAc, OC-0229) and MessageList (OC-0286).
-  it("aborts a discarded row's listeners on a full rebuild instead of retaining them for the component's lifetime (OC-0295)", () => {
+  it("aborts a discarded row's listeners on a full rebuild instead of retaining them for the component's lifetime", () => {
     setTestMembers(testMembers);
     memberList.mount(container);
 
@@ -1035,7 +1035,7 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-custom-status-2"]')).toBeNull();
   });
 
-  it("shows Playing <game> as the second line, with the controller icon (WP 8.3)", () => {
+  it("shows Playing <game> as the second line, with the controller icon", () => {
     setTestMembers([
       makeMember({
         id: 1,
@@ -1056,7 +1056,7 @@ describe("MemberList profile fields", () => {
     expect(row?.getAttribute("aria-describedby")).toContain("mi-activity-1");
   });
 
-  it("lets a custom status win the row; the game is not drawn there (WP 8.3)", () => {
+  it("lets a custom status win the row; the game is not drawn there", () => {
     setTestMembers([
       makeMember({
         id: 1,
@@ -1074,7 +1074,7 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
   });
 
-  it("follows a game starting and stopping in place (WP 8.3)", () => {
+  it("follows a game starting and stopping in place", () => {
     setTestMembers([makeMember({ id: 1, username: "alice" })]);
     list = createMemberList(opts);
     list.mount(container);
@@ -1093,7 +1093,7 @@ describe("MemberList profile fields", () => {
     expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
   });
 
-  describe("Listening to <player> (WP 8.10)", () => {
+  describe("Listening to <player>", () => {
     const song = {
       title: "Blue in Green",
       artist: "Miles Davis",
@@ -1173,7 +1173,7 @@ describe("MemberList profile fields", () => {
     });
   });
 
-  it("opens the profile from the keyboard, where Report names the user (B9-10)", async () => {
+  it("opens the profile from the keyboard, where Report names the user", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice", displayName: "Alice A." }),
       makeMember({ id: 2, username: "me" }),
@@ -1208,7 +1208,7 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="upp-report-btn"]')).toBeNull();
   });
 
-  it("wires the profile popup's Call action to onCallUser, but not for yourself (BUG-05)", async () => {
+  it("wires the profile popup's Call action to onCallUser, but not for yourself", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice" }),
       makeMember({ id: 2, username: "me" }),
@@ -1243,7 +1243,7 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
   });
 
-  it("omits the Call action when no onCallUser handler is wired (BUG-05)", async () => {
+  it("omits the Call action when no onCallUser handler is wired", async () => {
     setTestMembers([makeMember({ id: 1, username: "alice" })]);
     list = createMemberList(opts);
     list.mount(container);
@@ -1256,7 +1256,7 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
   });
 
-  it("returns focus to the row that opened the profile after an earlier one closed (B9-10)", async () => {
+  it("returns focus to the row that opened the profile after an earlier one closed", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice" }),
       makeMember({ id: 3, username: "carol" }),
@@ -1285,7 +1285,7 @@ describe("MemberList profile fields", () => {
     expect(document.activeElement).toBe(rowB);
   });
 
-  it("returns focus to the user's rebuilt row when the list re-rendered while the profile was open (B9-10)", async () => {
+  it("returns focus to the user's rebuilt row when the list re-rendered while the profile was open", async () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice" }),
       makeMember({ id: 3, username: "carol" }),
@@ -1343,7 +1343,7 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="user-profile-popup"]')).toBeNull();
   });
 
-  it("describes each row by its custom status and presence, kept current (B9-10)", () => {
+  it("describes each row by its custom status and presence, kept current", () => {
     setTestMembers([
       makeMember({ id: 1, username: "alice", customStatus: "shipping" }),
       makeMember({ id: 2, username: "bob", status: "idle" }),
@@ -2042,7 +2042,7 @@ describe("MemberList search (3C-4b)", () => {
   });
 });
 
-describe("MemberList arrow navigation (4.14b)", () => {
+describe("MemberList arrow navigation", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMemberList> | null;
 

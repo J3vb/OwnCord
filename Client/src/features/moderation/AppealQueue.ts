@@ -22,7 +22,7 @@
  * appeal can still take it and the view is live.
  */
 
-import { isImeCommit } from "@lib/ime";
+import { isImeCommit } from "@lib/text/ime";
 import { ApiClientError, serverErrorText, type ModerationAppealFilter } from "@lib/api";
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";

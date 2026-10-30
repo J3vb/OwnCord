@@ -47,7 +47,7 @@ import {
   type ReadyActivity,
   type ReadyListening,
 } from "../../lib/types";
-import { loadLastChannel } from "../../lib/last-channel";
+import { loadLastChannel } from "../../lib/prefs/lastChannel";
 import {
   acceptReadState,
   failMarkUnread,

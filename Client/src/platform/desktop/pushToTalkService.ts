@@ -27,7 +27,7 @@
  * Only `./pushToTalk.ts` imports this module, and lazily — see its header.
  */
 
-import { loadPref, savePref } from "@lib/preferences";
+import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/ptt";

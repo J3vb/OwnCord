@@ -6,21 +6,16 @@ import (
 	"slices"
 )
 
-// ─── Errors ─────────────────────────────────────────────────────────────────
-
 // ErrNotDMParticipant is returned when a user is not a participant in a DM channel.
 var ErrNotDMParticipant = errors.New("not a participant in this DM")
 
 // ErrPermissionDenied is returned when a user lacks the required permission.
 var ErrPermissionDenied = errors.New("permission denied")
 
-// ─── DB interface ───────────────────────────────────────────────────────────
-
 // ChannelOverride holds both override layers for a single channel: Allow/Deny
 // are the ROLE layer (channel_overrides), UserAllow/UserDeny the per-member
-// layer (channel_user_overrides) that is applied on top of it. The zero value
-// means "no override at either layer", which is why a missing map entry is
-// always the correct answer.
+// layer (channel_user_overrides) applied on top. The zero value means "no
+// override at either layer", so a missing map entry is always correct.
 type ChannelOverride struct {
 	Allow     int64
 	Deny      int64
@@ -28,17 +23,16 @@ type ChannelOverride struct {
 	UserDeny  int64
 }
 
-// ChannelRef is the minimal channel description VisibleChannelIDs needs.
-// Declared here (not imported from db) so the permissions package stays free
-// of a db dependency; callers map their []db.Channel down to []ChannelRef.
+// ChannelRef is the minimal channel description VisibleChannelIDs needs,
+// declared here so the package stays free of a db dependency.
 type ChannelRef struct {
 	ID       int64
 	Type     string
 	Archived bool
-	// NSFW is consulted only by CanReadContent (B5-7); every other predicate
+	// NSFW is consulted only by CanReadContent; every other predicate
 	// ignores it. Always false for a DM — DMs cannot be labelled.
 	NSFW bool
-	// AuthorityID is the parent of a thread (6.9c), whose overrides are the
+	// AuthorityID is the parent of a thread, whose overrides are the
 	// thread's; 0 means the channel is its own authority. A thread's Archived
 	// and NSFW are already its parent's (the channel queries merge them).
 	AuthorityID int64
@@ -55,16 +49,13 @@ func (c ChannelRef) OverrideKey() int64 {
 }
 
 // DB is the minimal database interface the Checker needs.
-// Defined at the consumer (per Go convention: accept interfaces, return structs).
 type DB interface {
 	GetChannelPermissions(ctx context.Context, channelID, roleID int64) (allow, deny int64, err error)
 	GetUserChannelPermissions(ctx context.Context, channelID, userID int64) (allow, deny int64, err error)
-	// HasActiveTimeout is B5-9's live, uncached lookup: Subject.TimedOut is
+	// HasActiveTimeout is the live, uncached timeout lookup: Subject.TimedOut is
 	// filled from it on every Subject call, never from a cache.
 	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
 }
-
-// ─── Checker ────────────────────────────────────────────────────────────────
 
 // Checker consolidates all channel permission checks into one reusable type.
 // It is safe to share across goroutines because it holds no mutable state.
@@ -81,9 +72,9 @@ func NewChecker(db DB) *Checker {
 // Perms is the OR of all held role masks; Overrides carries the per-channel
 // override (the single role's layer plus the member layer for a one-role
 // member, only the member layer where Layers is set); Layers holds the
-// per-held-role breakdown for the channels where the member holds two or more
+// per-held-role breakdown for channels where the member holds two or more
 // roles and at least one has an override. A missing map entry means "no
-// override" and is always the correct answer. Build it with db.GetMemberGrants.
+// override". Build it with db.GetMemberGrants.
 type MemberGrants struct {
 	Perms int64
 	// RoleIDs are the held roles the grants were read for, top role first. A
@@ -103,13 +94,11 @@ func (g MemberGrants) Subject(channelID int64) Subject {
 }
 
 // HasChannelPerm reports whether the member (identified by the roles they
-// hold and userID) has all the given permission bits on the specified channel.
+// hold and userID) has all the given permission bits on the channel.
 // Administrator in any held role bypasses all checks. Every held role's
-// override and the user's are fetched from the database per call and composed
-// as MemberChannelPerms does.
-//
-// userID may be 0 for a check that is genuinely role-only (no member in hand);
-// the per-user layer is then skipped rather than queried for a nonexistent id.
+// override and the user's are fetched per call and composed as
+// MemberChannelPerms does. userID may be 0 for a role-only check; the per-user
+// layer is then skipped.
 func (ck *Checker) HasChannelPerm(ctx context.Context, held []RoleGrant, userID, channelID, perm int64) bool {
 	s, err := ck.Subject(ctx, held, userID, channelID)
 	if err != nil {
@@ -120,13 +109,13 @@ func (ck *Checker) HasChannelPerm(ctx context.Context, held []RoleGrant, userID,
 
 // Subject resolves every held role's override and the user's override for the
 // member in channelID, live from the database, and returns them with the role
-// bits as a Subject for the value-taking predicates (CanViewChannel and
-// friends). held carries each held role's id and mask (Allow/Deny are ignored
-// and read from the database). The channel's flags and any DM state are the
-// caller's to fill in. Administrator skips the fetch — overrides never change
-// its verdict. A lookup failure is returned, not collapsed, so error-aware
-// callers (the voice sweep) can tell a transient read failure from a denial;
-// HasChannelPerm collapses it to false.
+// bits as a Subject for the value-taking predicates. held carries each role's
+// id and mask (Allow/Deny are ignored and read from the database). The
+// channel's flags and any DM state are the caller's to fill in. Administrator
+// skips the fetch, since overrides never change its verdict. A lookup failure
+// is returned, not collapsed, so error-aware callers (the voice sweep) can
+// tell a transient read failure from a denial; HasChannelPerm collapses it to
+// false.
 func (ck *Checker) Subject(ctx context.Context, held []RoleGrant, userID, channelID int64) (Subject, error) {
 	var rolePerms int64
 	for _, g := range held {
@@ -171,23 +160,21 @@ func (ck *Checker) Subject(ctx context.Context, held []RoleGrant, userID, channe
 }
 
 // HasChannelPermBatch reports whether the member has the given permission on
-// the channel using pre-fetched grants (build them with db.GetMemberGrants).
-// The grants are keyed by override authority, so a thread's id must be resolved
-// to its parent's first (service.PermissionService does). This avoids N+1
-// queries when filtering many channels in bulk. A channel with no entry in
-// grants is correct -- it means no override exists at either layer.
+// the channel using pre-fetched grants (build them with db.GetMemberGrants),
+// avoiding N+1 queries in bulk filtering. The grants are keyed by override
+// authority, so a thread's id must be resolved to its parent's first
+// (service.PermissionService does). A channel with no entry in grants has no
+// override at either layer.
 func (ck *Checker) HasChannelPermBatch(grants MemberGrants, channelID, perm int64) bool {
 	return grants.Subject(channelID).Has(perm)
 }
 
-// VisibleChannelIDs returns the set of non-DM channel IDs the member
-// (identified by their MemberGrants) may READ, using pre-fetched grants. It is
-// the single predicate behind every "which channels does this member see" site
-// (REST ListVisibleChannels, the ws ready payload, and reconnect replay
-// filtering) so they can never drift apart. DM channels are skipped — their
-// visibility is membership-based, layered on top by the caller. Zero grants
-// yield an empty set naturally (no admin bypass, no base READ, and no entries
-// to grant it).
+// VisibleChannelIDs returns the set of non-DM channel IDs the member may READ,
+// using pre-fetched grants. It is the single predicate behind every "which
+// channels does this member see" site (REST ListVisibleChannels, the ws ready
+// payload, reconnect replay filtering), so they cannot drift apart. DM
+// channels are skipped: their visibility is membership-based, layered on top
+// by the caller. Zero grants yield an empty set.
 func (ck *Checker) VisibleChannelIDs(grants MemberGrants, channels []ChannelRef) map[int64]bool {
 	visible := make(map[int64]bool)
 	for _, ch := range channels {

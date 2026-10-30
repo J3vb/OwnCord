@@ -14,7 +14,7 @@ const { testPrefs, playVoiceSound } = vi.hoisted(() => ({
   playVoiceSound: vi.fn(),
 }));
 
-vi.mock("../../src/lib/preferences", () => ({
+vi.mock("../../src/lib/prefs/preferences", () => ({
   STORAGE_PREFIX: "owncord:settings:",
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
@@ -203,7 +203,7 @@ describe("voice UI sounds", () => {
     expect(playVoiceSound).not.toHaveBeenCalled();
   });
 
-  describe("stream start and end (WP 1C-4)", () => {
+  describe("stream start and end", () => {
     const member = { ...SELF, userId: 2, username: "peer" };
     beforeEach(() => {
       authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
@@ -498,7 +498,7 @@ describe("voice UI sounds", () => {
       vi.useRealTimers();
     });
   });
-  describe("viewers of your own stream (6.6b)", () => {
+  describe("viewers of your own stream", () => {
     const peer = (userId: number, screenshare = false) => ({
       ...SELF,
       userId,

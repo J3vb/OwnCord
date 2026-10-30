@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGameActivity, GAME_ACTIVITY_POLL_MS, type GameActivityLoop } from "@lib/gameActivity";
 import { handleActivityRefusal, GAME_ACTIVITY_PREF_KEY } from "@lib/gameActivityBridge";
 import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/serverCapabilities";
-import { savePref } from "@lib/preferences";
+import { savePref } from "@lib/prefs/preferences";
 import {
   GAME_PREFS_KEY,
   GAME_SEEN_KEY,
@@ -13,7 +13,7 @@ import {
   withHidden,
   withManual,
   withRename,
-} from "@lib/gameActivityPrefs";
+} from "@lib/prefs/gameActivityPrefs";
 import type { ConnectionState } from "@lib/ws";
 import type { DetectedGame } from "../../src/platform/contracts/gameDetector";
 
@@ -300,7 +300,7 @@ describe("game activity loop", () => {
     expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio", "Factorio"]);
   });
 
-  describe("the per-server switch (WP 8.3e-2)", () => {
+  describe("the per-server switch", () => {
     afterEach(() => resetServerCapabilities());
 
     it("sends nothing, not even a null, when the switch goes off, and stops scanning", async () => {
@@ -459,7 +459,7 @@ describe("game activity loop", () => {
   });
 });
 
-describe("game activity loop: the user's own game choices (WP 8.3d)", () => {
+describe("game activity loop: the user's own game choices", () => {
   let loop: GameActivityLoop | null = null;
   let current: DetectedGame | null;
   const detect = vi.fn(async (_prefs: unknown) => current);

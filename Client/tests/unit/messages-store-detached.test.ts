@@ -186,7 +186,7 @@ describe("setAroundMessages", () => {
     expect(msgs[4]!.status).toBe("failed");
   });
 
-  it("keeps a live message that landed while the fetch was in flight, once the window reattaches to the tail (OC-0244)", () => {
+  it("keeps a live message that landed while the fetch was in flight, once the window reattaches to the tail", () => {
     // The socket is already subscribed to the channel (channel_focus was sent
     // on mount), so a broadcast that commits while the /messages/around
     // request is still in flight lands as an ordinary "sent" row — the

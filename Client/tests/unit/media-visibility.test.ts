@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as mediaVisibility from "../../src/lib/media-visibility";
-import { observeMedia, unobserveMedia, pauseAllMedia } from "../../src/lib/media-visibility";
+import * as mediaVisibility from "../../src/lib/prefs/mediaVisibility";
+import { observeMedia, unobserveMedia, pauseAllMedia } from "../../src/lib/prefs/mediaVisibility";
 import { runSessionResets } from "../../src/lib/sessionRegistry";
 
 // Resolved off the namespace so a missing export fails the assertion, not the import.
@@ -174,7 +174,7 @@ describe("media-visibility", () => {
     cleanup();
   });
 
-  it("freezes a GIF whose src the DOM normalizes away from the raw originalSrc (OC-0130)", () => {
+  it("freezes a GIF whose src the DOM normalizes away from the raw originalSrc", () => {
     const cleanup = setupCanvasMocks();
     // Mixed-case host: the <img> element's src getter returns this
     // lowercased per the WHATWG URL spec, so it no longer string-matches

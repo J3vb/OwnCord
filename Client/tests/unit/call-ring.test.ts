@@ -451,7 +451,7 @@ describe("outgoing call", () => {
     expect(h.armed()).toBe(true);
   });
 
-  it("a call to an offline 1:1 contact is offline at once, with no window and no ringback (D-14)", () => {
+  it("a call to an offline 1:1 contact is offline at once, with no window and no ringback", () => {
     const h = outgoingHarness();
     h.call.start(5, [9], true);
 

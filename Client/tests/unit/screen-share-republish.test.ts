@@ -27,7 +27,7 @@ vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   h264GpuPublish: (codec: string) => codec === "h264",
 }));
 
-vi.mock("@lib/preferences", () => ({
+vi.mock("@lib/prefs/preferences", () => ({
   loadPref: (_key: string, fallback: unknown) => fallback,
   savePref: vi.fn(),
 }));

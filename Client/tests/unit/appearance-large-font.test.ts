@@ -17,22 +17,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const { mockGetActiveThemeName } = vi.hoisted(() => ({
   mockGetActiveThemeName: vi.fn(() => "neon-glow"),
 }));
-vi.mock("@lib/themes", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/themes")>()),
+vi.mock("@lib/prefs/themes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/prefs/themes")>()),
   getActiveThemeName: mockGetActiveThemeName,
   restoreAccent: vi.fn(),
   restoreTheme: vi.fn(),
 }));
 vi.mock("@lib/os-motion", () => ({ SYNC_OS_MOTION_DEFAULT: true, syncOsMotionListener: vi.fn() }));
 
-import { applyStoredAppearance } from "@lib/appearance";
+import { applyStoredAppearance } from "@lib/prefs/appearance";
 import { buildAccessibilityTab } from "@components/settings/AccessibilityTab";
 
 function fontSize(): string {
   return document.documentElement.style.getPropertyValue("--font-size");
 }
 
-describe("Large Font raises the effective font size (OC-0319)", () => {
+describe("Large Font raises the effective font size", () => {
   beforeEach(() => {
     document.documentElement.className = "";
     document.documentElement.removeAttribute("style");

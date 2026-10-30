@@ -11,7 +11,7 @@ import (
 // egressSitesID is the rule's stable id.
 const egressSitesID = "egress-sites"
 
-// EgressEntry is one row of the B4-8 egress inventory (BPR-055): why a
+// EgressEntry is one row of the egress inventory: why a
 // production file — or the cmd/smoke CI harness, which the syntactic rule
 // sees like any other — may open an outbound network connection, what
 // triggers it, where it goes, and the configuration that gates it.
@@ -62,7 +62,7 @@ var EgressAllow = map[string]EgressEntry{
 	"updater/assets.go": {"manual", "api.github.com and github.com release assets (github.owner/github.repo)", "an admin's update check or apply, or a client asking /api/v1/client-update",
 		"release metadata and asset fetches for the two rows above; refuses a URL that is not https on a GitHub host, on every redirect hop too",
 		[]string{"(*Updater).fetchBody"}},
-	// B5-1 moved the dialing out of api/gif_handler.go and
+	// The dialing moved out of api/gif_handler.go and
 	// plugin/host_http.go and into Server/safefetch, so both of those rows
 	// are gone and these two carry what they used to. Neither file chooses a
 	// destination: safefetch has no configuration and no call sites of its
@@ -88,7 +88,7 @@ var EgressAllow = map[string]EgressEntry{
 	"cmd/smoke/docker.go": {"loopback", "the same address, published on 127.0.0.1 by the container under test", "someone invoking cmd/smoke",
 		"one /health probe confirming the drained container stopped answering; the destination is a server this harness launched moments earlier on loopback, and this binary is a CI harness that ships in no release",
 		[]string{"serving"}},
-	// B6-11's recovery drills (phases R, C and D): six probes against the same
+	// The recovery drills (phases R, C and D): six probes against the same
 	// loopback server — health while the disk is full, an authenticated read, a
 	// WebSocket dial, a read taken while a restore runs underneath it, and the
 	// upload and backup routes the rehearsals drive. Same row shape as the two

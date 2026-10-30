@@ -76,7 +76,7 @@ async function openModal(
   return { dom, bridge };
 }
 
-describe("Server/admin/static — access explanation and preview (RI-06)", () => {
+describe("Server/admin/static — access explanation and preview", () => {
   let dom: JSDOM | undefined;
   afterEach(() => {
     dom?.window?.close();

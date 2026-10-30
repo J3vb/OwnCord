@@ -15,13 +15,13 @@ const authzChokepointID = "authz-chokepoint"
 const permissionsImportPath = "github.com/J3vb/OwnCord/Server/permissions"
 
 // rawPermChecks are the raw bit helpers exported by permissions.go: the six
-// call targets HP-2 question 5's residue grep treats as a raw check
+// call targets the residue grep treats as a raw check
 // (HasPerm, HasAnyPerm, HasServerPerm, HasAdmin, EffectivePerms,
 // EffectiveChannelPerms). They are the whole of that file's exported surface
 // apart from Name, which formats a bit rather than deciding on one.
 //
 // Everything else in the package is a chokepoint rather than a raw check and
-// is deliberately absent: the B2-5 predicates (CanViewChannel,
+// is deliberately absent: the channel predicates (CanViewChannel,
 // CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice),
 // Subject.Has, and Checker — those are what a call site is supposed to use.
 var rawPermChecks = map[string]bool{
@@ -33,8 +33,8 @@ var rawPermChecks = map[string]bool{
 	"EffectiveChannelPerms": true,
 }
 
-// Residue classes, from HP-2 question 5's table. Each says why the sites in it
-// are not a channel predicate, so B3-8 can retire a whole class at once.
+// Residue classes. Each says why the sites in it are not a channel predicate,
+// so a whole class can be retired at once as its call sites move behind a service.
 const (
 	// classServerScoped: a server-wide permission with no channel to resolve
 	// a permissions.Subject for. These are the canonical server-wide check.
@@ -51,14 +51,14 @@ const (
 	classBulkReaderWalk = "bulk-reader-walk"
 	// classBaseBitRejection: a base-bit early rejection ahead of
 	// CanModerateVoice. It never admits; it keeps FORBIDDEN ahead of the
-	// voice-state lookup (a B2-5 decision).
+	// voice-state lookup.
 	classBaseBitRejection = "base-bit-rejection"
 )
 
 // authzResidueClasses is the closed set of classes a row may carry;
 // TestAuthzResidueAllowIsLive rejects any other value. A row cannot invent a
-// class, and that includes the "unclassified" escape valve the B3-6 brief
-// sketched: a genuinely new kind of residue means adding a constant above as a
+// class, and that includes the "unclassified" escape valve that was once
+// proposed: a genuinely new kind of residue means adding a constant above as a
 // deliberate, reviewable edit, so nothing reaches the allowlist without a
 // classification someone chose. authzClassList must name it too.
 var authzResidueClasses = map[string]bool{
@@ -80,7 +80,7 @@ const authzClassList = classServerScoped + ", " + classAdminShortCircuit + ", " 
 // exported field below stays a plain map[string]int.
 type calls = map[string]int
 
-// AuthzResidueEntry is one row of HP-2 question 5's residue table: why a
+// AuthzResidueEntry is one row of the residue table: why a
 // production symbol outside Server/permissions still calls a raw bit helper
 // instead of a predicate, and exactly which raw calls it is frozen at.
 type AuthzResidueEntry struct {
@@ -110,19 +110,18 @@ type AuthzResidueEntry struct {
 // The list only shrinks and never widens: a symbol that stops calling a raw
 // helper, or whose counts no longer match, fails TestAuthzResidueAllowIsLive;
 // an extra or different call fails authz-chokepoint at the offending line; a
-// new raw call anywhere else fails it too. B3-8 deletes rows as it moves each
-// family behind a service. Raising a count is a reviewable edit here, never a
-// side effect of editing the function.
+// new raw call anywhere else fails it too. Rows are deleted as each
+// family moves behind a service. Raising a count is a reviewable edit here,
+// never a side effect of editing the function.
 //
-// 17 symbols, 19 bound calls (was 19/21 at dev 75d64dd4, HP-2 question 5);
-// B5-9 added service.(*PermissionService).Subject for the TimedOut admin
+// 17 symbols, 19 bound calls (was 19/21 at dev 75d64dd4);
+// service.(*PermissionService).Subject was added for the TimedOut admin
 // short-circuit, and (briefly) service.(*ModerationService).Timeout for a
-// bare MUTE_MEMBERS check — P1-3 (Codex review) replaced that check with
+// bare MUTE_MEMBERS check — that check was replaced with
 // permissions.CanModerateVoice over a real Subject, so Timeout's own row is
-// gone again; only Subject's remains. Round 4 (Codex review Part C) removed
-// the two classBaseBitRejection rows (ws.voiceModTarget and
-// service.(*ModerationService).actorCanModerateVoiceFor) once both moved
-// onto permissions.AuthorizeVoiceModerator.
+// gone again; only Subject's remains. The two classBaseBitRejection rows
+// (ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor)
+// were removed once both moved onto permissions.AuthorizeVoiceModerator.
 var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	// ── server-scoped: no channel exists to resolve a Subject for ──────────
 	"admin.adminAuthMiddleware":                {classServerScoped, "HasAnyPerm over AdminPerimeter gates the admin panel as a whole", calls{"HasAnyPerm": 1}},
@@ -131,16 +130,15 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"api.RequirePermission":                    {classServerScoped, "per-route server permission for the REST mux", calls{"HasServerPerm": 1}},
 	"service.(*EmojiService).RequireManage":    {classServerScoped, "MANAGE_SERVER is server-wide; emoji have no channel", calls{"HasServerPerm": 1}},
 	"service.(*ModerationService).requirePerm": {classServerScoped, "ban/kick/timeout are server-wide", calls{"HasServerPerm": 1}},
-	// service.(*ModerationService).Timeout's own row is GONE (P1-3, Codex
-	// review): the voice half used to defer to a bare, server-wide
-	// MUTE_MEMBERS bit with no channel to resolve a Subject for (decision 6);
+	// service.(*ModerationService).Timeout's own row is GONE: the voice half used to defer to a bare, server-wide
+	// MUTE_MEMBERS bit with no channel to resolve a Subject for;
 	// it now builds a Subject for the target's CURRENT voice channel and asks
 	// permissions.CanModerateVoice — the canonical predicate, not a residue.
 	"service.(*RoleService).actorRole": {classServerScoped, "MANAGE_ROLES is server-wide", calls{"HasServerPerm": 1}},
 
 	// ── HasAdmin as a fetch short-circuit, ahead of the predicate ──────────
 	"service.(*ChannelService).ListVisibleChannels": {classAdminShortCircuit, "an administrator sees every channel; skips the override query", calls{"HasAdmin": 1}},
-	// The channel family's override guards (B3-8 part 2) — moved from the
+	// The channel family's override guards — moved from the
 	// admin handlers with their code; the rows moved with them.
 	"service.requireGrantableChannelOverride":           {classAdminPerimeter, "refuses an override that grants past the actor's own role", calls{"HasAdmin": 1}},
 	"service.(*ChannelService).requireOutranks":         {classAdminPerimeter, "role-hierarchy check on the target user; admin bypass", calls{"HasAdmin": 1}},
@@ -162,9 +160,9 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 	"service.(*MessageService).mentionReaders": {classBulkReaderWalk, "per-role layer walk over every role that can read the channel", calls{"EffectivePerms": 1, "HasAdmin": 2}},
 
 	// ws.voiceModTarget and service.(*ModerationService).actorCanModerateVoiceFor's
-	// own base-bit-rejection rows are GONE (round 4, Codex review Part C):
+	// own base-bit-rejection rows are GONE:
 	// both used to duplicate a base-bit HasServerPerm(MUTE_MEMBERS) check
-	// ahead of CanModerateVoice (NEW P1, Codex review round 3); they now
+	// ahead of CanModerateVoice; they now
 	// call permissions.AuthorizeVoiceModerator, the canonical combined
 	// predicate, not a residue. classBaseBitRejection is unused as a result
 	// but stays defined — a future call site with the same shape reuses it
@@ -172,10 +170,11 @@ var AuthzResidueAllow = map[string]AuthzResidueEntry{
 }
 
 // authzChokepoint fails on any production symbol outside Server/permissions
-// that calls a raw permission bit helper without a residue row. B2-5 gave
-// every channel-scoped security property exactly one predicate; this rule
+// that calls a raw permission bit helper without a residue row. Every
+// channel-scoped security property has exactly one predicate; this rule
 // keeps the next call site from re-deriving one of them by hand, which is how
-// the thirteen hand-rolled decision sites B2-5 collapsed came to exist.
+// the thirteen hand-rolled decision sites that were collapsed into those
+// predicates came to exist.
 //
 // Test files are out of scope — Run never parses them — so a parity table may
 // call the helpers freely.
@@ -251,7 +250,7 @@ func (h authzHit) excessMessage(want, got int) string {
 		h.Helper, h.Symbol, want, h.Helper, got, authzPredicateList)
 }
 
-// authzPredicateList names the B2-5 predicates a call site should be using.
+// authzPredicateList names the channel predicates a call site should be using.
 const authzPredicateList = "CanViewChannel, CanAdmitSession, CanSendMessage, CanType, CanJoinVoice, CanModerateVoice, CanReadContent, CanDeleteMessage, CanPinMessage, CanMentionRole"
 
 // authzHits reports every raw permission check in one file, whether or not it

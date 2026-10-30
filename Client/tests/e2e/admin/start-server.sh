@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds and runs a real OwnCord server for the admin-panel e2e suite
-# (playwright.config.admin.ts). Fresh temp data dir every run, TLS off so
+# (tests/e2e/config/playwright.config.admin.ts). Fresh temp data dir every run, TLS off so
 # Playwright talks plain http, loopback only. The server's cwd is the temp
 # dir so the first-boot config.yaml template and the wizard's write-back
 # land there instead of in the repo.

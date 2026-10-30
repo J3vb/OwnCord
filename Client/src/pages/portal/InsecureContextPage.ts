@@ -3,7 +3,7 @@
 // storage adapters inert there, so nothing on this page may reach them.
 
 import { createElement, appendChildren } from "@lib/dom";
-import type { MountableComponent } from "@lib/safe-render";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { portalText } from "../../i18n/portal";
 
 export function createInsecureContextPage(): MountableComponent {

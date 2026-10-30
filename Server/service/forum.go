@@ -15,7 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
-// ─── Forum posts (WP 6.9d-a2) ────────────────────────────────────────────────
+// ─── Forum posts ────────────────────────────────────────────────
 //
 // A post is a thread under a forum with no starter message; its opening message
 // is the thread's first message. CreateForumPost writes the thread, the
@@ -301,7 +301,7 @@ func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessagePara
 }
 
 // isPostOpening reports whether msgID is the opening message of the forum post
-// ch (WP 6.9d): an edit of it changes the preview the forum list shows, so the
+// ch: an edit of it changes the preview the forum list shows, so the
 // post's viewers hear a thread_changed. A read failure answers false; the
 // edit is already committed and the list catches up on the next change.
 func (s *MessageService) isPostOpening(ctx context.Context, ch *db.Channel, msgID int64) bool {

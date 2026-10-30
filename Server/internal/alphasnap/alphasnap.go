@@ -1,14 +1,13 @@
 // Package alphasnap hands tests a private copy of the committed alpha-shaped
-// database snapshot, Server/testdata/snapshots/v1.2.0-alpha.4.sqlite — the
-// B3-7 dataset that HP-4's drills and the B4-9..B4-11 destructive tests run
-// against (docs/architecture/data-lifecycle.md, "Drill protocol").
+// database snapshot, Server/testdata/snapshots/v1.2.0-alpha.4.sqlite, which the
+// recovery drills and destructive tests run against
+// (docs/architecture/data-lifecycle.md, "Drill protocol").
 //
-// The tracked file is never opened for writing and never opened by SQLite
-// through this package: every consumer gets a byte copy in a directory it
-// owns, so the source cannot gain a -wal/-shm sidecar or change a byte. The
-// package imports neither testing nor db on purpose — it resolves a path and
-// copies bytes, so any package's tests can use it without a db import and
-// nothing here links into the server binary.
+// The tracked file is never opened for writing or by SQLite through this
+// package: every consumer gets a byte copy in a directory it owns, so the
+// source cannot gain a -wal/-shm sidecar or change a byte. It imports neither
+// testing nor db on purpose, so any package's tests can use it and nothing
+// links into the server binary.
 package alphasnap
 
 import (
@@ -20,20 +19,18 @@ import (
 	"runtime"
 )
 
-// Name is the snapshot's file name. The README beside it records its shape
-// and the rule that it is regenerated only deliberately.
+// Name is the snapshot's file name; the README beside it records its shape and
+// the rule that it is regenerated only deliberately.
 const Name = "v1.2.0-alpha.4.sqlite"
 
 // relPath is the snapshot's location under the Server module root.
 var relPath = filepath.Join("testdata", "snapshots", Name)
 
-// Path returns the absolute path of the tracked snapshot.
-//
-// It is resolved from this source file's compiled-in location first, which
-// works from any package's test working directory. Under -trimpath that
-// location is not a real path, so the fallback walks up from the working
-// directory to the module root (the directory holding go.mod) — every `go
-// test` runs inside the module.
+// Path returns the absolute path of the tracked snapshot. It is resolved from
+// this source file's compiled-in location first, which works from any
+// package's test working directory; under -trimpath that is not a real path, so
+// the fallback walks up from the working directory to the module root (the
+// directory holding go.mod).
 func Path() (string, error) {
 	if _, self, _, ok := runtime.Caller(0); ok {
 		// self = <root>/internal/alphasnap/alphasnap.go
@@ -64,9 +61,9 @@ func Path() (string, error) {
 	}
 }
 
-// Copy writes a private copy of the snapshot into dir, which must already
-// exist (a test's t.TempDir()), and returns the copy's path. Each call makes
-// a new file, so a test may hold several copies in one directory.
+// Copy writes a private copy of the snapshot into dir, which must already exist
+// (a test's t.TempDir()), and returns the copy's path. Each call makes a new
+// file, so a test may hold several copies in one directory.
 func Copy(dir string) (string, error) {
 	src, err := Path()
 	if err != nil {

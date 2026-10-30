@@ -157,7 +157,7 @@ async function channelRowsOutsideSlot(
   });
 }
 
-test.describe("P1-01 channel list priority over a long member list", () => {
+test.describe("channel list priority over a long member list", () => {
   for (const { width, height } of [
     { width: 1280, height: 800 },
     { width: 1920, height: 1080 },
@@ -190,9 +190,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(scrolls).toBe(true);
   });
 
-  test("members keep about three rows when the channel list overflows (P1-01)", async ({
-    page,
-  }) => {
+  test("members keep about three rows when the channel list overflows", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await signInFreshProfile(page, LEFT_LAYOUT, LONG_CHANNEL_LIST);
 
@@ -212,7 +210,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(channelsScroll).toBe(true);
   });
 
-  test("a saved height holds when the channel list overflows (P1-01)", async ({ page }) => {
+  test("a saved height holds when the channel list overflows", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await signInFreshProfile(
       page,
@@ -224,7 +222,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(Math.abs(memberBox.height - 200)).toBeLessThanOrEqual(1);
   });
 
-  test("a saved height and a collapsed state still restore (P1-01)", async ({ page }) => {
+  test("a saved height and a collapsed state still restore", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
 
     // A saved height restores as a definite (`.sized`) height, not a flex
@@ -250,7 +248,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect((await channelRowsOutsideSlot(page)).outside).toBe(0);
   });
 
-  test("a dragged height saves and sizes the section (P1-01)", async ({ page }) => {
+  test("a dragged height saves and sizes the section", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await signInFreshProfile(page, LEFT_LAYOUT);
 
@@ -270,7 +268,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(dragged.sized).toBe(true);
   });
 
-  test("the first drag follows the cursor on a tall window (P1-01)", async ({ page }) => {
+  test("the first drag follows the cursor on a tall window", async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 });
     await signInFreshProfile(page, LEFT_LAYOUT);
 
@@ -287,9 +285,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(await members.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(before - 10);
   });
 
-  test("a drag follows the cursor from a saved height taller than the column (P1-01)", async ({
-    page,
-  }) => {
+  test("a drag follows the cursor from a saved height taller than the column", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await signInFreshProfile(page, { ...LEFT_LAYOUT, "owncord:member-list-height": "1040" });
 
@@ -307,9 +303,7 @@ test.describe("P1-01 channel list priority over a long member list", () => {
     expect(after).toBeCloseTo(before - 10, 0);
   });
 
-  test("the channel list stays reachable at 940x500 with 20px text (B9 Q1, #1780)", async ({
-    page,
-  }) => {
+  test("the channel list stays reachable at 940x500 with 20px text", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem("owncord:settings:fontSize", "20");
       localStorage.setItem("owncord:settings:largeFont", "true");

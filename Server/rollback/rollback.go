@@ -1,12 +1,12 @@
 // Package rollback holds the hand-run reversal of every migration in
-// Server/migrations that the B4 phase added and every one since, and the order to run them in.
+// Server/migrations from the data-contract migrations onward, and the order to
+// run them in.
 //
 // Migrations here are forward-only: the server applies them and never
-// un-applies them, so a rollback is an operator action rather than a server
-// one. These files are what that operator runs, against a database no server
-// is holding open, after taking a backup. The reversals were written with the
-// migrations (the B4 data contracts drafted theirs in
-// docs/archive/plans/hp-4-drafts/) rather than improvised during an incident.
+// un-applies them, so a rollback is an operator action. These files are what
+// that operator runs, against a database no server is holding open, after
+// taking a backup. They were written with the migrations rather than
+// improvised during an incident.
 //
 // Each file reverses exactly one migration and ends by deleting that
 // migration's row from schema_versions, so the next server start applies the

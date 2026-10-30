@@ -2,14 +2,14 @@
 // whether or not the rules exist. Instead this asserts the parsed stylesheet
 // rules (tests/helpers/app-css.ts).
 //
-// applyTheme() (lib/themes.ts) writes theme tokens --
+// applyTheme() (lib/prefs/themes.ts) writes theme tokens --
 // including --text-normal -- as an *inline* style on document.documentElement.
 // An inline declaration always beats a plain class rule on the same element,
 // so `.high-contrast { --text-normal: ... }` can never win against it: the
 // High Contrast toggle's headline promise (pure-white body text) is a no-op
 // unless the override is `!important`.
 //
-// applyThemeByName() (lib/themes.ts) does the same thing for custom themes,
+// applyThemeByName() (lib/prefs/themes.ts) does the same thing for custom themes,
 // except it writes the inline override on document.body instead of
 // documentElement -- so the override also needs a selector that reaches body
 // while high-contrast is active, not just one that targets html.

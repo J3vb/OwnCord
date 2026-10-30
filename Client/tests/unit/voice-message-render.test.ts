@@ -11,7 +11,7 @@ vi.mock("@lib/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));
-vi.mock("@lib/media-visibility", () => ({ observeMedia: vi.fn() }));
+vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 
 import { renderMessage } from "../../src/components/message-list/renderers";
 import {

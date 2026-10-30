@@ -1,5 +1,5 @@
 /**
- * The window operations `lib/window-state.ts`'s off-screen guard needs. The
+ * The window operations `lib/prefs/windowState.ts`'s off-screen guard needs. The
  * seam is the operations, not the guard: `initWindowState` is a
  * fire-and-forget orchestrator over them, and it stays in `lib/` as behaviour.
  * The platform seam lifted the operations in place, pinned them with `window.suite.ts`,
