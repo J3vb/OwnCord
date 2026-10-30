@@ -20,9 +20,9 @@ type Lifecycle struct {
 // adminSetupOptions is what the router hands the admin API: the running
 // config, the setup token, the log-level controller and the app's lifecycle
 // handles (the background group and the shutdown signal) the update apply
-// tail needs.
+// tail needs, and the upload directory for the Storage page.
 func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImporter) admin.SetupOptions {
-	return admin.SetupOptions{
+	opts := admin.SetupOptions{
 		ConfigPath: config.DefaultPath,
 		RunningCfg: cfg,
 		BackupDir:  cfg.Backup.Dir,
@@ -38,4 +38,9 @@ func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImp
 		ImportMaxBytes: cfg.Upload.ImportMaxBytes(),
 		BeginTransfer:  beginImportTransfer,
 	}
+	// Only a real store: a typed nil pointer would make a non-nil interface.
+	if rt.Storage != nil {
+		opts.UploadFiles = rt.Storage
+	}
+	return opts
 }

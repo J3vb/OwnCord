@@ -150,10 +150,12 @@ async function membersListHtml(seq){
   const noun=banned?'banned member':'member';
   const summary=!users.length&&state.usersPage===1?(filtered?'No '+noun+'s match':banned?'Nobody is banned':'No members yet')
     :users.length+(hasMore?'+':'')+' '+noun+(users.length===1&&!hasMore?'':'s')+(filtered?' match':'')+(state.usersPage>1?' on page '+state.usersPage:'');
-  let html='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl members-tbl"><thead><tr><th scope="col">Member</th><th scope="col" class="col-role">Role</th><th scope="col">Status</th><th scope="col" class="col-actions"><span class="sr-only">Actions</span></th></tr></thead><tbody>';
-  if(!users.length)html+='<tr><td colspan="4" class="members-empty">'+esc(summary)+'</td></tr>';
-  users.forEach(u=>{html+=memberRowHtml(u)});
+  const storage=can(PERM.MANAGE_SERVER);
+  let html='<div class="section-card"><div class="section-card-body no-pad"><table class="tbl members-tbl"><thead><tr><th scope="col">Member</th><th scope="col" class="col-role">Role</th><th scope="col">Status</th>'+(storage?'<th scope="col" class="col-storage">Storage</th>':'')+'<th scope="col" class="col-actions"><span class="sr-only">Actions</span></th></tr></thead><tbody>';
+  if(!users.length)html+='<tr><td colspan="'+(storage?5:4)+'" class="members-empty">'+esc(summary)+'</td></tr>';
+  users.forEach(u=>{html+=memberRowHtml(u,storage)});
   html+='</tbody></table></div></div>';
+  if(storage&&users.length)setTimeout(()=>loadMemberStorage(seq,users.map(u=>u.id)),0);
   html+='<div class="pagination"><div class="pagination-info">Page '+state.usersPage+'</div><div class="pagination-btns">';
   html+='<button class="page-btn" '+(state.usersPage<=1?'disabled':'')+' data-action="turnUsersPage" data-args="[-1]" aria-label="Previous page">&lt;</button>';
   html+='<button class="page-btn active" aria-current="page">'+state.usersPage+'</button>';
@@ -174,7 +176,59 @@ function memberStatusHtml(u){
     +(reason?'<div class="member-sub">'+esc(reason)+'</div>':'');
 }
 
-function memberRowHtml(u){
+/* The Storage column: what each member on the page has uploaded and their
+   limit, filled in after the table is on screen so the list never waits on it.
+   A member with no row has uploaded nothing and follows the server limit. */
+let memberStorageRows={};let memberServerQuota=0;
+async function loadMemberStorage(seq,ids){
+  let r;
+  try{r=await api('GET','/storage/members?ids='+ids.join(','))}catch(e){r=null}
+  if(seq!==membersListSeq||state.section!=='users')return;
+  memberStorageRows={};memberServerQuota=(r&&r.user_quota_bytes)||0;
+  ((r&&r.members)||[]).forEach(m=>{memberStorageRows[m.user_id]=m});
+  ids.forEach(id=>{const td=document.getElementById('mstore-'+id);if(td)td.innerHTML=r?memberStorageText(id):'<span class="member-sub">unavailable</span>'});
+}
+function memberLimitBytes(m){
+  if(m&&m.quota_mb!==null&&m.quota_mb!==undefined)return m.quota_mb*1048576;
+  return memberServerQuota;
+}
+function memberStorageText(id){
+  const m=memberStorageRows[id];const used=(m&&m.bytes_used)||0;const limit=memberLimitBytes(m);
+  const own=m&&m.quota_mb!==null&&m.quota_mb!==undefined;
+  const of=limit?' of '+fmtBytes(limit):own?' · no limit':'';
+  return esc(fmtBytes(used)+of)+(own?' <span class="badge badge-accent" title="This member has their own upload limit">own limit</span>':'');
+}
+
+/* Upload limit: the server-wide one, none, or the member's own in MB. */
+function openUploadLimit(uid,uname){
+  const m=memberStorageRows[uid];const own=m&&m.quota_mb!==null&&m.quota_mb!==undefined;
+  const mode=!own?'default':m.quota_mb===0?'none':'custom';
+  const opt=(v,label)=>'<label class="check-row"><input type="radio" name="uploadLimitMode" value="'+v+'"'+(mode===v?' checked':'')+'> '+label+'</label>';
+  openModal('<div class="modal-header"><h3>Upload limit for '+esc(uname)+'</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div>'
+    +'<div class="modal-body"><p style="color:var(--text-muted);margin-bottom:12px">Uploaded so far: '+esc(fmtBytes((m&&m.bytes_used)||0))+'. Files already uploaded stay; the limit applies to new uploads.</p>'
+    +opt('default','Use the server limit ('+(memberServerQuota?esc(fmtBytes(memberServerQuota)):'none')+')')
+    +opt('none','No limit for this member')
+    +opt('custom','Own limit')
+    +'<div class="form-group" style="margin-top:8px"><label class="form-label" for="uploadLimitMB">Own limit in MB</label><input class="form-input" id="uploadLimitMB" type="number" min="1" max="10000000" step="1" value="'+(mode==='custom'?m.quota_mb:'')+'"></div></div>'
+    +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-accent" data-action="saveUploadLimit" data-args="'+actArgs(uid)+'">Save</button></div>');
+}
+async function saveUploadLimit(uid){
+  const picked=document.querySelector('input[name="uploadLimitMode"]:checked');
+  const mode=picked?picked.value:'default';
+  let quota=null;
+  if(mode==='none')quota=0;
+  else if(mode==='custom'){
+    quota=parseInt(document.getElementById('uploadLimitMB').value,10);
+    if(!(quota>=1&&quota<=10000000)){showToast('Enter a limit between 1 and 10000000 MB','error');return}
+  }
+  try{
+    const row=await api('PATCH','/users/'+uid+'/upload-limit',{quota_mb:quota});
+    memberStorageRows[uid]=row;closeModal();showToast('Upload limit saved');
+    const td=document.getElementById('mstore-'+uid);if(td)td.innerHTML=memberStorageText(uid);
+  }catch(e){showToast(e.message,'error')}
+}
+
+function memberRowHtml(u,storage){
   const guard=memberGuard(u);const items=guard?[]:memberMenuItems(u);
   const initial=u.username?u.username[0].toUpperCase():'?';
   const name=esc(u.username);
@@ -183,6 +237,7 @@ function memberRowHtml(u){
   return'<tr><td><div class="member-cell"><span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(initial)+'</span><div><strong>'+name+'</strong>'+(guard?' <span class="badge '+(guard==='self'?'badge-accent':'badge-muted')+'" title="'+esc(MEMBER_GUARD_TEXT[guard])+'">'+MEMBER_GUARD_BADGE[guard]+'</span>':'')+(u.display_name?'<div class="member-sub member-nick">'+esc(u.display_name)+'</div>':'')+'<div class="member-role-inline">'+role+'</div></div></div></td>'
     +'<td class="col-role">'+role+'</td>'
     +'<td>'+memberStatusHtml(u)+'</td>'
+    +(storage?'<td class="col-storage member-storage" id="mstore-'+u.id+'"><span class="member-sub">…</span></td>':'')
     +'<td class="col-actions"><div class="act-group member-actions">'
     +'<button class="btn btn-outline member-btn" data-action="openEditUser" data-args="'+actArgs(u.id,u.username,u.role_id)+'">Manage<span class="sr-only"> '+name+'</span></button>'
     +'<button class="act-btn member-more" aria-haspopup="menu" aria-expanded="false" aria-label="'+esc(more)+'" title="'+esc(more)+'"'+(items.length?'':' disabled')+' data-action="toggleMemberMenu" data-args="'+actArgs(u.id)+'">'+MORE_ICON+'</button>'
@@ -204,6 +259,7 @@ function canIssueRecoveryTo(u){
    be able to reach it. */
 function memberMenuItems(u){
   const banned=effectiveBan(u);const items=[];
+  if(can(PERM.MANAGE_SERVER))items.push(['openUploadLimit','Upload limit',I.upload,[u.id,u.username]]);
   if(can(PERM.KICK_MEMBERS))items.push(['forceLogout','Force logout',I.disconnect,[u.id]]);
   if(canIssueRecoveryTo(u)&&!banned)items.push(['openIssueRecovery','Issue recovery credential',I.lock,[u.id,u.username]]);
   if(can(PERM.BAN_MEMBERS))items.push(banned?['unbanUser','Unban',I.check,[u.id]]:['openBanUser','Ban',I.ban,[u.id,u.username],'danger']);
@@ -517,6 +573,6 @@ async function confirmForceLogout(uid){
 
 Object.assign(ACTIONS,{confirmBan,confirmDenyRegistration,confirmEraseUser,confirmForceLogout,confirmIssueRecovery,decideRegistration,
   forceLogout,openBanUser,openEditUser,openEraseUser,openIssueRecovery,addMemberRole,removeMemberRole,saveMemberNickname,resetMemberNickname,unbanUser,
-  setMembersTab,toggleMemberMenu,searchMembers,filterMembersRole,
+  setMembersTab,toggleMemberMenu,searchMembers,filterMembersRole,openUploadLimit,saveUploadLimit,
   turnUsersPage(delta){state.usersPage+=delta;renderContent()},
   turnPendingPage(delta){state.pendingPage=Math.max(1,state.pendingPage+delta);renderContent()}});

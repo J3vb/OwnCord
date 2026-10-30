@@ -273,7 +273,7 @@ describe("Server/admin/static — Members", () => {
     const items = [...doc.querySelectorAll("#memberMenu [role=menuitem]")].map((b) =>
       b.getAttribute("data-action"),
     );
-    expect(items).toEqual(["forceLogout", "openBanUser", "openEraseUser"]);
+    expect(items).toEqual(["openUploadLimit", "forceLogout", "openBanUser", "openEraseUser"]);
   });
 
   it("drives the overflow menu from the keyboard and returns focus to its button", async () => {
@@ -298,6 +298,7 @@ describe("Server/admin/static — Members", () => {
     expect(menu.getAttribute("aria-label")).toBe("Actions for member");
     const items = [...menu.querySelectorAll<HTMLElement>("[role=menuitem]")];
     expect(items.map((i) => i.textContent)).toEqual([
+      "Upload limit",
       "Force logout",
       "Issue recovery credential",
       "Ban",
@@ -308,7 +309,7 @@ describe("Server/admin/static — Members", () => {
     expect(doc.activeElement).toBe(items[1]);
     key(doc.activeElement!, "ArrowUp");
     key(doc.activeElement!, "ArrowUp");
-    expect(doc.activeElement).toBe(items[3]);
+    expect(doc.activeElement).toBe(items[4]);
     key(doc.activeElement!, "Home");
     expect(doc.activeElement).toBe(items[0]);
 

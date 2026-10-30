@@ -29,6 +29,10 @@ type UploadService struct {
 	// own backs the signed-in user's own upload list and removal (user_uploads.go);
 	// set once by NewUploadService, nil when the store cannot serve it.
 	own OwnUploadStore
+	// admin backs the admin Storage page and the per-member upload limit
+	// (admin_uploads.go); nil when the store cannot serve it, and every member
+	// then follows the server-wide limit.
+	admin AdminUploadStore
 }
 
 var _ BannerFileStore = (*db.DB)(nil)
@@ -42,7 +46,8 @@ type BannerFileStore interface {
 // NewUploadService creates an UploadService.
 func NewUploadService(st Store, perms *PermissionService) *UploadService {
 	own, _ := st.(OwnUploadStore)
-	return &UploadService{st: st, perms: perms, own: own}
+	admin, _ := st.(AdminUploadStore)
+	return &UploadService{st: st, perms: perms, own: own, admin: admin}
 }
 
 // AttachmentRecord is the metadata of one stored file, whose bytes the caller has

@@ -60,4 +60,8 @@ type SetupOptions struct {
 	// BeginTransfer gives the upload route the long-transfer deadline of the
 	// file routes. Nil leaves only the size cap.
 	BeginTransfer TransferBegin
+	// UploadFiles is the upload directory the Storage page counts leftover
+	// files in and deletes from. Nil when the server has none: deletes then
+	// remove the rows and leave the bytes for the maintenance sweep.
+	UploadFiles StorageFiles
 }

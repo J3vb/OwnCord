@@ -121,7 +121,11 @@ password):** `086_channel_password.sql` adds `password_hash` and `password_versi
 granted_at)`. The hash is channel configuration and never leaves the server; a grant only
 records that a member entered a voice channel's current password, is never read as
 permission, and is deleted with the channel or the account (lifecycle row 18e in
-`data-lifecycle.md`). Other historical
+`data-lifecycle.md`). **Amended 2026-10-30 (per-member upload limit):**
+`088_user_storage_quota.sql` adds one nullable column to `user_storage`, `quota_mb`: the
+member's own upload limit, set by a MANAGE_SERVER holder on the admin Storage page. It is
+part of the per-user counter row and shares its ownership, erasure (deleted with the
+account) and backup behaviour; no new data class. Other historical
 status statements retain their `cbebd37c` baseline.
 **Amended 2026-10-21 (polls):** `073_polls.sql` adds `polls`, `poll_answers` and
 `poll_votes` (WP 6.9b). A poll is an ordinary message of its author whose text is a
