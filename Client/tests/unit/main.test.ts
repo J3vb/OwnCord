@@ -35,9 +35,18 @@ vi.mock("@tauri-apps/api/core", async () => ({
 vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
-const { mockOnOpenUrl } = vi.hoisted(() => ({
-  mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
-}));
+// main.ts registers its deep-link listener once at startup, and every test
+// runs with its mock calls cleared, so the handler is kept here as it arrives.
+const { mockOnOpenUrl, deepLink } = vi.hoisted(() => {
+  const deepLink: { handler: ((urls: readonly string[]) => void) | null } = { handler: null };
+  return {
+    deepLink,
+    mockOnOpenUrl: vi.fn((handler: (urls: readonly string[]) => void) => {
+      deepLink.handler = handler;
+      return Promise.resolve(undefined);
+    }),
+  };
+});
 
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
@@ -65,7 +74,7 @@ vi.mock("@lib/prefs/windowState", () => ({
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
   getCurrent: vi.fn().mockResolvedValue(null),
-  onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
+  onOpenUrl: (handler: (urls: readonly string[]) => void) => mockOnOpenUrl(handler),
 }));
 // The Reload recovery leaves a call through this lazily imported module.
 const { mockLeaveVoice } = vi.hoisted(() => ({
@@ -128,13 +137,16 @@ const mockServerInfo: { value: unknown } = {
 const mockHealthFails = { value: false };
 // When set, a failing health probe rejects with this instead of a network error.
 const mockHealthError: { value: (() => Error) | null } = { value: null };
+// main.ts builds its API client once at startup; mock calls are cleared before
+// every test, so the client is kept here rather than read from mock.results.
+const createdApiClients: unknown[] = [];
 vi.mock("@lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/api")>();
   return {
     ...actual,
     createApiClient: vi.fn(() => {
       const api = actual.createApiClient({ host: "" });
-      return {
+      const client = {
         ...api,
         setConfig: vi.fn((cfg: { host?: string; token?: string }) => {
           if (cfg.host !== undefined) mockApiState.host = cfg.host;
@@ -157,6 +169,8 @@ vi.mock("@lib/api", async (importOriginal) => {
             : Promise.resolve(mockServerInfo.value),
         ),
       };
+      createdApiClients.push(client);
+      return client;
     }),
   };
 });
@@ -185,10 +199,13 @@ const capturedConnectCallbacks: {
   onDeleteProfile?: (profileId: string) => void;
   onToggleAutoLogin?: (profileId: string, enabled: boolean) => void;
 } = {};
+// Every connect page main.ts builds, in order. The first is built at startup,
+// before the per-test mock clear, so tests read pages from here.
+const createdConnectPages: unknown[] = [];
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: vi.fn((callbacks: typeof capturedConnectCallbacks) => {
     Object.assign(capturedConnectCallbacks, callbacks);
-    return {
+    const page = {
       mount: vi.fn(),
       destroy: vi.fn(),
       showTotp: vi.fn(),
@@ -207,6 +224,8 @@ vi.mock("@pages/ConnectPage", () => ({
       selectServer: vi.fn(),
       applyInviteLink: vi.fn(),
     };
+    createdConnectPages.push(page);
+    return page;
   }),
 }));
 
@@ -256,6 +275,10 @@ import { createCertFirstUseModal, createCertMismatchModal } from "@components/Ce
 import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
+
+const latestConnectPage = () =>
+  vi.mocked(createdConnectPages.at(-1) as ReturnType<typeof createConnectPage>, true);
+const startupApiClient = () => createdApiClients[0] as ReturnType<typeof createApiClient>;
 
 // ---------------------------------------------------------------------------
 // Import the module under test AFTER all mocks are registered. #app must
@@ -521,7 +544,7 @@ describe("main.ts pre-auth connection deadline", () => {
     mockLogin.mockResolvedValue({ token: "test-token", requires_2fa: false });
     await capturedConnectCallbacks.onLogin!("offline.example:8443", "alex", "hunter2");
     await vi.advanceTimersByTimeAsync(10);
-    const attempt = vi.mocked(createApiClient).mock.results[0]!.value.getSession();
+    const attempt = startupApiClient().getSession();
 
     // The socket was asked to open, but the offline server never answers — so
     // the deadline must give up rather than leave the spinner running forever.
@@ -677,6 +700,7 @@ describe("main.ts native certificate-dialog decline", () => {
       status: "first_use",
     });
     expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    await vi.advanceTimersByTimeAsync(10); // the modal chunk loads on demand
     const modalCallsBefore = vi.mocked(createCertFirstUseModal).mock.calls.length;
 
     declineAcceptFingerprint();
@@ -695,6 +719,7 @@ describe("main.ts native certificate-dialog decline", () => {
       status: "first_use",
     });
     expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    await vi.advanceTimersByTimeAsync(10);
     expect(vi.mocked(createCertFirstUseModal).mock.calls.length).toBe(modalCallsBefore + 1);
     vi.mocked(createCertFirstUseModal).mock.lastCall![0].onReject();
 
@@ -771,6 +796,7 @@ describe("main.ts native certificate-dialog decline", () => {
     };
     emitTauriEvent("cert-tofu", firstUse);
     expectConsole("warn", /\[ws\] TOFU: first-use certificate/);
+    await vi.advanceTimersByTimeAsync(10); // the modal chunk loads on demand
 
     // The native dialog stays open until the test answers it.
     let answerNative!: (value: unknown) => void;
@@ -876,7 +902,7 @@ describe("main.ts stay-signed-in storage split", () => {
     motd: "",
   };
   const page = () =>
-    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    latestConnectPage() as {
       getRememberPassword: ReturnType<typeof vi.fn>;
       getAutoConnect: ReturnType<typeof vi.fn>;
     };
@@ -975,7 +1001,7 @@ describe("main.ts drops an orphaned stay-signed-in token", () => {
 
   it("deletes the previous holder's token when a second server claims auto-connect", async () => {
     profiles = [mk("a", true, false), mk("b", false, false)];
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       getAutoConnect: ReturnType<typeof vi.fn>;
     };
     page.getAutoConnect.mockReturnValue(true);
@@ -1042,7 +1068,7 @@ describe("main.ts startup resume of the stored token", () => {
     for (let i = 0; i < 12; i++) await Promise.resolve();
   }
   const lastPage = () =>
-    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    latestConnectPage() as {
       showAutoConnecting: ReturnType<typeof vi.fn>;
     };
 
@@ -1269,7 +1295,7 @@ describe("main.ts quick-switch resume", () => {
     for (let i = 0; i < 8; i++) await Promise.resolve();
   };
   const lastPage = () =>
-    vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    latestConnectPage() as {
       showAutoConnecting: ReturnType<typeof vi.fn>;
     };
 
@@ -1322,7 +1348,7 @@ async function signedInWithDeepLinkHandler(
   expectConsole("warn", /\[main\] Credential delete failed/);
   emitTauriEvent("ws-message", JSON.stringify({ type: "ready", payload: {} }));
   await vi.advanceTimersByTimeAsync(800);
-  deepLinkHandler ??= mockOnOpenUrl.mock.calls[0]?.[0] as (urls: readonly string[]) => void;
+  deepLinkHandler ??= deepLink.handler as (urls: readonly string[]) => void;
   expect(deepLinkHandler).toBeTypeOf("function");
   return deepLinkHandler;
 }
@@ -1435,7 +1461,7 @@ describe("main.ts external invite link asks before leaving the signed-in server 
     await vi.advanceTimersByTimeAsync(50);
     for (let i = 0; i < 12; i++) await Promise.resolve();
 
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       applyInviteLink: ReturnType<typeof vi.fn>;
     };
     expect(page.applyInviteLink).toHaveBeenCalledTimes(1);
@@ -1492,7 +1518,7 @@ describe("main.ts external invite link asks before leaving the signed-in server 
 
     expect(dialogEl()).toBeNull();
     // Even a click on the detached button does nothing.
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       applyInviteLink: ReturnType<typeof vi.fn>;
     };
     page.applyInviteLink.mockClear();
@@ -1711,7 +1737,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
 
   it("shows the server-older notice without offering a client update when the refused server is older", async () => {
     mockCheckForUpdate.mockClear();
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       showIncompatible: ReturnType<typeof vi.fn>;
     };
     page.showIncompatible.mockClear();
@@ -1784,9 +1810,7 @@ describe("main.ts connect page after a protocol-epoch refusal", () => {
 
 describe("main.ts session ownership", () => {
   it("invalidates API work synchronously on logout before deferred store notifications", () => {
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+    const api = startupApiClient();
     const owner = api.getSession();
     const cleanup = vi.fn();
     owner.addCleanup(cleanup);
@@ -1851,7 +1875,7 @@ describe("main.ts session ownership", () => {
 
     // A failed health probe drops the snapshot and refreshes the form through
     // updateCompatibility, so the stale "approval" form cannot outlive it.
-    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    const connectPage = latestConnectPage();
     connectPage.updateCompatibility.mockClear();
     mockHealthFails.value = true;
     await vi.advanceTimersByTimeAsync(15_000);
@@ -1889,7 +1913,7 @@ describe("main.ts session ownership", () => {
     clearAuth();
     for (let i = 0; i < 4; i++) await Promise.resolve();
     await vi.advanceTimersByTimeAsync(50);
-    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    const connectPage = latestConnectPage();
     connectPage.updateCompatibility.mockClear();
     mockHealthFails.value = true;
     mockHealthError.value = () => new ApiClientError(503, "DEGRADED", "degraded");
@@ -1919,7 +1943,7 @@ describe("main.ts session ownership", () => {
   });
 
   it("probes server-info for a typed host that is not a saved profile", async () => {
-    const connectPage = vi.mocked(createConnectPage).mock.results.at(-1)!.value;
+    const connectPage = latestConnectPage();
     connectPage.updateCompatibility.mockClear();
     mockServerInfo.value = {
       name: "Typed",
@@ -1939,9 +1963,7 @@ describe("main.ts session ownership", () => {
   });
 
   it("does not start a second server-info probe for a host already being probed", async () => {
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+    const api = startupApiClient();
     const calls = vi.mocked(api.getServerInfo).mock.calls.length;
     let release!: () => void;
     vi.mocked(api.getServerInfo).mockImplementationOnce(
@@ -1956,9 +1978,7 @@ describe("main.ts session ownership", () => {
   });
 
   it("signs a recovered session in exactly as a login does", async () => {
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+    const api = startupApiClient();
     const secret = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
     mockRecoverAccount.mockResolvedValueOnce({ token: "recovered-token", requires_2fa: false });
     await capturedConnectCallbacks.onRecover!("recover.example", "alice", secret, "N3w-Str0ng!");
@@ -2000,9 +2020,7 @@ describe("main.ts session ownership", () => {
     const rejected = expect(old).rejects.toMatchObject({ name: "AbortError" });
     await capturedConnectCallbacks.onLogin!("same.example", "bob", "second-password");
     expectConsole("warn", /\[main\] Credential delete failed/);
-    const api = vi.mocked(createApiClient).mock.results[0]!.value as ReturnType<
-      typeof createApiClient
-    >;
+    const api = startupApiClient();
     const current = api.getSession();
     resolveOld({ token: "old-account-token", requires_2fa: false });
     await rejected;
@@ -2019,7 +2037,7 @@ describe("main.ts pending-approval notice", () => {
     });
     await capturedConnectCallbacks.onRegister!("approve.example:8443", "newbie", "hunter22", "");
 
-    const page = vi.mocked(createConnectPage).mock.results.at(-1)!.value as {
+    const page = latestConnectPage() as {
       showNotice: ReturnType<typeof vi.fn>;
       showError: ReturnType<typeof vi.fn>;
     };

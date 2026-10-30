@@ -22,6 +22,9 @@ import {
   type QualityLevel,
 } from "../../src/lib/connectionStats";
 
+// Logger names are taken when the module loads, before the per-test mock clear.
+const loggerCallsAtLoad = [...createLoggerMock.mock.calls];
+
 type Entry = Record<string, unknown>;
 
 /** A room whose subscriber transport answers with the entries `read()` returns. */
@@ -49,7 +52,7 @@ function cp(rttSeconds: number, extra: Entry = {}): Entry {
 
 describe("connection stats logging", () => {
   it("names its logger 'connection-stats' so these messages are filterable", () => {
-    expect(createLoggerMock).toHaveBeenCalledWith("connection-stats");
+    expect(loggerCallsAtLoad).toContainEqual(["connection-stats"]);
   });
 });
 
