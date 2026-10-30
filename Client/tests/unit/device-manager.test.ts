@@ -51,7 +51,7 @@ vi.mock("../../src/features/voice/native/devices", () => ({
   onNativeDevicesChanged: () => null,
 }));
 
-import { DeviceManager, isMicPolicyGated } from "../../src/lib/deviceManager";
+import { DeviceManager, isMicPolicyGated } from "../../src/lib/voice/deviceManager";
 
 describe("isMicPolicyGated", () => {
   beforeEach(() => {

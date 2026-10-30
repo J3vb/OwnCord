@@ -34,7 +34,7 @@ import {
 } from "@components/SlashAutocomplete";
 import { replaceEmojiShortcodes } from "../features/messaging/shortcodes";
 import { applyPickedMentions, type PickedMention } from "@lib/text/pickedMentions";
-import { idMentionsEnabled } from "@lib/serverCapabilities";
+import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { applySlashCommand } from "../features/messaging/slashCommands";
 import { FORMAT_MARKERS, wrapWithMarker } from "../features/messaging/markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../features/messaging/messageLimits";
@@ -52,7 +52,7 @@ const stickerPickerScreen = createLazyScreen(
 
 export { wrapWithMarker };
 import { authStore } from "@stores/auth.store";
-import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/serverCapabilities";
+import { pollsEnabled, stickersEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
 import { onPrefChange } from "@lib/prefs/preferences";
 import {
   COMPOSER_BUTTON_PREF_KEYS,

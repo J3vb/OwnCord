@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { reconnectAfterCertAccept } from "../../src/lib/cert-reconnect";
+import { reconnectAfterCertAccept } from "../../src/lib/net/certReconnect";
 
 function fakeWs() {
   const listeners = new Set<(state: string) => void>();

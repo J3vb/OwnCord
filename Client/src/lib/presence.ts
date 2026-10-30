@@ -19,7 +19,7 @@
  */
 
 import type { WsClient } from "./ws";
-import type { RateLimiter } from "./rate-limiter";
+import type { RateLimiter } from "./net/rateLimiter";
 import type { UserStatus } from "./types";
 import { updatePresence, membersStore } from "@stores/members.store";
 import { authStore, updateUser } from "@stores/auth.store";

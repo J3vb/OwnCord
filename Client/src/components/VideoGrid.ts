@@ -20,10 +20,10 @@ import {
   setScreenshareAudioVolume,
   setUserLocalMute,
   setUserVolume,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { syncVideoSurface, videoSurfaceOf } from "@lib/videoSurface";
+import { syncVideoSurface, videoSurfaceOf } from "@lib/voice/videoSurface";
 import { bindVideoZoom } from "@lib/zoomPan";
 import type { ZoomPan } from "@lib/zoomPan";
 import type { MountableComponent } from "@lib/text/safeRender";

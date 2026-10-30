@@ -42,7 +42,7 @@ import {
   isGameActivityShared,
   setActivityRefusalHandler,
 } from "./gameActivityBridge";
-import { onGameActivityPolicy, serverSupportsGameActivity } from "./serverCapabilities";
+import { onGameActivityPolicy, serverSupportsGameActivity } from "./net/serverCapabilities";
 import type { WsClient } from "./ws";
 import {
   GAME_PREFS_KEY,

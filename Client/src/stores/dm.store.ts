@@ -4,7 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { channelsStore, removeChannel } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { DmChannelPayload } from "@lib/types";

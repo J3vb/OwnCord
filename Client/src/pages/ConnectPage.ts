@@ -12,7 +12,7 @@ import type { RegistrationMode } from "@lib/types";
 import { createServerPanel } from "./connect-page/ServerPanel";
 import { createLoginForm } from "./connect-page/LoginForm";
 import { createIncompatibleNotice } from "./connect-page/IncompatibleNotice";
-import { loadCredential } from "@lib/credentials";
+import { loadCredential } from "@lib/net/credentials";
 import { desktop } from "../platform/desktop";
 
 const log = createLogger("ConnectPage");

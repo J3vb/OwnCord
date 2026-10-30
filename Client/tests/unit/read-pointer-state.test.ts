@@ -28,7 +28,7 @@ import {
   markMessageUnread,
   setMarkUnreadSender,
 } from "../../src/components/message-list/mark-unread";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { markReadyActiveChannelRead } from "../../src/features/channels/wsHandlers";
 import { channelsStore, setActiveChannel, setChannels } from "@stores/channels.store";
 import { dmStore, setDmChannels } from "@stores/dm.store";

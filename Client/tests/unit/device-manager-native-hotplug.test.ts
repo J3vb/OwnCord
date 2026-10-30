@@ -53,7 +53,7 @@ vi.mock("../../src/features/voice/native/devices", () => ({
   },
 }));
 
-import { DeviceManager } from "../../src/lib/deviceManager";
+import { DeviceManager } from "../../src/lib/voice/deviceManager";
 
 describe("DeviceManager on the native device watch", () => {
   let dm: DeviceManager;

@@ -19,7 +19,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: vi.fn() }));
-vi.mock("@lib/httpProxy", () => ({ ensureHttpProxy: vi.fn() }));
+vi.mock("@lib/net/httpProxy", () => ({ ensureHttpProxy: vi.fn() }));
 
 const { createTauriBackend } = await import("../../../src/lib/profiles");
 const legacy: SettingsStore = createTauriBackend();

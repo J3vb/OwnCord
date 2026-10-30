@@ -8,7 +8,7 @@ import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { deriveCompatibility, type Compatibility } from "@lib/profiles";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";
-import type { SessionScope } from "@lib/sessionScope";
+import type { SessionScope } from "@lib/net/sessionScope";
 import type { ServerInfoResponse } from "@lib/types";
 
 const log = createLogger("main");

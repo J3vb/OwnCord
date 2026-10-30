@@ -14,7 +14,7 @@ const getUserVolume = vi.fn();
 const setUserLocalMute = vi.fn();
 const getUserLocalMute = vi.fn((..._args: unknown[]) => false);
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
   getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,
   setUserLocalMute: (...args: unknown[]) => setUserLocalMute(...args) as unknown,

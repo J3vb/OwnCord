@@ -12,7 +12,7 @@ import type {
 import { createLogger } from "./logger";
 import { PROTOCOL_EPOCH } from "./protocolTypes";
 import { Disposable } from "./disposable";
-import { normalizeHostForCertCompare } from "./hostNormalize";
+import { normalizeHostForCertCompare } from "./net/hostNormalize";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 const log = createLogger("ws");

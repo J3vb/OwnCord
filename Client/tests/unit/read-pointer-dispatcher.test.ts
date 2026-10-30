@@ -28,7 +28,7 @@ import {
   setMarkUnreadSender,
 } from "../../src/components/message-list/mark-unread";
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
-import { readPointerEnabled } from "../../src/lib/serverCapabilities";
+import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
 import { expectConsole } from "../helpers/console";
@@ -39,7 +39,7 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),
@@ -60,7 +60,7 @@ const mockShowToast = vi.fn();
 vi.mock("@lib/toast", () => ({
   showToast: (...args: unknown[]) => mockShowToast(...args),
 }));
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 

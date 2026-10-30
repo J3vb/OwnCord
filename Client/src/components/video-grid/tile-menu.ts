@@ -20,7 +20,7 @@ import {
   muteScreenshareAudio,
   setScreenshareAudioVolume,
   setUserVolume,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import type { TileConfig } from "../VideoGrid";
 import {
   appendVoiceModeration,

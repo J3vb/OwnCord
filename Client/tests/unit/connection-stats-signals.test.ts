@@ -20,7 +20,7 @@ import {
   type ConnectionStats,
   type ConnectionStatsPoller,
   type QualityLevel,
-} from "../../src/lib/connectionStats";
+} from "../../src/lib/voice/connectionStats";
 
 type Entry = Record<string, unknown>;
 

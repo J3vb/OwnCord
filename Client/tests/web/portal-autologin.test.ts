@@ -28,7 +28,7 @@ vi.mock("@lib/logger", () => ({
 }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
 
-import { SessionScope } from "@lib/sessionScope";
+import { SessionScope } from "@lib/net/sessionScope";
 import type { ProfileManager } from "@lib/profiles";
 import type { WsClient } from "@lib/ws";
 import { authStore, clearAuth } from "@stores/auth.store";

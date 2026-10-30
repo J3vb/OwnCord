@@ -20,7 +20,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { createIcon } from "../../lib/icons";
-import { syncVideoSurface } from "../../lib/videoSurface";
+import { syncVideoSurface } from "../../lib/voice/videoSurface";
 import { bindVideoZoom } from "../../lib/zoomPan";
 import { voiceText } from "../../i18n/voice";
 

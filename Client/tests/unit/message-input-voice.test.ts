@@ -12,7 +12,7 @@ vi.mock("@components/GifPicker", () => ({
 }));
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import type { VoiceUploadMeta } from "@lib/types";
 import { ATTACHMENT_TTL_MS } from "../../src/features/messaging/attachmentTtl";
 import { authStore } from "@stores/auth.store";

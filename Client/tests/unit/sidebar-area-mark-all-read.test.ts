@@ -12,12 +12,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   rePinPeerIdentity: vi.fn(),
   leaveVoice: vi.fn(),
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
 }));
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
 }));

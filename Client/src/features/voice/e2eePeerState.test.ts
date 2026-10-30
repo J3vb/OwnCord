@@ -9,11 +9,11 @@ vi.mock("../../stores/members.store", () => ({
 }));
 vi.mock("../../stores/voice.store", () => ({ setPeerVerification: vi.fn() }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-vi.mock("../../lib/identity", () => ({
+vi.mock("../../lib/net/identity", () => ({
   getIdentityPin: vi.fn(),
   storeIdentityPin: vi.fn(),
 }));
-vi.mock("../../lib/e2eeCrypto", () => ({
+vi.mock("../../lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(async (b64: string) => `idkey:${b64}`),
   verifyEphemeralKeySignature: vi.fn(),
   computeKeyFingerprint: vi.fn(async () => "safety-number"),
@@ -35,8 +35,8 @@ vi.mock("../../lib/logger", () => ({
 
 import { setPeerVerification } from "../../stores/voice.store";
 import { showToast } from "../../lib/toast";
-import { getIdentityPin, storeIdentityPin } from "../../lib/identity";
-import { verifyEphemeralKeySignature } from "../../lib/e2eeCrypto";
+import { getIdentityPin, storeIdentityPin } from "../../lib/net/identity";
+import { verifyEphemeralKeySignature } from "../../lib/net/e2eeCrypto";
 import { E2EEPeerState } from "./e2eePeerState";
 
 const PEER = 42;
@@ -335,7 +335,7 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
   });
 });
 
-/** A pin store that behaves like lib/identity: keys are added, never replaced. */
+/** A pin store that behaves like lib/net/identity: keys are added, never replaced. */
 function statefulPins(initial: string[] = []) {
   const keys = [...initial];
   vi.mocked(getIdentityPin).mockImplementation(async () => {

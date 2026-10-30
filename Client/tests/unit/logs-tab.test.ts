@@ -25,7 +25,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getSessionDebugInfo: vi.fn().mockReturnValue({}),
   getShareDiagnostics: vi.fn().mockReturnValue(null),
 }));
@@ -60,7 +60,7 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
 }));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
 import { createLogsTab } from "../../src/components/settings/LogsTab";
 import type { TabName } from "../../src/components/SettingsOverlay";
 

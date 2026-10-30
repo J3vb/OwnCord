@@ -13,7 +13,7 @@
  */
 
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { ImageSize } from "@lib/imageHeader";
 
 /** Ceiling for an inline image box, in CSS px. */

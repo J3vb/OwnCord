@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reconcileChildren } from "../../src/lib/reconcile";
+import { reconcileChildren } from "../../src/lib/net/reconcile";
 
 // Moving a focused node with insertBefore blurs it in Chromium/WebView2 while
 // the node stays connected; jsdom keeps focus, so this has to run here.

@@ -15,7 +15,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { MessageRequest } from "./api";
 
 export type RequestsStatus = "loading" | "ready" | "unavailable";

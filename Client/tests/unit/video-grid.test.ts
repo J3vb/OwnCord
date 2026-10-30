@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 import { expectConsole } from "../helpers/console";
-import { registerVideoSurface } from "../../src/lib/videoSurface";
+import { registerVideoSurface } from "../../src/lib/voice/videoSurface";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing VideoGrid
@@ -19,7 +19,7 @@ const mockSetUserLocalMute = vi.fn();
 const mockShowToast = vi.hoisted(() => vi.fn());
 vi.mock("@lib/toast", () => ({ showToast: mockShowToast }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
   setScreenshareAudioVolume: (...args: unknown[]) => mockSetScreenshareAudioVolume(...args),
   setUserVolume: (...args: unknown[]) => mockSetUserVolume(...args),
@@ -2410,7 +2410,7 @@ describe("VideoGrid", () => {
     });
 
     it("shows a canvas-drawn stream's canvas with its video, in the window and back", () => {
-      // Linux draws remote video into a canvas (lib/videoSurface.ts).
+      // Linux draws remote video into a canvas (lib/voice/videoSurface.ts).
       const { stream, track } = fakeStreamWithTrack();
       const canvas = document.createElement("canvas");
       registerVideoSurface(track as unknown as MediaStreamTrack, canvas);

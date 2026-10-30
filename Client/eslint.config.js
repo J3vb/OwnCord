@@ -38,7 +38,7 @@ export default tseslint.config(
       "consistent-return": "error",
 
       // `any` is banned in src/ (CLAUDE.md, "AI Quality Guardrails"). The
-      // residue in lib/livekitReconnect.ts carries a reasoned eslint-disable
+      // residue in lib/voice/livekitReconnect.ts carries a reasoned eslint-disable
       // and only shrinks; a new `any` fails the build.
       "@typescript-eslint/no-explicit-any": "error",
 
@@ -90,8 +90,8 @@ export default tseslint.config(
     // livekitSession.ts — the supersession invariant travelled with them, so
     // the rule must cover every file or those paths go unguarded.
     files: [
-      "src/lib/livekitSession.ts",
-      "src/lib/livekitReconnect.ts",
+      "src/lib/voice/livekitSession.ts",
+      "src/lib/voice/livekitReconnect.ts",
       "src/features/voice/joinOrchestration.ts",
     ],
     plugins: { local: localRules },
@@ -105,7 +105,7 @@ export default tseslint.config(
     // identity-scope invariants travelled with that code, so every one of
     // those files is listed or the moved guards go unchecked.
     files: [
-      "src/lib/livekitE2EE.ts",
+      "src/lib/voice/livekitE2EE.ts",
       "src/features/voice/e2eeIdentity.ts",
       "src/features/voice/e2eeEpoch.ts",
       "src/features/voice/e2eePeerState.ts",
@@ -120,7 +120,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/lib/identity.ts"],
+    files: ["src/lib/net/identity.ts"],
     plugins: { local: localRules },
     rules: {
       "local/no-identity-scope-fallback": "error",
@@ -231,8 +231,8 @@ export default tseslint.config(
                 "**/features/*/store",
                 "./store",
                 "**/store",
-                "@lib/livekitSession",
-                "**/lib/livekitSession",
+                "@lib/voice/livekitSession",
+                "**/lib/voice/livekitSession",
               ],
               message:
                 "A *.view.ts draws from its row model and imports no store or voice session; build the model in the caller (5.4e).",

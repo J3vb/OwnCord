@@ -65,7 +65,7 @@ import {
   hasReceivedReady,
   readPointerEnabled,
   stickersEnabled,
-} from "../../lib/serverCapabilities";
+} from "../../lib/net/serverCapabilities";
 import { showToast } from "../../lib/toast";
 import {
   notifyChannelActivity,
@@ -80,7 +80,7 @@ import {
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
-import { registerSessionReset } from "../../lib/sessionRegistry";
+import { registerSessionReset } from "../../lib/net/sessionRegistry";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 /** The channel/role/member snapshot of `ready`. */

@@ -5,7 +5,7 @@
  * them. The banner itself is the main page's (main-page.test.ts).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RingState } from "../../src/lib/call-ring";
+import type { RingState } from "../../src/lib/voice/callRing";
 
 const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),

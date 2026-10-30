@@ -1,5 +1,5 @@
 /**
- * The start step of Windows per-app share audio (src/lib/appAudioShare.ts),
+ * The start step of Windows per-app share audio (src/lib/voice/appAudioShare.ts),
  * driven directly: which shares ask for the app's sound, what a refusal, a
  * stale start or a failed socket leave behind, and which of two overlapping
  * starts may stop the host's single capture.
@@ -28,7 +28,7 @@ vi.mock("livekit-client", () => {
   return { LocalAudioTrack: FakeLocalAudioTrack };
 });
 vi.mock("../../src/platform/desktop", () => ({ desktop: { appAudio: host } }));
-vi.mock("../../src/lib/appAudioTrack", () => ({
+vi.mock("../../src/lib/voice/appAudioTrack", () => ({
   openAppAudio: (...a: unknown[]) => openAppAudio(...a) as unknown,
 }));
 vi.mock("../../src/lib/toast", () => ({ showToast }));
@@ -41,8 +41,8 @@ vi.mock("../../src/lib/logger", () => ({
 
 // Loaded inside the first test that needs it, so what the module builds at load
 // (its quiet-refusal list, its logger tag) is exercised by that test.
-type Loaded = typeof import("../../src/lib/appAudioShare");
-const load = (): Promise<Loaded> => import("../../src/lib/appAudioShare");
+type Loaded = typeof import("../../src/lib/voice/appAudioShare");
+const load = (): Promise<Loaded> => import("../../src/lib/voice/appAudioShare");
 const startAppShareAudio: Loaded["startAppShareAudio"] = async (...args) =>
   (await load()).startAppShareAudio(...args);
 const publishAppAudio: Loaded["publishAppAudio"] = async (...args) =>

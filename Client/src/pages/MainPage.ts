@@ -18,7 +18,7 @@ import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../platform/desktop";
-import { createRateLimiterSet } from "@lib/rate-limiter";
+import { createRateLimiterSet } from "@lib/net/rateLimiter";
 import type { CallState, VideoGridComponent } from "@components/VideoGrid";
 import { isConnecting } from "@components/voiceStatusText";
 import { createServerBanner, applyConnectionStatus } from "@components/ServerBanner";
@@ -32,12 +32,12 @@ import { dmCallText } from "../i18n/dmCall";
 import { shellText } from "../i18n/shell";
 import { joinBackoffText } from "../features/voice/joinBackoffText";
 import { shareBlockReason } from "../features/voice/shareGate";
-import { sessionNoticeMessage, startSessionNotice } from "@lib/session-notice";
-import { logout } from "@lib/logout";
+import { sessionNoticeMessage, startSessionNotice } from "@lib/net/sessionNotice";
+import { logout } from "@lib/net/logout";
 import { authStore, clearAuth, onAuthCleared, updateUser } from "@stores/auth.store";
 import { closeSettings, openSettings, setSessionReplaced, uiStore } from "@stores/ui.store";
 import { loadUserStatus } from "@lib/userStatus";
-import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
+import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
 import {
   anyTriggerBound,
   clearPortalBound,
@@ -75,7 +75,7 @@ import {
   setRemoteVideoView,
   setRemoteVideoWatched,
   forgetRemoteVideoWatch,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
 import {
   pruneAttachmentCacheScope,
@@ -91,7 +91,7 @@ import { markAllRead, setMarkReadSender } from "@lib/read-state";
 import { setMarkUnreadSender } from "@components/message-list/mark-unread";
 import { onChannelReselect, stepChannel } from "@lib/channel-navigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
-import { setAudioVolumeHost } from "@lib/audioElements";
+import { setAudioVolumeHost } from "@lib/voice/audioElements";
 import { setScreenSourcePicker } from "../features/voice/native/screenPickerSlot";
 import { createQuickSwitcherManager } from "./main-page/OverlayManagers";
 import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
@@ -111,8 +111,8 @@ import type { DmProfileData, DmProfileSidebarComponent } from "@components/DmPro
 import type { GroupMemberPanelController } from "./main-page/GroupMemberPanelController";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
-import { createRingController, createOutgoingCall } from "@lib/call-ring";
-import type { RingController, OutgoingCall } from "@lib/call-ring";
+import { createRingController, createOutgoingCall } from "@lib/voice/callRing";
+import type { RingController, OutgoingCall } from "@lib/voice/callRing";
 import type { DmCallPanelComponent } from "@components/DmCallPanel";
 import { startRingChime, stopRingChime, startRingback, stopRingback } from "@lib/notificationSound";
 import { startVoiceUiSounds } from "../features/voice/uiSounds";

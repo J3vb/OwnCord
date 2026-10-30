@@ -6,11 +6,11 @@
 
 import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
-import { reconcileModels } from "@lib/reconcile";
+import { reconcileModels } from "@lib/net/reconcile";
 import { select } from "@lib/select";
 import { shallowEqual } from "@lib/store";
 import { buildOffsets, rangeFor } from "@lib/virtualRange";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { resolveDisplayName } from "@lib/avatar";
@@ -28,7 +28,7 @@ import { canMention, mentionInComposer } from "../features/messaging/activeCompo
 import { openUserProfilePopup } from "../features/profiles/openUserProfilePopup";
 import { openMenuOnKeyboard, type OpenMenu } from "@lib/context-menu";
 import { Permission, type ReadyRole } from "@lib/types";
-import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/serverCapabilities";
+import { manageNicknamesEnabled, multiRoleEnabled } from "@lib/net/serverCapabilities";
 import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
 import {
   MEMBER_PATCH_FIELDS,

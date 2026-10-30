@@ -13,7 +13,7 @@ import { createElement, setText } from "@lib/dom";
 import { navigateToChannel, findChannelByName, findChannelById } from "@lib/channel-navigation";
 import { parseInviteLink, parseMessageLink } from "@lib/deep-link";
 import { getChannelMutesHost } from "@lib/prefs/channelMutes";
-import { normalizeHostForCertCompare } from "@lib/hostNormalize";
+import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
 import { requestInviteJoin } from "@lib/invite-navigation";
 import { jumpToMessage } from "@lib/message-navigation";
 import { showToast } from "@lib/toast";

@@ -1,7 +1,7 @@
 // Desktop binding for the PushToTalk suite: `platform/desktop`'s registered
 // push-to-talk facade, which loads the service on first use. B7-5 re-runs the
 // same suite file the legacy binding ran against
-// `lib/ptt.ts`'s exports; those are now internal to the desktop adapter, so
+// `lib/voice/ptt.ts`'s exports; those are now internal to the desktop adapter, so
 // the legacy binding is deleted with this commit.
 //
 // The service keeps module-level binding/generation state across calls, so

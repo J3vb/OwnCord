@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { ApiClientError } from "@lib/api";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { Permission, type ForumSettings, type ForumSettingsBody } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { setRoles, updateChannel } from "@stores/channels.store";

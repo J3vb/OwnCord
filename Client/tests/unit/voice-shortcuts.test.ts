@@ -10,7 +10,7 @@ import {
   loadGlobalShortcutVks,
   saveGlobalShortcutVk,
   shortcutConflict,
-} from "../../src/lib/voiceShortcuts";
+} from "../../src/lib/voice/voiceShortcuts";
 import {
   globalShortcutTakenVks,
   inAppCtrlShiftVks,

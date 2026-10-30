@@ -21,7 +21,7 @@ vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
 
-vi.mock("../../src/lib/livekitSession", () => ({
+vi.mock("../../src/lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),

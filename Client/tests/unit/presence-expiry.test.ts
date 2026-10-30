@@ -10,7 +10,7 @@ import {
   type Member,
 } from "@stores/members.store";
 import { createPresenceSender } from "@lib/presence";
-import { createPresenceLimiter } from "@lib/rate-limiter";
+import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import { loadStatusTimer, loadUserStatus, saveStatusTimer, saveUserStatus } from "@lib/userStatus";
 import type { WsClient } from "@lib/ws";
 

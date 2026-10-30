@@ -33,7 +33,7 @@ import {
   saveCredential,
   deleteCredential,
   createUserUpdateCredentialSaver,
-} from "@lib/credentials";
+} from "@lib/net/credentials";
 import { connectText } from "../i18n/connect";
 import type { PageId } from "./context";
 
@@ -80,7 +80,7 @@ export function configureSession(
 // module is necessarily already loaded, so this import resolves from the
 // module cache in a microtask.
 export function voiceSessionLeave(sendWsLeave: boolean): void {
-  void import("@lib/livekitSession")
+  void import("@lib/voice/livekitSession")
     .then(({ leaveVoice }) => leaveVoice(sendWsLeave))
     .catch((e) => log.warn("Failed to leave voice session", e));
 }
@@ -163,7 +163,7 @@ export function startSession(
   // Lazy: the identity module pulls in the E2EE crypto layer, which the
   // session shell must not load just to dial.
   setIdentityKeyProvider(async (identityHost) =>
-    (await import("@lib/identity")).getDeviceIdentityPublicKey(identityHost),
+    (await import("@lib/net/identity")).getDeviceIdentityPublicKey(identityHost),
   );
   owner.addCleanup(() => setIdentityKeyProvider(null));
   ws.connect({ host, token });

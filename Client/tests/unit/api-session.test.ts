@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockFetch, mockProxy } = vi.hoisted(() => ({ mockFetch: vi.fn(), mockProxy: vi.fn() }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
-vi.mock("../../src/lib/httpProxy", () => ({ ensureHttpProxy: mockProxy }));
+vi.mock("../../src/lib/net/httpProxy", () => ({ ensureHttpProxy: mockProxy }));
 import { createApiClient, type ApiClient } from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
 
@@ -53,7 +53,7 @@ describe("API session ownership", () => {
   );
 
   it("sends the logout revocation outside the ending session's scope", async () => {
-    // lib/logout.ts calls clearAuth() synchronously after api.logout(), and
+    // lib/net/logout.ts calls clearAuth() synchronously after api.logout(), and
     // clearAuth ends the API session. The revocation must still go out, with
     // the credential it was called with.
     const api = createApiClient({ host: "same.example", token: "alice" });

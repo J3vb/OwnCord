@@ -13,7 +13,7 @@ import {
   validateAvatarFile,
 } from "@components/settings/AccountTab";
 import { authStore } from "@stores/auth.store";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { ApiClientError } from "@lib/api";
 import * as imageCrop from "@lib/imageCrop";
 import type { SettingsOverlayOptions } from "@components/SettingsOverlay";

@@ -32,7 +32,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 
 // These caches hold server content only (B7-16): the URLs below are the
 // configured server's, reached through the (mocked) TOFU proxy.
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
 }));
 vi.mock("@stores/auth.store", () => ({

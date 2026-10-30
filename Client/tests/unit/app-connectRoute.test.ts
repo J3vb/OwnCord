@@ -36,7 +36,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   deleteCredential: vi.fn(),
   loginWithSavedPassword: vi.fn(),
   parseRelayedLogin: vi.fn(),

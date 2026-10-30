@@ -29,7 +29,7 @@
 import { DisconnectReason, RoomEvent, type VideoQuality } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
 import { loadPref } from "../../../lib/prefs/preferences";
-import { NoiseFloorTracker } from "../../../lib/noiseFloor";
+import { NoiseFloorTracker } from "../../../lib/voice/noiseFloor";
 import { voiceStore } from "../../../stores/voice.store";
 import { desktop } from "../../../platform/desktop";
 import type {
@@ -45,7 +45,7 @@ import { nativeCounters } from "./counters";
 
 /** How often a remote participant whose frames stopped decrypting
  *  is re-reported — the web E2EE worker's cadence, so the shared streak grace
- *  in `lib/roomEventHandlers.ts` applies to the native path
+ *  in `lib/voice/roomEventHandlers.ts` applies to the native path
  *  unchanged. Unlike the web worker's, these reports are not rate-limited, so
  *  the native room recovers after the short quiet gap (`isNativeRoom`). */
 const DECRYPT_REPORT_MS = 1000;
@@ -67,7 +67,7 @@ import {
   pickScreenSource,
   shareSettings,
 } from "./screenPicker";
-import type { StreamQuality } from "@lib/screenShare";
+import type { StreamQuality } from "@lib/voice/screenShare";
 import type { PublishCodec } from "../videoCodec";
 
 const log = createLogger("nativeRoom");

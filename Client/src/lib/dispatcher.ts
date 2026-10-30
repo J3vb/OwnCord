@@ -106,7 +106,7 @@ import {
 } from "../features/voice/wsHandlers";
 import { createReconnectClock, log } from "../features/connection/dispatchContext";
 import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./read-state";
-import { resetServerCapabilities } from "./serverCapabilities";
+import { resetServerCapabilities } from "./net/serverCapabilities";
 import {
   applyReadySafety,
   handleAppealStatus,

@@ -42,7 +42,7 @@ const { mockOnOpenUrl } = vi.hoisted(() => ({
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
@@ -53,7 +53,7 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn().mockResolvedValue(undefined),
@@ -71,7 +71,7 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
 const { mockLeaveVoice } = vi.hoisted(() => ({
   mockLeaveVoice: vi.fn((..._args: unknown[]): Promise<void> => Promise.resolve()),
 }));
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
 }));
 vi.mock("@lib/message-navigation", () => ({ jumpToMessage: vi.fn() }));
@@ -79,7 +79,7 @@ vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
-vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
 const mockProfileManager = vi.hoisted(() => ({
   loadProfiles: vi.fn().mockResolvedValue(undefined),
   saveProfiles: vi.fn().mockResolvedValue(undefined),
@@ -111,7 +111,7 @@ const mockRegister = vi.fn();
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
 const mockCheckForUpdate = vi.fn();
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
@@ -247,13 +247,13 @@ import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { setMarkReadSender } from "@lib/read-state";
 import type { ReadyChannel } from "@lib/types";
 import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
-import { deleteCredential, loadCredential, saveCredential } from "@lib/credentials";
+import { deleteCredential, loadCredential, saveCredential } from "@lib/net/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/userStatus";
 import { createMainPage } from "@pages/MainPage";
 import { createCertFirstUseModal, createCertMismatchModal } from "@components/CertMismatchModal";
-import { reconnectAfterCertAccept } from "@lib/cert-reconnect";
+import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
 import { createConnectPage } from "@pages/ConnectPage";
 import { setActivePresenceSender, type PresenceSender } from "@lib/presence";
 
@@ -592,7 +592,7 @@ describe("main.ts pre-auth connection deadline", () => {
     // accepts: the re-dial must still have its host and token to resume with.
     await vi.advanceTimersByTimeAsync(PREAUTH_CONNECT_TIMEOUT_MS / 2);
     const { reconnectAfterCertAccept: realReconnect } =
-      await vi.importActual<typeof import("@lib/cert-reconnect")>("@lib/cert-reconnect");
+      await vi.importActual<typeof import("@lib/net/certReconnect")>("@lib/net/certReconnect");
     vi.mocked(reconnectAfterCertAccept).mockImplementationOnce(realReconnect);
     vi.mocked(createCertMismatchModal).mock.lastCall![0].onAccept();
     await vi.advanceTimersByTimeAsync(10);
@@ -2080,7 +2080,7 @@ describe("main.ts external links (C16)", () => {
   });
 
   it("opens a masked link to a trusted domain without the dialog", async () => {
-    const { trustDomain } = await import("@lib/trustedDomains");
+    const { trustDomain } = await import("@lib/net/trustedDomains");
     mockInvoke.mockClear();
     trustDomain("trusted.example");
 

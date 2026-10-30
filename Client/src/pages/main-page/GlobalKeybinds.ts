@@ -37,7 +37,7 @@ import {
   keyEventToVk,
   loadGlobalShortcutVks,
   type GlobalShortcutVks,
-} from "@lib/voiceShortcuts";
+} from "@lib/voice/voiceShortcuts";
 import {
   KEYBINDS_PREF,
   comboFromEvent,

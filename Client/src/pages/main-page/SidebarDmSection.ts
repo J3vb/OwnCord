@@ -7,7 +7,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
-import { reconcileChildren } from "@lib/reconcile";
+import { reconcileChildren } from "@lib/net/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { totalDmUnread } from "@lib/dmUnread";

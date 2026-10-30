@@ -18,7 +18,7 @@
 import { loadPref, onPrefChange } from "./prefs/preferences";
 import { loadAppSoundsGain, soundSwitchOn } from "./prefs/soundPrefs";
 import { USER_STATUS_PREF_KEY, loadUserStatus } from "./userStatus";
-import { isVoiceDeafened } from "./voiceDeafened";
+import { isVoiceDeafened } from "./voice/voiceDeafened";
 import { createLogger } from "./logger";
 import { Disposable } from "./disposable";
 import { desktop } from "../platform/desktop";
@@ -181,7 +181,7 @@ export function stopRingback(): void {
 /** Every sound this module makes is silenced while the local user is deafened
  *  inside a voice session — except the ringtone, which D2 keeps for calls.
  *  Leaving voice releases the gate even though the stored deafen persists.
- *  Reads the leaf the lazy voice store mirrors (see lib/voiceDeafened.ts), so
+ *  Reads the leaf the lazy voice store mirrors (see lib/voice/voiceDeafened.ts), so
  *  this stays out of the startup closure. */
 function deafened(): boolean {
   return isVoiceDeafened();

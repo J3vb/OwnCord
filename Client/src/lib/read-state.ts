@@ -13,7 +13,7 @@ import { dmStore, clearDmUnread, setDmReadPointer } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 import { uiStore } from "@stores/ui.store";
 import { dialogOpen } from "./dialogOpen";
-import { readPointerEnabled } from "./serverCapabilities";
+import { readPointerEnabled } from "./net/serverCapabilities";
 
 /** Channels whose mounted list is scrolled away from the live tail. */
 const liveTailOutOfView = new Set<number>();

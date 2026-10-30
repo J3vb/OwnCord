@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listSessionResets, runSessionResets } from "../../src/lib/sessionRegistry";
+import { listSessionResets, runSessionResets } from "../../src/lib/net/sessionRegistry";
 
 // The store is loaded inside the test, so the registration it makes at load
 // time is the one this test sees.

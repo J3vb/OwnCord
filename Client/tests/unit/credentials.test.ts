@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/credentials.ts.
+ * Tests for src/lib/net/credentials.ts.
  *
  * This module was excluded from coverage in vitest.config.ts and only ever
  * `vi.mock`ed by other suites, so none of it had ever been executed under test.
@@ -37,7 +37,7 @@ const {
   createUserUpdateCredentialSaver,
   parseRelayedLogin,
   loginWithSavedPassword,
-} = await import("@lib/credentials");
+} = await import("@lib/net/credentials");
 const { ApiClientError, TransportError } = await import("@lib/api");
 
 // saveCredential (called from createUserUpdateCredentialSaver's listener) is
@@ -380,10 +380,10 @@ describe("outside Tauri", () => {
    * The branch matters because the connect screen calls loadCredential
    * unconditionally on mount: it must return null, not reject.
    */
-  async function importWithoutInvoke(): Promise<typeof import("@lib/credentials")> {
+  async function importWithoutInvoke(): Promise<typeof import("@lib/net/credentials")> {
     vi.resetModules();
     vi.doMock("@tauri-apps/api/core", () => ({}));
-    return import("@lib/credentials");
+    return import("@lib/net/credentials");
   }
 
   afterEach(() => {

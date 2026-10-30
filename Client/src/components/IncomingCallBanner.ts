@@ -6,13 +6,13 @@
  * demand, and a modal would block the app until the 30s timer expired. Accept
  * joins the DM's voice channel; Decline tells the ringer to stop.
  *
- * All state lives in @lib/call-ring — this only draws whatever it is handed.
+ * All state lives in @lib/voice/callRing — this only draws whatever it is handed.
  */
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText, clearChildren } from "@lib/dom";
 import type { MountableComponent } from "@lib/text/safeRender";
-import type { RingState } from "@lib/call-ring";
+import type { RingState } from "@lib/voice/callRing";
 import type { AvatarSubject } from "@lib/avatar";
 import { createAvatarElement } from "@components/message-list/avatar";
 import { dmStore, dmDisplayName } from "@stores/dm.store";

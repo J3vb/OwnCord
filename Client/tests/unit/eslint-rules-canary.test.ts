@@ -55,7 +55,7 @@ interface Canary {
 const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-leave-voice-when-superseded",
-    filePath: "src/lib/livekitReconnect.ts",
+    filePath: "src/lib/voice/livekitReconnect.ts",
     code: `async function attemptAutoReconnect(deps, signal, channelId, owner) {
       const superseded = () => reconnectSuperseded(signal, channelId, owner, deps.getState());
       if (superseded()) {
@@ -170,7 +170,7 @@ const CANARIES: readonly Canary[] = [
     rule: "local/subscription-result-kept",
     shape: "registerSessionReset",
     filePath: "src/stores/messages.store.ts",
-    code: `import { registerSessionReset } from "@lib/sessionRegistry";
+    code: `import { registerSessionReset } from "@lib/net/sessionRegistry";
     registerSessionReset("x:y", reset);`,
     messageId: "discarded",
   },
@@ -206,7 +206,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/layer-direction",
     shape: "dynamic import",
-    filePath: "src/lib/livekitSession.ts",
+    filePath: "src/lib/voice/livekitSession.ts",
     code: `async function f() { return import("@pages/MainPage"); }`,
     messageId: "upwardImport",
     hasOptions: true,
@@ -289,7 +289,7 @@ describe("view-file store ban", () => {
     expect(await restricted(`import { x } from "../../stores/ui.store";`, VIEW)).toContain(
       "no-restricted-imports",
     );
-    expect(await restricted(`import { x } from "@lib/livekitSession";`, VIEW)).toContain(
+    expect(await restricted(`import { x } from "@lib/voice/livekitSession";`, VIEW)).toContain(
       "no-restricted-imports",
     );
     expect(await restricted(`import { x } from "../safety/store";`, VIEW)).toContain(
@@ -305,7 +305,7 @@ describe("view-file store ban", () => {
       await restricted(`export const f = () => import("../moderation/store");`, VIEW),
     ).toContain("no-restricted-syntax");
     expect(
-      await restricted(`export const f = () => import("@lib/livekitSession");`, VIEW),
+      await restricted(`export const f = () => import("@lib/voice/livekitSession");`, VIEW),
     ).toContain("no-restricted-syntax");
   }, 60_000);
 

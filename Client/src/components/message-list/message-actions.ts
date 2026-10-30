@@ -6,7 +6,7 @@
 
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import { channelBitOrRole } from "@lib/permissions";
-import { threadsEnabled } from "@lib/serverCapabilities";
+import { threadsEnabled } from "@lib/net/serverCapabilities";
 import { authorityChannelId, threadOfMessage } from "@stores/threads.store";
 import { isPinRowKind, isServerRowKind, isWelcomeRowKind } from "@lib/text/messageKind";
 import { formatMessageLink } from "@lib/deep-link";

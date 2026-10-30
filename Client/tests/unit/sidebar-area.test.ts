@@ -8,7 +8,7 @@ import { cascadedDeclaration, keyword } from "../helpers/app-css";
 // inside factories. Instead, use vi.fn() inline and retrieve mock later.
 // ---------------------------------------------------------------------------
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),

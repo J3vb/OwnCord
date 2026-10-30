@@ -92,18 +92,18 @@ These stay in the server and client proper, permanently, whatever the plugin
 system becomes. A plugin may _call_ some of them; none may _replace_ or
 _bypass_ them.
 
-| Concern                       | Owner                                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------------------------ |
-| Authentication, sessions, 2FA | `Server/auth/`, `Server/api/auth_handler.go`                                               |
-| Authorization                 | `Server/permissions/` (one predicate per property — B2-5)                                  |
-| TLS and certificate pinning   | `Server/auth/tls.go`; `Client/src-tauri/src/tofu.rs`                                       |
-| Safe outbound fetch           | `Server/safefetch/` (C-09 clauses 2–6, server side); the B7 native broker (C-09 1, 7, 8)   |
-| Quotas and rate limits        | `Server/auth/ratelimit*.go`, per-action limits in `Server/service/`                        |
-| Voice/video E2EE              | `Client/src/lib/e2eeCrypto.ts`, `livekitE2EE.ts`, `identity.ts`; `Server/ws/voice_e2ee.go` |
-| Updates and signatures        | `Server/updater/`, `Server/api/client_update.go`                                           |
-| Deletion and account removal  | `Server/db/account.go`                                                                     |
-| Backup and recovery           | `Server/admin/handlers_backup.go`, `Server/db/admin_queries.go`                            |
-| Moderation audit              | `Server/db/audit*.go`, `Server/db/audittest/`, `TestAuditCoverage_*`                       |
+| Concern                       | Owner                                                                                          |
+| ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| Authentication, sessions, 2FA | `Server/auth/`, `Server/api/auth_handler.go`                                                   |
+| Authorization                 | `Server/permissions/` (one predicate per property — B2-5)                                      |
+| TLS and certificate pinning   | `Server/auth/tls.go`; `Client/src-tauri/src/tofu.rs`                                           |
+| Safe outbound fetch           | `Server/safefetch/` (C-09 clauses 2–6, server side); the B7 native broker (C-09 1, 7, 8)       |
+| Quotas and rate limits        | `Server/auth/ratelimit*.go`, per-action limits in `Server/service/`                            |
+| Voice/video E2EE              | `Client/src/lib/net/e2eeCrypto.ts`, `livekitE2EE.ts`, `identity.ts`; `Server/ws/voice_e2ee.go` |
+| Updates and signatures        | `Server/updater/`, `Server/api/client_update.go`                                               |
+| Deletion and account removal  | `Server/db/account.go`                                                                         |
+| Backup and recovery           | `Server/admin/handlers_backup.go`, `Server/db/admin_queries.go`                                |
+| Moderation audit              | `Server/db/audit*.go`, `Server/db/audittest/`, `TestAuditCoverage_*`                           |
 
 The trust statements these back are in [../trust-model.md](../trust-model.md).
 

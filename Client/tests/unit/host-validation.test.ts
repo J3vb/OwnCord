@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { isValidHost } from "../../src/lib/hostValidation";
+import { isValidHost } from "../../src/lib/net/hostValidation";
 
 describe("isValidHost", () => {
   it("rejects a host containing '@' (identity.ts's scope-key premise)", () => {

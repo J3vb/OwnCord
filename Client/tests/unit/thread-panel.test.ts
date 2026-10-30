@@ -27,7 +27,7 @@ import { createThreadPanel } from "@components/ThreadPanel";
 import { createMessageList } from "@components/MessageList";
 import { resumeThreadFocus, withThreadsStore } from "../../src/stores/threadsLoader";
 import { createThreadPanelHost } from "../../src/pages/main-page/ThreadPanelHost";
-import { applyReadyCapabilities, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import {

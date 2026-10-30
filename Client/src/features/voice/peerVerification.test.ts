@@ -14,9 +14,9 @@ const showToast = vi.hoisted(() => vi.fn());
 const importIdentityPublicKey = vi.hoisted(() => vi.fn());
 const computeKeyFingerprint = vi.hoisted(() => vi.fn());
 
-vi.mock("../../lib/livekitSession", () => ({ rePinPeerIdentity, peerAnnouncedIdentityKey }));
+vi.mock("../../lib/voice/livekitSession", () => ({ rePinPeerIdentity, peerAnnouncedIdentityKey }));
 vi.mock("../../lib/toast", () => ({ showToast }));
-vi.mock("../../lib/e2eeCrypto", () => ({ importIdentityPublicKey, computeKeyFingerprint }));
+vi.mock("../../lib/net/e2eeCrypto", () => ({ importIdentityPublicKey, computeKeyFingerprint }));
 // Lets a test act at the instant an open prompt is torn down.
 const hooks = vi.hoisted(() => ({ onDestroy: null as (() => void) | null }));
 vi.mock("../../components/IdentityMismatchModal", async (importOriginal) => {

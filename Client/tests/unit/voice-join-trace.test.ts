@@ -24,7 +24,7 @@ import {
   resetSelfTest,
   setJoinUrlKind,
   voiceJoinSnapshot,
-} from "@lib/voiceJoinTrace";
+} from "@lib/voice/voiceJoinTrace";
 import { addLogListener, setLogLevel, type LogEntry } from "@lib/logger";
 import { expectConsole } from "../helpers/console";
 

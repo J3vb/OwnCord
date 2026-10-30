@@ -102,7 +102,7 @@ import {
   onMarkUnreadFailed,
   setLiveTailInView,
 } from "@lib/read-state";
-import { idMentionsEnabled, readPointerEnabled } from "@lib/serverCapabilities";
+import { idMentionsEnabled, readPointerEnabled } from "@lib/net/serverCapabilities";
 import { markMessageUnread } from "./message-list/mark-unread";
 import { onPrefChange } from "@lib/prefs/preferences";
 

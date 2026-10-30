@@ -11,7 +11,7 @@ import { ApiClientError } from "@lib/api";
 import { createStore } from "@lib/store";
 import { showToast } from "@lib/toast";
 import { gifFavoritesText } from "../i18n/gifFavorites";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { GifFavoritesApi } from "@lib/gifProvider";
 import type { GifFavorite } from "@lib/types";
 import { RestErrorCode } from "@lib/protocolTypes";

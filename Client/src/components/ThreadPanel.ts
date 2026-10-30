@@ -46,7 +46,7 @@ import {
   type Message,
 } from "@stores/messages.store";
 import { getThread, isFollowed, threadsStore } from "@stores/threads.store";
-import { threadFollowsEnabled } from "@lib/serverCapabilities";
+import { threadFollowsEnabled } from "@lib/net/serverCapabilities";
 import { safetyStore } from "../features/safety/store";
 import { formatUntil, safetyText } from "../i18n/safety";
 import { messageResponseToMessage } from "../features/messaging/messageModel";

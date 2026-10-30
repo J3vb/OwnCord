@@ -90,7 +90,7 @@ import { requestsText } from "../../i18n/requests";
 import { shellText, statusLabel } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { leaveChannel, markChannelRead, markChannelReadSeen } from "@lib/read-state";
-import { readPointerEnabled, threadsEnabled } from "@lib/serverCapabilities";
+import { readPointerEnabled, threadsEnabled } from "@lib/net/serverCapabilities";
 import {
   newClientMessageId,
   pendingMessageExpired,

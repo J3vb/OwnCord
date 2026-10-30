@@ -37,7 +37,7 @@ import {
   type LiveCodec,
   type ScreenTrackState,
   type VideoTrackDeps,
-} from "../../lib/screenShare";
+} from "../../lib/voice/screenShare";
 import { voiceStore } from "../../stores/voice.store";
 import { pickCommonCodec } from "./decodeCaps";
 import { isLinuxDesktop } from "./native/platform";

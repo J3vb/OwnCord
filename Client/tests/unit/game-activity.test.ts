@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startGameActivity, GAME_ACTIVITY_POLL_MS, type GameActivityLoop } from "@lib/gameActivity";
 import { handleActivityRefusal, GAME_ACTIVITY_PREF_KEY } from "@lib/gameActivityBridge";
-import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { savePref } from "@lib/prefs/preferences";
 import {
   GAME_PREFS_KEY,

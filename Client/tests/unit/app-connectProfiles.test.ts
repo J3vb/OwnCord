@@ -9,7 +9,7 @@
  * already decides that credential).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionScope } from "@lib/sessionScope";
+import { SessionScope } from "@lib/net/sessionScope";
 import type { ProfileManager } from "@lib/profiles";
 
 const hoisted = vi.hoisted(() => ({
@@ -17,7 +17,7 @@ const hoisted = vi.hoisted(() => ({
   setTransientError: vi.fn(),
   warn: vi.fn(),
 }));
-vi.mock("@lib/credentials", () => ({ deleteCredential: hoisted.deleteCredential }));
+vi.mock("@lib/net/credentials", () => ({ deleteCredential: hoisted.deleteCredential }));
 vi.mock("@stores/ui.store", () => ({ setTransientError: hoisted.setTransientError }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({

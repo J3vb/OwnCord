@@ -9,7 +9,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { reconcileModels, sameModel } from "@lib/reconcile";
+import { reconcileModels, sameModel } from "@lib/net/reconcile";
 import { select, eventSource, type Selection } from "@lib/select";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import type { MountableComponent } from "@lib/text/safeRender";
@@ -31,7 +31,7 @@ import type { PeerVerification, VoiceState, VoiceUser } from "@stores/voice.stor
 import { SCREENSHARE_TILE_ID_OFFSET, USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { openMenuOnKeyboard } from "@lib/context-menu";
 import { createLazyScreen } from "./lazyScreen";
-import { getUserLocalMute, getUserVolume } from "@lib/livekitSession";
+import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volume-menu";
 import { attachCategoryContextMenu } from "./channel-sidebar/category-menu";
 import { attachChannelContextMenu, CHANNEL_MUTE_CHANGED } from "./channel-sidebar/context-menu";

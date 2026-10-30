@@ -26,7 +26,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   muteScreenshareAudio: vi.fn(),
   setScreenshareAudioVolume: vi.fn(),
   setUserVolume: vi.fn(),

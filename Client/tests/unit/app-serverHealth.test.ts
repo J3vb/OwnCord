@@ -9,7 +9,7 @@
  * flight is reported as such so a typed host is not probed twice.
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
-import { SessionScope } from "@lib/sessionScope";
+import { SessionScope } from "@lib/net/sessionScope";
 import type { ApiClient } from "@lib/api";
 import type { ServerInfoResponse } from "@lib/types";
 import { PROTOCOL_EPOCH } from "@lib/protocolTypes";

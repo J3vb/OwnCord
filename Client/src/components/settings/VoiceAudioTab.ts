@@ -4,9 +4,9 @@
 
 import { createElement, appendChildren, setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "./helpers";
-import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/shareFps";
+import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/voice/shareFps";
 import { createLogger } from "@lib/logger";
-import { syncVideoSurface } from "@lib/videoSurface";
+import { syncVideoSurface } from "@lib/voice/videoSurface";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../features/voice/autoPlayCameras";
 import {
   switchInputDevice,
@@ -20,7 +20,7 @@ import {
   reapplyAudioProcessing,
   reapplyEnhancedNoiseSuppression,
   getLocalMicSettings,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import {
   VAD_MAX_THRESHOLD,
   micCaptureOptions,
@@ -28,8 +28,8 @@ import {
   isMissingDeviceError,
   startVadDetector,
   vadThreshold,
-} from "@lib/audioPipeline";
-import { GATE_LOOKAHEAD_S, createMicProcessor, type MicProcessor } from "@lib/micProcessor";
+} from "@lib/voice/audioPipeline";
+import { GATE_LOOKAHEAD_S, createMicProcessor, type MicProcessor } from "@lib/voice/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
 import {
   nativeAudioDevices,
@@ -57,7 +57,7 @@ import { settingsText as t } from "../../i18n/settings";
 import { setStatusIcon, statusIcon } from "../../features/settings/status";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/a11y";
 import { autoInputSensitivity, inputMode, type InputMode } from "@lib/inputMode";
-import { NoiseFloorTracker } from "@lib/noiseFloor";
+import { NoiseFloorTracker } from "@lib/voice/noiseFloor";
 import { buildPttControls } from "./pttControls";
 
 const log = createLogger("VoiceAudioTab");
@@ -913,7 +913,7 @@ function buildVoiceAudioTabInner(
     t("voiceAudio.cameraQualityDesc"),
     "streamQuality",
     // The defaults match getCameraQuality/getScreenShareQuality in
-    // lib/screenShare, which this tab does not import (it pulls in the
+    // lib/voice/screenShare, which this tab does not import (it pulls in the
     // voice store).
     loadPref<string>("streamQuality", "medium"),
     [
@@ -1442,9 +1442,9 @@ function buildVoiceAudioTabInner(
   // the tab is rebuilt, since this function runs again on every build.
 
   // Mic level meter. It runs the call's own microphone processor
-  // (lib/micProcessor.ts: RNNoise when Enhanced Noise Suppression is on) over
+  // (lib/voice/micProcessor.ts: RNNoise when Enhanced Noise Suppression is on) over
   // a microphone opened with the call's capture settings, and the call's own
-  // detector (lib/audioPipeline.ts startVadDetector, same attack and hold)
+  // detector (lib/voice/audioPipeline.ts startVadDetector, same attack and hold)
   // at the same threshold. The bar is the loudest smoothed level (a ~10 ms
   // running RMS, the one the gate compares) the detector saw, on the threshold handle's axis; green is the gate open. So
   // what the meter shows is what the gate does. Opening the microphone with

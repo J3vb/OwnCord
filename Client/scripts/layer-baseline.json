@@ -27,7 +27,7 @@
       "features/content-consent/nsfw.ts": 1,
       "stores/channels.store.ts": 1
     },
-    "lib/audioElements.ts": {
+    "lib/voice/audioElements.ts": {
       "features/voice/mediaEncryption.ts": 1,
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1,
@@ -38,15 +38,15 @@
       "stores/dm.store.ts": 1,
       "stores/ui.store.ts": 1
     },
-    "lib/connectionDiagnostics.ts": {
+    "lib/net/connectionDiagnostics.ts": {
       "features/voice/native/devices.ts": 1,
       "features/voice/native/micProbe.ts": 1,
       "features/voice/native/platform.ts": 1
     },
-    "lib/credentials.ts": {
+    "lib/net/credentials.ts": {
       "stores/auth.store.ts": 1
     },
-    "lib/deviceManager.ts": {
+    "lib/voice/deviceManager.ts": {
       "features/voice/native/devices.ts": 1,
       "stores/voice.store.ts": 1
     },
@@ -58,17 +58,17 @@
       "stores/channels.store.ts": 1,
       "stores/members.store.ts": 1
     },
-    "lib/identity.ts": {
+    "lib/net/identity.ts": {
       "stores/auth.store.ts": 1
     },
     "lib/prefs/lastChannel.ts": {
       "stores/channels.store.ts": 1
     },
-    "lib/livekitDiagnostics.ts": {
+    "lib/voice/livekitDiagnostics.ts": {
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1
     },
-    "lib/livekitE2EE.ts": {
+    "lib/voice/livekitE2EE.ts": {
       "features/voice/e2eeEpoch.ts": 1,
       "features/voice/e2eeIdentity.ts": 1,
       "features/voice/e2eeOffer.ts": 1,
@@ -77,12 +77,12 @@
       "stores/auth.store.ts": 1,
       "stores/voice.store.ts": 1
     },
-    "lib/livekitReconnect.ts": {
+    "lib/voice/livekitReconnect.ts": {
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1,
       "stores/voice.store.ts": 1
     },
-    "lib/livekitSession.ts": {
+    "lib/voice/livekitSession.ts": {
       "features/direct-messages/keptCallDms.ts": 1,
       "features/voice/joinOrchestration.ts": 1,
       "features/voice/joinRequest.ts": 1,
@@ -99,7 +99,7 @@
       "stores/dm.store.ts": 1,
       "stores/voice.store.ts": 2
     },
-    "lib/logout.ts": {
+    "lib/net/logout.ts": {
       "stores/auth.store.ts": 1
     },
     "lib/text/markdown.ts": {
@@ -137,13 +137,13 @@
       "stores/messages.store.ts": 1,
       "stores/ui.store.ts": 1
     },
-    "lib/roomEventHandlers.ts": {
+    "lib/voice/roomEventHandlers.ts": {
       "features/voice/mediaEncryption.ts": 1,
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1,
       "stores/voice.store.ts": 1
     },
-    "lib/screenShare.ts": {
+    "lib/voice/screenShare.ts": {
       "features/voice/native/devices.ts": 1,
       "features/voice/native/platform.ts": 1,
       "features/voice/native/screenPickerSlot.ts": 1,

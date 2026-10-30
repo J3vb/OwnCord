@@ -90,7 +90,7 @@ export function h265Offered(): boolean {
 }
 
 /** Whether an H.264 publish here offers only H.264 Main and High
- *  (`lib/h264Profile`): the Windows app, whose WebView2 encodes those on the
+ *  (`lib/voice/h264Profile`): the Windows app, whose WebView2 encodes those on the
  *  graphics card and Constrained Baseline only in software, on a hardware GPU
  *  known not to be Intel's (see `isKnownNonIntel`). */
 export function h264GpuProfiles(): boolean {

@@ -28,7 +28,7 @@ vi.mock("../../src/pages/main-page/MemberPickerModal", () => {
   return { createMemberPickerModal: h.createPicker };
 });
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn().mockResolvedValue(undefined),
   switchOutputDevice: vi.fn().mockResolvedValue(undefined),

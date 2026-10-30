@@ -18,7 +18,7 @@ vi.mock("@stores/voice.store", () => ({
 }));
 
 const { attachGlobalKeybinds } = await import("../../src/pages/main-page/GlobalKeybinds");
-const { saveGlobalShortcutVk } = await import("../../src/lib/voiceShortcuts");
+const { saveGlobalShortcutVk } = await import("../../src/lib/voice/voiceShortcuts");
 const { parseKeybinds, saveKeybind } = await import("../../src/lib/prefs/keybinds");
 
 function makeHandlers(): {

@@ -5,7 +5,7 @@ import {
   type MusicActivityLoop,
 } from "@lib/musicActivity";
 import { handleActivityRefusal } from "@lib/gameActivityBridge";
-import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/serverCapabilities";
+import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { savePref } from "@lib/prefs/preferences";
 import {
   EMPTY_MUSIC_PREFS,

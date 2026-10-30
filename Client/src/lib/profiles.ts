@@ -7,7 +7,7 @@
  */
 
 import { createStore, type Store } from "./store";
-import { ensureHttpProxy } from "./httpProxy";
+import { ensureHttpProxy } from "./net/httpProxy";
 import { desktop } from "../platform/desktop";
 import type { SettingsStore, SettingsSnapshot } from "../platform/contracts/settings";
 

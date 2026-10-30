@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 describe("voiceDeafened", () => {
   it("starts silent for neither flag, and each flag alone stays quiet", async () => {
     const { isVoiceDeafened, setVoiceDeafened, setVoiceInSession } =
-      await import("../../src/lib/voiceDeafened");
+      await import("../../src/lib/voice/voiceDeafened");
     expect(isVoiceDeafened()).toBe(false);
     setVoiceInSession(true);
     expect(isVoiceDeafened()).toBe(false);
@@ -16,7 +16,7 @@ describe("voiceDeafened", () => {
 
   it("silences sounds only while deafened inside a voice session", async () => {
     const { isVoiceDeafened, setVoiceDeafened, setVoiceInSession } =
-      await import("../../src/lib/voiceDeafened");
+      await import("../../src/lib/voice/voiceDeafened");
     setVoiceDeafened(true);
     setVoiceInSession(true);
     expect(isVoiceDeafened()).toBe(true);

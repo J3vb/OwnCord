@@ -39,7 +39,7 @@ vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
 }));
 
 // Mock livekitSession (imported transitively by auth.store)
-vi.mock("../../src/lib/livekitSession", () => ({
+vi.mock("../../src/lib/voice/livekitSession", () => ({
   leaveVoice: vi.fn(),
   switchInputDevice: vi.fn(),
   switchOutputDevice: vi.fn(),

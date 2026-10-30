@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("../../lib/e2eeCrypto", () => ({
+vi.mock("../../lib/net/e2eeCrypto", () => ({
   generateRoomKey: vi.fn(() => new Uint8Array([9])),
 }));
 const log = vi.hoisted(() => ({

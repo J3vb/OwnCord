@@ -15,7 +15,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/modalFactory";
 import { errorText } from "@lib/api";
-import { forumsEnabled } from "@lib/serverCapabilities";
+import { forumsEnabled } from "@lib/net/serverCapabilities";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { ChannelType } from "@lib/types";
 import {

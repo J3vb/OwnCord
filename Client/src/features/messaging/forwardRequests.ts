@@ -7,7 +7,7 @@
  * while the sender that fills it (forwardSend.ts) loads with the picker.
  */
 
-import { registerSessionReset } from "../../lib/sessionRegistry";
+import { registerSessionReset } from "../../lib/net/sessionRegistry";
 
 const claimed = new Set<string>();
 

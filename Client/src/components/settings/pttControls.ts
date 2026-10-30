@@ -12,8 +12,8 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref } from "./helpers";
-import { vkName, pttReleaseDelayMs, PTT_RELEASE_DELAY_MAX_MS } from "@lib/ptt";
-import { loadGlobalShortcutVks } from "@lib/voiceShortcuts";
+import { vkName, pttReleaseDelayMs, PTT_RELEASE_DELAY_MAX_MS } from "@lib/voice/ptt";
+import { loadGlobalShortcutVks } from "@lib/voice/voiceShortcuts";
 import {
   functionKeyVk,
   globalKeysErrorCode,

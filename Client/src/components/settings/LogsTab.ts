@@ -12,7 +12,7 @@ import {
 } from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "../SettingsOverlay";
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
 import { savePref, readMigratedStringPref, appendToggleRows } from "./helpers";
 import {
   SHARE_DIAGNOSTICS_KEY,
@@ -20,7 +20,7 @@ import {
   SHARE_MOTION_POLICY_KEY,
   getShareMotionPolicy,
   isShareMotionPolicy,
-} from "@lib/shareFlags";
+} from "@lib/voice/shareFlags";
 import { createDisclosure } from "../../features/settings/status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";

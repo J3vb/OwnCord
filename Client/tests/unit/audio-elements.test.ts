@@ -44,7 +44,7 @@ vi.mock("@stores/voice.store", () => ({
   },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   parseUserId: (identity: string) => {
     const match = identity.match(/^user-(\d+)$/);
     if (match !== null && match[1] !== undefined) return parseInt(match[1], 10);
@@ -52,7 +52,7 @@ vi.mock("@lib/livekitSession", () => ({
   },
 }));
 
-import { AudioElements, setAudioVolumeHost } from "../../src/lib/audioElements";
+import { AudioElements, setAudioVolumeHost } from "../../src/lib/voice/audioElements";
 
 function createMockTrack(kind: string, sid: string) {
   const audioEl = document.createElement("audio");

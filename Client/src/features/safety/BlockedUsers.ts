@@ -18,7 +18,7 @@
 import { errorText, type ApiClient } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { showToast } from "@lib/toast";
 import type { createAvatarElement } from "@components/message-list/avatar";
 import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";

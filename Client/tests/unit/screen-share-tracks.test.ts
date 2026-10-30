@@ -1,5 +1,5 @@
 /**
- * Tests for the track-publishing half of src/lib/screenShare.ts.
+ * Tests for the track-publishing half of src/lib/voice/screenShare.ts.
  *
  * The module sat at 61.1% statements: screen-share-fps.test.ts covers the
  * preset/bitrate helpers, but enableCamera, disableCamera, enableScreenshare,
@@ -25,12 +25,12 @@ const createLocalVideoTrack = vi.fn();
 const createLocalScreenTracks = vi.fn();
 const loadPref = vi.fn();
 
-// 120 fps is hidden for now (lib/shareFps); the 120 fps tests turn it back on
+// 120 fps is hidden for now (lib/voice/shareFps); the 120 fps tests turn it back on
 // so the dormant 120 handling (one layer, balanced degradation, Auto's
 // hardware rule) keeps its coverage.
 const offer120 = vi.hoisted(() => ({ value: false }));
-vi.mock("@lib/shareFps", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@lib/shareFps")>();
+vi.mock("@lib/voice/shareFps", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/voice/shareFps")>();
   return {
     ...actual,
     offeredShareFps: (saved: number) =>
@@ -39,7 +39,7 @@ vi.mock("@lib/shareFps", async (importOriginal) => {
 });
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/h264Profile", () => ({ setH264GpuProfiles }));
+vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
 const gpuProfiles = vi.hoisted(() => ({ value: false }));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/features/voice/videoCodec")>();
@@ -81,7 +81,7 @@ const {
   stopManualScreenTracks,
   rollbackPendingVideo,
   reconcileVideoFlags,
-} = await import("@lib/screenShare");
+} = await import("@lib/voice/screenShare");
 
 type VideoTrackDeps = Parameters<typeof enableCamera>[1];
 type CameraTrackState = Parameters<typeof stopManualCameraTrack>[0];

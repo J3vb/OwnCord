@@ -14,7 +14,7 @@ import {
   saveKeybind,
   type KeyCombo,
 } from "../../src/lib/prefs/keybinds";
-import { saveGlobalShortcutVk } from "../../src/lib/voiceShortcuts";
+import { saveGlobalShortcutVk } from "../../src/lib/voice/voiceShortcuts";
 import { STORAGE_PREFIX } from "../../src/lib/prefs/preferences";
 
 const GLOBALS = { mute: 0x4d, deafen: 0x44 };

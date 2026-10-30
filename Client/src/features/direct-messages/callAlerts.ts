@@ -12,7 +12,7 @@ import { loadUserStatus } from "../../lib/userStatus";
 import { getChannelMutesHost } from "../../lib/prefs/channelMutes";
 import { showToast } from "../../lib/toast";
 import { createLogger } from "../../lib/logger";
-import type { RingState } from "../../lib/call-ring";
+import type { RingState } from "../../lib/voice/callRing";
 import { desktop } from "../../platform/desktop";
 import { dmCallText } from "../../i18n/dmCall";
 import { dmStore, dmDisplayName } from "../../stores/dm.store";

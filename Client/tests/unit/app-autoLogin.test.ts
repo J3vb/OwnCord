@@ -10,7 +10,7 @@
  * never replaced by a resume, a server wait ending with its API session.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionScope } from "@lib/sessionScope";
+import { SessionScope } from "@lib/net/sessionScope";
 import type { ProfileManager } from "@lib/profiles";
 
 const hoisted = vi.hoisted(() => ({
@@ -20,7 +20,7 @@ const hoisted = vi.hoisted(() => ({
   runHealthChecks: vi.fn(),
   warn: vi.fn(),
 }));
-vi.mock("@lib/credentials", () => ({ loadCredential: hoisted.loadCredential }));
+vi.mock("@lib/net/credentials", () => ({ loadCredential: hoisted.loadCredential }));
 vi.mock("../../src/app/session", () => ({ startSession: hoisted.startSession }));
 vi.mock("../../src/app/serverHealth", () => ({
   checkHealth: hoisted.checkHealth,

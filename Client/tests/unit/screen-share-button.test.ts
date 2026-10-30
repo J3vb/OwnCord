@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
   joinVoice: vi.fn(),
@@ -10,7 +10,7 @@ vi.mock("@lib/livekitSession", () => ({
   toggleDeafen: vi.fn(),
 }));
 
-vi.mock("@lib/connectionStats", () => ({
+vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
     start: vi.fn(),
     stop: vi.fn(),

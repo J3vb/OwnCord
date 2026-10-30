@@ -27,7 +27,7 @@ import {
   disableCamera,
   enableScreenshare,
   disableScreenshare,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 
 const log = createLogger("voice-callbacks");
 

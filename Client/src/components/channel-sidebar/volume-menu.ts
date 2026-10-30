@@ -12,7 +12,7 @@ import {
   getUserVolume,
   setUserLocalMute,
   getUserLocalMute,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { voiceText as t } from "../../i18n/voice";
 
 /** Moderation section wiring. Passed only when the local user may moderate

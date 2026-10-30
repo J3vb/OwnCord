@@ -90,7 +90,7 @@
   background: var(--bg-secondary);
 }
 
-/* A <video> whose picture a canvas draws (Linux, lib/videoSurface.ts) gives
+/* A <video> whose picture a canvas draws (Linux, lib/voice/videoSurface.ts) gives
    its place to that canvas, which every rule below styles as the video. */
 video[data-surface],
 video[hidden] + .video-surface {

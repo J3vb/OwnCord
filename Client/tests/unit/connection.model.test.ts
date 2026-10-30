@@ -43,20 +43,20 @@ vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/screenShare", () => ({
+vi.mock("@lib/voice/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined),
 }));
 vi.mock("@lib/toast", () => ({
   showToast: vi.fn(),
 }));
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 // The media layer is out of scope for a connection model (it needs a real
 // LiveKit room and WebCrypto), but handleParticipantLeft's store-visible
 // effect is not: livekitE2EE.ts drops a departed peer's verification, and the
 // verification invariant below has to be able to observe that happening.
-vi.mock("@lib/livekitSession", async () => {
+vi.mock("@lib/voice/livekitSession", async () => {
   const { clearPeerVerification, clearPeerVerifications } = await import("@stores/voice.store");
   return {
     handleVoiceToken: vi.fn(async () => {}),

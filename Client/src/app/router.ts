@@ -134,7 +134,7 @@ async function reloadAfterVoiceLeave(): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
-        import("@lib/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
+        import("@lib/voice/livekitSession").then(({ leaveVoice }) => leaveVoice(false)),
         new Promise<void>((resolve) => {
           timer = setTimeout(resolve, RELOAD_VOICE_LEAVE_TIMEOUT_MS);
         }),

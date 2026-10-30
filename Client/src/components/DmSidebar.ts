@@ -15,7 +15,7 @@
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
-import { reconcileChildren } from "@lib/reconcile";
+import { reconcileChildren } from "@lib/net/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/a11y";
 import { createIcon, type IconName } from "@lib/icons";
 import type { ModalInstance } from "@lib/modalFactory";

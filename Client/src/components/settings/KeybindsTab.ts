@@ -9,7 +9,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { vkName } from "@lib/ptt";
+import { vkName } from "@lib/voice/ptt";
 import { loadPref } from "@lib/prefs/preferences";
 import { inputMode } from "@lib/inputMode";
 import {
@@ -18,7 +18,7 @@ import {
   saveGlobalShortcutVk,
   shortcutConflict,
   type GlobalShortcutAction,
-} from "@lib/voiceShortcuts";
+} from "@lib/voice/voiceShortcuts";
 import { globalKeysErrorCode, markPortalBound, portalHoldsShortcuts } from "@lib/globalKeys";
 import { desktop } from "../../platform/desktop";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";

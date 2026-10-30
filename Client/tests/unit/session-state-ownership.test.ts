@@ -192,7 +192,7 @@ describe("session state ownership", () => {
         .map((f) => `${f.file}: ${f.binding}`);
       expect(
         unowned,
-        "register a reset with registerSessionReset (lib/sessionRegistry.ts), or add the binding to tests/session-state-allowlist.json with a reason",
+        "register a reset with registerSessionReset (lib/net/sessionRegistry.ts), or add the binding to tests/session-state-allowlist.json with a reason",
       ).toEqual([]);
     },
     SCAN_TIMEOUT_MS,

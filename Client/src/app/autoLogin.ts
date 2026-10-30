@@ -8,11 +8,11 @@
 
 import { errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
-import { loadCredential } from "@lib/credentials";
+import { loadCredential } from "@lib/net/credentials";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import type { ProfileManager } from "@lib/profiles";
-import type { SessionScope } from "@lib/sessionScope";
+import type { SessionScope } from "@lib/net/sessionScope";
 import type { createConnectPage } from "@pages/ConnectPage";
 import { connectText } from "../i18n/connect";
 import { desktop } from "../platform/desktop";

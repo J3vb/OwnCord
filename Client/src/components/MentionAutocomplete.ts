@@ -10,7 +10,7 @@ import { getCurrentUser } from "@stores/auth.store";
 import { currentUserHasPermission } from "@lib/permissions";
 import { Permission } from "@lib/types";
 import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/text/mentions";
-import { idMentionsEnabled } from "@lib/serverCapabilities";
+import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { channelsStore } from "@stores/channels.store";
 import {
   createInlineAutocomplete,

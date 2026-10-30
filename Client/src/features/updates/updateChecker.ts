@@ -5,7 +5,7 @@
 
 import { Disposable } from "../../lib/disposable";
 import { createLogger } from "../../lib/logger";
-import { checkForUpdate } from "../../lib/updater";
+import { checkForUpdate } from "../../lib/net/updater";
 
 const log = createLogger("update-checker");
 

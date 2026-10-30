@@ -23,10 +23,10 @@ const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 // The attachment cache is probed through its own fetch path: a second fetch of
 // the same file is a cache miss, which is how a reset shows.
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
 }));
-import { listSessionResets, registerSessionReset } from "../../src/lib/sessionRegistry";
+import { listSessionResets, registerSessionReset } from "../../src/lib/net/sessionRegistry";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
 import { stickersStore, setStickers } from "../../src/stores/stickers.store";
@@ -80,7 +80,7 @@ import {
 import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
 import { createAvatarElement } from "../../src/components/message-list/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
-import { noteWatchSent, takeWatchRefusal } from "../../src/lib/watchRequest";
+import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   bindGifFavoritesApi,

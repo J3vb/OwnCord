@@ -16,7 +16,7 @@ import {
   applyReadyCapabilities,
   resetServerCapabilities,
   serverSupportsGameActivity,
-} from "@lib/serverCapabilities";
+} from "@lib/net/serverCapabilities";
 import { GAME_ACTIVITY_PREF_KEY, isGameActivityShared } from "@lib/gameActivityBridge";
 import { loadPref } from "@lib/prefs/preferences";
 import {

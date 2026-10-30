@@ -17,7 +17,7 @@ import {
   hasReceivedReady,
   onGameActivityPolicy,
   serverSupportsGameActivity,
-} from "@lib/serverCapabilities";
+} from "@lib/net/serverCapabilities";
 import { savePref } from "@lib/prefs/preferences";
 import { desktop } from "../../platform/desktop";
 import { gameActivityText as t } from "../../i18n/gameActivity";

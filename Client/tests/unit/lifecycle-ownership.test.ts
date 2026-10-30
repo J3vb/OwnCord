@@ -29,7 +29,7 @@ const srcDir = path.join(clientRoot, "src");
 const LONG_LIVED = /^(window|document|document\.body|document\.documentElement|navigator\..*)$/;
 
 // The two lifecycle primitives. R4 exempts them by rule, not by allowlist.
-const PRIMITIVE_FILES = new Set(["lib/disposable.ts", "lib/sessionScope.ts"]);
+const PRIMITIVE_FILES = new Set(["lib/disposable.ts", "lib/net/sessionScope.ts"]);
 
 const sourceFiles = readdirSync(srcDir, { recursive: true, encoding: "utf8" })
   .filter(
@@ -102,7 +102,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime cross-tab storage listener installed once at module load",
   },
   {
-    file: "lib/deviceManager.ts",
+    file: "lib/voice/deviceManager.ts",
     receiver: "navigator.mediaDevices",
     event: "devicechange",
     category: "per-mount",
@@ -227,7 +227,7 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the per-attempt HEALTH_TIMEOUT_MS timer that aborts it",
   },
   {
-    file: "lib/roomEventHandlers.ts",
+    file: "lib/voice/roomEventHandlers.ts",
     fn: "abandonRoomAndReconnect",
     category: "cancellation-token",
     reason: "owner: the next attempt, which aborts this one",

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import { createPresenceSender } from "@lib/presence";
-import { createPresenceLimiter } from "@lib/rate-limiter";
+import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import {
   loadCustomStatus,
   loadUserStatus,

@@ -17,7 +17,10 @@ import { claimComposer } from "../../src/features/messaging/activeComposer";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { pickAvatarColor } from "@components/message-list/avatar";
 import { applyThemeByName } from "@lib/prefs/themes";
-import { applyReadyCapabilities, resetServerCapabilities } from "../../src/lib/serverCapabilities";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../src/lib/net/serverCapabilities";
 import { openUserProfilePopup } from "../../src/features/profiles/openUserProfilePopup";
 
 /**

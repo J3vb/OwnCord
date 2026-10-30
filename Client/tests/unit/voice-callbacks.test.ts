@@ -60,7 +60,7 @@ vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: mockUiGetState },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   leaveVoice: mockVoiceSessionLeave,
   setMuted: mockSetMuted,
   setDeafened: mockSetDeafened,

@@ -278,17 +278,17 @@ native surface itself lives only in `platform/desktop/`.
 | HTTP fetch        | `lib/api.ts`, `lib/profiles.ts`, `message-list/attachments.ts` (server files)                         | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
 | External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                                          | `api/core`; 2 invokes (`external_*`)                                                                                                                  | ⚠ no equivalent — a page cannot classify resolved addresses |
 | WebSocket         | `lib/ws.ts`                                                                                           | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                                                   | ⚠ see hard cases                                            |
-| Secret storage    | `lib/credentials.ts`, `lib/identity.ts`, `lib/pendingMessages.ts`                                     | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
+| Secret storage    | `lib/net/credentials.ts`, `lib/net/identity.ts`, `lib/pendingMessages.ts`                             | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
 | Settings          | `lib/profiles.ts`                                                                                     | `api/core` (`save_settings`, `get_settings`)                                                                                                          | `localStorage` / IndexedDB                                  |
-| Native proxies    | `lib/httpProxy.ts`, `lib/livekitUrlResolver.ts`                                                       | `api/core`; 3 invokes                                                                                                                                 | not needed — the proxies exist to work around desktop TLS   |
+| Native proxies    | `lib/net/httpProxy.ts`, `lib/voice/livekitUrlResolver.ts`                                             | `api/core`; 3 invokes                                                                                                                                 | not needed — the proxies exist to work around desktop TLS   |
 | Notifications     | `lib/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge)                         | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `clear_call_notification`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
 | Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`                             | `api/path`, `plugin-fs`                                                                                                                               | in-memory ring buffer + download                            |
 | Window            | `lib/prefs/windowState.ts`, `lib/notifications.ts`, `features/zoom/`                                  | `api/window`, `api/webview` (`setZoom`)                                                                                                               | mostly unsupported; degrade                                 |
-| Updater / process | `lib/updater.ts`, `settings/AdvancedTab.ts`                                                           | `api/core`, `api/event` (`update-progress`, `update-installing`), `plugin-process`, `plugin-autostart`                                                | unsupported — the page reloads instead                      |
+| Updater / process | `lib/net/updater.ts`, `settings/AdvancedTab.ts`                                                       | `api/core`, `api/event` (`update-progress`, `update-installing`), `plugin-process`, `plugin-autostart`                                                | unsupported — the page reloads instead                      |
 | Tray status       | `main.ts`                                                                                             | `api/event` (`status-change`)                                                                                                                         | unsupported — there is no tray                              |
 | Shell / opener    | `lib/admin-panel.ts`, `main.ts`                                                                       | `api/core` (`open_external_url`)                                                                                                                      | `window.open`                                               |
 | File save / pick  | `message-list/attachments.ts`                                                                         | `plugin-dialog`, `plugin-fs`                                                                                                                          | `<a download>` / File System Access API                     |
-| Input / PTT       | `lib/ptt.ts`                                                                                          | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
+| Input / PTT       | `lib/voice/ptt.ts`                                                                                    | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
 | Global shortcuts  | `pages/MainPage.ts`, `settings/{KeybindsTab,pttControls}.ts`, `platform/desktop/pushToTalkService.ts` | `api/core`, `api/event`; 6 invokes, 2 event listens                                                                                                   | unsupported — a page cannot observe keys outside itself     |
 | Deep links        | `lib/deep-link.ts`                                                                                    | `plugin-deep-link`                                                                                                                                    | URL routing                                                 |
 | App metadata      | `settings/AboutTab.ts`                                                                                | `api/app`                                                                                                                                             | build-time constant                                         |
@@ -298,7 +298,7 @@ native surface itself lives only in `platform/desktop/`.
 
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`
 surface exists for them: the cross-platform media-device call sites
-(`lib/deviceManager.ts`, `lib/connectionDiagnostics.ts`,
+(`lib/voice/deviceManager.ts`, `lib/net/connectionDiagnostics.ts`,
 `components/settings/VoiceAudioTab.ts`) use the Web API
 `navigator.mediaDevices`, while the Linux-native voice session lists its audio
 and camera devices through its own `native_voice_*` commands (the audio
@@ -324,14 +324,14 @@ publicly-trusted certificate and say so — not emulate the flow. This trust pat
 has been hardened twice already (identity TOFU, then a re-pin TOCTOU); do not
 let a browser adapter quietly reopen it.
 
-**`lib/credentials.ts` / `lib/identity.ts` — OS keychain.** Secrets live in
+**`lib/net/credentials.ts` / `lib/net/identity.ts` — OS keychain.** Secrets live in
 Windows Credential Manager / GNOME Keyring / macOS Keychain, and
 `Client/src-tauri/src/secret_store.rs` reads each write back before returning.
 The browser has no peer for this. Whatever the browser adapter stores, it is
 strictly weaker, and the E2EE identity key is among the secrets involved. This
 is a security-posture decision, not a storage swap.
 
-**`lib/ptt.ts` — push-to-talk.** PTT is deliberately hand-rolled rather than
+**`lib/voice/ptt.ts` — push-to-talk.** PTT is deliberately hand-rolled rather than
 using `plugin-global-shortcut`, because it must observe a key held down while
 OwnCord is unfocused. A browser cannot see keys outside its tab. The browser
 adapter can offer in-tab PTT or voice-activity detection, but not the desktop
@@ -385,7 +385,7 @@ Three shapes recur in B7-5's moves, worth knowing before adding a member:
   `desktop/pushToTalk.ts` is a facade over `desktop/pushToTalkService.ts`,
   loaded on first use, so the static graph gains no import cycle.
 - **Where a `lib/` export keeps callers, it stays as a thin delegate**
-  (`lib/updater.ts`, `lib/httpProxy.ts`, `LiveKitUrlResolver`), and its legacy
+  (`lib/net/updater.ts`, `lib/net/httpProxy.ts`, `LiveKitUrlResolver`), and its legacy
   suite binding stays with it. Where the export went internal (deep links,
   push-to-talk, and every capability whose seam was lifted in place), the
   legacy binding was deleted in the same commit.

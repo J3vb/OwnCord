@@ -18,7 +18,7 @@ import { isServerRowKind } from "./text/messageKind";
 import { mentionsCurrentUser } from "./text/mentions";
 import { jumpToMessage } from "./message-navigation";
 import { createLogger } from "./logger";
-import { registerSessionReset } from "./sessionRegistry";
+import { registerSessionReset } from "./net/sessionRegistry";
 import { cleanupNotificationAudio, playNotificationSound } from "./notificationSound";
 import { soundSwitchOn } from "./prefs/soundPrefs";
 import { resolveAuthor } from "@lib/text/formatting";

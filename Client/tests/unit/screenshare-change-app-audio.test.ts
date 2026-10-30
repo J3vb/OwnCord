@@ -32,7 +32,7 @@ vi.mock("livekit-client", async (importOriginal) => {
   };
 });
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...a) as unknown }));
-vi.mock("../../src/lib/appAudioTrack", () => ({
+vi.mock("../../src/lib/voice/appAudioTrack", () => ({
   openAppAudio: (...a: unknown[]) => openAppAudio(...a) as unknown,
 }));
 vi.mock("@lib/prefs/preferences", () => ({
@@ -40,9 +40,9 @@ vi.mock("@lib/prefs/preferences", () => ({
   savePref: vi.fn(),
 }));
 
-const { watchScreenEnded } = await import("@lib/screenShare");
+const { watchScreenEnded } = await import("@lib/voice/screenShare");
 const { changeScreenshareSource } = await import("../../src/features/voice/screenshareChange");
-const { startAppShareAudio } = await import("../../src/lib/appAudioShare");
+const { startAppShareAudio } = await import("../../src/lib/voice/appAudioShare");
 const { voiceStore } = await import("@stores/voice.store");
 
 type State = Parameters<typeof changeScreenshareSource>[0];

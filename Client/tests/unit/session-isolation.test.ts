@@ -28,7 +28,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
@@ -37,7 +37,7 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn().mockResolvedValue(undefined),
@@ -56,7 +56,7 @@ vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
-vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
 const PROFILES = [
   {
     id: "p-a",
@@ -94,7 +94,7 @@ vi.mock("@lib/profiles", () => ({
 
 // The media session is its own suite (session-isolation-media.test.ts); here
 // only the switch's call into it is observed.
-vi.mock("@lib/livekitSession", () => ({ leaveVoice: vi.fn() }));
+vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
 vi.mock("@lib/notificationSound", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@lib/notificationSound")>()),
   cleanupNotificationAudio: vi.fn(),
@@ -113,7 +113,7 @@ const mockApiLogout = vi.fn().mockResolvedValue(undefined);
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
 const mockCheckForUpdate = vi.fn();
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
@@ -229,12 +229,12 @@ import { blocksStore } from "@stores/blocks.store";
 import { membersStore, setMembers } from "@stores/members.store";
 import { dmStore, setDmChannels } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/notificationSound";
-import { leaveVoice } from "@lib/livekitSession";
-import { deleteCredential, loadCredential } from "@lib/credentials";
+import { leaveVoice } from "@lib/voice/livekitSession";
+import { deleteCredential, loadCredential } from "@lib/net/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/profiles";
 import { createConnectPage } from "@pages/ConnectPage";

@@ -11,9 +11,9 @@ import {
   verifyEphemeralKeySignature,
   computeKeyFingerprint,
   computeRawKeyFingerprint,
-} from "../../lib/e2eeCrypto";
-import { getIdentityPin, storeIdentityPin } from "../../lib/identity";
-import { trustedPins } from "../../lib/identityPins";
+} from "../../lib/net/e2eeCrypto";
+import { getIdentityPin, storeIdentityPin } from "../../lib/net/identity";
+import { trustedPins } from "../../lib/net/identityPins";
 import { memberDisplayName, membersStore } from "../../stores/members.store";
 import { setPeerVerification } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";

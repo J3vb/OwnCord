@@ -42,7 +42,7 @@ import { Disposable } from "./disposable";
 import { createLogger } from "./logger";
 import { ServerMessageType as S } from "./protocolTypes";
 import { setMusicRefusalHandler } from "./gameActivityBridge";
-import { onGameActivityPolicy, serverSupportsListeningActivity } from "./serverCapabilities";
+import { onGameActivityPolicy, serverSupportsListeningActivity } from "./net/serverCapabilities";
 import type { WsClient } from "./ws";
 import {
   MUSIC_ACTIVITY_PREF_KEY,

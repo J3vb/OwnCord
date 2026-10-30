@@ -33,8 +33,12 @@ import {
   publishIdentityKey,
   ensureIdentityKeyPublished,
   getDeviceIdentityPublicKey,
-} from "@lib/identity";
-import { generateIdentityKeyPair, exportPublicKey, exportIdentityKeyPair } from "@lib/e2eeCrypto";
+} from "@lib/net/identity";
+import {
+  generateIdentityKeyPair,
+  exportPublicKey,
+  exportIdentityKeyPair,
+} from "@lib/net/e2eeCrypto";
 import { authStore } from "@stores/auth.store";
 
 /**

@@ -1,4 +1,4 @@
-// Legacy binding for the AppUpdater suite: the `lib/updater.ts` exports,
+// Legacy binding for the AppUpdater suite: the `lib/net/updater.ts` exports,
 // wrapped with no cast against the contract. B7-5 moved the install behind
 // `platform/desktop` and kept these exports as its callers' names, so the
 // suite runs here and in `updater.desktop.test.ts`.
@@ -28,7 +28,7 @@ describeAppUpdaterSuite(async () => {
   relaunch.mockReset().mockResolvedValue(undefined);
   listen.mockReset().mockResolvedValue(unlisten);
 
-  const mod = await import("../../../src/lib/updater");
+  const mod = await import("../../../src/lib/net/updater");
   const legacy: AppUpdater = {
     available: true,
     checkForUpdate: mod.checkForUpdate,

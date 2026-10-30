@@ -240,8 +240,8 @@ vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("@lib/noise-suppression", () => ({ createRNNoiseProcessor: vi.fn() }));
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/voice/noiseSuppression", () => ({ createRNNoiseProcessor: vi.fn() }));
+vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => ({ publicKey: {}, privateKey: {} })),
   exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
   importPublicKey: vi.fn(async () => ({})),
@@ -255,7 +255,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
   computeKeyFingerprint: vi.fn(async () => "AB12"),
   computeRawKeyFingerprint: vi.fn(async () => "5E55"),
 }));
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => ({ publicKey: {}, privateKey: {} })),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
@@ -264,7 +264,7 @@ globalThis.Worker = vi.fn(function () {
   throw new Error("no E2EE web worker on Linux");
 }) as unknown as typeof Worker;
 
-import { LiveKitSession } from "../../src/lib/livekitSession";
+import { LiveKitSession } from "../../src/lib/voice/livekitSession";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";

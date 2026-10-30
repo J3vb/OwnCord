@@ -21,12 +21,12 @@ import {
   type ConnectionStats,
   type ConnectionStatsPoller,
   type QualityLevel,
-} from "@lib/connectionStats";
+} from "@lib/voice/connectionStats";
 import {
   getRoomForStats,
   reapplyEnhancedNoiseSuppression,
   retryMicPermission,
-} from "@lib/livekitSession";
+} from "@lib/voice/livekitSession";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../i18n/voice";
 import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";

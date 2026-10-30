@@ -8,11 +8,11 @@
 import type { IconName } from "../../lib/icons";
 import type { MountableComponent } from "../../lib/text/safeRender";
 import type { PeerVerification } from "../../stores/voice.store";
-import { rePinPeerIdentity, peerAnnouncedIdentityKey } from "../../lib/livekitSession";
+import { rePinPeerIdentity, peerAnnouncedIdentityKey } from "../../lib/voice/livekitSession";
 import { showToast } from "../../lib/toast";
 import { createLogger } from "../../lib/logger";
 import { membersStore } from "../../stores/members.store";
-import { importIdentityPublicKey, computeKeyFingerprint } from "../../lib/e2eeCrypto";
+import { importIdentityPublicKey, computeKeyFingerprint } from "../../lib/net/e2eeCrypto";
 import { shellText } from "../../i18n/shell";
 
 const log = createLogger("peer-verification");

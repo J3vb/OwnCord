@@ -13,8 +13,8 @@ import { createZoomPan, PAN_MIN_SCALE } from "@lib/zoomPan";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
-import { formatByteSize } from "@lib/connectionStats";
-import { ensureHttpProxy } from "@lib/httpProxy";
+import { formatByteSize } from "@lib/voice/connectionStats";
+import { ensureHttpProxy } from "@lib/net/httpProxy";
 import { authStore, getToken } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import { desktop } from "../../platform/desktop";
@@ -34,7 +34,7 @@ import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
 import { messageStatusText } from "../../i18n/messageStatus";
 import { clearStillCache } from "../../features/messaging/emojiStill";
 import { clearAnimatedStills } from "@lib/animatedStill";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { sniffImageBlob } from "@lib/imageHeader";
 import {
   ATTACHMENT_BOX_MAX_H,

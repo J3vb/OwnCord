@@ -30,13 +30,13 @@ import {
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore } from "../../stores/members.store";
-import { noteWatchSent, resetWatchRequest } from "../../lib/watchRequest";
+import { noteWatchSent, resetWatchRequest } from "../../lib/voice/watchRequest";
 import { clearAfkMove } from "./moveHint";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
 
-vi.mock("../../lib/livekitSession", () => ({
+vi.mock("../../lib/voice/livekitSession", () => ({
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   leaveVoice: vi.fn(),
@@ -53,8 +53,8 @@ vi.mock("../../lib/livekitSession", () => ({
   retryWatching: vi.fn(),
 }));
 vi.mock("../../lib/toast", () => ({ showToast: vi.fn() }));
-vi.mock("../../lib/screenShare", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/screenShare")>();
+vi.mock("../../lib/voice/screenShare", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/voice/screenShare")>();
   return { ...actual, rollbackPendingVideo: vi.fn() };
 });
 import {
@@ -71,8 +71,8 @@ import {
   reconcileVideoFlags,
   resendWatching,
   retryWatching,
-} from "../../lib/livekitSession";
-import { rollbackPendingVideo } from "../../lib/screenShare";
+} from "../../lib/voice/livekitSession";
+import { rollbackPendingVideo } from "../../lib/voice/screenShare";
 import { expectConsole } from "../../../tests/helpers/console";
 import { captureLogs } from "../../../tests/helpers/log-capture";
 import { showToast } from "../../lib/toast";

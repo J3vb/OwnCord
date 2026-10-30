@@ -1,6 +1,6 @@
 import type { ApiClient } from "@lib/api";
 import { createElement } from "@lib/dom";
-import { dmPrivacyEnabled } from "@lib/serverCapabilities";
+import { dmPrivacyEnabled } from "@lib/net/serverCapabilities";
 import { reportEntryText } from "../../i18n/reportEntry";
 import { buildSafetyTab } from "../safety/Notices";
 

@@ -205,7 +205,7 @@ vi.mock("@lib/toast", () => ({
   showActionToast: mockShowActionToast,
 }));
 
-vi.mock("@lib/noise-suppression", () => ({
+vi.mock("@lib/voice/noiseSuppression", () => ({
   createRNNoiseProcessor: vi.fn(),
 }));
 
@@ -219,7 +219,7 @@ const mockIdentityKeyPair = vi.hoisted(() => ({
   privateKey: { type: "id-private" } as unknown as CryptoKey,
 }));
 
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => mockKeyPair),
   exportPublicKey: vi.fn(async () => "bW9ja2VwaGVtZXJhbA=="),
   importPublicKey: vi.fn(async () => ({ type: "public" }) as unknown as CryptoKey),
@@ -238,7 +238,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
 }));
 
 // F3 TOFU: identity keyring + peer pin store (Tauri-backed; mocked here).
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
@@ -257,7 +257,7 @@ import {
   LiveKitSession,
   getRoomForStats,
   setPttPollingLive,
-} from "../../src/lib/livekitSession";
+} from "../../src/lib/voice/livekitSession";
 import {
   setLocalMuted,
   setLocalDeafened,
@@ -270,8 +270,8 @@ import {
   setPeerVerification,
   setEncryptionDegraded,
 } from "@stores/voice.store";
-import { getIdentityPin, storeIdentityPin } from "@lib/identity";
-import { verifyEphemeralKeySignature } from "@lib/e2eeCrypto";
+import { getIdentityPin, storeIdentityPin } from "@lib/net/identity";
+import { verifyEphemeralKeySignature } from "@lib/net/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
@@ -279,13 +279,13 @@ import { keepDmForCall, resetKeptCallDms } from "../../src/features/direct-messa
 import type { ReadyMember } from "../../src/lib/types";
 import { ensureLiveKitProxy, getLiveKitProxyPort } from "../../src/platform/desktop/nativeProxies";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
-import { takeWatchRefusal } from "../../src/lib/watchRequest";
+import { takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import {
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
   setDeafened as boundSetDeafened,
   cleanupAll as boundCleanupAll,
-} from "../../src/lib/livekitSession";
+} from "../../src/lib/voice/livekitSession";
 
 function createDeferred<T>(): {
   promise: Promise<T>;

@@ -14,7 +14,7 @@
  */
 
 import { createLogger } from "@lib/logger";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { ReactionUser } from "@lib/types";
 
 const log = createLogger("reaction-tooltip");

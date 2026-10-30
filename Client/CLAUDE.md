@@ -7,7 +7,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 
 - `src/stores/` observable stores · `src/lib/` protocol, WS, voice, E2EE ·
   `src/pages/`, `src/components/` UI · `src/features/voice/` modules
-  extracted from `lib/livekitSession.ts` and `lib/livekitE2EE.ts` (the
+  extracted from `lib/voice/livekitSession.ts` and `lib/voice/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety,moderation}/wsHandlers.ts`
   hold the WebSocket handler bodies extracted from `lib/dispatcher.ts`;
@@ -94,7 +94,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `lib/notifications` — `voice.store.ts` registers its logout teardown through
   `registerVoiceLogoutTeardown` at load, and `lib/notifications.ts` registers the
   notification-audio cleanup through `registerSessionReset`
-  (`lib/sessionRegistry.ts`, the leaf every per-server reset registers with). In
+  (`lib/net/sessionRegistry.ts`, the leaf every per-server reset registers with). In
   `components/message-list/`, `attachments.ts` is the leaf every renderer
   imports (it also owns the image lightbox, which `media.ts` re-exports), so it
   must not import a sibling renderer. `madge` still lists cycles that close only
@@ -118,7 +118,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   before touching native voice, camera, screen share, codecs or global keys.
 - **Lifecycle ownership is enforced, not assumed (B7-11).** `Disposable`
   (`src/lib/disposable.ts`) owns component, overlay and render lifetimes;
-  `SessionScope` (`src/lib/sessionScope.ts`) owns session-bound async work.
+  `SessionScope` (`src/lib/net/sessionScope.ts`) owns session-bound async work.
   `tests/unit/lifecycle-ownership.test.ts` classifies every production site
   from the syntax tree and fails on an unowned one that is not on an exact,
   shrink-only allowlist (R1 long-lived-target listeners need `signal`/`once`;

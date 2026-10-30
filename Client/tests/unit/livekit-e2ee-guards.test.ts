@@ -25,7 +25,7 @@ const mockIdentityKeyPair = vi.hoisted(() => ({
   privateKey: { type: "id-private" } as unknown as CryptoKey,
 }));
 
-vi.mock("@lib/e2eeCrypto", () => ({
+vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => mockKeyPair),
   exportPublicKey: vi.fn(async (key: { b64?: string }) => key.b64 ?? "bW9ja2VwaGVtZXJhbA=="),
   importPublicKey: vi.fn(async (b64: string) => ({ type: "peer", b64 }) as unknown as CryptoKey),
@@ -42,7 +42,7 @@ vi.mock("@lib/e2eeCrypto", () => ({
   computeRawKeyFingerprint: vi.fn(async () => "5E55 1234 5678 9ABC"),
 }));
 
-vi.mock("@lib/identity", () => ({
+vi.mock("@lib/net/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => mockIdentityKeyPair),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => "stored"),
@@ -96,13 +96,13 @@ vi.mock("@lib/logger", () => ({
   },
 }));
 
-vi.mock("@lib/voiceJoinTrace", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/voiceJoinTrace")>()),
+vi.mock("@lib/voice/voiceJoinTrace", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@lib/voice/voiceJoinTrace")>()),
   markJoinMilestone: vi.fn(),
 }));
 
-import { E2EEManager } from "../../src/lib/livekitE2EE";
-import { markJoinMilestone } from "@lib/voiceJoinTrace";
+import { E2EEManager } from "../../src/lib/voice/livekitE2EE";
+import { markJoinMilestone } from "@lib/voice/voiceJoinTrace";
 import { clearPeerVerification, clearPeerVerifications } from "@stores/voice.store";
 import {
   computeRawKeyFingerprint,
@@ -111,8 +111,8 @@ import {
   importPublicKey,
   signEphemeralKey,
   wrapRoomKey,
-} from "@lib/e2eeCrypto";
-import { getIdentityPin, getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/identity";
+} from "@lib/net/e2eeCrypto";
+import { getIdentityPin, getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
 
 const SELF = 1;
 const CHANNEL = 7;

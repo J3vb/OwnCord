@@ -10,7 +10,7 @@ import { ApiClientError, errorText } from "@lib/api";
 import type { SessionInfo } from "@lib/api";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/toast";
-import { sessionDeviceLabel } from "@lib/session-notice";
+import { sessionDeviceLabel } from "@lib/net/sessionNotice";
 import { formatMessageTimestamp } from "@lib/text/formatting";
 import { authStore } from "@stores/auth.store";
 import { uiStore } from "@stores/ui.store";
@@ -24,7 +24,7 @@ import {
 } from "@components/message-list/attachments";
 import { cropImage, type CropResult } from "@lib/imageCrop";
 import { isAnimatedImage } from "@lib/animatedStill";
-import { profileBannersEnabled } from "@lib/serverCapabilities";
+import { profileBannersEnabled } from "@lib/net/serverCapabilities";
 import { isBannerColor, paintBanner } from "../../features/profiles/banner";
 import { bannerImages } from "../bannerImages";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";

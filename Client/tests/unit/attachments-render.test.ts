@@ -31,7 +31,7 @@ vi.mock("@tauri-apps/plugin-http", () => ({
 
 // The HTTP TOFU proxy resolves a server host to a fixed loopback origin so
 // server-bound fetches are cert-pinned; external URLs go to the broker instead.
-vi.mock("@lib/httpProxy", () => ({
+vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
   stopHttpProxy: () => Promise.resolve(),
 }));

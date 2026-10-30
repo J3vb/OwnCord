@@ -22,7 +22,7 @@ import { authStore } from "@stores/auth.store";
 
 const mockToast = vi.hoisted(() => vi.fn());
 vi.mock("../../src/lib/toast", () => ({ showToast: mockToast }));
-vi.mock("../../src/lib/credentials", () => ({
+vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("../../src/components/SettingsOverlay", () => ({

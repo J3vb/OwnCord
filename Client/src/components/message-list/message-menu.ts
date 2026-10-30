@@ -18,7 +18,7 @@ import {
   type ContextMenuSeparator,
 } from "@lib/context-menu";
 import { Disposable } from "@lib/disposable";
-import { readPointerEnabled } from "@lib/serverCapabilities";
+import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { wantsNativeMenu } from "@lib/dom";
 import type { Message } from "@stores/messages.store";
 import { isServerRowKind } from "@lib/text/messageKind";

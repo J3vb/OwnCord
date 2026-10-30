@@ -4,8 +4,8 @@ const auth = vi.hoisted((): { user: { id: number } | null } => ({ user: { id: 7 
 vi.mock("../../stores/auth.store", () => ({
   authStore: { getState: () => auth },
 }));
-vi.mock("../../lib/identity", () => ({ getOrCreateIdentityKeyPair: vi.fn() }));
-vi.mock("../../lib/e2eeCrypto", () => ({
+vi.mock("../../lib/net/identity", () => ({ getOrCreateIdentityKeyPair: vi.fn() }));
+vi.mock("../../lib/net/e2eeCrypto", () => ({
   signEphemeralKey: vi.fn(),
   exportPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
@@ -26,8 +26,8 @@ vi.mock("../../lib/logger", () => ({
   },
 }));
 
-import { getOrCreateIdentityKeyPair } from "../../lib/identity";
-import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/e2eeCrypto";
+import { getOrCreateIdentityKeyPair } from "../../lib/net/identity";
+import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/net/e2eeCrypto";
 import { E2EEIdentity, rawFromBase64 } from "./e2eeIdentity";
 
 const PAIR = { privateKey: "priv", publicKey: "pub" } as unknown as CryptoKeyPair;

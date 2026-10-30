@@ -21,9 +21,9 @@ import {
   getScreenShareMaxBitrate,
   getScreenShareQuality,
   isScreenShareSimulcast,
-} from "@lib/screenShare";
+} from "@lib/voice/screenShare";
 import type { NativeVoiceScreenCapture } from "../../../platform/contracts/nativeVoice";
-import type { StreamQuality } from "@lib/screenShare";
+import type { StreamQuality } from "@lib/voice/screenShare";
 import { getScreenSourcePicker } from "./screenPickerSlot";
 import { captureOptions } from "./screenTrack";
 

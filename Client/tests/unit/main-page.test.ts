@@ -41,7 +41,7 @@ const { capturedOnRemoteVideo } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@lib/livekitSession", () => ({
+vi.mock("@lib/voice/livekitSession", () => ({
   cleanupAll: vi.fn(),
   setOnRemoteVideo: vi.fn(
     (cb: (userId: number, stream: MediaStream, isScreenshare: boolean) => void) => {
@@ -99,7 +99,7 @@ vi.mock("@components/UpdateNotifier", () => ({
   createUpdateNotifier: mockCreateUpdateNotifier,
 }));
 
-vi.mock("@lib/audioElements", () => ({
+vi.mock("@lib/voice/audioElements", () => ({
   setAudioVolumeHost: mockSetAudioVolumeHost,
 }));
 
@@ -1370,7 +1370,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
     await vi.dynamicImportSettled();
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
     ws.emit("call_incoming", { channel_id: 50, from_user: 10, username: "alice" });
@@ -1669,7 +1669,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("wires full screen, the full-screen call controls, stream stats and video views into the video grid", async () => {
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     const setFullscreen = vi.spyOn(desktop.window, "setFullscreen").mockResolvedValue(undefined);
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -2087,7 +2087,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   // WP 1D-1: outside a call the shortcut toggles the local, saved state and
   // sends nothing; the next join restates it to the server.
   it("toggles mute and deafen from a global shortcut outside a voice channel, sending nothing (U6)", async () => {
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
     const onShortcut = vi
       .spyOn(desktop.globalShortcuts, "onShortcut")
@@ -2135,7 +2135,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
-    const { disableScreenshare } = await import("@lib/livekitSession");
+    const { disableScreenshare } = await import("@lib/voice/livekitSession");
     page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     page.mount(container);
     const grid = capturedChatAreaRef.current!.videoGrid;
@@ -2192,7 +2192,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
     await vi.dynamicImportSettled();
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
     mockCreateChatArea.mock.calls[0]![0].onStartVideoCall();
@@ -2222,7 +2222,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
     await vi.dynamicImportSettled();
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 50,
@@ -2245,7 +2245,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
     await vi.dynamicImportSettled();
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
     const { noteJoinFailed } = await import("../../src/features/voice/joinBackoff");
     noteJoinFailed(Date.now(), true);
@@ -2270,7 +2270,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     page = createMainPage({ ws, api: fakeApi() });
     page.mount(container);
     await vi.dynamicImportSettled();
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
     mockCreateChatArea.mock.calls[0]![0].onStartCall();
@@ -4425,7 +4425,7 @@ describe("MainPage — destroy isolates every teardown step", () => {
     const stores = [uiStore, channelsStore, voiceStore, dmStore, membersStore, authStore];
     const originals = stores.map((s) => [s.subscribe, s.subscribeSelector] as const);
     const counts = stores.map((s) => trackSubscriptions(s as never));
-    const lk = await import("@lib/livekitSession");
+    const lk = await import("@lib/voice/livekitSession");
     const page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     try {
       page.mount(container);

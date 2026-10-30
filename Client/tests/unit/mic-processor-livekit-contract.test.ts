@@ -6,8 +6,8 @@
 // that the sender only ever received the processor's gated output.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalAudioTrack, Track } from "livekit-client";
-import { createMicProcessor, type MicProcessor } from "../../src/lib/micProcessor";
-import { AudioPipeline } from "../../src/lib/audioPipeline";
+import { createMicProcessor, type MicProcessor } from "../../src/lib/voice/micProcessor";
+import { AudioPipeline } from "../../src/lib/voice/audioPipeline";
 import {
   FakeAudioContext,
   FakeMediaStream,

@@ -13,7 +13,7 @@ import {
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { savePref } from "@lib/prefs/preferences";
 import { createPresenceSender } from "@lib/presence";
-import { createPresenceLimiter } from "@lib/rate-limiter";
+import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 
 function setUser(custom: string | null = null): void {

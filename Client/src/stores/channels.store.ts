@@ -4,7 +4,7 @@
  */
 
 import { createStore } from "@lib/store";
-import { registerSessionReset } from "@lib/sessionRegistry";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { registerRoleIdLookup } from "@lib/roleLookup";
 import { connectText } from "../i18n/connect";
 import type {

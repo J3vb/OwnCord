@@ -26,7 +26,7 @@ const { mockOnOpenUrl } = vi.hoisted(() => ({
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
@@ -37,7 +37,7 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/credentials", () => ({
+vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   deleteCredential: vi.fn().mockResolvedValue(undefined),
@@ -56,7 +56,7 @@ vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
   createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
-vi.mock("@lib/cert-reconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
+vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
 const mockProfileManager = vi.hoisted(() => ({
   loadProfiles: vi.fn().mockResolvedValue(undefined),
   saveProfiles: vi.fn().mockResolvedValue(undefined),
@@ -88,7 +88,7 @@ const mockRegister = vi.fn();
 // calls checkForUpdate; stub the Tauri-backed updater so the test observes the
 // call instead of an invoke() into nothing.
 const mockCheckForUpdate = vi.fn();
-vi.mock("@lib/updater", () => ({
+vi.mock("@lib/net/updater", () => ({
   checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
   downloadAndInstallUpdate: vi.fn(),
   subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {

@@ -1,6 +1,6 @@
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { settingsText as t } from "../../i18n/settings";
-import { recordSelfTestStage, resetSelfTest } from "@lib/voiceJoinTrace";
+import { recordSelfTestStage, resetSelfTest } from "@lib/voice/voiceJoinTrace";
 import {
   diagnosticLabel,
   getConnectionDiagnosticsSessionSignal,
@@ -8,7 +8,7 @@ import {
   type DiagnosticResult,
   type DiagnosticStage,
   type DiagnosticStatus,
-} from "@lib/connectionDiagnostics";
+} from "@lib/net/connectionDiagnostics";
 import {
   createDisclosure,
   setStatusIcon,
