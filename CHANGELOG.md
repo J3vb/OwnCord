@@ -53,6 +53,12 @@ and only when it changes something a contributor or fork holder must do
 
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
 
+### Fixed
+
+**Phones and touch screens**
+
+- Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
+
 ## v2.6.0
 
 **OwnCord 2.6** (the seventh public beta) adds a Discord-style server rail, a Media panel for every text channel, Discord channel import, passwords on voice channels and your own CSS themes. Screen shares now stay smooth when the connection drops, and the web client catches up with the desktop app.
