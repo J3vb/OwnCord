@@ -28,9 +28,9 @@ import {
   fetchImageAsObjectUrl,
   previewExternal,
   setServerHost,
-} from "../../components/message-list/attachments";
-import { clearMediaCaches, renderUrlEmbeds } from "../../components/message-list/media";
-import { clearEmbedCaches } from "../../components/message-list/embeds";
+} from "../messaging/content/attachments";
+import { clearMediaCaches, renderUrlEmbeds } from "../messaging/content/media";
+import { clearEmbedCaches } from "../messaging/content/embeds";
 import { createGifPicker } from "../../components/GifPicker";
 import { nsfwConsentRequired } from "./nsfw";
 import {

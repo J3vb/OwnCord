@@ -12,6 +12,24 @@ process.env.OC_ALLOW_UNPINNED_TZ = "1";
 // Lets wall-clock timing tests loosen their budget: instrumentation makes it meaningless.
 process.env.OC_MUTATION_RUN = "1";
 
+// Code that moved into features/ from components/ without a change. It stays
+// out of the mutation surface it was never in; adding it is a separate decision.
+const MOVED_NOT_MUTATED = [
+  "src/features/channels/muteMenu.ts",
+  "src/features/messaging/content/attachmentCache.ts",
+  "src/features/messaging/content/attachmentUrls.ts",
+  "src/features/messaging/content/attachments.ts",
+  "src/features/messaging/content/contentParser.ts",
+  "src/features/messaging/content/customEmoji.ts",
+  "src/features/messaging/content/embeds.ts",
+  "src/features/messaging/content/imageSizes.ts",
+  "src/features/messaging/content/imageViewer.ts",
+  "src/features/messaging/content/media.ts",
+  "src/features/messaging/content/syntaxHighlight.ts",
+  "src/features/profiles/bannerImages.ts",
+  "src/features/voice/voiceStatusText.ts",
+];
+
 /** @type {import('@stryker-mutator/api/core').PartialStrykerOptions} */
 const config = {
   testRunner: "vitest",
@@ -24,11 +42,11 @@ const config = {
     "src/lib/**/*.ts",
     "src/stores/**/*.ts",
     "src/features/**/*.ts",
-    "src/components/message-list/avatar.ts",
     "src/features/members/memberRow.view.ts",
     "!src/lib/types.ts",
     "!src/lib/wire*.ts", // split out of types.ts, excluded with it
     "!src/features/messaging/emojiData.ts", // generated data, no logic to mutate
+    ...MOVED_NOT_MUTATED.map((file) => `!${file}`),
     "!src/**/*.d.ts",
     "!src/**/*.test.ts",
   ],

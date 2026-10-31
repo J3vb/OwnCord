@@ -28,7 +28,7 @@ import {
   openImageLightbox,
   setServerHost,
   type LightboxGallery,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import { closeImageMenu } from "../../src/components/message-list/imageMenu";
 
 const BASE = "https://myserver.local:8443/api/v1/files";

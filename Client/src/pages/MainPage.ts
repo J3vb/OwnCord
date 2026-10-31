@@ -30,8 +30,8 @@ import {
   setOnError as setVoiceOnError,
 } from "@lib/voice/livekitSession";
 import { setServerHost } from "@components/message-list/renderers";
-import { setAttachmentCacheScope } from "@components/message-list/attachments";
-import { closeActiveLightbox } from "@components/message-list/media";
+import { setAttachmentCacheScope } from "../features/messaging/content/attachments";
+import { closeActiveLightbox } from "../features/messaging/content/media";
 import {
   setReactionUsersFetcher,
   clearReactionUsersCache,

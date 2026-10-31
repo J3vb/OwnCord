@@ -14,7 +14,7 @@
 
 import { createElement } from "@lib/dom";
 import { resolveEmoji, type CustomEmoji } from "@stores/emoji.store";
-import { animateEmojiEnabled, showStillFrame } from "../../features/messaging/emojiStill";
+import { animateEmojiEnabled, showStillFrame } from "../emojiStill";
 import { fetchImageAsObjectUrl, recoverEvictedImage, resolveServerUrl } from "./attachments";
 
 /**

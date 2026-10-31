@@ -5,8 +5,8 @@ import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import type { Member } from "../../src/stores/members.store";
 
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/components/message-list/attachments")>()),
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
   fetchImageAsObjectUrl: vi.fn().mockResolvedValue("blob:avatar-2"),
 }));
 

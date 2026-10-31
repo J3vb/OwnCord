@@ -30,7 +30,7 @@ import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
-import { isConnecting, formatElapsed } from "@components/voiceStatusText";
+import { isConnecting, formatElapsed } from "../features/voice/voiceStatusText";
 import type { VideoGridComponent } from "@components/VideoGrid";
 import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";

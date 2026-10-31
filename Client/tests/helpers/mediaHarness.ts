@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { closeActiveLightbox, clearMediaCaches } from "../../src/components/message-list/media";
-import { clearExternalImageCache } from "../../src/components/message-list/attachments";
+import { closeActiveLightbox, clearMediaCaches } from "../../src/features/messaging/content/media";
+import { clearExternalImageCache } from "../../src/features/messaging/content/attachments";
 import { previewMock, imageMock, observeMediaMock, loadPrefMock } from "./mediaMocks";
 
 // ---------------------------------------------------------------------------

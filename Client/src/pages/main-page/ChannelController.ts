@@ -23,7 +23,7 @@ import {
   setThreadNavigationConsumer,
   settleThreadNavigation,
 } from "../../features/threads/threadNavigation";
-import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
 import { viewChannel } from "@lib/prefs/lastChannel";
 import { messagingText } from "../../i18n/messaging";

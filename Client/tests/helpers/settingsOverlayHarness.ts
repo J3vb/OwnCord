@@ -1,7 +1,7 @@
 import { expect, vi, beforeEach, afterEach } from "vitest";
-import * as attachments from "@components/message-list/attachments";
+import * as attachments from "../../src/features/messaging/content/attachments";
 import * as formatting from "@lib/text/formatting";
-import * as media from "@components/message-list/media";
+import * as media from "../../src/features/messaging/content/media";
 import * as channelMutes from "@lib/prefs/channelMutes";
 import {
   mockAppVersion,
@@ -10,10 +10,12 @@ import {
   mockAuthState,
 } from "./settingsOverlayMocks";
 
+// vi.doMock resolves a relative id from the calling test file; a
+// root-relative id works from any test directory.
 export const APP_LIFETIME_MODULES = [
-  ["@components/message-list/attachments", attachments],
+  ["/src/features/messaging/content/attachments", attachments],
   ["@lib/text/formatting", formatting],
-  ["@components/message-list/media", media],
+  ["/src/features/messaging/content/media", media],
   ["@lib/prefs/channelMutes", channelMutes],
 ] as const;
 

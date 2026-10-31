@@ -20,7 +20,7 @@ import { createElement, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { showToast } from "@lib/ui/toast";
-import type { createAvatarElement } from "@components/message-list/avatar";
+import type { createAvatarElement } from "../profiles/avatar";
 import { blocksStore, setBlockedByMe, setUserBlockedByMe } from "@stores/blocks.store";
 import { dmStore } from "@stores/dm.store";
 import { memberDisplayName, membersStore } from "@stores/members.store";
@@ -83,7 +83,7 @@ export async function loadBlockedUsersSection(
   signal: AbortSignal,
   api: BlockedUsersApi,
 ): Promise<HTMLElement> {
-  const { createAvatarElement: createAvatar } = await import("@components/message-list/avatar");
+  const { createAvatarElement: createAvatar } = await import("../profiles/avatar");
   return buildBlockedUsersSection(signal, api, createAvatar);
 }
 

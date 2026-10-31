@@ -9,8 +9,8 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { parseTimestamp } from "@lib/text/formatting";
 import { messagingText } from "../i18n/messaging";
-import { createAvatarElement } from "./message-list/avatar";
-import { renderMessageContent } from "./message-list/contentParser";
+import { createAvatarElement } from "../features/profiles/avatar";
+import { renderMessageContent } from "../features/messaging/content/contentParser";
 import type { ImportedAuthor } from "@lib/types";
 import {
   createImportedAvatar,

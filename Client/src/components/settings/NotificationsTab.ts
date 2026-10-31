@@ -21,7 +21,7 @@ import {
   unmuteChannel,
 } from "@lib/prefs/channelMutes";
 import { Disposable } from "@lib/disposable";
-import { clockAndDate } from "../muteMenu";
+import { clockAndDate } from "../../features/channels/muteMenu";
 import {
   NOTIFICATION_LEVELS,
   getGlobalNotificationLevel,

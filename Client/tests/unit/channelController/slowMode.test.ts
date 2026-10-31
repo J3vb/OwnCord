@@ -28,7 +28,7 @@ vi.mock("../../../src/pages/main-page/ChatHeader", (importOriginal) =>
   mocks.pageChatHeaderMock(importOriginal),
 );
 vi.mock("@stores/dm.store", () => mocks.dmStoreMock());
-vi.mock("@components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
 vi.mock("@stores/members.store", () => mocks.membersStoreMock());

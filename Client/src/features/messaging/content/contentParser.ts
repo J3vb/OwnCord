@@ -32,12 +32,9 @@ import {
 } from "@lib/text/mentions";
 import { isSafeUrl } from "./attachments";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode, isEmojiOnlyMessage } from "./customEmoji";
-import {
-  formatDiscordTimestamp,
-  type TimestampStyle,
-} from "../../features/messaging/discordTimestamp";
-import { messagingText } from "../../i18n/messaging";
-import { desktop } from "../../platform/desktop";
+import { formatDiscordTimestamp, type TimestampStyle } from "../discordTimestamp";
+import { messagingText } from "../../../i18n/messaging";
+import { desktop } from "../../../platform/desktop";
 import {
   parseInline,
   parseBlocks,
@@ -567,7 +564,7 @@ function buildInviteLinkNode(url: string): HTMLSpanElement | null {
         ? messagingText("invite.confirmBodyNoHost", { current: name })
         : messagingText("invite.confirmBody", { current: name, target });
     // On demand, like the masked-link guard: keeps the modal off the startup chunk.
-    void import("../InviteJoinConfirm").then((m) =>
+    void import("../../../components/InviteJoinConfirm").then((m) =>
       m.confirmInviteJoin(body, () => requestInviteJoin(invite.code, invite.host)),
     );
   };

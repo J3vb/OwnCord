@@ -12,10 +12,13 @@ vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 import {
   renderInlineContent,
   renderMessageContent,
-} from "../../src/components/message-list/contentParser";
+} from "../../src/features/messaging/content/contentParser";
 import { parseInline, parseBlocks, splitCodeFences } from "../../src/lib/text/markdown";
-import { highlightCode, resolveLanguage } from "../../src/components/message-list/syntaxHighlight";
-import { extractUrls } from "../../src/components/message-list/media";
+import {
+  highlightCode,
+  resolveLanguage,
+} from "../../src/features/messaging/content/syntaxHighlight";
+import { extractUrls } from "../../src/features/messaging/content/media";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";

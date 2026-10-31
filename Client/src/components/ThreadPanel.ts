@@ -63,8 +63,8 @@ import {
 import { createMessageList, type MessageListComponent } from "./MessageList";
 import { createMessageInput, type MessageInputComponent } from "./MessageInput";
 import { createArchiveIcon } from "./message-list/threadChip";
-import { renderMessageContent } from "./message-list/contentParser";
-import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import { renderMessageContent } from "../features/messaging/content/contentParser";
+import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import {
   createImportedAvatar,
   createImportedName,

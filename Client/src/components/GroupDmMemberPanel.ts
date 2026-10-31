@@ -21,7 +21,7 @@ import { showContextMenu, openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import type { GroupMemberView, GroupPanelView } from "../features/direct-messages/groupMembers";
 import { groupDmText } from "../i18n/groupDm";
 import { statusLabel } from "../i18n/shell";

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // Painting an existing avatar goes through the authenticated image fetch;
 // stub just that call so the Remove avatar tests need no network.
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: vi.fn(() => Promise.resolve(null)) };
 });
 

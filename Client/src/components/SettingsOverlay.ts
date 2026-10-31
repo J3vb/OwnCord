@@ -25,7 +25,7 @@ import type {
 import { uiStore } from "@stores/ui.store";
 import { settingsText } from "../i18n/settings";
 import { authStore } from "@stores/auth.store";
-import { createAvatarElement } from "./message-list/avatar";
+import { createAvatarElement } from "../features/profiles/avatar";
 import { buildAccountTab } from "./settings/AccountTab";
 import { buildAppearanceTab } from "./settings/AppearanceTab";
 import { buildNotificationsTab } from "./settings/NotificationsTab";

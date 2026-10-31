@@ -6,19 +6,19 @@
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { ensureHttpProxy } from "@lib/net/httpProxy";
 import { authStore, getToken } from "@stores/auth.store";
-import { desktop } from "../../platform/desktop";
+import { desktop } from "../../../platform/desktop";
 import type {
   ExternalContentResult,
   ExternalImageSource,
   ExternalPreview,
-} from "../../platform/contracts/externalContent";
-import { externalAllowed } from "../../features/content-consent/external";
-import { clearStillCache } from "../../features/messaging/emojiStill";
+} from "../../../platform/contracts/externalContent";
+import { externalAllowed } from "../../content-consent/external";
+import { clearStillCache } from "../emojiStill";
 import { clearAnimatedStills } from "@lib/ui/animatedStill";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { sniffImageBlob } from "@lib/ui/imageHeader";
 import { rememberBlobSize } from "./imageSizes";
-import { clearTextPreviewCache } from "../../features/messaging/textPreview";
+import { clearTextPreviewCache } from "../textPreview";
 import { isConvertedImageMime, log, serverHost } from "./attachmentUrls";
 
 // ---------------------------------------------------------------------------

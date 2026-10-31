@@ -16,7 +16,7 @@ import {
   pruneAttachmentCacheScope,
   resolveServerUrl,
   thumbnailUrl,
-} from "@components/message-list/attachments";
+} from "../../features/messaging/content/attachments";
 import { createQuickSwitcherManager } from "./OverlayManagers";
 import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";

@@ -11,7 +11,7 @@ import { resetStores, addVoiceUser, testChannels } from "../../helpers/channelSi
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/net/e2eeCrypto", (importOriginal) => mocks.netE2eeCryptoMock(importOriginal));
-vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
 vi.mock("../../../src/features/profiles/openUserProfilePopup", () =>

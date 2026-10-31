@@ -57,7 +57,7 @@ export async function prefsPreferencesMock(importOriginal: <T>() => Promise<T>) 
 // the mocked broker above; only isSafeUrl is pinned to a plain http(s) check.
 export async function listAttachmentsMock(importOriginal: <T>() => Promise<T>) {
   return {
-    ...(await importOriginal<typeof import("../../src/components/message-list/attachments")>()),
+    ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
     isSafeUrl: (url: string) => {
       try {
         const parsed = new URL(url, "https://placeholder");

@@ -167,7 +167,7 @@ export function presenceAutoIdleMock() {
 
 export async function listAttachmentsMock(importOriginal: <T>() => Promise<T>) {
   return {
-    ...(await importOriginal<typeof import("../../src/components/message-list/attachments")>()),
+    ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
     pruneAttachmentCacheScope: mockPruneAttachmentCacheScope,
   };
 }

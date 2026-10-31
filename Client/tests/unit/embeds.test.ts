@@ -35,13 +35,13 @@ import {
   clearEmbedCaches,
   renderGenericLinkPreview,
   applyOgMeta,
-} from "../../src/components/message-list/embeds";
-import type { OgMeta } from "../../src/components/message-list/embeds";
+} from "../../src/features/messaging/content/embeds";
+import type { OgMeta } from "../../src/features/messaging/content/embeds";
 import {
   clearExternalImageCache,
   externalPartition,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 
 function previewOk(title: string | null): PreviewResult {
   return { ok: true, value: { title, description: null, siteName: null, image: null } };

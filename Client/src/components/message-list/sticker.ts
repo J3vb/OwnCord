@@ -18,7 +18,11 @@ import { createElement } from "@lib/dom";
 import type { MessageStickerInfo } from "@lib/types";
 import { showStillFrame } from "../../features/messaging/emojiStill";
 import { stickersText } from "../../i18n/stickers";
-import { fetchImageAsObjectUrl, recoverEvictedImage, resolveServerUrl } from "./attachments";
+import {
+  fetchImageAsObjectUrl,
+  recoverEvictedImage,
+  resolveServerUrl,
+} from "../../features/messaging/content/attachments";
 
 /** Whether motion is reduced, by the OS setting or the in-app toggle (os-motion.ts owns the class). */
 export function motionReduced(): boolean {

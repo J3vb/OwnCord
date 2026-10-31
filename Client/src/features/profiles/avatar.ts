@@ -31,7 +31,7 @@ import {
   cachedImageBytes,
   recoverEvictedImage,
   resolveServerUrl,
-} from "./attachments";
+} from "../messaging/content/attachments";
 
 export interface AvatarOptions {
   /** Class applied to the wrapper — each surface keeps its own sizing rules. */

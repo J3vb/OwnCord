@@ -46,7 +46,7 @@ export async function netE2eeCryptoMock(importOriginal: <T>() => Promise<T>) {
 
 export async function listAttachmentsMock(importOriginal: <T>() => Promise<T>) {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 }
 

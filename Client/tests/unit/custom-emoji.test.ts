@@ -15,9 +15,9 @@ vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
   fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
@@ -26,11 +26,11 @@ import {
   MAX_JUMBO_EMOJI,
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
-} from "../../src/components/message-list/customEmoji";
+} from "../../src/features/messaging/content/customEmoji";
 import {
   renderMessageContent,
   clearContentParseCache,
-} from "../../src/components/message-list/contentParser";
+} from "../../src/features/messaging/content/contentParser";
 import { renderReactions } from "../../src/components/message-list/reactions";
 import {
   emojiStore,

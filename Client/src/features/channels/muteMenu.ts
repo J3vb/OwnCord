@@ -6,7 +6,7 @@
 
 import { MUTE_DURATIONS_MS } from "@lib/prefs/channelMutes";
 import { formatClockTime, formatFullDate } from "@lib/text/formatting";
-import { shellText } from "../i18n/shell";
+import { shellText } from "../../i18n/shell";
 
 const DURATION_KEYS = {
   900_000: "mute.for15m",

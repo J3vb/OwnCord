@@ -15,9 +15,9 @@ import fc from "fast-check";
 
 // The avatar image is behind the session token; stub the authenticated fetch
 // with a URL-derived data URI so a changed avatarUrl shows in the DOM.
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return {
     ...actual,
     fetchImageAsObjectUrl: vi.fn((url: string) =>
@@ -34,7 +34,7 @@ import {
   type VoiceUserRowModel,
   type VoiceVerifyModel,
 } from "../../src/features/channels/voiceRow.view";
-import { createAvatarElement } from "../../src/components/message-list/avatar";
+import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { assertEveryFieldDraws } from "../helpers/rowModelProperty";
 
 const draw = (model: VoiceUserRowModel): HTMLElement =>

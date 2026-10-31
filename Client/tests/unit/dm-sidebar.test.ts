@@ -5,7 +5,7 @@ const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 // Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
 // reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
   // No cached bytes: every avatar here is a still picture (WP 8.7).
   cachedImageBytes: () => null,

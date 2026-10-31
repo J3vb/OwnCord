@@ -16,7 +16,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { buildCustomEmojiImage } from "@components/message-list/customEmoji";
+import { buildCustomEmojiImage } from "../features/messaging/content/customEmoji";
 import { listCustomEmoji, type CustomEmoji } from "@stores/emoji.store";
 import { messagingText } from "../i18n/messaging";
 import {

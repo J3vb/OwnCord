@@ -31,7 +31,7 @@ import {
   isConnecting,
   micControlKey,
   micControlState,
-} from "./voiceStatusText";
+} from "../features/voice/voiceStatusText";
 import { callParticipants, participantAvatar, participantKey } from "./callParticipants";
 
 export interface PhoneCallBarOptions {

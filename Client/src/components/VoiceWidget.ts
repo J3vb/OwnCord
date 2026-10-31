@@ -29,7 +29,7 @@ import {
 } from "@lib/voice/livekitSession";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../i18n/voice";
-import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
+import { formatElapsed, headerStatusText, isConnecting } from "../features/voice/voiceStatusText";
 import { shareBlockReason } from "../features/voice/shareGate";
 import { canPublishScreen } from "../features/voice/native/platform";
 import type { StreamCard } from "./voice-widget/streamCard";

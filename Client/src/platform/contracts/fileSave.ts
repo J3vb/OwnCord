@@ -1,6 +1,6 @@
 /**
  * No-seam: both operations sit inside `downloadFile`, a private function in
- * `message-list/attachments.ts` — there is no exported function to bind a
+ * `features/messaging/content/attachments.ts` — there is no exported function to bind a
  * legacy suite against yet. The suite lands with the seam.
  */
 export interface FileSaver {

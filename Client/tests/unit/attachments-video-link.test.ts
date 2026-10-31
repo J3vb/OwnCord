@@ -34,7 +34,7 @@ vi.mock("@lib/icons", () => ({
   },
 }));
 vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
+vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
 vi.mock("@stores/auth.store", () => ({
   getToken: () => "session-token",
   authStore: { getState: () => ({ uploadPolicy: null }) },
@@ -45,7 +45,7 @@ import {
   fetchMediaAsObjectUrl,
   renderAttachment,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import type { Attachment } from "@lib/types";
 
 const ORIGIN = "http://127.0.0.1:9999/proxytoken";

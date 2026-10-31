@@ -5,7 +5,7 @@
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import klipyWatermark from "../../assets/KLIPY Light with logo.svg";
+import klipyWatermark from "../../../assets/KLIPY Light with logo.svg";
 import { createLogger } from "@lib/logger";
 import { observeMedia } from "@lib/prefs/mediaVisibility";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
@@ -28,10 +28,10 @@ import {
   externalConsentChoice,
   requestExternalItem,
   resetExternalConsent,
-} from "../../features/content-consent/external";
-import { renderConcealedItem } from "../../features/content-consent/concealed";
-import { externalConsentText } from "../../i18n/externalConsent";
-import { contentText } from "../../i18n/content";
+} from "../../content-consent/external";
+import { renderConcealedItem } from "../../content-consent/concealed";
+import { externalConsentText } from "../../../i18n/externalConsent";
+import { contentText } from "../../../i18n/content";
 import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
@@ -52,7 +52,7 @@ import {
   type ImageBox,
 } from "./imageSizes";
 import { clearEmbedCaches, focusMessageLink, renderGenericLinkPreview } from "./embeds";
-import type { ExternalContentFailure } from "../../platform/contracts/externalContent";
+import type { ExternalContentFailure } from "../../../platform/contracts/externalContent";
 
 // The lightbox lives in attachments.ts, which renders attachment images and
 // must not import this module (that import was a cycle); re-exported here for

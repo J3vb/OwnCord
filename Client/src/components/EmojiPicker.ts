@@ -6,7 +6,7 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
-import { buildCustomEmojiNode } from "@components/message-list/customEmoji";
+import { buildCustomEmojiNode } from "../features/messaging/content/customEmoji";
 import { messagingText } from "../i18n/messaging";
 import { addRecentEmoji, getRecentEmoji } from "./emojiRecent";
 import {

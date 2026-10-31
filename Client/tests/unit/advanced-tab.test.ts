@@ -69,16 +69,16 @@ vi.mock("@lib/logPersistence", () => ({
   clearPendingPersistedLogs: mockClearPendingPersistedLogs,
 }));
 
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   clearAttachmentCaches: mockClearAttachmentCaches,
   clearExternalImageCache: mockClearExternalImageCache,
 }));
 
-vi.mock("@components/message-list/embeds", () => ({
+vi.mock("../../src/features/messaging/content/embeds", () => ({
   clearEmbedCaches: mockClearEmbedCaches,
 }));
 
-vi.mock("@components/message-list/media", () => ({
+vi.mock("../../src/features/messaging/content/media", () => ({
   clearMediaCaches: mockClearMediaCaches,
 }));
 

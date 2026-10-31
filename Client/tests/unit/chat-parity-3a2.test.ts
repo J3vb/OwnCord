@@ -16,8 +16,8 @@ import { createMessageInput, type MessageInputOptions } from "../../src/componen
 import {
   relabelInlineTimestamps,
   renderMessageContent,
-} from "../../src/components/message-list/contentParser";
-import { extractUrls } from "../../src/components/message-list/media";
+} from "../../src/features/messaging/content/contentParser";
+import { extractUrls } from "../../src/features/messaging/content/media";
 import { markdownToPlainText, parseBlocks, parseInline } from "../../src/lib/text/markdown";
 import { formatDiscordTimestamp } from "../../src/features/messaging/discordTimestamp";
 import { refreshTimeFormat, saveTimeFormat } from "../../src/lib/text/timeFormat";

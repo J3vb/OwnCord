@@ -6,7 +6,7 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../../src/lib/types";
-import { pickAvatarColor } from "@components/message-list/avatar";
+import { pickAvatarColor } from "../../../src/features/profiles/avatar";
 import {
   applyReadyCapabilities,
   resetServerCapabilities,

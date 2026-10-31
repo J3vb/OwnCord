@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn(() => Promise.resolve("blob:thumb")));
 
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
   formatFileSize: (n: number) => `${n} B`,
   isImageMime: (m: string) => m.startsWith("image/"),

@@ -6,8 +6,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@components/message-list/attachments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
   fetchImageAsObjectUrl: vi.fn(async () => "blob:sticker"),
 }));
 

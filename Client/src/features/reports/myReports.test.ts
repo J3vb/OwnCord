@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DmPrivacy, OwnReportSummary } from "@lib/api";
 // Loaded up front: the Blocked users section lazily imports it, and its module-level
 // listener must not first appear inside a test.
-import "@components/message-list/avatar";
+import "../profiles/avatar";
 import { buildMyReportsSection, reportStateKey } from "./myReports";
 import { buildSafetyPane } from "./safetyPane";
 import { pinZone } from "../../../tests/helpers/tz-pin";

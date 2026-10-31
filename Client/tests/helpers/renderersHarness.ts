@@ -9,7 +9,7 @@ import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearExternalImageCache,
   closeActiveLightbox,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import { previewMock, imageMock } from "./renderersMocks";
 import { resetMembersState } from "./storeResets";
 

@@ -25,7 +25,7 @@ vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messages
 vi.mock("@components/UpdateNotifier", () => mocks.updateNotifierMock());
 vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
-vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
 vi.mock("../../../src/pages/main-page/ChannelController", () => mocks.pageChannelControllerMock());

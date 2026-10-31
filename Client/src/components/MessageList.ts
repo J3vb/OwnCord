@@ -19,7 +19,10 @@ import { renderUnreadBar, refreshConnectionControls } from "./message-list/rende
 import { refreshReactionLocks } from "./message-list/reactions";
 import { withMessageMenu } from "./message-list/messageMenuLoader";
 import { preloadInlineEdit } from "../features/messaging/inlineEditLoader";
-import { clearContentParseCache, relabelInlineTimestamps } from "./message-list/contentParser";
+import {
+  clearContentParseCache,
+  relabelInlineTimestamps,
+} from "../features/messaging/content/contentParser";
 import { canManageMessages } from "@lib/permissions";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { channelsStore, getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";

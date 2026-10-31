@@ -56,12 +56,12 @@ vi.mock("../../src/platform/desktop", async (importOriginal) => {
     },
   };
 });
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   clearAttachmentCaches: vi.fn(),
   clearExternalImageCache: vi.fn(),
 }));
-vi.mock("@components/message-list/embeds", () => ({ clearEmbedCaches: vi.fn() }));
-vi.mock("@components/message-list/media", () => ({ clearMediaCaches: vi.fn() }));
+vi.mock("../../src/features/messaging/content/embeds", () => ({ clearEmbedCaches: vi.fn() }));
+vi.mock("../../src/features/messaging/content/media", () => ({ clearMediaCaches: vi.fn() }));
 vi.mock("@lib/logPersistence", () => ({ clearPendingPersistedLogs: vi.fn() }));
 vi.mock("../../src/features/whats-new/changelogSource", () => ({
   loadChangelog: () => Promise.resolve([]),

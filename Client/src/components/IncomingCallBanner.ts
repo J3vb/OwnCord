@@ -19,7 +19,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { RingState } from "@lib/voice/callRing";
 import type { AvatarSubject } from "@lib/ui/avatar";
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
-import { createAvatarElement } from "@components/message-list/avatar";
+import { createAvatarElement } from "../features/profiles/avatar";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { voiceText } from "../i18n/voice";

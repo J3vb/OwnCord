@@ -21,9 +21,8 @@ import { bindAnimatedImage } from "@lib/ui/animatedStill";
 import { createElement } from "@lib/dom";
 
 /**
- * How a banner picture is loaded. The helpers live in `components/`, which a
- * feature may not import, so each surface passes them in from
- * `components/bannerImages.ts`.
+ * How a banner picture is loaded. Each surface passes the helpers in from
+ * `bannerImages.ts`, so this module does not load the attachment cache.
  */
 export interface BannerImages {
   /** The authenticated fetch behind the attachment cache; null on failure. */
