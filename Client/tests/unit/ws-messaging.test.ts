@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { ConnectionState } from "../../src/lib/ws";
 
 // vi.mock is hoisted per file; the factories resolve to the shared handles
@@ -11,25 +11,15 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 
-import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, toConnectionStatus } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
 
 describe("message handling edge cases", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("silently ignores pong messages", async () => {
@@ -310,19 +300,8 @@ describe("message handling edge cases", () => {
 
 describe("handleMessage size boundary", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("accepts message exactly at size limit", async () => {
@@ -493,19 +472,8 @@ describe("handleMessage size boundary", () => {
 
 describe("dispatch with no listeners for type", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("does not crash when dispatching to type with empty listener set", async () => {
@@ -571,19 +539,8 @@ describe("dispatch with no listeners for type", () => {
 
 describe("on() creates Set for new type", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("creates a listener set for a type that has never been registered", async () => {
@@ -630,19 +587,8 @@ describe("on() creates Set for new type", () => {
 
 describe("send envelope format", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("wraps message with id and serializes to JSON", async () => {
@@ -684,19 +630,8 @@ describe("send envelope format", () => {
 
 describe("send edge cases", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("send when not connected does not crash (logs warning)", () => {

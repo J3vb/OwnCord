@@ -15,22 +15,12 @@ import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers
 import { createWsClient, bracketBareIPv6Host } from "../../src/lib/ws";
 import { addLogListener, type LogEntry } from "../../src/lib/logger";
 import { expectConsole } from "../helpers/console";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
 
 describe("WebSocket Client (Tauri proxy)", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("starts in disconnected state", () => {
@@ -318,19 +308,8 @@ describe("WebSocket Client (Tauri proxy)", () => {
 
 describe("heartbeat", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("sends heartbeat ping every 30 seconds after auth_ok", async () => {
@@ -433,19 +412,8 @@ describe("heartbeat", () => {
 
 describe("setState deduplication", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("does not notify listeners when state is already the same", async () => {
@@ -625,19 +593,8 @@ describe("getReconnectDelay boundary and arithmetic", () => {
 
 describe("wsGeneration stale listener guard", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("ignores events from stale generation after new connect()", async () => {
@@ -930,19 +887,8 @@ describe("overlapping connect() attempts", () => {
 
 describe("heartbeat proxyOpen guard", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("does not send ping when proxyOpen is false (connection dropped mid-heartbeat)", async () => {
@@ -1070,19 +1016,8 @@ describe("cleanupEventListeners edge cases", () => {
 
 describe("listener registry mechanics (on/off/dispatch)", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("on() registers a listener and returns an unsubscribe function", () => {
