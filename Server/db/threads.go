@@ -383,7 +383,7 @@ func (d *DB) attachThreads(ctx context.Context, msgs []MessageAPIResponse) error
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := d.q.ListThreadInfosByStarters(ctx, ids)
+	rows, err := d.q.ListThreadInfosByStarters(ctx, padIDs(ids))
 	if err != nil {
 		return fmt.Errorf("threads: %w", err)
 	}

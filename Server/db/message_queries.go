@@ -485,7 +485,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 		err  error
 	)
 	if before > 0 {
-		rows, err = d.reader.QueryContext(ctx,
+		rows, err = d.queryCached(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        m.mentions_everyone, m.kind
@@ -495,7 +495,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 			channelID, before, limit,
 		)
 	} else {
-		rows, err = d.reader.QueryContext(ctx,
+		rows, err = d.queryCached(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        m.mentions_everyone, m.kind
@@ -510,7 +510,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // GetMessagesAfterForAPI returns up to limit messages with id > after in the
@@ -531,7 +531,7 @@ func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64,
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // GetMessagesAroundForAPI returns a window of messages centred on centerID in
@@ -575,7 +575,7 @@ func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID in
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // getReactionsBatch returns aggregated reactions for multiple messages.
@@ -584,28 +584,14 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 		return map[int64][]ReactionInfo{}, nil
 	}
 
-	args := make([]any, 0, len(msgIDs)+1)
-	var sb strings.Builder
-	for i, id := range msgIDs {
-		if i > 0 {
-			sb.WriteByte(',')
-		}
-		sb.WriteByte('?')
-		args = append(args, id)
-	}
-	placeholders := sb.String()
-
-	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
+	rows, err := d.queryCached(ctx,
 		`SELECT r.message_id, r.emoji, COUNT(*) as cnt,
 		        MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) as me
 		 FROM reactions r
-		 WHERE r.message_id IN (%s)
+		 WHERE r.message_id IN (SELECT value FROM json_each(?))
 		 GROUP BY r.message_id, r.emoji`,
-		placeholders,
+		requestingUserID, idsJSON(msgIDs),
 	)
-	args = append([]any{requestingUserID}, args...)
-
-	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getReactionsBatch: %w", err)
 	}
@@ -764,11 +750,13 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // scanAndEnrichMessages scans rows into MessageAPIResponse and batch-fetches
 // reactions, attachments and mentions. The caller must defer rows.Close().
+// Callers pass withCachedReads(ctx): every sqlc read here binds constant SQL
+// or ids padded with padIDs.
 func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var msgs []MessageAPIResponse
 	var msgIDs []int64

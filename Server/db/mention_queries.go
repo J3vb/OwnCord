@@ -173,19 +173,10 @@ func (d *DB) GetMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (map[i
 		return result, nil
 	}
 
-	placeholders := make([]string, len(msgIDs))
-	args := make([]any, len(msgIDs))
-	for i, id := range msgIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-
-	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT message_id, mentioned_user_id FROM message_mentions
-			 WHERE message_id IN (%s) ORDER BY message_id, mentioned_user_id`,
-			strings.Join(placeholders, ",")),
-		args...,
+	rows, err := d.queryCached(ctx,
+		`SELECT message_id, mentioned_user_id FROM message_mentions
+		 WHERE message_id IN (SELECT value FROM json_each(?)) ORDER BY message_id, mentioned_user_id`,
+		idsJSON(msgIDs),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetMentionsByMessageIDs: %w", err)
