@@ -83,6 +83,23 @@ pub(crate) fn open_path(path: &Path) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// A `Command` for a host program with the host's environment: inside an
+/// AppImage the bundle's library and data paths are taken out, as for the
+/// openers above, so the program loads the system's own libraries.
+#[cfg(target_os = "linux")]
+pub(crate) fn host_command(program: &str) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    if let Some(appdir) = appimage::appimage_dir() {
+        for edit in appimage::host_env(std::env::vars_os(), &appdir) {
+            match edit {
+                appimage::EnvEdit::Set(name, value) => command.env(name, value),
+                appimage::EnvEdit::Remove(name) => command.env_remove(name),
+            };
+        }
+    }
+    command
+}
+
 #[cfg(target_os = "linux")]
 mod appimage {
     use std::ffi::{OsStr, OsString};

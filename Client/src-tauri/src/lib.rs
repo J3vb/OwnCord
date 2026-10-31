@@ -56,6 +56,8 @@ mod ptt;
 mod secret_store;
 mod shortcuts;
 mod sync;
+#[cfg(target_os = "linux")]
+mod system_crash_report;
 mod text;
 mod tofu;
 #[cfg(desktop)]
