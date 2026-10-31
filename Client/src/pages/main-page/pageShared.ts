@@ -17,7 +17,7 @@ export const SESSION_NOTICE_TOAST_MS = 12_000;
  * DM call panel, which the page already loads at mount, so the ring's OS alert
  * costs no second dynamic chunk here.
  */
-export const callAlerts = () => import("@components/DmCallPanel");
+export const callAlerts = () => import("../../features/direct-messages/DmCallPanel");
 
 // ---------------------------------------------------------------------------
 // MainPage

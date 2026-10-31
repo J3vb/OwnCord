@@ -17,6 +17,7 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, setCategories, setRoles } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import { Permission } from "@lib/types";
+import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
 
 const ROW = 20;
 
@@ -201,19 +202,8 @@ function summary(reorders: readonly ChannelReorderData[]): Record<number, number
 const stored = (id: number): Channel | undefined => channelsStore.getState().channels.get(id);
 
 beforeEach(() => {
-  authStore.setState(() => ({
-    token: null,
-    user: null,
-    serverName: null,
-    motd: null,
-    isAuthenticated: false,
-  }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetAuthState();
+  resetChannelsState();
   document.body.className = "";
   document.body.innerHTML = "";
 });

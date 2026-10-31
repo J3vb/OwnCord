@@ -8,6 +8,7 @@ import type { DmChannel } from "../../../src/stores/dm.store";
 import { setBlockedByMe } from "../../../src/stores/blocks.store";
 import { setLogLevel } from "../../../src/lib/logger";
 import { makePayload, useNotificationsHarness } from "../../helpers/notificationsHarness";
+import { resetAuthState } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
@@ -322,13 +323,7 @@ describe("notifyIncomingMessage", () => {
   it("notifies when current user is null (not logged in)", async () => {
     const { sendNotification } = await import("@tauri-apps/plugin-notification");
     (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     // payload.user.id = 2 (different from null user), should proceed
     const payload = makePayload();
     notifyIncomingMessage(payload);

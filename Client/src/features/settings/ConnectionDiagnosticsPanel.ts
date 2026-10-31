@@ -9,12 +9,7 @@ import {
   type DiagnosticStage,
   type DiagnosticStatus,
 } from "@lib/net/connectionDiagnostics";
-import {
-  createDisclosure,
-  setStatusIcon,
-  statusIcon,
-  type StatusKind,
-} from "../../features/settings/status";
+import { createDisclosure, setStatusIcon, statusIcon, type StatusKind } from "./status";
 
 const DIAGNOSTIC_STATUS_KEYS = {
   running: "diagnostics.status.running",

@@ -4,18 +4,18 @@ import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText, ApiClientError } from "@lib/api";
 import { authStore } from "@stores/auth.store";
 import { avatarInitial } from "@lib/ui/avatar";
-import { setAvatarSource, isRenderableAvatar } from "../../features/profiles/avatar";
+import { setAvatarSource, isRenderableAvatar } from "../profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "../../features/messaging/content/attachments";
+} from "../messaging/content/attachments";
 import { type CropResult, cropImage } from "@lib/ui/imageCrop";
 import { isAnimatedImage } from "@lib/ui/animatedStill";
-import { isBannerColor } from "../../features/profiles/banner";
-import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import { isBannerColor } from "../profiles/banner";
+import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { outcomeEl, showOutcome } from "./helpers";
-import { createRevealToggle } from "../../features/settings/status";
+import { createRevealToggle } from "./status";
 import { accountText as t } from "../../i18n/account";
 import { connectText } from "../../i18n/connect";
 import {

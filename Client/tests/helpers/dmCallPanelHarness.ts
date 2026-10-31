@@ -3,7 +3,7 @@ import {
   createDmCallPanel,
   type DmCallPanelComponent,
   type DmCallPanelOptions,
-} from "../../src/components/DmCallPanel";
+} from "../../src/features/direct-messages/DmCallPanel";
 import {
   voiceStore,
   clearPeerVerifications,
@@ -17,6 +17,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { RingState } from "../../src/lib/voice/callRing";
+import { signInAs } from "./storeSeeds";
 
 export const SELF = 1;
 
@@ -136,13 +137,10 @@ export const timer = (root: HTMLElement) => root.querySelector(".dcp-timer")!.te
 beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: SELF, username: "me", avatar: null, role: "member" },
-    serverName: "s",
-    motd: "",
-    isAuthenticated: true,
-  }));
+  signInAs(
+    { id: SELF, username: "me", avatar: null, role: "member" },
+    { token: "t", serverName: "s", motd: "" },
+  );
   membersStore.setState(() => ({
     members: new Map([
       [

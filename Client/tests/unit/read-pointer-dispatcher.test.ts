@@ -34,6 +34,7 @@ import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
 import { expectConsole } from "../helpers/console";
 import { resetMessagesState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
@@ -154,12 +155,7 @@ describe("read pointer through the dispatcher", () => {
   beforeEach(() => {
     mockShowToast.mockClear();
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
     resetMessagesState();
     setLiveTailInView(1, true);

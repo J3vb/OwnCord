@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/settingsOverlayMocks";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { createSettingsOverlay } from "../../../src/features/settings/SettingsOverlay";
 import {
   APP_LIFETIME_MODULES,
   clickEl,
@@ -548,7 +548,7 @@ describe("SettingsOverlay - mount() with settingsOpen already true", () => {
     }));
 
     const { createSettingsOverlay: createReopenedOverlay } =
-      await import("@components/SettingsOverlay");
+      await import("../../../src/features/settings/SettingsOverlay");
 
     const opener = document.createElement("button");
     document.body.appendChild(opener);

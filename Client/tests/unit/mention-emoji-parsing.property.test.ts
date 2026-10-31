@@ -34,9 +34,9 @@ import {
 } from "../../src/features/messaging/content/contentParser";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
-import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -64,19 +64,11 @@ function seedStores(): void {
     ]),
     typingUsers: new Map(),
   }));
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: SELF_ID, username: "me", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  signInAs(
+    { id: SELF_ID, username: "me", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
+  resetChannelsState();
   setChannels(CHANNELS);
   setRoles([{ id: KNOWN_ROLE_ID, name: "Mods", color: "#ff8800", permissions: 0 }]);
   channelsStore.flush();

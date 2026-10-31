@@ -8,23 +8,18 @@
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { createDisclosure } from "../../features/settings/status";
-import { buildUpdateCheckRow, installInProgressText } from "../../features/updates/UpdateCheckRow";
-import { subscribeAvailableUpdate } from "../../features/updates/availableUpdate";
-import type { AvailableUpdate } from "../../features/updates/availableUpdate";
+import { createDisclosure } from "./status";
+import { buildUpdateCheckRow, installInProgressText } from "../updates/UpdateCheckRow";
+import { subscribeAvailableUpdate } from "../updates/availableUpdate";
+import type { AvailableUpdate } from "../updates/availableUpdate";
 import { desktop } from "../../platform/desktop";
 import { platformText } from "./helpers";
 import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/net/updater";
 import type { UpdateInstallState } from "@lib/net/updater";
-import {
-  REPO_URL,
-  findVersion,
-  releaseUrl,
-  renderChangelogBody,
-} from "../../features/whats-new/changelog";
-import type { ChangelogVersion } from "../../features/whats-new/changelog";
-import { loadChangelog } from "../../features/whats-new/changelogSource";
-import { readAppVersion } from "../../features/whats-new/appVersion";
+import { REPO_URL, findVersion, releaseUrl, renderChangelogBody } from "../whats-new/changelog";
+import type { ChangelogVersion } from "../whats-new/changelog";
+import { loadChangelog } from "../whats-new/changelogSource";
+import { readAppVersion } from "../whats-new/appVersion";
 import { whatsNewText as t } from "../../i18n/whatsNew";
 
 const log = createLogger("AboutTab");

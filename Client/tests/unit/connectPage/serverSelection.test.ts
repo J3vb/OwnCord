@@ -6,7 +6,7 @@ import { uiStore, setTransientError } from "../../../src/stores/ui.store";
 import { makeCallbacks, testProfiles } from "../../helpers/connectPageHarness";
 
 vi.mock("../../../src/lib/net/credentials", () => mocks.netCredentialsMock());
-vi.mock("../../../src/components/SettingsOverlay", () => mocks.settingsOverlayMock());
+vi.mock("../../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 vi.mock("../../../src/stores/ui.store", () => mocks.uiStoreMock());
 
 const { mockLoadCredential } = mocks;

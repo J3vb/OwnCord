@@ -12,7 +12,6 @@ import {
   notifyMention,
   resetNotificationCoalescing,
 } from "../../src/lib/notifications";
-import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -20,6 +19,7 @@ import { messagesStore } from "../../src/stores/messages.store";
 import { setBlockedByMe } from "../../src/stores/blocks.store";
 import { addLogListener, setLogLevel, type LogEntry } from "../../src/lib/logger";
 import type { ChannelActivityEntry, ChatMessagePayload } from "../../src/lib/types";
+import { signInAs } from "../helpers/storeSeeds";
 
 const { testPrefs, shouldTauriNotifThrow, sendNotificationMock } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
@@ -163,13 +163,10 @@ beforeEach(() => {
   flashSpy.mockClear();
   oscillator.start.mockClear();
   shouldTauriNotifThrow.value = false;
-  authStore.setState(() => ({
-    token: "test",
-    user: { id: 1, username: "Me", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs(
+    { id: 1, username: "Me", avatar: null, role: "member" },
+    { token: "test", serverName: null },
+  );
   channelsStore.setState(() => ({
     categories: [],
     channels: new Map([

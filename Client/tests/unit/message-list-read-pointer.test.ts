@@ -32,6 +32,7 @@ import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNEL_ID = 1;
 
@@ -39,12 +40,7 @@ function resetStores(): void {
   resetGateStores();
   resetMessagesState();
   resetMembersState();
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
 }
 
 /** Spaced past the 7-minute group window, so grouping never merges rows. */

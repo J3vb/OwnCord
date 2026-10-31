@@ -104,6 +104,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Voice**
+
+- On Linux, the app could crash when you switched or restarted the camera, and a built-in laptop camera could show the same few frames over and over. Cameras are now opened directly instead of through PipeWire where they can be (PipeWire is still used for cameras that need it, with each frame copied out as it arrives).
+
 **Admin panel**
 
 - "Back up now" and "Restore" showed an error after 30 seconds on a big database even though the work finished (and a retried backup made a second copy) — both now run to completion.

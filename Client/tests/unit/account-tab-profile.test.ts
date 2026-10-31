@@ -11,12 +11,12 @@ import {
   buildAccountTab,
   prepareBannerFile,
   validateAvatarFile,
-} from "@components/settings/AccountTab";
+} from "../../src/features/settings/AccountTab";
 import { authStore } from "@stores/auth.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { ApiClientError } from "@lib/api";
 import * as imageCrop from "@lib/ui/imageCrop";
-import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
+import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
 
 /**
  * The Account tab's new job: edit the display name and about text, and upload

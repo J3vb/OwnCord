@@ -8,7 +8,7 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 131500,
+      "budget": 132000,
       "note": "src/pages/MainPage.ts and what only it imports: the signed-in app shell (channels, messages, members, DMs)."
     },
     "livekit": {

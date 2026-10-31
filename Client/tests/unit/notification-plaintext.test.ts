@@ -9,9 +9,9 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 
 import { markdownToPlainText } from "../../src/lib/text/markdown";
 import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
-import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
+import { signInAs } from "../helpers/storeSeeds";
 
 const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
 
@@ -87,13 +87,10 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
     testPrefs.clear();
     resetNotificationCoalescing();
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
-    authStore.setState(() => ({
-      token: "t",
-      user: { id: 1, username: "Me", avatar: null, role: "member" },
-      serverName: null,
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "Me", avatar: null, role: "member" },
+      { token: "t", serverName: null },
+    );
     channelsStore.setState(() => ({
       categories: [],
       channels: new Map([

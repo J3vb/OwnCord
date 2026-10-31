@@ -59,7 +59,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+import { createVoiceAudioTab } from "../../src/features/settings/VoiceAudioTab";
 import { installFakeAudio } from "../helpers/fakeAudioContext";
 
 function codecOptions(): string[] {

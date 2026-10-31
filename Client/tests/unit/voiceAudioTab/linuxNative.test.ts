@@ -152,7 +152,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   async function mount() {
-    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const { createVoiceAudioTab: create } =
+      await import("../../../src/features/settings/VoiceAudioTab");
     const ac = new AbortController();
     const tab = create(ac.signal);
     const element = tab.build();
@@ -309,7 +310,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   it("drives the meter from the engine's level reports", async () => {
     mockUnsubscribeNativeLevel.mockClear();
     const ac = new AbortController();
-    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const { createVoiceAudioTab: create } =
+      await import("../../../src/features/settings/VoiceAudioTab");
     const element = create(ac.signal).build();
     document.body.appendChild(element);
     expect(nativeLevelListener).not.toBeNull();
@@ -971,7 +973,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     startCameraPreview
       .mockResolvedValueOnce({ width: 320, height: 180, frames: "ws://127.0.0.1:9/own" })
       .mockResolvedValue({ width: 1280, height: 720, frames: "ws://127.0.0.1:9/call" });
-    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const { createVoiceAudioTab: create } =
+      await import("../../../src/features/settings/VoiceAudioTab");
     const ac = new AbortController();
     const element = create(ac.signal).build();
     document.body.appendChild(element);
@@ -1019,7 +1022,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         }),
       )
       .mockResolvedValue({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok2" });
-    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const { createVoiceAudioTab: create } =
+      await import("../../../src/features/settings/VoiceAudioTab");
     const ac = new AbortController();
     const element = create(ac.signal).build();
     document.body.appendChild(element);
@@ -1054,7 +1058,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         }),
       )
       .mockRejectedValue(new Error("no camera"));
-    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const { createVoiceAudioTab: create } =
+      await import("../../../src/features/settings/VoiceAudioTab");
     const ac = new AbortController();
     const element = create(ac.signal).build();
     document.body.appendChild(element);
@@ -1083,7 +1088,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         resolveStart = resolve;
       }),
     );
-    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const { createVoiceAudioTab: create } =
+      await import("../../../src/features/settings/VoiceAudioTab");
     const ac = new AbortController();
     const element = create(ac.signal).build();
     document.body.appendChild(element);
@@ -1151,7 +1157,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         resolveDevices = resolve;
       }),
     );
-    const { createVoiceAudioTab: create } = await import("@components/settings/VoiceAudioTab");
+    const { createVoiceAudioTab: create } =
+      await import("../../../src/features/settings/VoiceAudioTab");
     const ac = new AbortController();
     const element = create(ac.signal).build();
     document.body.appendChild(element);

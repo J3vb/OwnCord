@@ -7,7 +7,7 @@ import type { DmChannel } from "@stores/dm.store";
 import type { GridPerson } from "@components/VideoGrid";
 import type { AvatarRef, ControlRefs, DmCallView } from "../DmCallViewModel";
 import type { DmCallPanelOptions } from "../DmCallPanel";
-import type { TalkSlot } from "../../features/voice/talkSlot";
+import type { TalkSlot } from "../../voice/talkSlot";
 
 export interface DmCallState {
   readonly options: DmCallPanelOptions;

@@ -10,8 +10,8 @@ import {
   ownIdentityTitle,
   verifyPresentation,
   openIdentityMismatchModal,
-} from "../../features/voice/peerVerification";
-import { dmCallText as d } from "../../i18n/dmCall";
+} from "../../voice/peerVerification";
+import { dmCallText as d } from "../../../i18n/dmCall";
 import {
   type AvatarRef,
   callName,

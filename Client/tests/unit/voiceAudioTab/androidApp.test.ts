@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/voiceAudioTabMocks";
-import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+import { createVoiceAudioTab } from "../../../src/features/settings/VoiceAudioTab";
 import { installFakeAudio } from "../../helpers/fakeAudioContext";
 import { stubNavigator } from "../../helpers/voiceAudioTabHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";

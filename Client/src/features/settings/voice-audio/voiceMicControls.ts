@@ -9,7 +9,7 @@ import { applyInputMode, setInputVolume } from "@lib/voice/livekitSession";
 import { vadLevelPosition, vadThreshold } from "@lib/voice/audioPipeline";
 import { desktop } from "../../../platform/desktop";
 import { settingsText as t } from "../../../i18n/settings";
-import { setStatusIcon, statusIcon } from "../../../features/settings/status";
+import { setStatusIcon, statusIcon } from "../status";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
 import { autoInputSensitivity, inputMode, type InputMode } from "@lib/ui/inputMode";
 import { buildPttControls } from "../pttControls";
@@ -276,7 +276,7 @@ export function mountMicControls(sc: VoiceTabScope): void {
     sc.syncMeterGate();
     sc.resetNativeTestGate();
     if (sc.android) {
-      void import("../../../features/voice/talkButton")
+      void import("../../voice/talkButton")
         .then((m) => m.syncTalkSource())
         .catch((err: unknown) => log.warn("Talk button failed to follow the input mode", err));
       return;

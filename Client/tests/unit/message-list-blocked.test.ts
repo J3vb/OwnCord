@@ -16,7 +16,7 @@ import {
   setBlockedByMe,
   setUserBlockedByMe,
 } from "@stores/blocks.store";
-import { channelsStore, setActiveChannel, setChannels } from "@stores/channels.store";
+import { setActiveChannel, setChannels } from "@stores/channels.store";
 import {
   leaveChannel,
   resetReadPointerState,
@@ -27,6 +27,7 @@ import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/server
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNEL_ID = 1;
 const ALICE = { id: 2, username: "alice", avatar: null };
@@ -38,12 +39,7 @@ function resetStores(): void {
   resetBlocksStore();
   resetMessagesState();
   resetMembersState();
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
 }
 
 /** Ten minutes apart (past the 7-minute group window), so no two rows group. */

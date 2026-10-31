@@ -33,6 +33,7 @@ import { createReconnectClock } from "../../src/features/connection/dispatchCont
 import { formatMessageTimestamp } from "@lib/text/formatting";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNEL_ID = 1;
 const ME = 1;
@@ -52,12 +53,7 @@ function nextFrame(): Promise<void> {
 function resetStores(): void {
   resetMessagesState();
   resetMembersState();
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
 }
 
 /** Authors alternate between two other users so no row is ever grouped, and

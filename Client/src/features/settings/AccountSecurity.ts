@@ -3,15 +3,10 @@
 import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText, ApiClientError } from "@lib/api";
 import { authStore } from "@stores/auth.store";
-import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { buildShownOnce, buildRegenerateCodes } from "./RecoverySections";
 import { outcomeEl, showOutcome } from "./helpers";
-import {
-  createStatusRow,
-  setStatusIcon,
-  createRevealToggle,
-  type StatusKind,
-} from "../../features/settings/status";
+import { createStatusRow, setStatusIcon, createRevealToggle, type StatusKind } from "./status";
 import { accountText as t } from "../../i18n/account";
 import { RestErrorCode } from "@lib/protocolTypes";
 import { createLogger } from "@lib/logger";

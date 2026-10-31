@@ -46,6 +46,7 @@ import type { Message } from "@stores/messages.store";
 import type { ReadyChannel } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
 import { resetMessagesState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function channel(id: number, unread: number, pointer: number | undefined): ReadyChannel {
   return {
@@ -104,12 +105,7 @@ beforeEach(() => {
     unreads.push([id, messageId]);
     return `u-${unreads.length}`;
   });
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
   resetMessagesState();
   applyReadyCapabilities({ read_pointer: true });

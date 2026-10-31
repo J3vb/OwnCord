@@ -30,11 +30,11 @@ import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
-import { isConnecting, formatElapsed } from "../features/voice/voiceStatusText";
+import { isConnecting, formatElapsed } from "../voice/voiceStatusText";
 import type { VideoGridComponent } from "@components/VideoGrid";
-import { voiceText as t } from "../i18n/voice";
-import { dmCallText as d } from "../i18n/dmCall";
-import { shareBlockReason } from "../features/voice/shareGate";
+import { voiceText as t } from "../../i18n/voice";
+import { dmCallText as d } from "../../i18n/dmCall";
+import { shareBlockReason } from "../voice/shareGate";
 import {
   type AvatarRef,
   callName,
@@ -49,7 +49,7 @@ import { HEIGHT_PREF, MIN_HEIGHT, MESSAGES_MIN_HEIGHT, KEY_STEP } from "./dm-cal
 import type { DmCallState, DmCallApi } from "./dm-call/dmCallState";
 import { connectedStatus, createDmCallRender } from "./dm-call/dmCallRender";
 import { createDmCallVerify, identitiesOf } from "./dm-call/dmCallVerify";
-import { createTalkSlot } from "../features/voice/talkSlot";
+import { createTalkSlot } from "../voice/talkSlot";
 
 export { absentMembers, deriveCallView } from "./DmCallViewModel";
 export type { DmCallView, DmCallViewInput } from "./DmCallViewModel";
@@ -99,7 +99,7 @@ export {
   alertMissedCall,
   alertSupersededCall,
   clearIncomingCall,
-} from "../features/direct-messages/callAlerts";
+} from "./callAlerts";
 
 export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelComponent {
   const disposable = new Disposable();

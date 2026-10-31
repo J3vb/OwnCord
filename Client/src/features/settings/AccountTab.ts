@@ -8,15 +8,15 @@ import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText } from "@lib/api";
 import { authStore } from "@stores/auth.store";
 import { resolveDisplayName, avatarInitial } from "@lib/ui/avatar";
-import { isRenderableAvatar } from "../../features/profiles/avatar";
-import { resolveServerUrl } from "../../features/messaging/content/attachments";
+import { isRenderableAvatar } from "../profiles/avatar";
+import { resolveServerUrl } from "../messaging/content/attachments";
 import { profileBannersEnabled } from "@lib/net/serverCapabilities";
-import { paintBanner } from "../../features/profiles/banner";
-import { bannerImages } from "../../features/profiles/bannerImages";
-import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import { paintBanner } from "../profiles/banner";
+import { bannerImages } from "../profiles/bannerImages";
+import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { buildRecoveryKitSection } from "./RecoverySections";
 import { outcomeEl } from "./helpers";
-import { statusIcon, type StatusKind, setStatusIcon } from "../../features/settings/status";
+import { statusIcon, type StatusKind, setStatusIcon } from "./status";
 import { accountText as t } from "../../i18n/account";
 import {
   attachLimitHint,

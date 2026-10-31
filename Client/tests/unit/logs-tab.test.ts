@@ -59,8 +59,8 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
 import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
-import { createLogsTab } from "../../src/components/settings/LogsTab";
-import type { TabName } from "../../src/components/SettingsOverlay";
+import { createLogsTab } from "../../src/features/settings/LogsTab";
+import type { TabName } from "../../src/features/settings/SettingsOverlay";
 
 /** The <details> whose summary starts with `label`. */
 function disclosure(el: HTMLElement, label: string): HTMLDetailsElement {

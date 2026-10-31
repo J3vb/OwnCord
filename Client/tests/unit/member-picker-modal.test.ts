@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
 import { membersStore } from "../../src/stores/members.store";
-import { authStore } from "../../src/stores/auth.store";
 import type { Member } from "../../src/stores/members.store";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetAuthState, signInAs } from "../helpers/storeSeeds";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,24 +30,15 @@ function setStoreMembers(members: Member[]): void {
 }
 
 function setCurrentUser(userId: number): void {
-  authStore.setState(() => ({
-    token: "test-token",
-    user: { id: userId, username: "Me", avatar: null, role: "member" },
-    serverName: "TestServer",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs(
+    { id: userId, username: "Me", avatar: null, role: "member" },
+    { token: "test-token", serverName: "TestServer" },
+  );
 }
 
 function resetStores(): void {
   resetMembersState();
-  authStore.setState(() => ({
-    token: null,
-    user: null,
-    serverName: null,
-    motd: null,
-    isAuthenticated: false,
-  }));
+  resetAuthState();
 }
 
 // ---------------------------------------------------------------------------
@@ -554,13 +545,7 @@ describe("createMemberPickerModal", () => {
 
   it("handles missing auth user gracefully (defaults userId to 0)", () => {
     // No user set in auth store — user is null, so id defaults to 0
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     setStoreMembers([
       makeMember({ id: 0, username: "SystemUser" }),
       makeMember({ id: 1, username: "Alice" }),

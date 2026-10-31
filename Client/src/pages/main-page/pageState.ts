@@ -17,7 +17,7 @@ import type { DmProfileSidebarComponent } from "@components/DmProfileSidebar";
 import type { GroupMemberPanelController } from "./GroupMemberPanelController";
 import type { IncomingCallBannerComponent } from "@components/IncomingCallBanner";
 import type { RingController, OutgoingCall } from "@lib/voice/callRing";
-import type { DmCallPanelComponent } from "@components/DmCallPanel";
+import type { DmCallPanelComponent } from "../../features/direct-messages/DmCallPanel";
 import type { SidebarDrawer } from "./SidebarDrawer";
 import type { MemberColumn } from "./MemberColumn";
 import type { ContentNavigator } from "../../features/navigation/contentView";

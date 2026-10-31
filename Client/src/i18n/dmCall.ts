@@ -1,7 +1,7 @@
 import { defineCatalog } from "./format";
 
 /**
- * The DM call panel's copy (components/DmCallPanel.ts), and the caller's
+ * The DM call panel's copy (features/direct-messages/DmCallPanel.ts), and the caller's
  * declined/no-answer toast in the main page. Its own catalog rather than the
  * shared voice catalog. The panel also reads the shared voice catalog for
  * status and control names it has in common with the voice widget.

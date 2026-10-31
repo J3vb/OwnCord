@@ -468,7 +468,7 @@ popup's Call opens the 1:1 DM with that member (creating it if needed) and then
 starts the call there through the same `startCall` (`onCallUser` in
 `pages/main-page/SidebarArea.ts`).
 
-The DM call panel (`components/DmCallPanel.ts`, between the chat header and the
+The DM call panel (`features/direct-messages/DmCallPanel.ts`, between the chat header and the
 messages) shows while the open DM has a ring in flight, an outgoing ring, or
 anyone in its voice channel: outgoing, declined/no answer, incoming, a "Join
 call" strip for a call you are not in, and the connected stage (collapsible to

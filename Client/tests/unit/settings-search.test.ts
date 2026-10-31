@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
 import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
 
 const mockAppVersion = vi.hoisted(() => vi.fn());
@@ -69,12 +69,12 @@ import {
   SETTINGS_SEARCH_INDEX,
   highlightMatches,
   clearHighlights,
-} from "@components/settings/settingsSearch";
+} from "../../src/features/settings/settingsSearch";
 import { settingsText } from "../../src/i18n/settings";
 import { whatsNewText } from "../../src/i18n/whatsNew";
 import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
-import type { SearchableTab } from "@components/settings/settingsSearch";
+import type { SearchableTab } from "../../src/features/settings/settingsSearch";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
 
 const options = {

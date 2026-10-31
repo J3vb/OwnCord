@@ -23,12 +23,12 @@ vi.mock("../../src/features/whats-new/changelogSource", () => ({ loadChangelog: 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 vi.mock("@stores/ui.store", () => ({ setTheme: vi.fn() }));
 
-import { buildAboutTab } from "@components/settings/AboutTab";
-import { buildAdvancedTab } from "@components/settings/AdvancedTab";
-import { buildAppearanceTab } from "@components/settings/AppearanceTab";
-import { buildNotificationsTab } from "@components/settings/NotificationsTab";
-import { buildTextImagesTab } from "@components/settings/TextImagesTab";
-import { createLogsTab } from "@components/settings/LogsTab";
+import { buildAboutTab } from "../../src/features/settings/AboutTab";
+import { buildAdvancedTab } from "../../src/features/settings/AdvancedTab";
+import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
+import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
+import { buildTextImagesTab } from "../../src/features/settings/TextImagesTab";
+import { createLogsTab } from "../../src/features/settings/LogsTab";
 import { buildCustomThemeSection } from "../../src/features/custom-themes/customThemeSection";
 import { gameDetector } from "../../src/platform/desktop/gameDetector";
 import { mediaDetector } from "../../src/platform/desktop/mediaDetector";
@@ -36,7 +36,7 @@ import { systemIdle } from "../../src/platform/desktop/systemIdle";
 import { startAutoIdle } from "@lib/presence/autoIdle";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
 import { gameActivityText } from "../../src/i18n/gameActivity";
-import type { TabName } from "@components/SettingsOverlay";
+import type { TabName } from "../../src/features/settings/SettingsOverlay";
 
 const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
