@@ -359,6 +359,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.With(requirePerm(permissions.ManageServer)).
 			Post("/registrations/{id}/deny", handleDenyRegistration(svc.Users))
 		mountRetentionRoutes(r, svc.Retention)
+		mountStorageRoutes(r, newStorageAPI(svc, hub, setupOpts, paths))
 
 		mountChannelActionRoutes(r, "/channels", channels, hub)
 		mountDiscordImportRoutes(r, newDiscordImportAPI(svc.Retention, setupOpts))

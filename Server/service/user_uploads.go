@@ -74,14 +74,21 @@ func (s *UploadService) QuotaBytes() int64 {
 	return s.quota.limits.UserQuotaBytes
 }
 
-// StorageSummary reports userID's counted bytes and the quota. A user who has
-// never uploaded has no counter row and reads as 0.
+// StorageSummary reports userID's counted bytes and their limit: their own when
+// an admin set one, else the server-wide one. A user who has never uploaded has
+// no counter row and reads as 0.
 func (s *UploadService) StorageSummary(ctx context.Context, userID int64) (StorageSummary, error) {
 	used, err := s.StorageUsed(ctx, userID)
 	if err != nil {
 		return StorageSummary{}, fmt.Errorf("%w: storage used: %w", ErrInternal, err)
 	}
-	return StorageSummary{UsedBytes: used, QuotaBytes: s.QuotaBytes()}, nil
+	s.quota.mu.Lock()
+	quota, err := s.effectiveQuotaLocked(ctx, userID)
+	s.quota.mu.Unlock()
+	if err != nil {
+		return StorageSummary{}, err
+	}
+	return StorageSummary{UsedBytes: used, QuotaBytes: quota}, nil
 }
 
 func (s *UploadService) ownStore() (OwnUploadStore, error) {
@@ -140,9 +147,15 @@ func (s *UploadService) ListOwnUploads(ctx context.Context, userID int64, in Own
 // formatOwnUploadCursor renders the last item's sort key and id as an opaque
 // token: "n|<uploaded_at>|<id>" or "l|<size>|<id>", base64url encoded.
 func formatOwnUploadCursor(sort string, last db.OwnUpload) string {
-	raw := "n|" + last.UploadedAt + "|" + last.Attachment.ID
+	return formatUploadCursor(sort, last.UploadedAt, last.Attachment.Size, last.Attachment.ID)
+}
+
+// formatUploadCursor is formatOwnUploadCursor over the sort key values, shared
+// with the admin list.
+func formatUploadCursor(sort, uploadedAt string, size int64, id string) string {
+	raw := "n|" + uploadedAt + "|" + id
 	if sort == db.UploadSortLargest {
-		raw = "l|" + strconv.FormatInt(last.Attachment.Size, 10) + "|" + last.Attachment.ID
+		raw = "l|" + strconv.FormatInt(size, 10) + "|" + id
 	}
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
