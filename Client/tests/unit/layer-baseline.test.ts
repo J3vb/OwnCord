@@ -30,7 +30,7 @@ const baseline = JSON.parse(
 
 /** Upward value-import sites that may remain. Lower this in every change that
  *  removes one; it never rises. */
-const DEBT_SITE_CAP = 85;
+const DEBT_SITE_CAP = 74;
 
 /** The upward imports a written rule requires (Client/CLAUDE.md: the
  *  dispatcher door, and messages.store over its reducer modules). */
