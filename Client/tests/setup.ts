@@ -23,6 +23,8 @@
 //
 // What is left here is the assertion that the flag actually arrived. It fails
 // loudly instead of letting the suite go quietly vacuous again.
+import { webcrypto as nodeWebCrypto } from "node:crypto";
+import * as nodeWebStreams from "node:stream/web";
 import { setLogLevel } from "../src/lib/logger";
 import { installConsoleGuard } from "./helpers/console";
 import { installLifecycleGuard } from "./helpers/lifecycle";
@@ -41,6 +43,23 @@ if (Object.getPrototypeOf(globalThis.localStorage) !== Storage.prototype) {
       "vi.spyOn(Storage.prototype, ...) in this suite would silently intercept " +
       "nothing — check the NODE_OPTIONS block at the top of vitest.config.ts (OC-0415).",
   );
+}
+
+// The vmForks pool runs each file in jsdom's own VM context, which carries
+// only the globals jsdom implements. The forks pool used to copy jsdom onto
+// Node's global instead, so WebCrypto's `subtle` and the web streams came from
+// Node. Hand the same Node implementations to the VM context so the suite
+// sees what every browser (and the old pool) has.
+if (typeof globalThis.crypto?.subtle === "undefined") {
+  Object.defineProperty(globalThis.crypto, "subtle", {
+    value: nodeWebCrypto.subtle,
+    configurable: true,
+  });
+}
+for (const [name, value] of Object.entries(nodeWebStreams)) {
+  if (!(name in globalThis)) {
+    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  }
 }
 
 // jsdom never lays anything out, so it doesn't implement scrollIntoView at

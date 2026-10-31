@@ -14,6 +14,10 @@
  * jsdom render and so are not indexed unless they also show there. Matching
  * and highlighting lower-case the text and slice the original by the match
  * length, which assumes the English catalog (no case mapping changes length).
+ *
+ * The Android app leaves out rows that only make sense on a desktop (they are
+ * wrapped in `desktopOnly`) and says some of the others in its own words
+ * (`platformText`), so a search there finds only what the tab shows.
  */
 
 import { accountText } from "../../i18n/account";
@@ -22,9 +26,16 @@ import { gameActivityText } from "../../i18n/gameActivity";
 import { listeningDetailsText } from "../../i18n/listeningDetails";
 import { settingsText } from "../../i18n/settings";
 import { whatsNewText } from "../../i18n/whatsNew";
+import { isAndroidApp } from "../../features/voice/native/platform";
+import { platformText } from "./helpers";
 
 const s = settingsText;
 const a = accountText;
+
+/** Text that is on screen on a desktop and not in the Android app. */
+function desktopOnly(...texts: string[]): string[] {
+  return isAndroidApp() ? [] : texts;
+}
 
 /** The tabs the overlay can show; `SettingsOverlay`'s `TabName` is this union. */
 export type SearchableTab =
@@ -59,7 +70,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     a("totp.description"),
     a("status.sectionTitle"),
     a("status.showMeAs"),
-    a("status.hint"),
+    platformText(a("status.hint"), a("status.hint.android")),
     a("devices.sectionTitle"),
     a("devices.description"),
     a("security.title"),
@@ -71,16 +82,15 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
   Appearance: () => [
     s("appearance.theme"),
     s("appearance.fontSize"),
-    s("appearance.zoom"),
+    ...desktopOnly(s("appearance.zoom")),
     s("appearance.compactMode"),
     s("appearance.timeFormat"),
     s("appearance.timeFormat.desc"),
-    s("appearance.memberLayout"),
-    s("appearance.memberLayout.desc"),
+    ...desktopOnly(s("appearance.memberLayout"), s("appearance.memberLayout.desc")),
     s("appearance.accentColor"),
     s("appearance.accentNote"),
     s("appearance.customThemes"),
-    s("appearance.customThemes.desc"),
+    platformText(s("appearance.customThemes.desc"), s("appearance.customThemes.desc.android")),
   ],
   Accessibility: () => [
     s("accessibility.group.motion"),
@@ -104,11 +114,10 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("accessibility.saturation.desc"),
   ],
   "Voice & Video": () => [
-    s("voiceAudio.card.inputMode"),
-    s("voiceAudio.inputMode.ptt"),
+    ...desktopOnly(s("voiceAudio.card.inputMode"), s("voiceAudio.inputMode.ptt")),
     s("voiceAudio.card.microphone"),
     s("voiceAudio.card.speakers"),
-    s("voiceAudio.card.camera"),
+    platformText(s("voiceAudio.card.camera"), s("voiceAudio.card.camera.android")),
     s("voiceAudio.card.processing"),
     s("voiceAudio.micTest.label"),
     s("voiceAudio.micTest.desc"),
@@ -116,19 +125,21 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("voiceAudio.inputVolume"),
     s("voiceAudio.inputSensitivity"),
     s("voiceAudio.autoSensitivity"),
-    s("voiceAudio.outputDevice"),
+    ...desktopOnly(s("voiceAudio.outputDevice")),
     s("voiceAudio.outputVolume"),
     s("voiceAudio.videoDevice"),
     s("voiceAudio.autoPlayCameras"),
     s("voiceAudio.autoPlayCamerasDesc"),
     s("voiceAudio.cameraQuality"),
     s("voiceAudio.cameraQualityDesc"),
-    s("voiceAudio.screenQuality"),
-    s("voiceAudio.screenQualityDesc"),
-    s("voiceAudio.screenFps"),
-    s("voiceAudio.screenFpsDesc"),
-    s("voiceAudio.videoCodec"),
-    s("voiceAudio.videoCodecDesc"),
+    ...desktopOnly(
+      s("voiceAudio.screenQuality"),
+      s("voiceAudio.screenQualityDesc"),
+      s("voiceAudio.screenFps"),
+      s("voiceAudio.screenFpsDesc"),
+      s("voiceAudio.videoCodec"),
+      s("voiceAudio.videoCodecDesc"),
+    ),
     s("voiceAudio.echo.label"),
     s("voiceAudio.echo.desc"),
     s("voiceAudio.noise.label"),
@@ -153,26 +164,24 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     externalConsentText("reset.desc"),
     s("images.chatBar.title"),
     s("images.chatBar.emoji.label"),
-    s("images.chatBar.emoji.desc"),
+    platformText(s("images.chatBar.emoji.desc"), s("images.chatBar.emoji.desc.android")),
     s("images.chatBar.sticker.label"),
     s("images.chatBar.sticker.desc"),
     s("images.chatBar.gif.label"),
-    s("images.chatBar.gif.desc"),
+    platformText(s("images.chatBar.gif.desc"), s("images.chatBar.gif.desc.android")),
     s("images.chatBar.poll.label"),
     s("images.chatBar.poll.desc"),
     s("images.chatBar.voice.label"),
     s("images.chatBar.voice.desc"),
   ],
   Notifications: () => [
-    s("notifications.desktop.label"),
-    s("notifications.desktop.desc"),
+    platformText(s("notifications.desktop.label"), s("notifications.desktop.label.android")),
+    platformText(s("notifications.desktop.desc"), s("notifications.desktop.desc.android")),
     s("notifications.permission.label"),
-    s("notifications.flash.label"),
-    s("notifications.flash.desc"),
+    ...desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc")),
     s("notifications.suppress.label"),
     s("notifications.suppress.desc"),
-    s("notifications.unreadBadge.label"),
-    s("notifications.unreadBadge.desc"),
+    ...desktopOnly(s("notifications.unreadBadge.label"), s("notifications.unreadBadge.desc")),
     s("notifications.sounds.label"),
     s("notifications.sounds.desc"),
     s("notifications.callSound.label"),
@@ -202,57 +211,63 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("notifications.channelLevels.title"),
     s("notifications.channelLevels.desc"),
   ],
-  Keybinds: () => [
-    s("keybinds.pushToTalk"),
-    s("keybinds.pttReleaseDelay"),
-    s("keybinds.globalSection"),
-    s("keybinds.navigation"),
-    s("keybinds.communication"),
-    s("keybinds.messages"),
-    s("keybinds.action.quickSwitcher"),
-    s("keybinds.action.openSettings"),
-    s("keybinds.action.showShortcuts"),
-    s("keybinds.action.searchMessages"),
-    s("keybinds.action.closeOverlay"),
-    s("keybinds.action.markChannelRead"),
-    s("keybinds.action.markServerRead"),
-    s("keybinds.action.scrollChat"),
-    s("keybinds.action.emojiPicker"),
-    s("keybinds.action.gifPicker"),
-    s("keybinds.action.nextChannel"),
-    s("keybinds.action.nextUnreadChannel"),
-    s("keybinds.action.toggleMute"),
-    s("keybinds.action.toggleDeafen"),
-    s("keybinds.action.toggleCamera"),
-    s("keybinds.action.toggleScreenshare"),
-    s("keybinds.action.disconnect"),
-    s("keybinds.action.uploadFile"),
-    s("keybinds.action.editLastMessage"),
-    s("keybinds.action.bold"),
-    s("keybinds.action.italic"),
-    s("keybinds.action.underline"),
-  ],
+  // The Android app has no Keybinds tab.
+  Keybinds: () =>
+    desktopOnly(
+      s("keybinds.pushToTalk"),
+      s("keybinds.pttReleaseDelay"),
+      s("keybinds.globalSection"),
+      s("keybinds.navigation"),
+      s("keybinds.communication"),
+      s("keybinds.messages"),
+      s("keybinds.action.quickSwitcher"),
+      s("keybinds.action.openSettings"),
+      s("keybinds.action.showShortcuts"),
+      s("keybinds.action.searchMessages"),
+      s("keybinds.action.closeOverlay"),
+      s("keybinds.action.markChannelRead"),
+      s("keybinds.action.markServerRead"),
+      s("keybinds.action.scrollChat"),
+      s("keybinds.action.emojiPicker"),
+      s("keybinds.action.gifPicker"),
+      s("keybinds.action.nextChannel"),
+      s("keybinds.action.nextUnreadChannel"),
+      s("keybinds.action.toggleMute"),
+      s("keybinds.action.toggleDeafen"),
+      s("keybinds.action.toggleCamera"),
+      s("keybinds.action.toggleScreenshare"),
+      s("keybinds.action.disconnect"),
+      s("keybinds.action.uploadFile"),
+      s("keybinds.action.editLastMessage"),
+      s("keybinds.action.bold"),
+      s("keybinds.action.italic"),
+      s("keybinds.action.underline"),
+    ),
   Advanced: () => [
     s("advanced.developerMode.label"),
     s("advanced.developerMode.desc"),
-    s("advanced.launchOnLogin.label"),
-    s("advanced.launchOnLogin.desc"),
-    s("advanced.minimizeToTray.label"),
-    s("advanced.minimizeToTray.desc"),
-    s("advanced.startMinimized.label"),
-    s("advanced.startMinimized.desc"),
-    gameActivityText("settings.title"),
-    gameActivityText("settings.share.label"),
-    gameActivityText("settings.share.desc"),
-    gameActivityText("games.title"),
-    gameActivityText("games.desc"),
-    gameActivityText("games.empty"),
-    gameActivityText("add.button"),
-    listeningDetailsText("settings.share.label"),
-    listeningDetailsText("settings.share.desc"),
-    listeningDetailsText("players.title"),
-    listeningDetailsText("players.desc"),
-    listeningDetailsText("players.empty"),
+    s("advanced.confirmServerSwitch.label"),
+    s("advanced.confirmServerSwitch.desc"),
+    ...desktopOnly(
+      s("advanced.launchOnLogin.label"),
+      s("advanced.launchOnLogin.desc"),
+      s("advanced.minimizeToTray.label"),
+      s("advanced.minimizeToTray.desc"),
+      s("advanced.startMinimized.label"),
+      s("advanced.startMinimized.desc"),
+      gameActivityText("settings.title"),
+      gameActivityText("settings.share.label"),
+      gameActivityText("settings.share.desc"),
+      gameActivityText("games.title"),
+      gameActivityText("games.desc"),
+      gameActivityText("games.empty"),
+      gameActivityText("add.button"),
+      listeningDetailsText("settings.share.label"),
+      listeningDetailsText("settings.share.desc"),
+      listeningDetailsText("players.title"),
+      listeningDetailsText("players.desc"),
+      listeningDetailsText("players.empty"),
+    ),
     s("advanced.debug"),
     s("advanced.devtools.label"),
     s("advanced.devtools.desc"),
@@ -275,16 +290,18 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("logs.voiceDiagnostics"),
     s("logs.filter"),
     s("logs.minLevel"),
-    s("logs.shareTesting"),
-    s("logs.shareRecord"),
-    s("logs.shareRecordDesc"),
-    s("logs.shareMode"),
-    s("logs.shareModeDesc"),
+    ...desktopOnly(
+      s("logs.shareTesting"),
+      s("logs.shareRecord"),
+      s("logs.shareRecordDesc"),
+      s("logs.shareMode"),
+      s("logs.shareModeDesc"),
+    ),
   ],
   About: () => [
     s("updates.label"),
     s("updates.desc"),
-    whatsNewText("about.desktop"),
+    platformText(whatsNewText("about.desktop"), whatsNewText("about.android")),
     whatsNewText("about.history"),
   ],
 };
@@ -298,14 +315,15 @@ export function normalizeQuery(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-/** Lower-cased search text per tab, built on first use. */
-const searchTextCache = new Map<SearchableTab, string>();
+/** Lower-cased search text per tab and platform, built on first use. */
+const searchTextCache = new Map<string, string>();
 
 function indexedText(tab: SearchableTab): string {
-  let text = searchTextCache.get(tab);
+  const key = `${tab}:${isAndroidApp() ? "android" : "desktop"}`;
+  let text = searchTextCache.get(key);
   if (text === undefined) {
     text = SETTINGS_SEARCH_INDEX[tab]().join("\n").toLowerCase();
-    searchTextCache.set(tab, text);
+    searchTextCache.set(key, text);
   }
   return text;
 }

@@ -13,6 +13,7 @@ import {
   makeTileConfig,
   useVideoGridHarness,
 } from "../../helpers/videoGridHarness";
+import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -622,6 +623,17 @@ describe("VideoGrid", () => {
       expect(item("focus").textContent).toBe("Back to grid");
       item("focus").click();
       expect(grid.getFocusedTileId()).toBeNull();
+    });
+
+    it("leaves Pop out out of the menu in the Android app, which has one window", async () => {
+      hostAndroidApp();
+      try {
+        grid.addStream(OTTO, "Otto", fakeStream(), remote());
+        await openMenu(OTTO);
+        expect(actions()).toEqual(["local-mute", "focus", "fullscreen", "stop-watching"]);
+      } finally {
+        clearHost();
+      }
     });
 
     it("Pop out opens the tile in a window of its own", async () => {

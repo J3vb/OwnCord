@@ -28,6 +28,7 @@ import {
 } from "./features/custom-themes/customTheme";
 import { startZoom } from "./features/zoom/zoomKeys";
 import { migrateAutoInputSensitivity, migrateInputMode } from "@lib/ui/inputMode";
+import { migrateVoiceSensitivityScale } from "@lib/voice/gateScale";
 import { configureSession, installLogoutTeardown, voiceSessionLeave } from "./app/session";
 import { createLogger, applyStoredLogLevel } from "@lib/logger";
 import { initLogPersistence, flushLogs } from "@lib/logPersistence";
@@ -75,8 +76,10 @@ startZoom(() => import("./features/zoom").then((m) => m.appZoom), new Disposable
 // Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
 installCustomThemeEscape(new Disposable().signal);
 
-// A profile from before automatic sensitivity keeps a tuned slider.
+// A profile from before automatic sensitivity keeps a tuned slider, and one
+// from before the decibel slider keeps its gate level.
 migrateAutoInputSensitivity();
+migrateVoiceSensitivityScale();
 
 // Start push-to-talk listener (Rust-side polling, non-consuming), once the
 // input mode is settled: a profile from before Input Mode keeps its PTT key.

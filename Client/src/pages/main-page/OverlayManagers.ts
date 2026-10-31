@@ -155,6 +155,9 @@ export function mapToPinnedMessage(msg: {
 export interface QuickSwitcherManager {
   /** Attach Ctrl+K handler; returns cleanup function. */
   attach(): () => void;
+  /** Open the switcher, as Ctrl+K does when nothing else is in the way (the
+   *  phone drawer's search button). A no-op while one is open or loading. */
+  open(): void;
 }
 
 export function createQuickSwitcherManager(
@@ -282,7 +285,13 @@ export function createQuickSwitcherManager(
     };
   }
 
-  return { attach };
+  return {
+    attach,
+    open: () => {
+      if (isSuspended?.() === true || dialogOpen()) return;
+      open();
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

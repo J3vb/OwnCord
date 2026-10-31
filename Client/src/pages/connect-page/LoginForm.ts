@@ -5,7 +5,12 @@ import { createElement, setText, appendChildren, qs, setOwnedTimeout, focusIsOur
 import { isImeCommit } from "@lib/text/ime";
 import { createIcon } from "@lib/icons";
 import { ApiClientError, TLS_CERT_CODE, TransportError, errorText } from "@lib/api";
-import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
+import { isValidHost } from "@lib/net/hostValidation";
+import {
+  canonicalServerHost,
+  normalizeHostForCertCompare,
+  setAddressInputHints,
+} from "@lib/net/hostNormalize";
 import { normaliseInviteCode } from "@lib/nav/deepLink";
 import type { RegistrationMode } from "@lib/types";
 import type { RecoverContext } from "./RecoverOverlay";
@@ -115,6 +120,8 @@ export interface LoginFormOptions {
   readonly onHostSettled?: (host: string) => void;
   /** The host box was edited; the owner may apply a matching saved profile's settings. */
   readonly onHostInput?: (host: string) => void;
+  /** The saved hosts, so a typed address that differs only in case keeps the saved spelling. */
+  readonly getSavedHosts?: () => readonly string[];
   /**
    * The one host this page signs in to (the web portal). Read only
    * in `__OWNCORD_WEB__` builds: the host box is filled and hidden, a host
@@ -218,6 +225,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     getRetentionNotice,
     onHostSettled,
     onHostInput,
+    getSavedHosts,
   } = opts;
   // Written literally at every use so the desktop build drops each branch.
   const fixedHost = __OWNCORD_WEB__ ? opts.fixedHost : undefined;
@@ -408,7 +416,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       "host",
       connectText("login.hostLabel"),
       "text",
-      "localhost:8443",
+      connectText("login.hostPlaceholder"),
     );
     hostInput = qs("input", hostGroup)!;
     if (__OWNCORD_WEB__ && fixedHost !== undefined) {
@@ -424,7 +432,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
         clearSavedPasswordPlaceholder();
         updateRegistrationUi();
         scheduleHostSettled();
-        onHostInput?.(hostInput.value.trim());
+        onHostInput?.(currentHost());
+      },
+      { signal },
+    );
+    // Show the address the form will use once the user leaves the box.
+    hostInput.addEventListener(
+      "change",
+      () => {
+        const host = currentHost();
+        if (hostInput.value !== host) hostInput.value = host;
       },
       { signal },
     );
@@ -620,9 +637,16 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     });
     if (id === "host") {
       input.setAttribute("required", "");
+      setAddressInputHints(input);
     }
     if (id === "username" || id === "password") {
       input.setAttribute("required", "");
+    }
+    // Phone keyboards would capitalise or correct a name or code.
+    if (id === "username" || id === "invite") {
+      input.setAttribute("autocapitalize", "none");
+      input.setAttribute("autocorrect", "off");
+      input.setAttribute("spellcheck", "false");
     }
 
     if (inputType === "password") {
@@ -1012,7 +1036,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
    * deliberately treated as invite-required, never as `open`.
    */
   function currentRegistrationMode(): RegistrationMode | null {
-    const host = hostInput.value.trim();
+    const host = currentHost();
     if (!host) return null;
     return getRegistrationMode?.(host) ?? null;
   }
@@ -1037,7 +1061,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
 
     // Where registration is possible, the server's retention window is part
     // of what the user signs up to, so it is disclosed here too.
-    const host = hostInput.value.trim();
+    const host = currentHost();
     const retention =
       registering && mode !== "closed" && host ? (getRetentionNotice?.(host) ?? null) : null;
     const text =
@@ -1059,9 +1083,14 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   // Event handlers
   // ---------------------------------------------------------------------------
 
+  /** The host box's address as the form saves and compares it. */
+  function currentHost(): string {
+    return canonicalServerHost(hostInput.value, getSavedHosts?.() ?? []);
+  }
+
   /** Every write of the host goes through here: a new host ends the old one's busy retry and saved password. */
   function writeHost(host: string): void {
-    if (host !== hostInput.value.trim()) {
+    if (host !== currentHost()) {
       cancelAuthBusyRetry?.();
       // The saved password belongs to the old host's stored credential.
       clearSavedPasswordPlaceholder();
@@ -1073,7 +1102,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
   function scheduleHostSettled(delayMs = 500): void {
     if (!onHostSettled || formMode !== "register") return;
     const seq = ++hostSettledSeq;
-    const host = hostInput.value.trim();
+    const host = currentHost();
     if (!host) return;
     setOwnedTimeout(
       signal,
@@ -1114,6 +1143,12 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       connectText(formMode === "login" ? "login.toRegister" : "login.toLogin"),
     );
 
+    // Password managers offer a generated password for a new account.
+    passwordInput.setAttribute(
+      "autocomplete",
+      formMode === "login" ? "current-password" : "new-password",
+    );
+
     updateRegistrationUi();
     scheduleHostSettled(0);
 
@@ -1129,12 +1164,15 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     /** The message is shown under the field (its hint); the banner points there. */
     inline?: boolean;
   } | null {
-    const host = hostInput.value.trim();
+    const host = currentHost();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
 
     if (!host) {
       return { message: connectText("validation.hostRequired"), field: "host" };
+    }
+    if (!isValidHost(host)) {
+      return { message: connectText("validation.hostInvalid"), field: "host" };
     }
     if (!username) {
       return { message: connectText("validation.usernameRequired"), field: "username" };
@@ -1264,7 +1302,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       return;
     }
 
-    const host = hostInput.value.trim();
+    const host = currentHost();
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
     // The mode toggle stays live while a request is in flight.
@@ -1551,10 +1589,13 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
     },
 
     getHost(): string {
-      return hostInput?.value ?? "";
+      return hostInput === undefined ? "" : currentHost();
     },
 
     focusHost(): void {
+      // A touch screen opens its keyboard on focus, covering the saved servers.
+      if (typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches)
+        return;
       if (__OWNCORD_WEB__ && fixedHost !== undefined) usernameInput.focus();
       else hostInput.focus();
     },
@@ -1566,7 +1607,7 @@ export function createLoginForm(opts: LoginFormOptions): LoginFormApi {
       // The user may have moved on since: another server, the other mode, or
       // a submit of their own already under way.
       if (formState !== "error" || formMode !== refused.mode) return;
-      if (hostInput.value.trim() !== refused.host) return;
+      if (currentHost() !== refused.host) return;
       void handleFormSubmit(new Event("submit"));
     },
 

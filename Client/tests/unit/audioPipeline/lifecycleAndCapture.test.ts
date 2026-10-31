@@ -683,7 +683,7 @@ describe("startVadDetector details", () => {
     it("closes the gate on the poll where the quiet has lasted exactly the hold", async () => {
       const { onGate, detector } = await polling(0);
       // 30 polls of start-up grace, then the first quiet poll starts the hold.
-      await vi.advanceTimersByTimeAsync(16 * 50);
+      await vi.advanceTimersByTimeAsync(16 * 62);
       expect(onGate).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(16);
       expect(onGate.mock.calls).toEqual([[true]]);
@@ -713,7 +713,7 @@ describe("startVadDetector details", () => {
         void detector?.stop();
       });
       detector = startVadDetector(ctx as never, analyser as never, 0.05, { onGate });
-      await vi.advanceTimersByTimeAsync(16 * 60);
+      await vi.advanceTimersByTimeAsync(16 * 70);
       expect(onGate).toHaveBeenCalledTimes(1);
       const polls = analyser.getFloatTimeDomainData.mock.calls.length;
 

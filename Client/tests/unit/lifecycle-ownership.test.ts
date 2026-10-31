@@ -209,13 +209,13 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the SessionScope that aborts the transport (api.ts owner.addCleanup)",
   },
   {
-    file: "lib/api.ts",
+    file: "lib/apiDms.ts",
     fn: "getHealth",
     category: "cancellation-token",
     reason: "owner: the SessionScope that aborts the transport (api.ts owner.addCleanup)",
   },
   {
-    file: "lib/api.ts",
+    file: "lib/apiDms.ts",
     fn: "getServerInfo",
     category: "cancellation-token",
     reason: "owner: the SessionScope that aborts the transport (api.ts owner.addCleanup)",

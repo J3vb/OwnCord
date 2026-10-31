@@ -49,13 +49,15 @@ func TestTheLoadTest(t *testing.T) {
 
 	const (
 		numChannels     = 4
-		numAnchors      = 8   // steady readers, registered for the whole run
-		numChurnUsers   = 200 // distinct users churned through register/unregister
+		numAnchors      = 8 // steady readers, registered for the whole run
 		numChurnWorkers = 20
 		churnRounds     = 4
 		numBroadcasters = 6
-		broadcastIters  = 30
 		overallTimeout  = 90 * time.Second
+	)
+	var (
+		numChurnUsers  = ws.RaceScaled(200) // distinct users churned through register/unregister
+		broadcastIters = ws.RaceScaled(30)
 	)
 
 	// Deliberately not the shared openServeTestDB(t) helper: it closes the DB

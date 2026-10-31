@@ -295,6 +295,14 @@ jobs:
           mkdir -p test-results
           sudo dmesg -T | grep -iE 'segfault|trap|killed process|out of memory|webkit|owncord' > test-results/kernel-crashes.txt || true
 
+      # The installers may not grow past Client/artifact-size-budget.json. Last,
+      # so an oversized build still gets its install and update smoke.
+      - name: Installer size budget
+        if: ${{ !cancelled() }}
+        env:
+          TARGET: ${{ inputs.platform }}-${{ inputs.arch }}
+        run: node scripts/check-artifact-size.mjs ../artifacts/current "$TARGET" --summary "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

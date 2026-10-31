@@ -8,6 +8,7 @@ import {
   defaultOptions,
   useSettingsOverlayHarness,
 } from "../../helpers/settingsOverlayHarness";
+import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
 vi.mock("../../../src/features/whats-new/appVersion", () => mocks.newAppVersionMock());
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -138,6 +139,22 @@ describe("SettingsOverlay", () => {
       overlay.destroy?.();
     });
 
+    it("is laid out as pages on a phone turned sideways, past the 600 px width", () => {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn(
+          (query: string) => ({ matches: query.includes("pointer: coarse") }) as MediaQueryList,
+        ),
+      );
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(document.activeElement).toBe(container.querySelector("[data-testid='settings-back']"));
+      overlay.destroy?.();
+    });
+
     it("Back returns to the list with focus on the section it left, without closing", () => {
       stubPhone(true);
       const overlay = createSettingsOverlay(defaultOptions);
@@ -219,6 +236,29 @@ describe("SettingsOverlay", () => {
       overlay.destroy?.();
     });
 
+    it("a tapped My uploads opens its section, as every other tab does", () => {
+      stubPhone(true);
+      const overlay = createSettingsOverlay({
+        ...defaultOptions,
+        myUploadsTab: () => {
+          const pane = document.createElement("div");
+          pane.textContent = "uploads pane";
+          return pane;
+        },
+      });
+      overlay.mount(container);
+      overlay.open();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
+
+      container.querySelector<HTMLElement>("#settings-tab-my-uploads")!.click();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(container.querySelector(".settings-content h1")?.textContent).toBe("My uploads");
+      expect(container.querySelector(".settings-content")?.textContent).toContain("uploads pane");
+      expect(document.activeElement).toBe(container.querySelector("[data-testid='settings-back']"));
+
+      overlay.destroy?.();
+    });
+
     it("on a wide window Escape still closes Settings with a section picked", () => {
       stubPhone(false);
       const overlay = createSettingsOverlay(defaultOptions);
@@ -229,6 +269,62 @@ describe("SettingsOverlay", () => {
       escape();
       expect(defaultOptions.onClose).toHaveBeenCalledTimes(1);
 
+      overlay.destroy?.();
+    });
+  });
+
+  describe("the Keybinds tab", () => {
+    const navNames = (): string[] =>
+      [...container.querySelectorAll(".settings-sidebar > button.settings-nav-item")].map(
+        (t) => t.textContent ?? "",
+      );
+    const searchFor = (text: string): void => {
+      const box = container.querySelector<HTMLInputElement>("[data-testid='settings-search']")!;
+      box.value = text;
+      box.dispatchEvent(new Event("input"));
+    };
+    const visibleNav = (): string[] =>
+      [...container.querySelectorAll<HTMLElement>(".settings-sidebar > button.settings-nav-item")]
+        .filter((t) => !t.hidden)
+        .map((t) => t.textContent ?? "");
+
+    afterEach(() => {
+      clearHost();
+    });
+
+    it("is in the desktop app, and found by a search for a key", () => {
+      hostDesktopApp();
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(navNames()).toContain("Keybinds");
+      searchFor("push to talk");
+      expect(visibleNav()).toContain("Keybinds");
+      overlay.destroy?.();
+    });
+
+    it("is not in the Android app, and a search never offers it", () => {
+      hostAndroidApp();
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      expect(navNames()).not.toContain("Keybinds");
+      expect(navNames()).toHaveLength(9);
+      searchFor("push to talk");
+      expect(visibleNav()).toEqual([]);
+      searchFor("shortcut");
+      expect(visibleNav()).not.toContain("Keybinds");
+      overlay.destroy?.();
+    });
+
+    it("is ignored when another surface asks for it on Android", () => {
+      hostAndroidApp();
+      mockUiState.settingsTab = "Keybinds";
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      expect(container.querySelector(".settings-nav-item.active")?.textContent).not.toBe(
+        "Keybinds",
+      );
+      expect(container.querySelector(".settings-content h1")?.textContent).not.toBe("Keybinds");
       overlay.destroy?.();
     });
   });

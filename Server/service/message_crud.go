@@ -191,7 +191,7 @@ func (s *MessageService) sendMessageLinkAttachments(ctx context.Context, p SendM
 // whose recipient does not yet trust the sender stages a message request. It
 // reports false when the participant lookup failed, so the caller returns the
 // saved message without the remaining side effects.
-func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMessageParams, result *SendMessageResult) bool {
+func (s *dmDelivery) sendMessageDMSideEffects(ctx context.Context, p SendMessageParams, result *SendMessageResult) bool {
 	// The message is committed, so everything below must survive the sender dropping:
 	// a canceled ctx would silently drop every recipient from the fan-out, skip
 	// re-opening dm_open_state and degrade the payload, with chat_send_ok already
@@ -270,7 +270,7 @@ func (s *MessageService) sendMessageDMSideEffects(ctx context.Context, p SendMes
 // channelID: the first-contact gate's audience when wired, else every participant
 // (tests and NewMessageService callers). Exported for the ws typing path
 // (ws/handlers_presence.go), the one DM frame path outside this package.
-func (s *MessageService) DMAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
+func (s *dmDelivery) DMAudience(ctx context.Context, channelID, senderID int64) ([]int64, error) {
 	if s.messageRequests == nil {
 		return s.st.GetDMParticipantIDs(ctx, channelID)
 	}

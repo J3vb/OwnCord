@@ -76,6 +76,8 @@ func TestFindClientAssets_DebTargets(t *testing.T) {
 			{Name: "OwnCord_1.0.0_amd64.deb.sig", DownloadURL: "https://example.com/amd64.deb.sig"},
 			{Name: "OwnCord_1.0.0_arm64.deb", DownloadURL: "https://example.com/arm64.deb"},
 			{Name: "OwnCord_1.0.0_arm64.deb.sig", DownloadURL: "https://example.com/arm64.deb.sig"},
+			{Name: "OwnCord_1.0.0_arm64.apk", DownloadURL: "https://example.com/arm64.apk"},
+			{Name: "OwnCord_1.0.0_arm64.apk.sig", DownloadURL: "https://example.com/arm64.apk.sig"},
 		},
 	}
 	u.mu.Unlock()
@@ -85,6 +87,7 @@ func TestFindClientAssets_DebTargets(t *testing.T) {
 	}{
 		{"linux-x86_64-deb", "https://example.com/amd64.deb", "https://example.com/amd64.deb.sig"},
 		{"linux-aarch64-deb", "https://example.com/arm64.deb", "https://example.com/arm64.deb.sig"},
+		{"android-aarch64-apk", "https://example.com/arm64.apk", "https://example.com/arm64.apk.sig"},
 		{"linux-x86_64-rpm", "", ""},
 	}
 	for _, tc := range cases {

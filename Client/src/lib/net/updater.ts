@@ -31,7 +31,8 @@ export interface DownloadProgress {
   readonly total: number | null;
 }
 
-export type UpdateFailureReason = "cancelled" | "not-authorized";
+export type UpdateFailureReason =
+  "cancelled" | "not-authorized" | "android-confirm" | "android-permission";
 
 export type UpdateInstallState =
   | { readonly status: "idle" }
@@ -42,7 +43,10 @@ export type UpdateInstallState =
       readonly status: "failed";
       readonly restartRequired: boolean;
       /** Why a .deb install did not run, when the system password prompt was
-       *  dismissed or could not authorize. Absent for every other failure. */
+       *  dismissed or could not authorize. On Android: the installer is open
+       *  and waits for the user's Install tap (`android-confirm`), or OwnCord
+       *  may not install apps yet (`android-permission`). Absent for every
+       *  other failure. */
       readonly reason?: UpdateFailureReason;
     };
 

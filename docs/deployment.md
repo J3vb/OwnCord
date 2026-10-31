@@ -1843,7 +1843,7 @@ connections.
 ### Logs
 
 The server writes its log to **standard output** (stdout), as `slog` text. It
-also keeps the last 2,000 lines in memory for the admin panel's live log view.
+also keeps the last 10,000 lines in memory for the admin panel's live log view.
 There is no log file and no rotation inside the server. So where the log ends
 up depends on your supervisor:
 

@@ -1,5 +1,5 @@
 {
-  "nextId": 527,
+  "nextId": 535,
   "findings": [
     {
       "id": "OC-0001",
@@ -12179,6 +12179,182 @@
       "lens": "client-state",
       "finder": "claude",
       "fixedDate": "2026-10-28"
+    },
+    {
+      "id": "OC-0527",
+      "title": "One failed accept on the Linux video preview socket ended every camera, screen and remote video preview for the rest of the call",
+      "file": "Client/src-tauri/src/native_voice/video.rs",
+      "line": 170,
+      "severity": "low",
+      "why": "The accept loop returned on its first accept error, which dropped the listener and every open preview connection until the call was rejoined.",
+      "repro": "On Linux native voice, a single failed accept on the local frame socket stops all video previews.",
+      "evidence": "accept_loop logged and returned on Err; run_accept_loop in proxy_common.rs tolerates errors.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/video.rs a_failed_accept_does_not_end_the_frame_socket",
+        "revertProof": "fail"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "tauri-rust",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0528",
+      "title": "Every incoming WebSocket frame was fully parsed in the desktop proxy only to look for the sign-in reply",
+      "file": "Client/src-tauri/src/ws_proxy.rs",
+      "line": 381,
+      "severity": "low",
+      "why": "is_auth_ok built a full JSON tree for every server frame, including the large ready payload, although the sign-in reply is sent once.",
+      "repro": "Any connected desktop session: each inbound text frame is parsed in Rust before being forwarded.",
+      "evidence": "No text check ran before serde_json::from_str in is_auth_ok.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/ws_proxy.rs auth_ok_check_skips_frames_that_do_not_mention_it and only_an_auth_ok_frame_activates_the_session",
+        "revertProof": "fail"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "tauri-rust",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0529",
+      "title": "Manual backup and restore in the admin panel were cut off after 30 seconds on a big database",
+      "file": "Server/admin/handlers_backup.go",
+      "line": 26,
+      "severity": "medium",
+      "why": "The server's 30 second write timeout applied to POST /backup and the restore route, which write nothing until the copy and verification finish. The panel showed an error although the work completed, and a retry of the backup made a second full copy. The download link already extends its deadline.",
+      "repro": "Back up or restore a database whose copy takes longer than 30 seconds; the panel reports a failure.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/backup_deadline_test.go (TestManualBackup_OutlivesWriteTimeout, TestRestore_OutlivesWriteTimeout)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "error-paths",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0530",
+      "title": "A database error while deciding an appeal was reported as already decided or withdrawn",
+      "file": "Server/service/appeal.go",
+      "line": 520,
+      "severity": "low",
+      "why": "Decide mapped any non-conflict transaction error to the 409 conflict outcome, so a moderator saw 'already decided' for a database failure.",
+      "repro": "Fail the decide transaction; the response is 409 instead of a server error.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/service/appeal_test.go (TestAppeal_DecideDatabaseErrorIsInternal, TestAppeal_DecideReversalFailureStaysAConflict)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "error-paths",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0531",
+      "title": "Out-of-range event_persistence values in config.yaml or the environment were not clamped",
+      "file": "Server/config/bounds.go",
+      "line": 33,
+      "severity": "low",
+      "why": "The admin panel validates the event_persistence keys, but values from the file or environment skipped that range check, so a huge batch_size, replay_ring_size or retention_hours reached the persister and could crash boot.",
+      "repro": "Set event_persistence.batch_size to 9223372036854775807 in config.yaml and start the server.",
+      "evidence": "Found by the 2026-10-30 scan and re-read on dev before fixing.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/config/config_test.go (TestLoadEventPersistenceBoundsAreClamped)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "nightly-bughunt-2026-10-30",
+      "lens": "integer-bounds",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0532",
+      "title": "Forum and thread list counted messages for every thread before taking the page",
+      "file": "Server/db/queries/sqlite/threads.sql",
+      "line": 54,
+      "severity": "medium",
+      "why": "The activity-ordered thread list worked out each thread's message count and last message time for every thread of the parent, then sorted and took the page, so each page cost the size of the forum instead of the page.",
+      "repro": "List a forum or channel with thousands of threads by recent activity: every page, including the first, takes as long as counting all their messages.",
+      "evidence": "3,000 threads with 300,000 messages: 0.40 s for a page against 0.007 s when ordered without the counts (about 55x). Same shape measured here with 400 threads and 16,000 messages: a 10-row page took 16.5 ms against 21.8 ms for the whole forum.",
+      "suggestedFix": "Pick the page of thread ids first with the same filter, order and limit, then compute the counts for those rows only.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/db/thread_list_cost_test.go",
+        "revertProof": "fail (a 10-row page took 16.5 ms against 21.8 ms for all 400 threads; after the change 1.1 ms against 18 ms)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "server-api",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0533",
+      "title": "A message near the 4,000-character limit with picked mentions passed the composer check and was then refused",
+      "file": "Client/src/components/MessageInput.ts",
+      "line": 1066,
+      "severity": "medium",
+      "why": "The composer, the inline edit box and the character counter measured the text as typed, but a picked @name is sent as the longer <@id> token. A draft under the limit could be over it once sent; the box was already cleared and Retry failed the same way.",
+      "repro": "Pick two mentions, fill the draft to 3,999 characters and press Enter: the send is refused by the server after the box was cleared.",
+      "evidence": "Client/tests/unit/mention-autocomplete.test.ts, message-list-edit-lifecycle.test.ts and src/features/messaging/inlineEdit.test.ts.",
+      "suggestedFix": "Measure the expanded content in code points before clearing the box, in the edit box and in the counter.",
+      "fix": {
+        "commit": "pending",
+        "test": "mention-autocomplete.test.ts (composer id tokens), message-list-edit-lifecycle.test.ts, inlineEdit.test.ts",
+        "revertProof": "fail (reverting the length check on the expanded content fails the composer, counter and edit tests)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "client-ui",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
+    },
+    {
+      "id": "OC-0534",
+      "title": "Turning Role Colors on or off did not recolour usernames already on screen",
+      "file": "Client/src/components/MessageList.ts",
+      "line": 2845,
+      "severity": "low",
+      "why": "The role colour flag is cached in formatting.ts and refreshed on the preference change, but the rendered rows were only repainted by a later member update.",
+      "repro": "Open a channel with coloured names, turn Role Colors off in Settings > Accessibility: the names keep their colour until the rows are redrawn.",
+      "evidence": "Client/tests/unit/messageList/liveUpdatesAndBreakers.test.ts (recolours rendered names when the Role Colors preference is toggled).",
+      "suggestedFix": "Repaint the rendered author rows from the existing preference-change listener.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/messageList/liveUpdatesAndBreakers.test.ts",
+        "revertProof": "fail (removing the roleColors listener fails the test)"
+      },
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-10-30",
+      "hunt": "bug-hunt-2026-10-30",
+      "lens": "client-ui",
+      "finder": "claude",
+      "fixedDate": "2026-10-30"
     }
   ]
 }

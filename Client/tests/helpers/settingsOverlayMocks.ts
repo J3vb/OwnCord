@@ -7,7 +7,7 @@ export const mockSetTheme = vi.fn();
 
 export const mockUiState = {
   settingsOpen: false,
-  settingsTab: null as "Safety" | "Notifications" | null,
+  settingsTab: null as "Safety" | "Notifications" | "Keybinds" | null,
   settingsTabSeq: 0,
 };
 

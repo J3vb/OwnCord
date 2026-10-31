@@ -76,6 +76,7 @@ fn is_allowed_ptt_vk(vk: i32) -> bool {
 /// held when capture started. `stale` holds those start-time keys and drops
 /// each one once it is released, so a key held while the picker opened is only
 /// captured after a fresh press.
+#[cfg(desktop)]
 fn next_captured(down: &[i32], stale: &mut Vec<i32>) -> Option<i32> {
     stale.retain(|vk| down.contains(vk));
     down.iter()

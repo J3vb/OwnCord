@@ -949,3 +949,26 @@ func TestLoadDoesNotWarnOnDefaultAdminCIDRs(t *testing.T) {
 		t.Error("Load() with the default admin_allowed_cidrs warned about trusted_proxies on every boot")
 	}
 }
+
+// TestLoadEventPersistenceBoundsAreClamped: a value past the panel's range in
+// config.yaml or the environment is brought into range with a warning, as the
+// admin panel would have refused it; Load still succeeds.
+func TestLoadEventPersistenceBoundsAreClamped(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	yaml := "event_persistence:\n  batch_size: 9223372036854775807\n  replay_ring_size: 9223372036854775807\n  retention_hours: 9223372036854775807\n  batch_flush_ms: 0\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OWNCORD_EVENT_PERSISTENCE_REPLAY_COLD_LIMIT", "9223372036854775807")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() returned error: %v — out-of-range values must warn and clamp, never fail", err)
+	}
+	ep := cfg.EventPersistence
+	if ep.BatchSize != 10_000 || ep.ReplayRingSize != 1_000_000 || ep.RetentionHours != 8_760 || ep.ReplayColdLimit != 1_000_000 {
+		t.Errorf("event_persistence = %+v, want batch_size 10000, replay_ring_size 1000000, retention_hours 8760, replay_cold_limit 1000000", ep)
+	}
+	if ep.BatchFlushMs != 100 {
+		t.Errorf("batch_flush_ms = %d after 0 (below the minimum of 1), want the default 100", ep.BatchFlushMs)
+	}
+}

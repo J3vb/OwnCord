@@ -9,7 +9,7 @@ import (
 // this send (re)opened for someone, because only a (re)open builds a
 // dm_channel_open and so needs them. A read failure is non-fatal: the open goes
 // out without owner_id and icon, and the next ready repairs it.
-func (s *MessageService) fillGroupOwner(ctx context.Context, isGroup bool, channelID int64, result *SendMessageResult) {
+func (s *dmDelivery) fillGroupOwner(ctx context.Context, isGroup bool, channelID int64, result *SendMessageResult) {
 	if !isGroup || len(result.OpenedDMFor) == 0 {
 		return
 	}

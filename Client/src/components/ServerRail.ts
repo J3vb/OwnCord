@@ -41,6 +41,8 @@ import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../i18n/serverRail";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
+import { shouldConfirmServerSwitch } from "../features/server-rail/switchConfirmPref";
+import { openServerSwitchConfirm } from "../features/server-rail/switchConfirmDialog";
 
 export interface ServerRailOptions {
   /** `api.getConfig().host`: the server this session is connected to. */
@@ -166,6 +168,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   // Set by the first switch/add click; the session is torn down right after,
   // so any later click on the same rail is a stale double-click.
   let leaving = false;
+  let confirming = false;
   let dragging: ItemRef | null = null;
   let root: HTMLElement | null = null;
   let list: HTMLElement | null = null;
@@ -221,6 +224,25 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       else setSidebarMode("channels");
       return;
     }
+    if (leaving) return;
+    if (!shouldConfirmServerSwitch()) {
+      leaveFor(host);
+      return;
+    }
+    // A second click while the question is up must not stack another.
+    if (confirming) return;
+    confirming = true;
+    openServerSwitchConfirm({
+      name: describe(host).name,
+      onConfirm: () => leaveFor(host),
+      onClose: () => {
+        confirming = false;
+      },
+      signal,
+    });
+  }
+
+  function leaveFor(host: string): void {
     if (leaving) return;
     leaving = true;
     options.switchServer(host);

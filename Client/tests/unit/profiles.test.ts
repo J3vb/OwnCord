@@ -145,6 +145,15 @@ describe("ProfileManager", () => {
       expect(m.getAll()).toHaveLength(1);
     });
 
+    it("treats a host that differs only in case as the same server", () => {
+      const m = mgr();
+      const first = m.addProfile(sampleData);
+      const again = m.addProfile({ ...sampleData, name: "Other", host: "LocalHost:8443" });
+
+      expect(again).toBe(first);
+      expect(m.getAll()).toHaveLength(1);
+    });
+
     it("adds a profile with a generated UUID", () => {
       const m = mgr();
       const profile = m.addProfile(sampleData);

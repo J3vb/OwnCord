@@ -205,6 +205,36 @@ describe("createChatArea", () => {
     expect(children[5]!.getAttribute("data-testid")).toBe("video-grid-slot");
   });
 
+  it("keeps the phone call bar's place directly after the header when given callbacks", () => {
+    const result = createChatArea(
+      makeOptions({
+        callBar: {
+          isGridUp: () => false,
+          onMuteToggle: vi.fn(),
+          onLeave: vi.fn(),
+          onOpenCall: vi.fn(),
+        },
+      }),
+    );
+    const children = Array.from(result.chatArea.children);
+
+    expect(children[0]!.getAttribute("data-testid")).toBe("chat-header");
+    expect(children[1]!.getAttribute("data-testid")).toBe("phone-call-bar-slot");
+    expect(children[2]).toBe(result.callPanelSlot);
+    // Out of a call nothing loads; refreshing is safe, and teardown takes the place away.
+    expect(children[1]!.childElementCount).toBe(0);
+    result.refreshCallBar();
+    for (const child of result.children) child.destroy?.();
+    expect(result.chatArea.querySelector("[data-testid='phone-call-bar-slot']")).toBeNull();
+  });
+
+  it("has no call bar without callbacks, and refreshing is a no-op", () => {
+    const result = createChatArea(makeOptions());
+
+    expect(result.chatArea.querySelector("[data-testid='phone-call-bar-slot']")).toBeNull();
+    expect(() => result.refreshCallBar()).not.toThrow();
+  });
+
   // --- Slots in return value ---
 
   it("returns all four slots as separate DOM elements", () => {

@@ -67,6 +67,7 @@ import { createSidebarDmSection } from "./SidebarDmSection";
 import { uiStore, setSidebarMode, loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { addServer, switchToServer } from "../../features/server-rail/switchServer";
+import { shouldConfirmServerSwitch } from "../../features/server-rail/switchConfirmPref";
 import { membersStore, getOnlineMembers } from "@stores/members.store";
 import {
   channelsStore,
@@ -181,6 +182,8 @@ export interface SidebarAreaResult {
   readonly syncMemberSection: () => void;
   /** Rename a group DM through the sidebar's prompt (the header's name click). */
   readonly renameGroup: (channelId: number) => void;
+  /** Open the call in a channel, as the voice widget's channel name does. */
+  readonly openCall: (channelId: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1295,27 +1298,29 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     ws,
     limiters,
   );
+  /** Open the call in `channelId`: its DM, or a guild voice channel's call view. */
+  function openCall(channelId: number): void {
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    if (dm !== undefined) {
+      selectDmConversation(dm, dmDeps);
+      return;
+    }
+    // A guild voice channel: back to the server view, then its call, the
+    // same as clicking the joined channel in the sidebar.
+    if (uiStore.getState().sidebarMode === "channels") {
+      opts.onOpenCall?.();
+      return;
+    }
+    returnToChannel();
+    // After the channel switch's store notification, which shows that
+    // channel's chat and would close a call view opened before it.
+    queueMicrotask(() => opts.onOpenCall?.());
+  }
   const voiceWidgetOptions: VoiceWidgetOptions = {
     onDisconnect,
     onCameraToggle,
     onScreenshareToggle,
-    onOpenCall: (channelId) => {
-      const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      if (dm !== undefined) {
-        selectDmConversation(dm, dmDeps);
-        return;
-      }
-      // A guild voice channel: back to the server view, then its call, the
-      // same as clicking the joined channel in the sidebar.
-      if (uiStore.getState().sidebarMode === "channels") {
-        opts.onOpenCall?.();
-        return;
-      }
-      returnToChannel();
-      // After the channel switch's store notification, which shows that
-      // channel's chat and would close a call view opened before it.
-      queueMicrotask(() => opts.onOpenCall?.());
-    },
+    onOpenCall: openCall,
   };
   sidebarWrapper.appendChild(voiceWidgetSlot);
 
@@ -1394,9 +1399,9 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         quickSwitchInstance = createQuickSwitchOverlay({
           profiles,
           currentHost,
-          onSwitch: (host, _name) => {
+          onSwitch: (host, name) => {
             closeQuickSwitch();
-            switchToServer(host);
+            requestServerSwitch(host, name !== "" ? name : host);
           },
           onAddServer: () => {
             closeQuickSwitch();
@@ -1409,6 +1414,41 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
         openingQuickSwitch = false;
       }
     })();
+  }
+
+  // The question loads on demand; this owner closes it with the page.
+  const switchConfirmOwner = new Disposable();
+  let confirmingSwitch = false;
+
+  function requestServerSwitch(host: string, name: string): void {
+    if (!shouldConfirmServerSwitch()) {
+      switchToServer(host);
+      return;
+    }
+    if (confirmingSwitch) return;
+    confirmingSwitch = true;
+    void import("../../features/server-rail/switchConfirmDialog")
+      .then(({ openServerSwitchConfirm }) => {
+        if (tornDown) {
+          confirmingSwitch = false;
+          return;
+        }
+        openServerSwitchConfirm({
+          name,
+          onConfirm: () => switchToServer(host),
+          onClose: () => {
+            confirmingSwitch = false;
+          },
+          signal: switchConfirmOwner.signal,
+        });
+        return;
+      })
+      .catch((err: unknown) => {
+        confirmingSwitch = false;
+        // Better a switch without the question than a button that does nothing.
+        log.warn("Server switch confirm failed to load", err);
+        if (!tornDown) switchToServer(host);
+      });
   }
 
   function closeQuickSwitch(): void {
@@ -1476,6 +1516,7 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
 
   unsubscribers.push(() => {
     tornDown = true;
+    switchConfirmOwner.destroy();
     voiceWidget?.destroy?.();
     voiceWidget = null;
     closeQuickSwitch();
@@ -1496,5 +1537,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     buildMemberPanel,
     syncMemberSection,
     renameGroup,
+    openCall,
   };
 }

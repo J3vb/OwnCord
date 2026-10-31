@@ -70,6 +70,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     vi.doMock("@lib/logger", () => appLogger);
     vi.doMock("../../../src/features/voice/native/platform", () => ({
       isLinuxDesktop: () => true,
+      isAndroidApp: () => false,
     }));
     vi.doMock("../../../src/features/voice/native/devices", () => ({
       nativeAudioDevices: async (kind: string) =>
@@ -190,9 +191,9 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect([...select.options].every((o) => !o.disabled)).toBe(true);
     // Software H.264 and an Auto that is always VP8 are named as such.
     expect([...select.options].map((o) => o.textContent)).toEqual([
-      "VP8 (default, most compatible)",
+      "VP8 (most compatible)",
       "H.264 (software)",
-      "Auto (VP8)",
+      "Auto (default, VP8)",
     ]);
     expect(tab.element.textContent).toContain(
       "Linux encodes video in software; VP8 uses the least CPU.",
@@ -879,7 +880,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
             el
               .querySelector<HTMLElement>("[data-testid='auto-sensitivity'] [role='switch']")!
               .click(),
-          { kind: "voiceGate", threshold: 0.05, retune: false },
+          { kind: "voiceGate", threshold: 0.05, retune: false, speech: true },
         ],
         [
           "mode switch to Push to Talk",
@@ -987,10 +988,15 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     expect(stopCameraPreview).not.toHaveBeenCalled();
 
     // A close after the tab is gone starts nothing.
-    ac.abort();
-    renderers[1]!.onClosed?.();
-    await new Promise((r) => setTimeout(r, 600));
-    expect(startCameraPreview).toHaveBeenCalledTimes(2);
+    vi.useFakeTimers();
+    try {
+      ac.abort();
+      renderers[1]!.onClosed?.();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(startCameraPreview).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not let a superseded native preview stop the newer capture", async () => {
