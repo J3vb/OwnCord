@@ -12,6 +12,7 @@ import {
   setMeUser,
   readyEvent,
   readyMember,
+  patchVoice,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -48,11 +49,7 @@ describe("WS Dispatcher", () => {
     // The LiveKit session survived the WS drop (nothing tears voice down on a
     // socket drop alone) — voiceStatus is NOT idle, so the "stale voice
     // state" defense-in-depth branch below must not fire and swallow this.
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-      voiceStatus: "connected",
-    }));
+    patchVoice({ currentChannelId: 3, voiceStatus: "connected" });
 
     mock.dispatch(
       "ready",
@@ -84,11 +81,7 @@ describe("WS Dispatcher", () => {
     vi.mocked(mockSetDeafened).mockClear();
     vi.mocked(mockSetMuted).mockClear();
     setMeUser();
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-      voiceStatus: "connected",
-    }));
+    patchVoice({ currentChannelId: 3, voiceStatus: "connected" });
 
     mock.dispatch(
       "ready",
@@ -158,7 +151,7 @@ describe("WS Dispatcher", () => {
 
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
     setMeUser();
-    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
+    patchVoice({ voiceStatus: "joining" });
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -192,7 +185,7 @@ describe("WS Dispatcher", () => {
       vi.mocked(mockSetDeafened).mockClear();
       vi.mocked(mockSetMuted).mockClear();
       setMeUser();
-      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
+      patchVoice({ voiceStatus: "joining" });
     });
 
     function dispatchSelfVoiceState(flags: {
@@ -235,7 +228,7 @@ describe("WS Dispatcher", () => {
     }
 
     it("does not re-apply a moderator mute/deafen the client already honoured", async () => {
-      voiceStore.setState((prev) => ({ ...prev, localMuted: true, localDeafened: true }));
+      patchVoice({ localMuted: true, localDeafened: true });
 
       dispatchSelfVoiceState({ server_muted: true, server_deafened: true });
       await vi.runAllTimersAsync();
@@ -251,14 +244,13 @@ describe("WS Dispatcher", () => {
     // localServerDeafened, which gate the widget's own controls) say they
     // are no longer restricted.
     it("releases a moderator mute/deafen once the server lifts it", async () => {
-      voiceStore.setState((prev) => ({
-        ...prev,
+      patchVoice({
         localMuted: true,
         localDeafened: true,
         moderatorDeafened: true,
         localServerMuted: true,
         localServerDeafened: true,
-      }));
+      });
 
       dispatchSelfVoiceState({ server_muted: false, server_deafened: false });
       await vi.runAllTimersAsync();
@@ -277,13 +269,12 @@ describe("WS Dispatcher", () => {
     // importantly, a moderator flag that was never true must never release a
     // mute the user applied themselves.
     it("does not release a self-applied mute when no moderator restriction was ever in effect", async () => {
-      voiceStore.setState((prev) => ({
-        ...prev,
+      patchVoice({
         localMuted: true,
         localDeafened: false,
         localServerMuted: false,
         localServerDeafened: false,
-      }));
+      });
 
       dispatchSelfVoiceState({ server_muted: false, server_deafened: false });
       await vi.runAllTimersAsync();

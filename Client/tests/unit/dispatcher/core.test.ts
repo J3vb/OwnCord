@@ -20,6 +20,7 @@ import {
   memberRow,
   seedChannels,
   seedMembers,
+  patchAuth,
 } from "../../helpers/dispatcherHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
 
@@ -355,10 +356,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("syncs authStore.user.role when the member_update is about the signed-in user", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 42, username: "alice", avatar: null, role: "member" },
-    }));
+    patchAuth({ user: { id: 42, username: "alice", avatar: null, role: "member" } });
     seedMembers([memberRow({ id: 42, username: "alice" })]);
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
@@ -368,10 +366,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("tracks role_ids for the signed-in user and drops them when the echo has none", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 42, username: "alice", avatar: null, role: "member", role_ids: [3] },
-    }));
+    patchAuth({ user: { id: 42, username: "alice", avatar: null, role: "member", role_ids: [3] } });
     mock.dispatch("member_update", { user_id: 42, role: "vip", role_ids: [6, 3] });
     expect(authStore.getState().user?.role_ids).toEqual([6, 3]);
     mock.dispatch("member_update", { user_id: 42, role: "vip" });
@@ -439,15 +434,14 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires upload_policy to replace the file-type lists and keep the rest of the policy", () => {
-    authStore.setState((prev) => ({
-      ...prev,
+    patchAuth({
       uploadPolicy: {
         max_upload_bytes: 10 << 20,
         blocked_extensions: ["bat", "html"],
         allowed_extensions: ["png"],
         thumbnails: true,
       },
-    }));
+    });
 
     mock.dispatch("upload_policy", { blocked_extensions: [], allowed_extensions: [] });
 
@@ -460,10 +454,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("treats an upload_policy with missing lists as empty lists", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      uploadPolicy: { max_upload_bytes: 10 << 20, blocked_extensions: ["bat"] },
-    }));
+    patchAuth({ uploadPolicy: { max_upload_bytes: 10 << 20, blocked_extensions: ["bat"] } });
 
     mock.dispatch("upload_policy", {} as { blocked_extensions: []; allowed_extensions: [] });
 

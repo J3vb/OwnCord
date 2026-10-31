@@ -22,6 +22,7 @@ import {
   setMeUser,
   readyEvent,
   readyChannel,
+  patchVoice,
 } from "../../helpers/dispatcherHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -85,7 +86,7 @@ describe("WS Dispatcher", () => {
 
   it("wires voice_state and adopts the channel if current user and this device is joining", () => {
     setMeUser();
-    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
+    patchVoice({ voiceStatus: "joining" });
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -122,10 +123,7 @@ describe("WS Dispatcher", () => {
     setMeUser();
 
     // First join voice
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-    }));
+    patchVoice({ currentChannelId: 3 });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -138,10 +136,7 @@ describe("WS Dispatcher", () => {
   it("wires voice_leave does NOT clear local state for other users", () => {
     setMeUser();
 
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-    }));
+    patchVoice({ currentChannelId: 3 });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -158,10 +153,7 @@ describe("WS Dispatcher", () => {
   it("tears down the LiveKit session on a self voice_leave for the current channel", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
     setMeUser();
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-    }));
+    patchVoice({ currentChannelId: 3 });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -179,11 +171,7 @@ describe("WS Dispatcher", () => {
     vi.mocked(mockLeaveVoice).mockClear();
     vi.mocked(mockIsAutoReconnecting).mockReturnValueOnce(true);
     setMeUser();
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-      voiceStatus: "reconnecting",
-    }));
+    patchVoice({ currentChannelId: 3, voiceStatus: "reconnecting" });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -202,11 +190,7 @@ describe("WS Dispatcher", () => {
   it("tears down on a self voice_leave while the SDK reconnects inside a connected session", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
     setMeUser();
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-      voiceStatus: "reconnecting",
-    }));
+    patchVoice({ currentChannelId: 3, voiceStatus: "reconnecting" });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -225,10 +209,7 @@ describe("WS Dispatcher", () => {
     setMeUser();
     // Currently in channel 9 (a newer join) — the incoming voice_leave is for
     // the old channel 3.
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 9,
-    }));
+    patchVoice({ currentChannelId: 9 });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -249,10 +230,7 @@ describe("WS Dispatcher", () => {
     setMeUser();
     // Optimistically already moved to the new channel (7); the incoming
     // voice_leave is for the old channel (3).
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 7,
-    }));
+    patchVoice({ currentChannelId: 7 });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -279,8 +257,7 @@ describe("WS Dispatcher", () => {
     // Peer 7 is present in the roster right up until their own leave, just
     // as a real join (voice_state) would have left them — nothing removes
     // them from voiceUsers before this voice_leave is processed.
-    voiceStore.setState((prev) => ({
-      ...prev,
+    patchVoice({
       currentChannelId: 3,
       voiceUsers: new Map([
         [
@@ -303,7 +280,7 @@ describe("WS Dispatcher", () => {
           ]),
         ],
       ]),
-    }));
+    });
 
     mock.dispatch("voice_leave", {
       channel_id: 3,
@@ -328,10 +305,7 @@ describe("WS Dispatcher", () => {
     vi.mocked(mockHandleParticipantLeft).mockClear();
     setMeUser();
     // This client's live voice session is channel 3.
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 3,
-    }));
+    patchVoice({ currentChannelId: 3 });
 
     // A peer leaves channel 99, which this client can merely read (hence
     // seeing the broadcast) but is not the client's own voice channel.
@@ -346,7 +320,7 @@ describe("WS Dispatcher", () => {
 
   it("wires voice_moved to a leave + re-join of the destination channel", async () => {
     setMeUser();
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    patchVoice({ currentChannelId: 3 });
 
     mock.dispatch("voice_moved", { to_channel_id: 7 });
     await vi.runAllTimersAsync();
@@ -363,7 +337,7 @@ describe("WS Dispatcher", () => {
 
   it("wires voice_disconnected to clearing the local voice session", async () => {
     setMeUser();
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
+    patchVoice({ currentChannelId: 3 });
 
     mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked" });
     await vi.runAllTimersAsync();
@@ -383,7 +357,7 @@ describe("WS Dispatcher", () => {
     setMeUser();
     // A newer session is live in channel 9; the queued voice_disconnected is
     // for the old channel 3 the kick already evicted us from.
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
+    patchVoice({ currentChannelId: 9 });
 
     mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked" });
     await vi.runAllTimersAsync();
@@ -404,7 +378,7 @@ describe("WS Dispatcher", () => {
     mockShowToast.mockClear();
     setMeUser();
     // voice_leave for this same kick already cleared the store.
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    patchVoice({ currentChannelId: null });
 
     mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked by a moderator" });
     await vi.runAllTimersAsync();
@@ -465,7 +439,7 @@ describe("WS Dispatcher", () => {
   it("ready leaves another device's call alone when this device is idle", () => {
     // This device holds no call: the self row is another device's, so there is
     // nothing to clean up and a voice_leave would end that call.
-    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
+    patchVoice({ voiceStatus: "idle" });
 
     // Set up auth so the current user ID is 42
     signInAs(
@@ -490,7 +464,7 @@ describe("WS Dispatcher", () => {
   it("ready does NOT send voice_leave when LiveKit IS connected", () => {
     // A non-idle voice status means livekitSession is driving a live/pending
     // session (the lazily-loaded module's store-backed "connected" flag).
-    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+    patchVoice({ voiceStatus: "connected" });
 
     signInAs(
       { id: 42, username: "active", avatar: null, role: "member" },
@@ -517,7 +491,7 @@ describe("WS Dispatcher", () => {
   // WP 1C-8: an announce lost while the socket was down leaves the server's
   // camera/share flag behind what this session sends; `ready` checks it.
   it("ready hands the server's camera and share flags to the live voice session", async () => {
-    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected", currentChannelId: 10 }));
+    patchVoice({ voiceStatus: "connected", currentChannelId: 10 });
     signInAs(
       { id: 42, username: "active", avatar: null, role: "member" },
       { token: "test-token", serverName: "Test", motd: "" },
@@ -540,7 +514,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("ready does NOT send voice_leave when user is NOT in voice_states", () => {
-    voiceStore.setState((prev) => ({ ...prev, voiceStatus: "idle" }));
+    patchVoice({ voiceStatus: "idle" });
 
     signInAs(
       { id: 42, username: "notinvoice", avatar: null, role: "member" },
@@ -581,8 +555,7 @@ describe("WS Dispatcher", () => {
 
     // Before the resync: self (42) and peer (7) are both in channel 10 — the
     // live LiveKit session survived the WS drop.
-    voiceStore.setState((prev) => ({
-      ...prev,
+    patchVoice({
       voiceStatus: "connected",
       currentChannelId: 10,
       voiceUsers: new Map([
@@ -620,7 +593,7 @@ describe("WS Dispatcher", () => {
           ]),
         ],
       ]),
-    }));
+    });
 
     // The full resync's voice_states shows peer 7 has left channel 10 while
     // we were disconnected — only self remains.
@@ -695,7 +668,7 @@ describe("WS Dispatcher", () => {
     // channel with no LiveKit session, and the sidebar's recovery click tears
     // down whatever *is* live instead.
     it("rolls back the optimistic join on a first-time CHANNEL_FULL", () => {
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      patchVoice({ currentChannelId: 5, voiceStatus: "joining" });
 
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
       expectConsole("error", /\[dispatcher\] Server error/);
@@ -709,7 +682,7 @@ describe("WS Dispatcher", () => {
     // idle by the time this error lands — so the guard above is a no-op and
     // must not blow away a genuinely connected session.
     it("does not touch an already-established voice session on CHANNEL_FULL", () => {
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "connected" }));
+      patchVoice({ currentChannelId: 5, voiceStatus: "connected" });
 
       mock.dispatch("error", { code: "CHANNEL_FULL", message: "full" });
       expectConsole("error", /\[dispatcher\] Server error/);
@@ -728,7 +701,7 @@ describe("WS Dispatcher", () => {
     // LiveKitSession.leaveVoice(), and a refused first-time join gets no
     // voice_leave to trigger it).
     it("rolls back the optimistic join on a voice_join refusal other than CHANNEL_FULL", () => {
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      patchVoice({ currentChannelId: 5, voiceStatus: "joining" });
 
       mock.dispatch("error", { code: "VOICE_ERROR", message: "voice is not configured" });
       expectConsole("error", /\[dispatcher\] Server error/);
@@ -741,7 +714,7 @@ describe("WS Dispatcher", () => {
     // undo) ends the call through the session, which owns the voice-lost toast.
     it("hands a voice_join refusal to the session's pending reconnect rejoin", async () => {
       vi.mocked(mockFailPendingRejoin).mockClear();
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      patchVoice({ currentChannelId: 5, voiceStatus: "joining" });
 
       mock.dispatch("error", {
         code: "FORBIDDEN",
@@ -756,7 +729,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("rolls back the optimistic join on FORBIDDEN (revoked CONNECT_VOICE / blocked)", () => {
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      patchVoice({ currentChannelId: 5, voiceStatus: "joining" });
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
       expectConsole("error", /\[dispatcher\] Server error/);
@@ -782,7 +755,7 @@ describe("WS Dispatcher", () => {
       // than isVoiceConnected(), so a genuinely connected session is covered
       // by the same guard as the in-flight case exercised below.
       vi.mocked(mockIsVoiceSessionActive).mockReturnValue(true);
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 7, voiceStatus: "joining" }));
+      patchVoice({ currentChannelId: 7, voiceStatus: "joining" });
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "missing CONNECT_VOICE permission" });
       expectConsole("error", /\[dispatcher\] Server error/);
@@ -799,7 +772,7 @@ describe("WS Dispatcher", () => {
     // rollback tell the join's own refusal from an error answering another
     // command, which must leave the join in flight.
     it("leaves a voice join in place on an unrelated error during it", () => {
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      patchVoice({ currentChannelId: 5, voiceStatus: "joining" });
       noteJoinSent("join-1");
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "cannot edit" }, "other");
@@ -810,7 +783,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("rolls a voice join back on the refusal carrying its id", () => {
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 5, voiceStatus: "joining" }));
+      patchVoice({ currentChannelId: 5, voiceStatus: "joining" });
       noteJoinSent("join-1");
 
       mock.dispatch("error", { code: "FORBIDDEN", message: "denied" }, "join-1");

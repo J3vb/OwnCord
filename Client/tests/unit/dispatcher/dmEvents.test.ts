@@ -275,18 +275,7 @@ describe("WS Dispatcher", () => {
     });
 
     describe("call roster of a closed DM", () => {
-      const dmRow = (channelId: number, isGroup: boolean) => ({
-        channelId,
-        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-        participants: [],
-        name: "",
-        isGroup,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-        mentionCount: 0,
-      });
+      const callDm = (channelId: number, isGroup: boolean) => dmRow({ channelId, isGroup });
       const seedCall = (channelId: number) => {
         mock.dispatch("voice_state", {
           channel_id: channelId,
@@ -302,7 +291,7 @@ describe("WS Dispatcher", () => {
       };
 
       it("drops the roster when a group DM is closed (left or removed)", () => {
-        dmStore.setState(() => ({ channels: [dmRow(70, true)] }));
+        dmStore.setState(() => ({ channels: [callDm(70, true)] }));
         seedCall(70);
         expect(voiceStore.getState().voiceUsers.get(70)?.size).toBe(1);
 
@@ -313,7 +302,7 @@ describe("WS Dispatcher", () => {
       });
 
       it("keeps the roster when a 1:1 DM is closed", () => {
-        dmStore.setState(() => ({ channels: [dmRow(71, false)] }));
+        dmStore.setState(() => ({ channels: [callDm(71, false)] }));
         seedCall(71);
 
         mock.dispatch("dm_channel_close", { channel_id: 71 });
@@ -323,7 +312,7 @@ describe("WS Dispatcher", () => {
       });
 
       it("leaves the roster to voice_leave while the local user is in that call", () => {
-        dmStore.setState(() => ({ channels: [dmRow(72, true)] }));
+        dmStore.setState(() => ({ channels: [callDm(72, true)] }));
         seedCall(72);
         joinVoiceChannel(72);
         voiceStore.flush();
@@ -337,7 +326,7 @@ describe("WS Dispatcher", () => {
       });
 
       it("drops a roster left from an earlier membership when the group is re-added", () => {
-        dmStore.setState(() => ({ channels: [dmRow(73, true)] }));
+        dmStore.setState(() => ({ channels: [callDm(73, true)] }));
         seedCall(73);
         joinVoiceChannel(73);
         voiceStore.flush();

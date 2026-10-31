@@ -24,6 +24,7 @@ import {
   setMeUser,
   channelRow,
   seedChannels,
+  patchAuth,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -459,10 +460,7 @@ describe("WS Dispatcher", () => {
 
   it("wires reaction_update to messages store", () => {
     // Seed current user
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-    }));
+    patchAuth({ user: { id: 1, username: "alex", avatar: null, role: "admin" } });
 
     mock.dispatch("chat_message", {
       id: 200,
@@ -545,10 +543,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("does not increment unread for own messages", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-    }));
+    patchAuth({ user: { id: 1, username: "alex", avatar: null, role: "admin" } });
 
     seedChannels([channelRow({ id: 5, name: "other-ch" })], { activeChannelId: 1 });
 

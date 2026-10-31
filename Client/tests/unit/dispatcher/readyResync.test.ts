@@ -2,7 +2,6 @@ import { describe, it, expect, vi, afterEach, onTestFinished } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
 import { wireDispatcher } from "../../../src/lib/dispatcher";
 import { expectConsole } from "../../helpers/console";
-import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
 import {
   addOptimisticMessage,
@@ -39,6 +38,7 @@ import {
   readyMember,
   channelRow,
   seedChannels,
+  patchAuth,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -63,6 +63,18 @@ describe("WS Dispatcher", () => {
     },
     currentCleanup: () => cleanup,
   });
+
+  // Re-wires the dispatcher with the given deps (and an empty block list),
+  // after tearing down the one the harness wired.
+  function rewire(
+    deps: Omit<NonNullable<Parameters<typeof wireDispatcher>[1]>, "listBlocks">,
+  ): void {
+    cleanup();
+    cleanup = wireDispatcher(mock.ws, {
+      listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
+      ...deps,
+    });
+  }
 
   it("wires ready to channels, members, and voice stores", () => {
     mock.dispatch("ready", {
@@ -210,11 +222,10 @@ describe("WS Dispatcher", () => {
       setMarkReadSender(null);
     });
 
-    it("clears the resurrected badge and advances the server read state for the focused channel", () => {
-      // read_states go stale while a channel stays focused (channel_focus is
-      // sent once per mount), so a full-ready resync restates non-zero counts
-      // for the channel the user is currently reading.
-      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    // Resyncs channel 1 while the window has (or lacks) focus; the payload
+    // restates 4 unread and 2 mentions. Returns the mark_read sender.
+    function resyncActiveChannel(focused: boolean): ReturnType<typeof vi.fn> {
+      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(focused);
       onTestFinished(() => focus.mockRestore());
       const sender = vi.fn();
       setMarkReadSender(sender);
@@ -223,20 +234,18 @@ describe("WS Dispatcher", () => {
       mock.dispatch(
         "ready",
         readyEvent({
-          channels: [
-            {
-              id: 1,
-              name: "general",
-              type: "text",
-              category: null,
-              position: 0,
-              unread_count: 4,
-              mention_count: 2,
-            },
-          ],
+          channels: [readyChannel({ unread_count: 4, mention_count: 2 })],
           dm_channels: [],
         }),
       );
+      return sender;
+    }
+
+    it("clears the resurrected badge and advances the server read state for the focused channel", () => {
+      // read_states go stale while a channel stays focused (channel_focus is
+      // sent once per mount), so a full-ready resync restates non-zero counts
+      // for the channel the user is currently reading.
+      const sender = resyncActiveChannel(true);
 
       const ch = channelsStore.getState().channels.get(1);
       expect(ch?.unreadCount).toBe(0);
@@ -245,29 +254,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("keeps the restated badge and sends no mark_read for an unfocused resync", () => {
-      const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
-      onTestFinished(() => focus.mockRestore());
-      const sender = vi.fn();
-      setMarkReadSender(sender);
-      setActiveChannel(1);
-
-      mock.dispatch(
-        "ready",
-        readyEvent({
-          channels: [
-            {
-              id: 1,
-              name: "general",
-              type: "text",
-              category: null,
-              position: 0,
-              unread_count: 4,
-              mention_count: 2,
-            },
-          ],
-          dm_channels: [],
-        }),
-      );
+      const sender = resyncActiveChannel(false);
 
       const ch = channelsStore.getState().channels.get(1);
       expect(ch?.unreadCount).toBe(4);
@@ -334,27 +321,7 @@ describe("WS Dispatcher", () => {
 
   describe("ready reconciles the DM channelsStore mirror", () => {
     function seedDmMirrorRow(unreadCount: number, mentionCount: number): void {
-      channelsStore.setState((prev) => {
-        const ch = new Map(prev.channels);
-        ch.set(50, {
-          id: 50,
-          name: "bob",
-          type: "dm" as const,
-          category: null,
-          position: 0,
-          unreadCount,
-          mentionCount,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: ch };
-      });
+      seedChannels([channelRow({ id: 50, name: "bob", type: "dm", unreadCount, mentionCount })]);
     }
 
     // The mirror row is only ever created by addDmToChannelsStore (on open),
@@ -459,13 +426,11 @@ describe("WS Dispatcher", () => {
     // channel loaded before the drop keeps a permanent hole unless its
     // window is invalidated and the one on screen is refetched.
     it("invalidates every loaded channel and refetches the active one on a second ready", async () => {
-      cleanup();
-      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
       const getMessages = vi.fn().mockResolvedValue({
         messages: [storedMessage(900)],
         has_more: false,
       });
-      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+      rewire({ getMessages });
 
       setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
@@ -504,12 +469,10 @@ describe("WS Dispatcher", () => {
     // round trip of the refetch, instead of showing the in-region spinner
     // every other first-page fetch shows.
     it("marks the active channel loading (not idle) while the resync refetch is in flight", () => {
-      cleanup();
-      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
       // Never resolves within this test — pins the synchronous state right
       // after the resync `ready` is handled, before the refetch lands.
       const getMessages = vi.fn().mockReturnValue(new Promise(() => {}));
-      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+      rewire({ getMessages });
 
       setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
@@ -538,8 +501,6 @@ describe("WS Dispatcher", () => {
     // a channel the user already left (and, worse, re-marks it "loaded" so
     // MessageController.loadMessages never refetches it again on return).
     it("does not write a stale resync snapshot for a channel the user switched away from mid-refetch", async () => {
-      cleanup();
-      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
       let resolveGetMessages:
         ((resp: { messages: MessageResponse[]; has_more: boolean }) => void) | null = null;
       const getMessages = vi.fn().mockImplementation(
@@ -548,7 +509,7 @@ describe("WS Dispatcher", () => {
             resolveGetMessages = resolve;
           }),
       );
-      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+      rewire({ getMessages });
 
       setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
@@ -626,10 +587,8 @@ describe("WS Dispatcher", () => {
     });
 
     it("carries a failed optimistic row through the resync invalidation", () => {
-      cleanup();
-      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
       const getMessages = vi.fn().mockResolvedValue({ messages: [], has_more: false });
-      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+      rewire({ getMessages });
 
       setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
@@ -658,10 +617,8 @@ describe("WS Dispatcher", () => {
     // instead of api.getMessages. Pins the guard's other half and that no
     // downstream step in the ready handler assumes the invalidation ran.
     it("does not throw and leaves history untouched when no channel is active on resync", () => {
-      cleanup();
-      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
       const getMessages = vi.fn().mockResolvedValue({ messages: [], has_more: false });
-      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+      rewire({ getMessages });
 
       // Channel 1 is loaded but never made active — an empty `channels` list
       // on both readies means nothing ever auto-selects it.
@@ -688,10 +645,8 @@ describe("WS Dispatcher", () => {
     // channel, which is exactly the kind of silent history hole B2-1 exists
     // to prevent.
     it("marks the active channel load-errored when the resync refetch rejects", async () => {
-      cleanup();
-      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
       const getMessages = vi.fn().mockRejectedValue(new Error("network down"));
-      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+      rewire({ getMessages });
 
       setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
@@ -714,8 +669,6 @@ describe("WS Dispatcher", () => {
     // its load state. Flagging it errored paints an inline error + Retry on a
     // channel whose load never failed, the next time the user opens it.
     it("does not flag a channel load-errored when the rejection lands after a switch away", async () => {
-      cleanup();
-      const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
       let rejectGetMessages: ((err: Error) => void) | null = null;
       const getMessages = vi.fn().mockImplementation(
         () =>
@@ -723,7 +676,7 @@ describe("WS Dispatcher", () => {
             rejectGetMessages = reject;
           }),
       );
-      cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
+      rewire({ getMessages });
 
       setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
@@ -780,15 +733,11 @@ describe("WS Dispatcher", () => {
       }
 
       it("keeps 200 loaded rows synchronously and splices an overlapping tail", async () => {
-        cleanup();
         const fresh = page(151, 200).map((m) =>
           m.id === 180 ? { ...m, content: "edited while down" } : m,
         );
         const getMessages = vi.fn().mockResolvedValue({ messages: fresh, has_more: true });
-        cleanup = wireDispatcher(mock.ws, {
-          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
-          getMessages,
-        });
+        rewire({ getMessages });
         setActiveChannel(1);
         load200();
         const cached = getChannelMessages(1);
@@ -810,12 +759,8 @@ describe("WS Dispatcher", () => {
       });
 
       it("replaces the window when the tail is disjoint from it", async () => {
-        cleanup();
         const getMessages = vi.fn().mockResolvedValue({ messages: page(301, 350), has_more: true });
-        cleanup = wireDispatcher(mock.ws, {
-          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
-          getMessages,
-        });
+        rewire({ getMessages });
         setActiveChannel(1);
         load200();
 
@@ -827,7 +772,6 @@ describe("WS Dispatcher", () => {
       });
 
       it("refetches a detached window around the reader's top visible message", async () => {
-        cleanup();
         const getMessages = vi.fn();
         const getMessagesAround = vi.fn().mockResolvedValue({
           messages: page(110, 150)
@@ -836,11 +780,7 @@ describe("WS Dispatcher", () => {
           has_more_before: true,
           has_more_after: true,
         });
-        cleanup = wireDispatcher(mock.ws, {
-          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
-          getMessages,
-          getMessagesAround,
-        });
+        rewire({ getMessages, getMessagesAround });
         const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 130 : null));
         try {
           setActiveChannel(1);
@@ -863,12 +803,8 @@ describe("WS Dispatcher", () => {
       });
 
       it("detaches the kept rows when the refetch fails, so no live row lands across the gap", async () => {
-        cleanup();
         const getMessages = vi.fn().mockRejectedValue(new Error("503"));
-        cleanup = wireDispatcher(mock.ws, {
-          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
-          getMessages,
-        });
+        rewire({ getMessages });
         setActiveChannel(1);
         load200();
 
@@ -887,12 +823,8 @@ describe("WS Dispatcher", () => {
       });
 
       it("keeps the reader's anchor when a splice overflows the row cap", async () => {
-        cleanup();
         const getMessages = vi.fn().mockResolvedValue({ messages: page(481, 530), has_more: true });
-        cleanup = wireDispatcher(mock.ws, {
-          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
-          getMessages,
-        });
+        rewire({ getMessages });
         const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 10 : null));
         try {
           setActiveChannel(1);
@@ -913,12 +845,8 @@ describe("WS Dispatcher", () => {
       });
 
       it("trims the oldest rows when a splice overflows below the reader's anchor", async () => {
-        cleanup();
         const getMessages = vi.fn().mockResolvedValue({ messages: page(481, 530), has_more: true });
-        cleanup = wireDispatcher(mock.ws, {
-          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
-          getMessages,
-        });
+        rewire({ getMessages });
         const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 490 : null));
         try {
           setActiveChannel(1);
@@ -937,14 +865,9 @@ describe("WS Dispatcher", () => {
       });
 
       it("falls back to the tail for a detached window no list is showing", async () => {
-        cleanup();
         const getMessages = vi.fn().mockResolvedValue({ messages: page(451, 500), has_more: true });
         const getMessagesAround = vi.fn();
-        cleanup = wireDispatcher(mock.ws, {
-          listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
-          getMessages,
-          getMessagesAround,
-        });
+        rewire({ getMessages, getMessagesAround });
         setActiveChannel(1);
         setAroundMessages(1, page(100, 160).reverse(), true, true);
 
@@ -960,21 +883,16 @@ describe("WS Dispatcher", () => {
   });
 
   it("on ready publishes the client's identity key when the server copy is stale", async () => {
-    cleanup(); // tear down the no-api dispatcher wired in beforeEach
     mockEnsurePublished.mockClear();
     const updateProfile = vi.fn().mockResolvedValue({});
     const getConfig = vi.fn(() => ({
       host: "chat.example",
       token: "[redacted]" as string | undefined,
     }));
-    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
-    cleanup = wireDispatcher(mock.ws, { listBlocks, updateProfile, getConfig });
+    rewire({ updateProfile, getConfig });
 
     // We are user 7, "alex"; the server holds no identity key for us yet.
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 7, username: "alex", avatar: null, role: "member" },
-    }));
+    patchAuth({ user: { id: 7, username: "alex", avatar: null, role: "member" } });
 
     mock.dispatch(
       "ready",
@@ -1000,20 +918,15 @@ describe("WS Dispatcher", () => {
   });
 
   it("on ready publishes the signed-in user's own key, not the first member's", async () => {
-    cleanup();
     mockEnsurePublished.mockClear();
     const updateProfile = vi.fn().mockResolvedValue({});
     const getConfig = vi.fn(() => ({
       host: "chat.example",
       token: "[redacted]",
     }));
-    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
-    cleanup = wireDispatcher(mock.ws, { listBlocks, updateProfile, getConfig });
+    rewire({ updateProfile, getConfig });
 
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 7, username: "alex", avatar: null, role: "member" },
-    }));
+    patchAuth({ user: { id: 7, username: "alex", avatar: null, role: "member" } });
 
     mock.dispatch(
       "ready",
@@ -1039,20 +952,18 @@ describe("WS Dispatcher", () => {
   });
 
   it("on ready publishes no identity key when nobody is signed in", async () => {
-    cleanup();
     mockEnsurePublished.mockClear();
     const updateProfile = vi.fn().mockResolvedValue({});
     const getConfig = vi.fn(() => ({
       host: "chat.example",
       token: "[redacted]",
     }));
-    const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [] });
-    cleanup = wireDispatcher(mock.ws, { listBlocks, updateProfile, getConfig });
+    rewire({ updateProfile, getConfig });
 
     // No authStore.user, so currentUserId falls back to the 0 sentinel — a
     // member row carrying that id must not be mistaken for "us" and have a
     // long-term identity key published against it.
-    authStore.setState((prev) => ({ ...prev, user: null }));
+    patchAuth({ user: null });
 
     mock.dispatch(
       "ready",

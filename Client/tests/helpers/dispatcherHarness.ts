@@ -1,7 +1,7 @@
 import { vi, expect, beforeEach, afterEach } from "vitest";
 import { wireDispatcher } from "../../src/lib/dispatcher";
-import { authStore } from "../../src/stores/auth.store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { authStore, type AuthState } from "../../src/stores/auth.store";
+import { voiceStore, type VoiceState } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore } from "../../src/stores/blocks.store";
 import { emojiStore, clearCustomEmoji } from "../../src/stores/emoji.store";
@@ -276,4 +276,14 @@ export function seedMembers(rows: readonly Member[]): void {
     for (const row of rows) m.set(row.id, row);
     return { ...prev, members: m };
   });
+}
+
+/** Merge `patch` into voiceStore, leaving every other field as it is. */
+export function patchVoice(patch: Partial<VoiceState>): void {
+  voiceStore.setState((prev) => ({ ...prev, ...patch }));
+}
+
+/** Merge `patch` into authStore, leaving every other field as it is. */
+export function patchAuth(patch: Partial<AuthState>): void {
+  authStore.setState((prev) => ({ ...prev, ...patch }));
 }

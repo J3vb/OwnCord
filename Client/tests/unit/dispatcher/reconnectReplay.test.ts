@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
 import { restoreTZ, tzPinHonored } from "../../helpers/tz-pin";
-import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { setUserBlockedByMe } from "../../../src/stores/blocks.store";
@@ -14,6 +13,7 @@ import {
   setActiveChannel,
   channelRow,
   seedChannels,
+  patchAuth,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -267,10 +267,7 @@ describe("WS Dispatcher", () => {
   describe("mention counts", () => {
     function seedChannel(): void {
       seedChannels([channelRow({ id: 5, name: "off-topic" })], { activeChannelId: 1 });
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 1, username: "alex", avatar: null, role: "member" },
-      }));
+      patchAuth({ user: { id: 1, username: "alex", avatar: null, role: "member" } });
     }
 
     function incoming(extra: Record<string, unknown>): void {

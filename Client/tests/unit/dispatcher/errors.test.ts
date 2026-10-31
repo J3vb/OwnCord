@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, onTestFinished } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
 import { setActivityRefusalHandler } from "../../../src/lib/presence/gameActivityBridge";
 import { expectConsole } from "../../helpers/console";
@@ -17,6 +17,8 @@ import {
   type DispatcherMock,
   dmRow,
   memberRow,
+  seedMembers,
+  patchAuth,
 } from "../../helpers/dispatcherHarness";
 import { resetMessagesState } from "../../helpers/storeResets";
 
@@ -44,11 +46,10 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires error BANNED to clear auth and show error", () => {
-    authStore.setState((prev) => ({
-      ...prev,
+    patchAuth({
       isAuthenticated: true,
       user: { id: 1, username: "banned-user", avatar: null, role: "member" },
-    }));
+    });
 
     mock.dispatch("error", {
       code: "BANNED",
@@ -70,11 +71,10 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires error BANNED to disconnect the ws client (without this the banned token reconnects forever)", () => {
-    authStore.setState((prev) => ({
-      ...prev,
+    patchAuth({
       isAuthenticated: true,
       user: { id: 1, username: "banned-user", avatar: null, role: "member" },
-    }));
+    });
 
     mock.dispatch("error", {
       code: "BANNED",
@@ -91,22 +91,38 @@ describe("WS Dispatcher", () => {
     expect(mock.ws.disconnect).toHaveBeenCalled();
   });
 
-  // OC-0064: transientError has exactly one reader in the whole client —
+  // transientError has exactly one reader in the whole client —
   // ConnectPage's login-screen subscription. Routing the catch-all fallback
   // through it means an error raised while the user is in-app (MainPage
   // never subscribes) is invisible until the user later lands back on the
   // login screen, where it resurfaces stale and out of context. The
   // catch-all must use the same in-app toast the sibling CHANNEL_FULL /
   // VIDEO_LIMIT branches already use, and must leave transientError alone.
-  it("wires error RATE_LIMITED to an in-app toast with its catalog text", () => {
+  it.each([
+    [
+      "wires error RATE_LIMITED to an in-app toast with its catalog text",
+      "RATE_LIMITED",
+      "too many requests, please slow down",
+      "Too many requests. Try again later.",
+    ],
+    [
+      "wires error FORBIDDEN to an in-app toast with its catalog text",
+      "FORBIDDEN",
+      "Insufficient permissions",
+      "You don't have permission to do that.",
+    ],
+    [
+      "wires error RATE_LIMITED with empty message to its catalog text",
+      "RATE_LIMITED",
+      "",
+      "Too many requests. Try again later.",
+    ],
+  ] as const)("%s", (_name, code, message, toast) => {
     mockShowToast.mockClear();
-    mock.dispatch("error", {
-      code: "RATE_LIMITED",
-      message: "too many requests, please slow down",
-    });
+    mock.dispatch("error", { code, message });
     expectConsole("error", /\[dispatcher\] Server error/);
 
-    expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
+    expect(mockShowToast).toHaveBeenCalledWith(toast, "error");
     expect(uiStore.getState().transientError).toBeNull();
   });
 
@@ -127,147 +143,88 @@ describe("WS Dispatcher", () => {
     }
   });
 
-  it("wires error FORBIDDEN to an in-app toast with its catalog text", () => {
+  it.each([
+    [
+      "wires an unmapped error with an empty message to the generic fallback toast",
+      "SOMETHING_ODD",
+      "",
+    ],
+    [
+      "wires error INTERNAL to the generic fallback toast, never the server's message",
+      "INTERNAL",
+      "db: sqlite busy",
+    ],
+  ] as const)("%s", (_name, code, message) => {
     mockShowToast.mockClear();
-    mock.dispatch("error", {
-      code: "FORBIDDEN",
-      message: "Insufficient permissions",
+    mock.dispatch("error", { code, message });
+    expectConsole("error", /\[dispatcher\] Server error/);
+    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
+  });
+
+  // Sends a custom status the way the status picker does and returns the
+  // envelope id of the frame, so a test can answer it with a refusal.
+  function sendOptimisticStatus(status: "online" | "dnd", text: string): string {
+    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
+    setActivePresenceSender(presenceSender);
+    onTestFinished(() => {
+      setActivePresenceSender(null);
+      presenceSender.destroy();
     });
-    expectConsole("error", /\[dispatcher\] Server error/);
-
-    expect(mockShowToast).toHaveBeenCalledWith("You don't have permission to do that.", "error");
-    expect(uiStore.getState().transientError).toBeNull();
-  });
-
-  it("wires error RATE_LIMITED with empty message to its catalog text", () => {
-    mockShowToast.mockClear();
-    mock.dispatch("error", { code: "RATE_LIMITED", message: "" });
-    expectConsole("error", /\[dispatcher\] Server error/);
-    expect(mockShowToast).toHaveBeenCalledWith("Too many requests. Try again later.", "error");
-    expect(uiStore.getState().transientError).toBeNull();
-  });
-
-  it("wires an unmapped error with an empty message to the generic fallback toast", () => {
-    mockShowToast.mockClear();
-    mock.dispatch("error", { code: "SOMETHING_ODD", message: "" });
-    expectConsole("error", /\[dispatcher\] Server error/);
-    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
-  });
-
-  it("wires error INTERNAL to the generic fallback toast, never the server's message", () => {
-    mockShowToast.mockClear();
-    mock.dispatch("error", { code: "INTERNAL", message: "db: sqlite busy" });
-    expectConsole("error", /\[dispatcher\] Server error/);
-    expect(mockShowToast).toHaveBeenCalledWith("Server error", "error");
-  });
+    patchAuth({ user: { id: 1, username: "alice", avatar: null, role: "member" } });
+    seedMembers([memberRow({ id: 1, username: "alice", customStatus: "old text" })]);
+    saveCustomStatus("old text");
+    saveCustomStatus(text);
+    presenceSender.send(status, text);
+    return (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+  }
 
   // A timeout refuses a custom status without writing or broadcasting
   // anything, so the PresenceSender's optimistic apply would leave the user
   // seeing and saving a status nobody else has. The dispatcher is the one
   // writer for server events, so its error chain routes the rollback to the
   // active sender.
-  it("rolls back the optimistic presence status on a TIMED_OUT refusal", () => {
-    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
-    setActivePresenceSender(presenceSender);
-    try {
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 1, username: "alice", avatar: null, role: "member" },
-      }));
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [1, memberRow({ id: 1, username: "alice", customStatus: "old text" }) as never],
-        ]),
-      }));
-      saveCustomStatus("old text");
-      saveCustomStatus("new text");
-      presenceSender.send("dnd", "new text");
-      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+  it.each([
+    [
+      "rolls back the optimistic presence status on a TIMED_OUT refusal",
+      "TIMED_OUT",
+      "you are timed out",
+    ],
+    [
+      "rolls back the optimistic presence status on a REQUEST_TIMEOUT refusal",
+      "REQUEST_TIMEOUT",
+      "the server is busy",
+    ],
+  ] as const)("%s", (_name, code, message) => {
+    const id = sendOptimisticStatus("dnd", "new text");
 
-      mock.dispatch("error", { code: "TIMED_OUT", message: "you are timed out" }, id);
-      expectConsole("error", /\[dispatcher\] Server error/);
+    mock.dispatch("error", { code, message }, id);
+    expectConsole("error", /\[dispatcher\] Server error/);
 
-      expect(membersStore.getState().members.get(1)?.status).toBe("online");
-      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
-      expect(loadCustomStatus()).toBe("old text");
-    } finally {
-      setActivePresenceSender(null);
-      presenceSender.destroy();
-    }
+    expect(membersStore.getState().members.get(1)?.status).toBe("online");
+    expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+    expect(loadCustomStatus()).toBe("old text");
   });
 
-  it("rolls back the optimistic presence status on a REQUEST_TIMEOUT refusal", () => {
-    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
-    setActivePresenceSender(presenceSender);
-    try {
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 1, username: "alice", avatar: null, role: "member" },
-      }));
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [1, memberRow({ id: 1, username: "alice", customStatus: "old text" }) as never],
-        ]),
-      }));
-      saveCustomStatus("old text");
-      saveCustomStatus("new text");
-      presenceSender.send("dnd", "new text");
-      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
-
-      mock.dispatch("error", { code: "REQUEST_TIMEOUT", message: "the server is busy" }, id);
-      expectConsole("error", /\[dispatcher\] Server error/);
-
-      expect(membersStore.getState().members.get(1)?.status).toBe("online");
-      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
-      expect(loadCustomStatus()).toBe("old text");
-    } finally {
-      setActivePresenceSender(null);
-      presenceSender.destroy();
-    }
-  });
-
-  // WP 3C-9: a custom status the server's character or length rules refuse
+  // A custom status the server's character or length rules refuse
   // comes back BAD_REQUEST; the optimistic value must not stay on screen, and
   // the toast carries the server's own text.
   it("rolls back the optimistic custom status on a BAD_REQUEST refusal and toasts the server's text", () => {
-    const presenceSender = createPresenceSender(mock.ws, createPresenceLimiter());
-    setActivePresenceSender(presenceSender);
-    try {
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 1, username: "alice", avatar: null, role: "member" },
-      }));
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [1, memberRow({ id: 1, username: "alice", customStatus: "old text" }) as never],
-        ]),
-      }));
-      saveCustomStatus("old text");
-      saveCustomStatus("bad\u202etext");
-      presenceSender.send("online", "bad\u202etext");
-      const id = (mock.ws.send as ReturnType<typeof vi.fn>).mock.results.at(-1)!.value as string;
+    const id = sendOptimisticStatus("online", "bad\u202etext");
 
-      mockShowToast.mockClear();
-      mock.dispatch(
-        "error",
-        { code: "BAD_REQUEST", message: "custom_status must not contain invisible characters" },
-        id,
-      );
-      expectConsole("error", /\[dispatcher\] Server error/);
+    mockShowToast.mockClear();
+    mock.dispatch(
+      "error",
+      { code: "BAD_REQUEST", message: "custom_status must not contain invisible characters" },
+      id,
+    );
+    expectConsole("error", /\[dispatcher\] Server error/);
 
-      expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
-      expect(loadCustomStatus()).toBe("old text");
-      expect(mockShowToast).toHaveBeenCalledWith(
-        "Custom_status must not contain invisible characters",
-        "error",
-      );
-    } finally {
-      setActivePresenceSender(null);
-      presenceSender.destroy();
-    }
+    expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
+    expect(loadCustomStatus()).toBe("old text");
+    expect(mockShowToast).toHaveBeenCalledWith(
+      "Custom_status must not contain invisible characters",
+      "error",
+    );
   });
 
   it("wires error with an unrecognized code to the generic fallback toast", () => {
