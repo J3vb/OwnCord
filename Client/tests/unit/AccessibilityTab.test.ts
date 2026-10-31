@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildAccessibilityTab } from "../../src/components/settings/AccessibilityTab";
+import { buildAccessibilityTab } from "../../src/features/settings/AccessibilityTab";
 
 /**
  * OC-0232: "Reduce Motion" and "Sync with OS" are two independent writers of

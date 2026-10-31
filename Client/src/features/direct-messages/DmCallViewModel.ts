@@ -11,7 +11,7 @@ import { dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
-import { dmCallText as d } from "../i18n/dmCall";
+import { dmCallText as d } from "../../i18n/dmCall";
 
 // ---------------------------------------------------------------------------
 // View model

@@ -3,7 +3,7 @@
 //
 // Three code paths write the `--font-size` custom property:
 //   - applyStoredAppearance() (lib/prefs/appearance.ts) at startup
-//   - the Appearance-tab Font Size slider (components/settings/AppearanceTab.ts)
+//   - the Appearance-tab Font Size slider (features/settings/AppearanceTab.ts)
 //   - the Accessibility-tab "Large Font" toggle, which since OC-0319 goes
 //     through the same applyFontSize() writer rather than a `.large-font` CSS
 //     rule (an inline style outranks a class rule, so that rule never fired)

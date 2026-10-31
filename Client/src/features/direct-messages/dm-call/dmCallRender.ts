@@ -4,14 +4,14 @@
  */
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
-import { createAvatarElement } from "../../features/profiles/avatar";
+import { createAvatarElement } from "../../profiles/avatar";
 import { voiceStore, type VoiceStatus } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName, type DmChannel } from "@stores/dm.store";
-import { headerStatusText } from "../../features/voice/voiceStatusText";
-import { voiceText as t } from "../../i18n/voice";
-import { dmCallText as d } from "../../i18n/dmCall";
-import { canPublishScreen } from "../../features/voice/native/platform";
+import { headerStatusText } from "../../voice/voiceStatusText";
+import { voiceText as t } from "../../../i18n/voice";
+import { dmCallText as d } from "../../../i18n/dmCall";
+import { canPublishScreen } from "../../voice/native/platform";
 import {
   absentMembers,
   callName,

@@ -98,11 +98,11 @@ success message with a soft note, never a red error. (Server contract:
 
 ### 2.3 Two-factor (TOTP)
 
-| Flow             | Steps                                                                                                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Enable           | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true`                                                         |
-| Disable          | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `components/settings/AccountTab.ts`) |
-| Regenerate codes | With 2FA enabled: password confirm → `POST /totp/recovery-codes` → the new set is shown once (copy + Done); the old set is invalid server-side and never kept client-side                                                |
+| Flow             | Steps                                                                                                                                                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable           | Password prompt → `POST /totp/enable` → render QR URI + backup codes → 6-digit confirm → `POST /totp/confirm` → "Enabled" badge, `auth` user `totp_enabled:true`                                                       |
+| Disable          | Password confirm → `DELETE /totp`; a `403`/"required" is rewritten to "2FA is required by this server and cannot be disabled" (already the 403 rewrite in `buildTotpDisableView()`, `features/settings/AccountTab.ts`) |
+| Regenerate codes | With 2FA enabled: password confirm → `POST /totp/recovery-codes` → the new set is shown once (copy + Done); the old set is invalid server-side and never kept client-side                                              |
 
 **Target rule:** backup codes are shown exactly once, with an explicit "Save these
 now — you won't see them again" and a copy affordance.
@@ -113,12 +113,12 @@ up — and "Create"/"Replace recovery kit" behind a password confirm →
 `POST /users/me/recovery-kit`, which returns the server-generated secret once.
 
 **Shown-once secrets** (backup codes, regenerated codes, the kit secret) share
-one reveal (`buildShownOnce()` in `components/settings/RecoverySections.ts`):
+one reveal (`buildShownOnce()` in `features/settings/RecoverySections.ts`):
 never logged, never written to any storage, and wiped from the DOM on Done, on
 a tab switch and on closing the overlay (closing aborts the tab's build
 signal). While a kit or regenerated-codes request is in flight, close (Escape,
 button, backdrop) and tab switches are ignored so the only copy is shown first
-(`holdOpen()` in `components/SettingsOverlay.ts`). `tests/unit/recovery-secrets.test.ts` plants these values and proves
+(`holdOpen()` in `features/settings/SettingsOverlay.ts`). `tests/unit/recovery-secrets.test.ts` plants these values and proves
 none reaches a log entry, the console or browser storage.
 
 ### 2.4 Sessions & delete account
@@ -295,7 +295,7 @@ the only indicator. Both clear at 0 and on logout.
 
 ## Source of truth
 
-`src/components/SettingsOverlay.ts` (+ `settings/*`), `src/components/AdminActions.ts`,
+`src/features/settings/SettingsOverlay.ts` (+ `settings/*`), `src/components/AdminActions.ts`,
 `src/components/InviteManager.ts`, `CreateChannelModal.ts`, `EditChannelModal.ts`,
 `DeleteChannelModal.ts`, `src/components/UpdateNotifier.ts`, `src/lib/net/updater.ts`,
 `src/lib/api.ts`, `src/lib/prefs/themes.ts`, `src/lib/prefs/preferences.ts`,

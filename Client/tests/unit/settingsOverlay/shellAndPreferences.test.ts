@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/settingsOverlayMocks";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { createSettingsOverlay } from "../../../src/features/settings/SettingsOverlay";
 import { setAvailableUpdate } from "../../../src/features/updates/availableUpdate";
 import {
   clickEl,

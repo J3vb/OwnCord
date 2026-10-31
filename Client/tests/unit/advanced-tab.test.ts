@@ -130,7 +130,7 @@ vi.stubGlobal("indexedDB", {
   },
 });
 
-import { buildAdvancedTab } from "@components/settings/AdvancedTab";
+import { buildAdvancedTab } from "../../src/features/settings/AdvancedTab";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import {
   getGlobalNotificationLevel,

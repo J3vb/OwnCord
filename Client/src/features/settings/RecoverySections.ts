@@ -11,9 +11,9 @@
 import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText } from "@lib/api";
 import type { RecoveryKitStatus } from "@lib/api";
-import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { accountText as t } from "../../i18n/account";
-import { createStatusRow, setStatusIcon, type StatusKind } from "../../features/settings/status";
+import { createStatusRow, setStatusIcon, type StatusKind } from "./status";
 import { copyText } from "@lib/ui/clipboard";
 
 const MUTED = "color:var(--text-muted);font-size:13px;margin-bottom:12px";

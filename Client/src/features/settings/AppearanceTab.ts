@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle, platformText } from "./helpers";
-import { isAndroidApp } from "../../features/voice/native/platform";
+import { isAndroidApp } from "../voice/native/platform";
 import { readStored } from "@lib/prefs/preferences";
 import {
   THEMES,
@@ -25,13 +25,9 @@ import {
   MAX_FONT_SIZE_PX,
 } from "@lib/prefs/appearance";
 import { getTimeFormat, saveTimeFormat, type TimeFormat } from "@lib/text/timeFormat";
-import {
-  loadMemberLayout,
-  MEMBER_LAYOUT_PREF,
-  type MemberLayout,
-} from "../../features/members/memberLayout";
-import { appZoom, ZOOM_LEVELS, zoomIndex } from "../../features/zoom";
-import { buildCustomThemeSection } from "../../features/custom-themes/customThemeSection";
+import { loadMemberLayout, MEMBER_LAYOUT_PREF, type MemberLayout } from "../members/memberLayout";
+import { appZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
+import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
 import { settingsText as t } from "../../i18n/settings";
 
 const FALLBACK_ACCENT = "#5865f2";

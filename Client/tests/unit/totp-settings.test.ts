@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
-import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
+import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
+import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
 import { updateUser } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
 

@@ -1,7 +1,7 @@
 /**
  * Preference persistence helpers.
  *
- * Moved here from `@components/settings/helpers` so that `lib/` modules can
+ * Moved here from `features/settings/helpers` so that `lib/` modules can
  * depend on these utilities without importing from the component layer.
  */
 

@@ -5,16 +5,16 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "../helpers";
 import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/voice/shareFps";
-import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../../features/voice/autoPlayCameras";
+import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../voice/autoPlayCameras";
 import { setOutputVolume } from "@lib/voice/livekitSession";
-import { isLinuxDesktop } from "../../../features/voice/native/platform";
+import { isLinuxDesktop } from "../../voice/native/platform";
 import {
   getVideoCodecPref,
   h264Offered,
   h265Offered,
   vp9Available,
   vp9Offered,
-} from "../../../features/voice/videoCodec";
+} from "../../voice/videoCodec";
 import { settingsText as t } from "../../../i18n/settings";
 import { micTestVolume } from "./voiceTabShared";
 import type { VoiceTabScope } from "./voiceTabScope";

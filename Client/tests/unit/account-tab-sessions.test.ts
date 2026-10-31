@@ -3,9 +3,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 const mockShowToast = vi.fn();
 vi.mock("@lib/ui/toast", () => ({ showToast: (...args: unknown[]) => mockShowToast(...args) }));
 
-import { buildAccountTab } from "@components/settings/AccountTab";
+import { buildAccountTab } from "../../src/features/settings/AccountTab";
 import { setSessionReplaced } from "@stores/ui.store";
-import type { SettingsOverlayOptions } from "@components/SettingsOverlay";
+import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
 import type { SessionInfo } from "@lib/api";
 import { signInAs } from "../helpers/storeSeeds";
 

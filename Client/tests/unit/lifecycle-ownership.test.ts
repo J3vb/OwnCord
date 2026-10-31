@@ -197,7 +197,7 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the next search (query, scope or Load more), which aborts this one",
   },
   {
-    file: "components/settings/ConnectionDiagnosticsPanel.ts",
+    file: "features/settings/ConnectionDiagnosticsPanel.ts",
     fn: "createConnectionDiagnosticsPanel",
     category: "cancellation-token",
     reason: "owner: stop() and the next test run, which abort this attempt",

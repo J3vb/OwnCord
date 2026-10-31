@@ -299,7 +299,7 @@ apply live: the session rebuilds its audio processing module and the capture
 and the echo canceller's reference swap to it within a few frames, muted or
 not (`native_voice_set_audio_processing`). The automatic input sensitivity option and the mic
 test in Voice & Audio settings are web-path features and are not offered on
-Linux (`components/settings/VoiceAudioTab.ts`). Per-user and output volume
+Linux (`features/settings/VoiceAudioTab.ts`). Per-user and output volume
 came later (Audio parity, below); camera and remote video are phase 2 (below),
 screen share phase 3. rust-sdks #1408
 stays a tracked leak: the upstream fix is an 11-line `webrtc-sys` C++ change

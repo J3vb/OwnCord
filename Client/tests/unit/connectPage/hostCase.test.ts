@@ -7,7 +7,7 @@ import { makeCallbacks } from "../../helpers/connectPageHarness";
 import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("../../../src/lib/net/credentials", () => mocks.netCredentialsMock());
-vi.mock("../../../src/components/SettingsOverlay", () => mocks.settingsOverlayMock());
+vi.mock("../../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 vi.mock("../../../src/stores/ui.store", () => mocks.uiStoreMock());
 
 describe("canonicalServerHost", () => {

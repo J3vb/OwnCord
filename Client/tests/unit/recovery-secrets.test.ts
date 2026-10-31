@@ -46,7 +46,10 @@ vi.mock("@stores/auth.store", () => ({
 
 import { createApiClient } from "../../src/lib/api";
 import { addLogListener, createLogger, setLogLevel, type LogEntry } from "../../src/lib/logger";
-import { createSettingsOverlay, type SettingsOverlayOptions } from "@components/SettingsOverlay";
+import {
+  createSettingsOverlay,
+  type SettingsOverlayOptions,
+} from "../../src/features/settings/SettingsOverlay";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 
 const KIT_SECRET = "PLNT-KITS-ECRE-TAAA-BBBB-CCCC-DDDD-EEEE";

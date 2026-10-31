@@ -16,10 +16,10 @@ import {
   nativeCameraDevices,
   nativeCameraSupport,
   onNativeDevicesChanged,
-} from "../../../features/voice/native/devices";
-import { isLinuxDesktop } from "../../../features/voice/native/platform";
+} from "../../voice/native/devices";
+import { isLinuxDesktop } from "../../voice/native/platform";
 import { desktop } from "../../../platform/desktop";
-import { NativeVideoRenderer } from "../../../features/voice/native/videoRenderer";
+import { NativeVideoRenderer } from "../../voice/native/videoRenderer";
 import { settingsText as t } from "../../../i18n/settings";
 import {
   isRealInput,

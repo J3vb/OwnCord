@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.hoisted(() => {
   vi.stubGlobal("isSecureContext", true);
 });
-vi.mock("../../src/components/SettingsOverlay", () => ({
+vi.mock("../../src/features/settings/SettingsOverlay", () => ({
   createSettingsOverlay: () => ({ mount: vi.fn(), destroy: vi.fn() }),
 }));
 

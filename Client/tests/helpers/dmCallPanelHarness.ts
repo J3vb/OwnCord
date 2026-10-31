@@ -3,7 +3,7 @@ import {
   createDmCallPanel,
   type DmCallPanelComponent,
   type DmCallPanelOptions,
-} from "../../src/components/DmCallPanel";
+} from "../../src/features/direct-messages/DmCallPanel";
 import {
   voiceStore,
   clearPeerVerifications,

@@ -11,7 +11,7 @@ import {
   getLogLevel,
 } from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
-import type { TabName } from "../SettingsOverlay";
+import type { TabName } from "./SettingsOverlay";
 import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
 import { savePref, readMigratedStringPref, appendToggleRows } from "./helpers";
 import {
@@ -21,10 +21,10 @@ import {
   getShareMotionPolicy,
   isShareMotionPolicy,
 } from "@lib/voice/shareFlags";
-import { createDisclosure } from "../../features/settings/status";
+import { createDisclosure } from "./status";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
-import { isAndroidApp, isLinuxDesktop } from "../../features/voice/native/platform";
+import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
 import { copyThenRelabel } from "@lib/ui/clipboard";
 

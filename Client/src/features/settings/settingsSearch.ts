@@ -26,7 +26,7 @@ import { gameActivityText } from "../../i18n/gameActivity";
 import { listeningDetailsText } from "../../i18n/listeningDetails";
 import { settingsText } from "../../i18n/settings";
 import { whatsNewText } from "../../i18n/whatsNew";
-import { isAndroidApp } from "../../features/voice/native/platform";
+import { isAndroidApp } from "../voice/native/platform";
 import { platformText } from "./helpers";
 
 const s = settingsText;

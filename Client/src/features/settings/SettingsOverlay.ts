@@ -23,23 +23,23 @@ import type {
   SessionInfo,
 } from "@lib/api";
 import { uiStore } from "@stores/ui.store";
-import { settingsText } from "../i18n/settings";
+import { settingsText } from "../../i18n/settings";
 import { authStore } from "@stores/auth.store";
-import { createAvatarElement } from "../features/profiles/avatar";
-import { buildAccountTab } from "./settings/AccountTab";
-import { buildAppearanceTab } from "./settings/AppearanceTab";
-import { buildNotificationsTab } from "./settings/NotificationsTab";
-import { buildTextImagesTab } from "./settings/TextImagesTab";
-import { buildAccessibilityTab } from "./settings/AccessibilityTab";
-import { createVoiceAudioTab } from "./settings/VoiceAudioTab";
-import { buildKeybindsTab } from "./settings/KeybindsTab";
-import { buildAdvancedTab } from "./settings/AdvancedTab";
-import { createLogsTab } from "./settings/LogsTab";
-import { highlightMatches, normalizeQuery, tabMatches } from "./settings/settingsSearch";
-import { confirmLogout } from "../features/settings/logoutConfirm";
-import { readAppVersion } from "../features/whats-new/appVersion";
-import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
-import { isAndroidApp } from "../features/voice/native/platform";
+import { createAvatarElement } from "../profiles/avatar";
+import { buildAccountTab } from "./AccountTab";
+import { buildAppearanceTab } from "./AppearanceTab";
+import { buildNotificationsTab } from "./NotificationsTab";
+import { buildTextImagesTab } from "./TextImagesTab";
+import { buildAccessibilityTab } from "./AccessibilityTab";
+import { createVoiceAudioTab } from "./VoiceAudioTab";
+import { buildKeybindsTab } from "./KeybindsTab";
+import { buildAdvancedTab } from "./AdvancedTab";
+import { createLogsTab } from "./LogsTab";
+import { highlightMatches, normalizeQuery, tabMatches } from "./settingsSearch";
+import { confirmLogout } from "./logoutConfirm";
+import { readAppVersion } from "../whats-new/appVersion";
+import { subscribeAvailableUpdate } from "../updates/availableUpdate";
+import { isAndroidApp } from "../voice/native/platform";
 
 const log = createLogger("SettingsOverlay");
 
@@ -298,7 +298,7 @@ export function createSettingsOverlay(
     // Loaded on first open: the release notes renderer stays out of this chunk.
     About: (signal) => {
       const host = createElement("div", { class: "settings-pane active" });
-      void import("./settings/AboutTab").then(
+      void import("./AboutTab").then(
         ({ buildAboutTab }) => {
           if (signal.aborted) return;
           host.replaceWith(buildAboutTab(signal));

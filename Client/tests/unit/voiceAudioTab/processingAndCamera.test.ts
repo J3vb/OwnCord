@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/voiceAudioTabMocks";
-import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+import { createVoiceAudioTab } from "../../../src/features/settings/VoiceAudioTab";
 import { GATE_LOOKAHEAD_S } from "@lib/voice/micProcessor";
 import { expectConsole } from "../../helpers/console";
 import {
