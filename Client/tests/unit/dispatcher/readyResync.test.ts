@@ -721,6 +721,11 @@ describe("WS Dispatcher", () => {
       async function settle(): Promise<void> {
         for (let i = 0; i < 4; i++) await Promise.resolve();
       }
+      async function resyncAndSettle(): Promise<void> {
+        mock.dispatch("ready", readyPayload);
+        mock.dispatch("ready", readyPayload);
+        await settle();
+      }
 
       it("keeps 200 loaded rows synchronously and splices an overlapping tail", async () => {
         const fresh = page(151, 200).map((m) =>
@@ -754,9 +759,7 @@ describe("WS Dispatcher", () => {
         setActiveChannel(1);
         load200();
 
-        mock.dispatch("ready", readyPayload);
-        mock.dispatch("ready", readyPayload);
-        await settle();
+        await resyncAndSettle();
 
         expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(301, 350));
       });
@@ -776,9 +779,7 @@ describe("WS Dispatcher", () => {
           setActiveChannel(1);
           setAroundMessages(1, page(100, 160).reverse(), true, true);
 
-          mock.dispatch("ready", readyPayload);
-          mock.dispatch("ready", readyPayload);
-          await settle();
+          await resyncAndSettle();
 
           expect(getMessages).not.toHaveBeenCalled();
           expect(getMessagesAround).toHaveBeenCalledWith(1, 130, { limit: 50 });
@@ -798,9 +799,7 @@ describe("WS Dispatcher", () => {
         setActiveChannel(1);
         load200();
 
-        mock.dispatch("ready", readyPayload);
-        mock.dispatch("ready", readyPayload);
-        await settle();
+        await resyncAndSettle();
 
         expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 200));
         expect(isWindowDetached(1)).toBe(true);
@@ -822,9 +821,7 @@ describe("WS Dispatcher", () => {
           for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
           expect(isWindowDetached(1)).toBe(false);
 
-          mock.dispatch("ready", readyPayload);
-          mock.dispatch("ready", readyPayload);
-          await settle();
+          await resyncAndSettle();
 
           expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 500));
           expect(isWindowDetached(1)).toBe(true);
@@ -843,9 +840,7 @@ describe("WS Dispatcher", () => {
           setMessages(1, page(451, 500), true);
           for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
 
-          mock.dispatch("ready", readyPayload);
-          mock.dispatch("ready", readyPayload);
-          await settle();
+          await resyncAndSettle();
 
           expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(31, 530));
           expect(isWindowDetached(1)).toBe(false);
@@ -861,9 +856,7 @@ describe("WS Dispatcher", () => {
         setActiveChannel(1);
         setAroundMessages(1, page(100, 160).reverse(), true, true);
 
-        mock.dispatch("ready", readyPayload);
-        mock.dispatch("ready", readyPayload);
-        await settle();
+        await resyncAndSettle();
 
         expect(getMessagesAround).not.toHaveBeenCalled();
         expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(451, 500));

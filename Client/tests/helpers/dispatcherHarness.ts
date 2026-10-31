@@ -306,3 +306,15 @@ export function chatMessageEvent(overrides: Fields): Fields {
 export function seedDms(rows: readonly DmChannel[]): void {
   dmStore.setState(() => ({ channels: [...rows] }));
 }
+
+/** A `voice_state` payload for a user with nothing muted, speaking or streaming. */
+export function voiceStateEvent(overrides: Fields): Fields {
+  return {
+    muted: false,
+    deafened: false,
+    speaking: false,
+    camera: false,
+    screenshare: false,
+    ...overrides,
+  };
+}

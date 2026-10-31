@@ -13,6 +13,7 @@ import {
   readyMember,
   patchVoice,
   mock,
+  voiceStateEvent,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -278,17 +279,16 @@ describe("WS Dispatcher", () => {
   it("does not set the local moderator flags from another user's voice_state", () => {
     setMeUser();
 
-    mock.dispatch("voice_state", {
-      channel_id: 3,
-      user_id: 99,
-      username: "other",
-      muted: true,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-      server_muted: true,
-    });
+    mock.dispatch(
+      "voice_state",
+      voiceStateEvent({
+        channel_id: 3,
+        user_id: 99,
+        username: "other",
+        muted: true,
+        server_muted: true,
+      }),
+    );
 
     expect(voiceStore.getState().localServerMuted).not.toBe(true);
     expect(voiceStore.getState().voiceUsers.get(3)?.get(99)?.serverMuted).toBe(true);

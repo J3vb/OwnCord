@@ -248,10 +248,7 @@ describe("WS Dispatcher", () => {
     describe("the per-server switch", () => {
       const user = { id: 1, username: "alex", avatar: null, role: "admin" };
       const partner = { id: 10, username: "bob", avatar: "", status: "online" };
-      afterEach(() => resetServerCapabilities());
-
-      it("game_activity_policy false clears every shown game and turns the capability off", () => {
-        seedRoster();
+      const readyWithFactorioPlayer = (): void =>
         mock.dispatch(
           "ready",
           readyEvent({
@@ -260,6 +257,11 @@ describe("WS Dispatcher", () => {
             activities: [{ user_id: 1, ...factorio }],
           }),
         );
+      afterEach(() => resetServerCapabilities());
+
+      it("game_activity_policy false clears every shown game and turns the capability off", () => {
+        seedRoster();
+        readyWithFactorioPlayer();
         seedDms([dmRow({ recipient: partner, participants: [partner] })]);
         mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
         expect(activityOf(1)?.name).toBe("Factorio");
@@ -278,14 +280,7 @@ describe("WS Dispatcher", () => {
 
       it("auth_ok's game_activity_policy applies on a full connect and on a resume", () => {
         seedRoster();
-        mock.dispatch(
-          "ready",
-          readyEvent({
-            members: [readyMember({ id: 1, username: "alex", role: "admin" })],
-            capabilities: { game_activity: true },
-            activities: [{ user_id: 1, ...factorio }],
-          }),
-        );
+        readyWithFactorioPlayer();
         // A resume gets no ready: the policy a missed frame carried arrives here.
         mock.dispatch("auth_ok", {
           user,
@@ -331,27 +326,13 @@ describe("WS Dispatcher", () => {
       });
 
       it("still shows games from a ready and presence before any policy is stated", () => {
-        mock.dispatch(
-          "ready",
-          readyEvent({
-            members: [readyMember({ id: 1, username: "alex", role: "admin" })],
-            capabilities: { game_activity: true },
-            activities: [{ user_id: 1, ...factorio }],
-          }),
-        );
+        readyWithFactorioPlayer();
         expect(activityOf(1)?.name).toBe("Factorio");
       });
 
       it("a GAME_ACTIVITY_DISABLED refusal never overrides the policy the server stated", () => {
         seedRoster();
-        mock.dispatch(
-          "ready",
-          readyEvent({
-            members: [readyMember({ id: 1, username: "alex", role: "admin" })],
-            capabilities: { game_activity: true },
-            activities: [{ user_id: 1, ...factorio }],
-          }),
-        );
+        readyWithFactorioPlayer();
         // auth_ok said on; a refusal sent before a later on frame arrives after it.
         mock.dispatch("auth_ok", {
           user,

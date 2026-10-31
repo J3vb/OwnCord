@@ -40,6 +40,19 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 describe("WS Dispatcher", () => {
   useDispatcherHarness();
 
+  function bobPostsInChannel5(content: string, extra: Record<string, unknown> = {}): void {
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id: 200,
+        channel_id: 5,
+        user: { id: 2, username: "bob", avatar: null },
+        content,
+        ...extra,
+      }),
+    );
+  }
+
   it("wires chat_message to messages store", () => {
     mock.dispatch(
       "chat_message",
@@ -60,15 +73,7 @@ describe("WS Dispatcher", () => {
     // Set up a channel first
     seedChannels([channelRow({ id: 5, name: "off-topic" })], { activeChannelId: 1 });
 
-    mock.dispatch(
-      "chat_message",
-      chatMessageEvent({
-        id: 200,
-        channel_id: 5,
-        user: { id: 2, username: "bob", avatar: null },
-        content: "ping",
-      }),
-    );
+    bobPostsInChannel5("ping");
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
@@ -95,16 +100,7 @@ describe("WS Dispatcher", () => {
     );
 
     // The same message redelivered as a queued chat_message.
-    mock.dispatch(
-      "chat_message",
-      chatMessageEvent({
-        id: 200,
-        channel_id: 5,
-        user: { id: 2, username: "bob", avatar: null },
-        content: "hey @me",
-        mentions: [5],
-      }),
-    );
+    bobPostsInChannel5("hey @me", { mentions: [5] });
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);
@@ -125,15 +121,7 @@ describe("WS Dispatcher", () => {
     // back-history via a jump).
     messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([5]) }));
 
-    mock.dispatch(
-      "chat_message",
-      chatMessageEvent({
-        id: 200,
-        channel_id: 5,
-        user: { id: 2, username: "bob", avatar: null },
-        content: "ping",
-      }),
-    );
+    bobPostsInChannel5("ping");
 
     const ch = channelsStore.getState().channels.get(5);
     expect(ch?.unreadCount).toBe(1);

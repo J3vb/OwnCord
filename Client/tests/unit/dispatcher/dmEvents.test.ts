@@ -15,6 +15,7 @@ import {
   chatMessageEvent,
   seedDms,
   mock,
+  voiceStateEvent,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -228,16 +229,10 @@ describe("WS Dispatcher", () => {
     describe("call roster of a closed DM", () => {
       const callDm = (channelId: number, isGroup: boolean) => dmRow({ channelId, isGroup });
       const seedCall = (channelId: number) => {
-        mock.dispatch("voice_state", {
-          channel_id: channelId,
-          user_id: 10,
-          username: "bob",
-          muted: false,
-          deafened: false,
-          speaking: false,
-          camera: false,
-          screenshare: false,
-        });
+        mock.dispatch(
+          "voice_state",
+          voiceStateEvent({ channel_id: channelId, user_id: 10, username: "bob" }),
+        );
         voiceStore.flush();
       };
 

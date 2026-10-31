@@ -23,6 +23,7 @@ import {
   readyChannel,
   patchVoice,
   mock,
+  voiceStateEvent,
 } from "../../helpers/dispatcherHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -40,17 +41,51 @@ const { mockShowToast } = dispatcherMocks;
 describe("WS Dispatcher", () => {
   useDispatcherHarness();
 
+  function readyWithVoiceUser(userId: number, voiceState: Record<string, unknown> = {}): void {
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [readyChannel({ category: "" })],
+        voice_states: [
+          { user_id: userId, channel_id: 10, muted: false, deafened: false, ...voiceState },
+        ],
+        dm_channels: [],
+      }),
+    );
+  }
+
+  function signInVoiceUser(id: number, username: string): void {
+    signInAs(
+      { id, username, avatar: null, role: "member" },
+      { token: "test-token", serverName: "Test", motd: "" },
+    );
+  }
+
+  function expectNoVoiceLeave(): void {
+    const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
+    const voiceLeaveSent = sendCalls.some(
+      (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
+    );
+    expect(voiceLeaveSent).toBe(false);
+  }
+
+  const voiceUser = (userId: number, username: string) => ({
+    userId,
+    username,
+    muted: false,
+    deafened: false,
+    speaking: false,
+    camera: false,
+    screenshare: false,
+    serverMuted: false,
+    serverDeafened: false,
+  });
+
   it("wires voice_state to voice store", () => {
-    mock.dispatch("voice_state", {
-      channel_id: 2,
-      user_id: 1,
-      username: "alex",
-      muted: true,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    mock.dispatch(
+      "voice_state",
+      voiceStateEvent({ channel_id: 2, user_id: 1, username: "alex", muted: true }),
+    );
 
     const users = voiceStore.getState().voiceUsers.get(2);
     expect(users?.get(1)?.muted).toBe(true);
@@ -59,16 +94,7 @@ describe("WS Dispatcher", () => {
   it("wires voice_state to the roster only when this device holds no call", () => {
     setMeUser();
 
-    mock.dispatch("voice_state", {
-      channel_id: 3,
-      user_id: 5,
-      username: "me",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    mock.dispatch("voice_state", voiceStateEvent({ channel_id: 3, user_id: 5, username: "me" }));
 
     expect(voiceStore.getState().currentChannelId).toBeNull();
     expect(voiceStore.getState().voiceStatus).toBe("idle");
@@ -79,16 +105,7 @@ describe("WS Dispatcher", () => {
     setMeUser();
     patchVoice({ voiceStatus: "joining" });
 
-    mock.dispatch("voice_state", {
-      channel_id: 3,
-      user_id: 5,
-      username: "me",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    mock.dispatch("voice_state", voiceStateEvent({ channel_id: 3, user_id: 5, username: "me" }));
 
     expect(voiceStore.getState().currentChannelId).toBe(3);
   });
@@ -96,16 +113,10 @@ describe("WS Dispatcher", () => {
   it("wires voice_state does NOT auto-join for other users", () => {
     setMeUser();
 
-    mock.dispatch("voice_state", {
-      channel_id: 3,
-      user_id: 99,
-      username: "other",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    mock.dispatch(
+      "voice_state",
+      voiceStateEvent({ channel_id: 3, user_id: 99, username: "other" }),
+    );
 
     expect(voiceStore.getState().currentChannelId).toBeNull();
   });
@@ -250,27 +261,7 @@ describe("WS Dispatcher", () => {
     // them from voiceUsers before this voice_leave is processed.
     patchVoice({
       currentChannelId: 3,
-      voiceUsers: new Map([
-        [
-          3,
-          new Map([
-            [
-              7,
-              {
-                userId: 7,
-                username: "peer",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: false,
-                serverMuted: false,
-                serverDeafened: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
+      voiceUsers: new Map([[3, new Map([[7, voiceUser(7, "peer")]])]]),
     });
 
     mock.dispatch("voice_leave", {
@@ -433,19 +424,9 @@ describe("WS Dispatcher", () => {
     patchVoice({ voiceStatus: "idle" });
 
     // Set up auth so the current user ID is 42
-    signInAs(
-      { id: 42, username: "ghost", avatar: null, role: "member" },
-      { token: "test-token", serverName: "Test", motd: "" },
-    );
+    signInVoiceUser(42, "ghost");
 
-    mock.dispatch(
-      "ready",
-      readyEvent({
-        channels: [readyChannel({ category: "" })],
-        voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
-        dm_channels: [],
-      }),
-    );
+    readyWithVoiceUser(42);
 
     expect(mock.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_leave" }));
     expect(voiceStore.getState().currentChannelId).toBeNull();
@@ -457,49 +438,23 @@ describe("WS Dispatcher", () => {
     // session (the lazily-loaded module's store-backed "connected" flag).
     patchVoice({ voiceStatus: "connected" });
 
-    signInAs(
-      { id: 42, username: "active", avatar: null, role: "member" },
-      { token: "test-token", serverName: "Test", motd: "" },
-    );
+    signInVoiceUser(42, "active");
 
-    mock.dispatch(
-      "ready",
-      readyEvent({
-        channels: [readyChannel({ category: "" })],
-        voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
-        dm_channels: [],
-      }),
-    );
+    readyWithVoiceUser(42);
 
     // voice_leave should NOT be sent — the LiveKit room is active
-    const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
-    const voiceLeaveSent = sendCalls.some(
-      (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
-    );
-    expect(voiceLeaveSent).toBe(false);
+    expectNoVoiceLeave();
   });
 
   // WP 1C-8: an announce lost while the socket was down leaves the server's
   // camera/share flag behind what this session sends; `ready` checks it.
   it("ready hands the server's camera and share flags to the live voice session", async () => {
     patchVoice({ voiceStatus: "connected", currentChannelId: 10 });
-    signInAs(
-      { id: 42, username: "active", avatar: null, role: "member" },
-      { token: "test-token", serverName: "Test", motd: "" },
-    );
+    signInVoiceUser(42, "active");
     const { reconcileVideoFlags } = await import("@lib/voice/livekitSession");
     vi.mocked(reconcileVideoFlags).mockClear();
 
-    mock.dispatch(
-      "ready",
-      readyEvent({
-        channels: [readyChannel({ category: "" })],
-        voice_states: [
-          { user_id: 42, channel_id: 10, muted: false, deafened: false, screenshare: true },
-        ],
-        dm_channels: [],
-      }),
-    );
+    readyWithVoiceUser(42, { screenshare: true });
 
     await vi.waitFor(() => expect(reconcileVideoFlags).toHaveBeenCalledWith(false, true));
   });
@@ -507,26 +462,12 @@ describe("WS Dispatcher", () => {
   it("ready does NOT send voice_leave when user is NOT in voice_states", () => {
     patchVoice({ voiceStatus: "idle" });
 
-    signInAs(
-      { id: 42, username: "notinvoice", avatar: null, role: "member" },
-      { token: "test-token", serverName: "Test", motd: "" },
-    );
+    signInVoiceUser(42, "notinvoice");
 
-    mock.dispatch(
-      "ready",
-      readyEvent({
-        channels: [readyChannel({ category: "" })],
-        voice_states: [{ user_id: 99, channel_id: 10, muted: false, deafened: false }],
-        dm_channels: [],
-      }),
-    );
+    readyWithVoiceUser(99);
 
     // voice_leave should NOT be sent — user 42 is not in voice_states
-    const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
-    const voiceLeaveSent = sendCalls.some(
-      (args: unknown[]) => (args[0] as Record<string, unknown>)?.type === "voice_leave",
-    );
-    expect(voiceLeaveSent).toBe(false);
+    expectNoVoiceLeave();
   });
 
   // OC-0201: a full-ready resync that preserves a live voice session (the
@@ -539,10 +480,7 @@ describe("WS Dispatcher", () => {
   it("reconciles E2EE state for peers who left during a full-ready resync with a live voice session", async () => {
     vi.mocked(mockHandleParticipantLeft).mockClear();
 
-    signInAs(
-      { id: 42, username: "me", avatar: null, role: "member" },
-      { token: "test-token", serverName: "Test", motd: "" },
-    );
+    signInVoiceUser(42, "me");
 
     // Before the resync: self (42) and peer (7) are both in channel 10 — the
     // live LiveKit session survived the WS drop.
@@ -553,34 +491,8 @@ describe("WS Dispatcher", () => {
         [
           10,
           new Map([
-            [
-              42,
-              {
-                userId: 42,
-                username: "me",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: false,
-                serverMuted: false,
-                serverDeafened: false,
-              },
-            ],
-            [
-              7,
-              {
-                userId: 7,
-                username: "departed",
-                muted: false,
-                deafened: false,
-                speaking: false,
-                camera: false,
-                screenshare: false,
-                serverMuted: false,
-                serverDeafened: false,
-              },
-            ],
+            [42, voiceUser(42, "me")],
+            [7, voiceUser(7, "departed")],
           ]),
         ],
       ]),
@@ -588,14 +500,7 @@ describe("WS Dispatcher", () => {
 
     // The full resync's voice_states shows peer 7 has left channel 10 while
     // we were disconnected — only self remains.
-    mock.dispatch(
-      "ready",
-      readyEvent({
-        channels: [readyChannel({ category: "" })],
-        voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
-        dm_channels: [],
-      }),
-    );
+    readyWithVoiceUser(42);
     await vi.runAllTimersAsync();
 
     expect(mockHandleParticipantLeft).toHaveBeenCalledWith(7);
