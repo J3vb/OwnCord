@@ -6,21 +6,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
-
 // ---------------------------------------------------------------------------
 // MessageList helpers (we test the exported component's behavior via DOM)
 // ---------------------------------------------------------------------------
@@ -31,18 +16,8 @@ import { membersStore, setMembers } from "../../src/stores/members.store";
 
 // Reset stores before each test
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMessagesState();
+  resetMembersState();
 }
 
 // Helper to create a basic message payload
@@ -523,7 +498,7 @@ describe("MessageList", () => {
 // ---------------------------------------------------------------------------
 
 import { createTypingIndicator } from "../../src/components/TypingIndicator";
-import { setTyping, clearTyping } from "../../src/stores/members.store";
+import { setTyping } from "../../src/stores/members.store";
 
 describe("TypingIndicator", () => {
   let container: HTMLDivElement;
@@ -630,17 +605,14 @@ describe("TypingIndicator", () => {
 // ---------------------------------------------------------------------------
 
 import { createMessageInput } from "../../src/components/MessageInput";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
+import { useMountContainer } from "../helpers/mountContainer";
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("mounts with textarea and send button", () => {

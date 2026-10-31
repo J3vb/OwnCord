@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -53,6 +54,19 @@ type LoggingConfig struct {
 	// Level is the minimum level logged: "debug" | "info" | "warn" | "error".
 	// Override with OWNCORD_LOGGING_LEVEL.
 	Level string `yaml:"level"`
+	// HistoryDays is how many days of logs are saved to <data_dir>/logs for
+	// the admin panel's log history. 0 saves nothing.
+	HistoryDays int `yaml:"history_days"`
+	// HistoryMaxMB caps the saved log files' total size; the oldest go first.
+	HistoryMaxMB int `yaml:"history_max_mb"`
+}
+
+// LogHistoryDir is where saved log files go, or "" when history is off.
+func (c *Config) LogHistoryDir() string {
+	if c.Logging.HistoryDays <= 0 {
+		return ""
+	}
+	return filepath.Join(c.Server.DataDir, "logs")
 }
 
 // ParseLevel maps a log-level string to a slog.Level, case-insensitively, with
@@ -459,7 +473,9 @@ func defaults() Config {
 			HTTPAllowlist: []string{},
 		},
 		Logging: LoggingConfig{
-			Level: "info",
+			Level:        "info",
+			HistoryDays:  7,
+			HistoryMaxMB: 200,
 		},
 		Moderation: ModerationConfig{
 			ReportRetentionDays: 180,
@@ -629,8 +645,13 @@ voice:
 # Logging. "level" gates what is logged, to stdout and the admin panel's live
 # log view alike. Override without editing this file via the
 # OWNCORD_LOGGING_LEVEL environment variable.
+# "history_days" keeps that many days of logs on disk under <data_dir>/logs,
+# searchable from the Logs page's History tab (0 turns it off);
+# "history_max_mb" caps their total size, deleting the oldest first.
 # logging:
 #   level: "info"             # debug | info | warn | error
+#   history_days: 7
+#   history_max_mb: 200
 
 # Moderation: the report queue's content retention window (B5-8), and the
 # moderator-action ledger's own window (B5-9). Report rows and ban/kick/

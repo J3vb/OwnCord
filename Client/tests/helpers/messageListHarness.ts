@@ -2,41 +2,17 @@ import { vi, beforeEach, afterEach } from "vitest";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { buildMessage } from "./messageFactory";
+import { resetMessagesState, resetMembersState } from "./storeResets";
 
 export function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMessagesState();
+  resetMembersState();
 }
 
 export function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
-    channelId: 1,
-    user: { id: 1, username: "Alice", avatar: null },
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  return buildMessage(overrides);
 }
 
 export function setMessages(channelId: number, messages: Message[]): void {

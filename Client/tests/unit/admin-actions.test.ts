@@ -3,17 +3,12 @@ import { createMemberContextMenu } from "@components/AdminActions";
 import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { MemberContextMenuOptions } from "@components/AdminActions";
 import type { VoiceModMenuOptions } from "@components/channel-sidebar/volumeMenu";
+import { useMountContainer } from "../helpers/mountContainer";
 
 describe("AdminActions", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   describe("MemberContextMenu", () => {

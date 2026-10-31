@@ -5,14 +5,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 const loader = vi.hoisted(() => ({ failLoad: false }));
 vi.mock("../../src/features/messaging/inlineEditLoader", async (importActual) => {
   const actual =
@@ -33,6 +25,8 @@ import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { setChannels, setActiveChannel, setRoles, channelsStore } from "@stores/channels.store";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
@@ -93,15 +87,8 @@ describe("MessageList — inline editor lifecycle", () => {
   beforeEach(() => {
     loader.failLoad = false;
     resetServerCapabilities();
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMessagesState();
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");

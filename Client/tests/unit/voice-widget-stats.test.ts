@@ -54,9 +54,9 @@ vi.mock("@lib/voice/connectionStats", () => ({
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { voiceStore } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { ConnectionStats } from "../../src/lib/voice/connectionStats";
+import { resetMembersState } from "../helpers/storeResets";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -77,7 +77,7 @@ function resetStores(): void {
     roles: [],
     categories: [],
   }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
   setConnectionStatus("connected");
 }
 

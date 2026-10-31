@@ -3,6 +3,7 @@ import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerM
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import type { Member } from "../../src/stores/members.store";
+import { resetMembersState } from "../helpers/storeResets";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -39,10 +40,7 @@ function setCurrentUser(userId: number): void {
 }
 
 function resetStores(): void {
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   authStore.setState(() => ({
     token: null,
     user: null,

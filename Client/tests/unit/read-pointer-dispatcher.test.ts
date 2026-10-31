@@ -32,6 +32,7 @@ import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
 import { expectConsole } from "../helpers/console";
+import { resetMessagesState } from "../helpers/storeResets";
 
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
@@ -170,14 +171,7 @@ describe("read pointer through the dispatcher", () => {
       categories: [],
     }));
     dmStore.setState(() => ({ channels: [] }));
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState();
     setLiveTailInView(1, true);
     unreads = [];
     reads = [];

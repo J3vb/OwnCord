@@ -58,11 +58,11 @@ import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
 import { loadPref, savePref } from "../../src/lib/prefs/preferences";
+import { resetMembersState } from "../helpers/storeResets";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -83,10 +83,7 @@ function resetStores(): void {
     activeChannelId: null,
     roles: [],
   }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   // Voice controls freeze when the socket is down; keep it live by default so
   // the interaction tests below operate on enabled controls.
   setConnectionStatus("connected");

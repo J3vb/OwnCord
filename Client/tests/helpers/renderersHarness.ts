@@ -11,6 +11,7 @@ import {
   closeActiveLightbox,
 } from "../../src/components/message-list/attachments";
 import { previewMock, imageMock } from "./renderersMocks";
+import { resetMembersState } from "./storeResets";
 
 export let blobCounter = 0;
 
@@ -27,10 +28,7 @@ export async function brokerImages(count: number): Promise<HTMLImageElement[]> {
 }
 
 export function resetStores(): void {
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   channelsStore.setState((prev) => ({ ...prev, roles: [] }));
   authStore.setState(() => ({
     token: null,

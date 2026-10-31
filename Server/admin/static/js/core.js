@@ -58,7 +58,8 @@ const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logLevel:'',logLevelBase:'',logLevelUntil:0,logLevelTimer:null,
   logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:10000,
-  logCounts:{DEBUG:0,INFO:0,WARN:0,ERROR:0},logPending:[],logRepaint:false,logPaintFrame:0,logUnseen:0,logAtBottom:true};
+  logCounts:{DEBUG:0,INFO:0,WARN:0,ERROR:0},logPending:[],logRepaint:false,logPaintFrame:0,logUnseen:0,logAtBottom:true,
+  logMode:'live',logHistorySeq:0,logHistory:{range:'24h',from:'',to:'',q:'',params:'',cursors:[''],entries:[],next:'',partial:false,enabled:true}};
 
 /* ═══ API ═══ */
 /* A 401 means the admin session is gone. Handle it here rather than letting

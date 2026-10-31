@@ -17,9 +17,9 @@ import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
-import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -51,7 +51,7 @@ describe("ChannelSidebar — mark as read", () => {
       categories: [],
     }));
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
     voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
     authStore.setState(() => ({

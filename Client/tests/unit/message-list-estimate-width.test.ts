@@ -11,30 +11,24 @@ const { observers } = vi.hoisted(() => ({ observers: [] as Array<() => void> }))
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
+import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 
 function makeMessage(id: number): Message {
-  return {
-    id,
-    channelId: CHANNEL_ID,
-    user: { id: 1000 + id, username: `User${id}`, avatar: "" },
-    // ~600 characters: wraps to a different line count at 900 px and 400 px.
-    content: `Message ${id} ${"lorem ipsum ".repeat(50)}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
+  return buildMessage(
+    { id },
+    {
+      channelId: CHANNEL_ID,
+      user: { id: 1000 + id, username: `User${id}`, avatar: "" },
+      // ~600 characters: wraps to a different line count at 900 px and 400 px.
+      content: `Message ${id} ${"lorem ipsum ".repeat(50)}`,
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
+    },
+  );
 }
 
 describe("MessageList: estimates follow the list's width", () => {
@@ -82,15 +76,8 @@ describe("MessageList: estimates follow the list's width", () => {
       configurable: true,
       get: () => 600,
     });
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMessagesState();
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     container = document.createElement("div");

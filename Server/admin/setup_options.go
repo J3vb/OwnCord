@@ -60,6 +60,9 @@ type SetupOptions struct {
 	// BeginTransfer gives the upload route the long-transfer deadline of the
 	// file routes. Nil leaves only the size cap.
 	BeginTransfer TransferBegin
+	// LogHistoryDir is where the saved log files are (cfg.LogHistoryDir()).
+	// Empty means history is off: GET /logs/history answers enabled:false.
+	LogHistoryDir string
 	// System feeds the Dashboard health row. The zero value serves uptime-less
 	// answers with every CPU, memory and disk figure null.
 	System SystemSources

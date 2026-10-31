@@ -2,9 +2,10 @@
 // in-flight guard, so Enter-key auto-repeat (or a fast double-Enter) during
 // the verify round trip could fire a second onTotpSubmit call before the
 // first resolved. Covered here through ConnectPage, which mounts LoginForm.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
@@ -31,14 +32,8 @@ const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8
 
 describe("LoginForm TOTP re-entrancy guard", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("does not submit on an Enter that commits an IME candidate", async () => {

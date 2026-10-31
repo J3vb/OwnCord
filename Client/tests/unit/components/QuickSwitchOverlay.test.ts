@@ -1,16 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createQuickSwitchOverlay } from "@components/QuickSwitchOverlay";
+import { useMountContainer } from "../../helpers/mountContainer";
 
 describe("QuickSwitchOverlay", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("renders server list from profiles", () => {

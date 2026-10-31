@@ -22,7 +22,7 @@ const MAX_LINES = 1200;
 const STEP = 50;
 
 /** Files still over the limit. Lower this with every file that leaves the list; it never rises. */
-const OVER_LIMIT_CAP = 3;
+const OVER_LIMIT_CAP = 0;
 
 /** Generated data files, exempt from the limit. Never add a hand-written file here. */
 const GENERATED = new Set(["src/features/messaging/emojiData.ts"]);

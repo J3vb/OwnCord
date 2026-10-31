@@ -337,6 +337,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		gates.route(r, gateViewDiagnostics, http.MethodGet, "/logs/level", handleGetLogLevel(setupOpts.LogLevel))
 		gates.route(r, gateViewDiagnostics, http.MethodPatch, "/logs/level", handleSetLogLevel(database, setupOpts.LogLevel))
 		gates.route(r, gateViewDiagnostics, http.MethodDelete, "/logs/level", handleRevertLogLevel(database, setupOpts.LogLevel))
+		// Saved log history, searched on the server a page at a time.
+		gates.route(r, gateViewDiagnostics, http.MethodGet, "/logs/history", handleLogHistory(setupOpts.LogHistoryDir))
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe(settings, version))
