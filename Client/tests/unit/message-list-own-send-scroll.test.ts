@@ -18,6 +18,7 @@ import { messagesStore, isWindowDetached } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
+import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
 
@@ -38,25 +39,17 @@ function resetStores(): void {
 }
 
 function makeMessage(id: number, userId = 1): Message {
-  return {
-    id,
-    channelId: CHANNEL_ID,
-    user: { id: userId, username: "Alice", avatar: null },
-    content: `Message ${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    // 10 minutes apart, on the same UTC day, and past GROUP_THRESHOLD_MS
-    // (7 minutes) so shouldGroup never merges two of these rows — every
-    // message renders at its full (ungrouped) height.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
+  return buildMessage(
+    { id },
+    {
+      channelId: CHANNEL_ID,
+      user: { id: userId, username: "Alice", avatar: null },
+      // 10 minutes apart, on the same UTC day, and past GROUP_THRESHOLD_MS
+      // (7 minutes) so shouldGroup never merges two of these rows — every
+      // message renders at its full (ungrouped) height.
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
+    },
+  );
 }
 
 function setMessages(messages: readonly Message[]): void {

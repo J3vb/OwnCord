@@ -26,24 +26,10 @@ import {
 } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { INITIAL_STATE } from "../../src/features/messaging/messageModel";
+import { buildMessage } from "../helpers/messageFactory";
 
 function makeMessage(id: number): Message {
-  return {
-    id,
-    channelId: 1,
-    user: { id: 1, username: "Alice", avatar: null },
-    content: `Message ${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
+  return buildMessage({ id });
 }
 
 function seed(): void {

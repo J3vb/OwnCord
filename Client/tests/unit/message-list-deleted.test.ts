@@ -20,6 +20,7 @@ import { messagesStore, deleteMessage, bulkDeleteMessages } from "@stores/messag
 import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
+import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
@@ -40,22 +41,11 @@ function resetStores(): void {
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
+  return buildMessage(overrides, {
     channelId: CHANNEL_ID,
     user: ME,
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
     timestamp: new Date(Date.UTC(2024, 0, 15, 12, overrides.id)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  });
 }
 
 /** Ten minutes apart (past the 7-minute group window), so no two rows group. */

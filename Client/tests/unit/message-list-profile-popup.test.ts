@@ -34,28 +34,16 @@ import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { membersStore, updateMemberRole } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
+import { buildMessage } from "../helpers/messageFactory";
 
 function member(id: number, username: string): Member {
   return { id, username, avatar: null, role: "member", status: "online" };
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
-    channelId: 1,
+  return buildMessage(overrides, {
     user: { id: 7, username: "seven", avatar: null },
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  });
 }
 
 /** The user id the most recent popup was opened for. */

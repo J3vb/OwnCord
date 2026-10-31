@@ -59,6 +59,7 @@ import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
 import { expectConsole } from "../helpers/console";
+import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -93,22 +94,9 @@ function resetStores(): void {
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
-    channelId: 1,
-    user: { id: 1, username: "Alice", avatar: null },
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
+  return buildMessage(overrides, {
     timestamp: "2026-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  });
 }
 
 function response(id: number): MessageResponse {

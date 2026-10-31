@@ -42,6 +42,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { buildMessage } from "../helpers/messageFactory";
 
 const ROW_H = 61;
 
@@ -61,22 +62,7 @@ function resetStores(): void {
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
-    channelId: 1,
-    user: { id: 1, username: "Alice", avatar: null },
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  return buildMessage(overrides);
 }
 
 function setMessages(channelId: number, messages: Message[]): void {
