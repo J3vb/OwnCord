@@ -41,6 +41,23 @@ describe("createIcon template cache", () => {
     expect(createIcon("send", 12).getAttribute("stroke")).toBe("currentColor");
   });
 
+  it("builds every child shape with its attributes", () => {
+    const svg = createIcon("ellipsis", 16);
+    const circles = [...svg.children];
+    expect(circles.map((c) => c.localName)).toEqual(["circle", "circle", "circle"]);
+    expect(circles.map((c) => c.getAttribute("cx"))).toEqual(["12", "19", "5"]);
+    expect(circles.every((c) => c.namespaceURI === "http://www.w3.org/2000/svg")).toBe(true);
+    circles[0]!.setAttribute("r", "9");
+    expect(createIcon("ellipsis", 16).children[0]!.getAttribute("r")).toBe("1");
+  });
+
+  it("caches no element to clone, so the page holds no detached icon nodes", () => {
+    createIcon("flag", 16);
+    const clone = vi.spyOn(Node.prototype, "cloneNode");
+    createIcon("flag", 16);
+    expect(clone).not.toHaveBeenCalled();
+  });
+
   it("unknown name still returns an empty svg", () => {
     const svg = createIcon("no-such-icon" as IconName, 10);
     expect(svg.tagName.toLowerCase()).toBe("svg");

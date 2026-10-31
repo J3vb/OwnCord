@@ -297,40 +297,61 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @returns An SVGSVGElement ready to be appended to the DOM.
  */
 export function createIcon(name: IconName, size = 24): SVGSVGElement {
-  let tpl = ICON_TEMPLATES.get(name);
-  if (tpl === undefined) {
-    tpl = buildTemplate(name);
-    ICON_TEMPLATES.set(name, tpl);
+  let shapes = ICON_SHAPES.get(name);
+  if (shapes === undefined) {
+    shapes = parseShapes(name);
+    ICON_SHAPES.set(name, shapes);
   }
-  const svg = tpl.cloneNode(true) as SVGSVGElement;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));
+  for (const [attr, value] of ROOT_ATTRS) svg.setAttribute(attr, value);
+  svg.setAttribute("data-icon", name);
+  svg.classList.add("icon");
+  for (const shape of shapes) {
+    const child = document.createElementNS(SVG_NS, shape.tag);
+    for (const [attr, value] of shape.attrs) child.setAttribute(attr, value);
+    svg.appendChild(child);
+  }
   return svg;
 }
 
-/** One parsed template per icon name; innerHTML runs once per name per session. */
-const ICON_TEMPLATES = new Map<IconName, SVGSVGElement>();
+/** One child element of an icon, kept as plain data rather than as a node. */
+interface IconShape {
+  readonly tag: string;
+  readonly attrs: ReadonlyArray<readonly [string, string]>;
+}
 
-function buildTemplate(name: IconName): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "24");
-  svg.setAttribute("height", "24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("data-icon", name);
-  svg.classList.add("icon");
+const ROOT_ATTRS: ReadonlyArray<readonly [string, string]> = [
+  ["fill", "none"],
+  ["stroke", "currentColor"],
+  ["stroke-width", "2"],
+  ["stroke-linecap", "round"],
+  ["stroke-linejoin", "round"],
+  ["aria-hidden", "true"],
+];
 
+/**
+ * The parsed shapes of each icon name, so innerHTML runs once per name per
+ * session. They are stored as data, not as a template element to clone: a
+ * cached element is a detached DOM node that lives as long as the page, and
+ * the soak test counts every node.
+ */
+const ICON_SHAPES = new Map<IconName, readonly IconShape[]>();
+
+function parseShapes(name: IconName): readonly IconShape[] {
   // INVARIANT: ICON_PATHS values are static SVG path strings from Lucide.
   // They must NEVER contain user data or dynamically-loaded content.
   // This is the only safe use of innerHTML in the codebase — do not copy this pattern.
   const pathData = ICON_PATHS[name];
-  if (pathData !== undefined) svg.innerHTML = pathData;
-  return svg;
+  if (pathData === undefined) return [];
+  const scratch = document.createElementNS(SVG_NS, "svg");
+  scratch.innerHTML = pathData;
+  return [...scratch.children].map((el) => ({
+    tag: el.localName,
+    attrs: [...el.attributes].map((a) => [a.name, a.value] as const),
+  }));
 }
 
 /** Create a signal-strength icon with per-bar coloring based on quality level.
