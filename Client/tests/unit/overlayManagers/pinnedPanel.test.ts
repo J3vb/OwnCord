@@ -49,15 +49,21 @@ describe("createPinnedPanelController", () => {
     root.remove();
   });
 
+  function newPinned(
+    api: ReturnType<typeof makeMockApi>,
+    channelId: number,
+  ): ReturnType<typeof createPinnedPanelController> {
+    return createPinnedPanelController({
+      api: api as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => channelId,
+    });
+  }
+
   it("toggles pinned panel open and mounts to root", async () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
 
@@ -67,11 +73,7 @@ describe("createPinnedPanelController", () => {
 
   it("open() opens a closed panel and never closes or rebuilds an open one", async () => {
     const api = makeMockApi();
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.open();
     expect(createPinnedMessages).toHaveBeenCalledOnce();
@@ -92,11 +94,7 @@ describe("createPinnedPanelController", () => {
 
   it("concurrent open() calls fetch once", async () => {
     const api = makeMockApi();
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
     await Promise.all([controller.open(), controller.open()]);
     expect(api.getPins).toHaveBeenCalledOnce();
     expect(createPinnedMessages).toHaveBeenCalledOnce();
@@ -104,11 +102,7 @@ describe("createPinnedPanelController", () => {
 
   it("does not open, fetch or toast behind an NSFW consent gate", async () => {
     const api = makeMockApi();
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 99,
-    });
+    const controller = newPinned(api, 99);
 
     await controller.toggle();
 
@@ -460,12 +454,7 @@ describe("createPinnedPanelController", () => {
       getPins: vi.fn().mockRejectedValue(new Error("load failed")),
     });
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
 
@@ -503,11 +492,7 @@ describe("createPinnedPanelController", () => {
   it("toggle closes panel when already open", async () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
     expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
@@ -520,11 +505,7 @@ describe("createPinnedPanelController", () => {
   it("cleanup closes panel if open", async () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     await controller.toggle();
     controller.cleanup();
@@ -539,11 +520,7 @@ describe("createPinnedPanelController", () => {
     });
     const api = makeMockApi({ getPins: vi.fn().mockReturnValue(pending) });
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     const first = controller.toggle();
     const second = controller.toggle(); // fires while getPins is still pending
@@ -564,11 +541,7 @@ describe("createPinnedPanelController", () => {
       getPins: vi.fn().mockReturnValueOnce(pending).mockResolvedValue({ messages: [] }),
     });
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     const opening = controller.toggle();
     controller.cleanup(); // e.g. the narrow-width drawer opening over it
@@ -608,11 +581,7 @@ describe("createPinnedPanelController", () => {
   it("cleanup is safe when no panel is open", () => {
     const api = makeMockApi();
 
-    const controller = createPinnedPanelController({
-      api: api as never,
-      getRoot: () => root,
-      getCurrentChannelId: () => 42,
-    });
+    const controller = newPinned(api, 42);
 
     // Should not throw
     controller.cleanup();

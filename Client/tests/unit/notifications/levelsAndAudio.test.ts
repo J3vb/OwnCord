@@ -3,7 +3,6 @@ import * as mocks from "../../helpers/notificationsMocks";
 import { notifyIncomingMessage } from "../../../src/lib/notifications";
 import { cleanupNotificationAudio } from "../../../src/lib/media/notificationSound";
 import { channelsStore } from "../../../src/stores/channels.store";
-import { dmStore } from "../../../src/stores/dm.store";
 import type { ChatMessagePayload } from "../../../src/lib/types";
 import { setLogLevel } from "../../../src/lib/logger";
 import {
@@ -17,6 +16,9 @@ import {
   freshSendNotification,
   armDesktopPrefs,
   makePayload,
+  notifyAs,
+  seedBobDm,
+  expectNoAlerts,
   useNotificationsHarness,
 } from "../../helpers/notificationsHarness";
 
@@ -91,29 +93,10 @@ describe("notifyIncomingMessage", () => {
         makePayload({ content: "hey @Me", mentions: [1], mentions_everyone: false }),
       );
 
-      await new Promise((r) => setTimeout(r, 50));
-      expect(sendNotification).not.toHaveBeenCalled();
-      expect(mockOscillator.start).not.toHaveBeenCalled();
-      expect(win.requestUserAttention).not.toHaveBeenCalled();
+      await expectNoAlerts(sendNotification, win);
     });
 
-    const bobDm = (): void =>
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+    const bobDm = (): void => seedBobDm();
 
     it("Nothing does not silence a DM; a server channel message stays silent", async () => {
       const sendNotification = await freshSendNotification();
@@ -197,22 +180,7 @@ describe("notifyIncomingMessage", () => {
     it("treats a DM as addressed to you at Mentions only", async () => {
       const sendNotification = await freshSendNotification();
       testPrefs.set("notificationLevel", "mentions");
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedBobDm();
 
       notifyIncomingMessage(
         makePayload({
@@ -288,22 +256,7 @@ describe("notifyIncomingMessage", () => {
     it("collapses a burst of direct messages like any channel", async () => {
       const sendNotification = await freshSendNotification();
       const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedBobDm();
       const dm = (id: number) =>
         makePayload({ id, channel_id: 55, user: { id: 2, username: "bob", avatar: null } });
 
@@ -517,12 +470,7 @@ describe("notifyIncomingMessage", () => {
 
       armDesktopPrefs();
 
-      const payload = makePayload({
-        user: { id: 2, username: "WebUser", avatar: null },
-        channel_id: 1,
-        content: "web notif test",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("WebUser", 1, "web notif test");
 
       await new Promise((r) => setTimeout(r, 50));
 

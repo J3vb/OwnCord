@@ -12,6 +12,7 @@ import {
   freshSendNotification,
   armDesktopPrefs,
   makePayload,
+  notifyAs,
   useNotificationsHarness,
 } from "../../helpers/notificationsHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
@@ -45,12 +46,7 @@ describe("notifyIncomingMessage", () => {
     it("passes title with format 'username in #channelName'", async () => {
       const sendNotification = await armDesktopNotifications();
 
-      const payload = makePayload({
-        user: { id: 2, username: "Alice", avatar: null },
-        channel_id: 1,
-        content: "Hey there!",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("Alice", 1, "Hey there!");
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalledWith({
@@ -85,12 +81,7 @@ describe("notifyIncomingMessage", () => {
 
       armDesktopPrefs();
 
-      const payload = makePayload({
-        user: { id: 2, username: "bob", avatar: null },
-        channel_id: 55,
-        content: "hey",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("bob", 55, "hey");
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalledWith({
@@ -127,12 +118,7 @@ describe("notifyIncomingMessage", () => {
 
       armDesktopPrefs();
 
-      const payload = makePayload({
-        user: { id: 2, username: "a_martinez", avatar: null },
-        channel_id: 1,
-        content: "hi",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("a_martinez", 1, "hi");
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalledWith({
@@ -169,12 +155,7 @@ describe("notifyIncomingMessage", () => {
 
       armDesktopPrefs();
 
-      const payload = makePayload({
-        user: { id: 2, username: "Bob", avatar: null },
-        channel_id: 42,
-        content: "test",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("Bob", 42, "test");
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalledWith({
@@ -195,12 +176,7 @@ describe("notifyIncomingMessage", () => {
 
       armDesktopPrefs();
 
-      const payload = makePayload({
-        user: { id: 2, username, avatar: null },
-        channel_id: 1,
-        content: "x",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs(username, 1, "x");
 
       await vi.waitFor(() => {
         const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -219,12 +195,7 @@ describe("notifyIncomingMessage", () => {
 
       armDesktopPrefs();
 
-      const payload = makePayload({
-        user: { id: 2, username, avatar: null },
-        channel_id: 1,
-        content: "x",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs(username, 1, "x");
 
       await vi.waitFor(() => {
         const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -238,12 +209,7 @@ describe("notifyIncomingMessage", () => {
       const sendNotification = await armDesktopNotifications();
 
       const content = "B".repeat(100);
-      const payload = makePayload({
-        user: { id: 2, username: "X", avatar: null },
-        channel_id: 1,
-        content,
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("X", 1, content);
 
       await vi.waitFor(() => {
         const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -256,12 +222,7 @@ describe("notifyIncomingMessage", () => {
       const sendNotification = await armDesktopNotifications();
 
       const content = "B".repeat(101);
-      const payload = makePayload({
-        user: { id: 2, username: "X", avatar: null },
-        channel_id: 1,
-        content,
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("X", 1, content);
 
       await vi.waitFor(() => {
         const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -273,12 +234,7 @@ describe("notifyIncomingMessage", () => {
     it("strips control characters from username and content", async () => {
       const sendNotification = await armDesktopNotifications();
 
-      const payload = makePayload({
-        user: { id: 2, username: "Evil\x00\x1FUser\x7F", avatar: null },
-        channel_id: 1,
-        content: "Hello\x00World\x1F!\x7F",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("Evil\x00\x1FUser\x7F", 1, "Hello\x00World\x1F!\x7F");
 
       await vi.waitFor(() => {
         const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -292,12 +248,7 @@ describe("notifyIncomingMessage", () => {
 
       // 100 visible chars + 5 control chars => after strip = 100, should NOT truncate
       const content = "C".repeat(100) + "\x00\x01\x02\x03\x04";
-      const payload = makePayload({
-        user: { id: 2, username: "U", avatar: null },
-        channel_id: 1,
-        content,
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("U", 1, content);
 
       await vi.waitFor(() => {
         const call = (sendNotification as ReturnType<typeof vi.fn>).mock.calls[0]![0];
