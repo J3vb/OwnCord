@@ -409,7 +409,11 @@ trust action entirely (a blind accept is refused).
   LiveKit answers Constrained Baseline first when it is offered. A saved
   H.264 there skips the `encodingInfo` probe, which always reports software
   in WebView2, and Auto there publishes H.264 the same way (a share that
-  lands on OpenH264 still switches to VP8). The 120 fps share option is hidden for now
+  lands on OpenH264 still switches to VP8). Such a share is also held to the
+  GPU encoder's 3840x2160 box (`fitGpuH264Share`, aspect ratio and frame rate
+  kept) on publish, Change source and a Quality change, so a 5120x1440 screen
+  at Source 60 fps goes out at 3840x1080 instead of falling back; the box is
+  the RTX 4080's edge://gpu figure. The 120 fps share option is hidden for now
   (`lib/voice/shareFps.ts`): WebView2's capture delivers about 60 fps, and a saved
   120 reads as 60.
 - **Sensitivity gate:** `public/vad-worklet.js` on the processor's tap

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalVideoTrack } from "livekit-client";
+import { captureLogs } from "../../../tests/helpers/log-capture";
 import type { PublishCodec } from "./videoCodec";
 import type { ShareSenderSample } from "./shareSenderStats";
 import type {
@@ -190,6 +191,21 @@ describe("CodecSwitchController software H.264 check", () => {
     // The pick stays VP8: nothing flips the share back.
     await vi.advanceTimersByTimeAsync(SWITCH_UP_MIN_GAP_MS * 2);
     expect(r.calls).toEqual(["screen:vp8"]);
+  });
+
+  it("logs what the encoder was given when it falls back to software", async () => {
+    const logs = captureLogs();
+    h264Rig({ encoder: "OpenH264", width: 5120, height: 1440, captureFps: 60, sentFps: 9 });
+    await vi.advanceTimersByTimeAsync(SOFTWARE_CHECK_MS);
+    const [entry] = logs.find("H.264 share fell back to the software encoder, switching to VP8");
+    expect(entry?.data).toEqual({
+      encoder: "OpenH264",
+      width: 5120,
+      height: 1440,
+      captureFps: 60,
+      sentFps: 9,
+      limitation: undefined,
+    });
   });
 
   it.each(["ExternalEncoder", "MediaFoundationVideoEncodeAccelerator"])(
