@@ -273,6 +273,7 @@ func (s *Storage) SaveThumb(uuid string, data []byte) error {
 type Entry struct {
 	Name    string
 	ModTime time.Time
+	Size    int64
 }
 
 // List returns every regular file in the storage directory with its
@@ -297,7 +298,7 @@ func (s *Storage) List() ([]Entry, error) {
 			}
 			return nil, fmt.Errorf("stat %s: %w: %w", e.Name(), ErrIO, err)
 		}
-		out = append(out, Entry{Name: e.Name(), ModTime: info.ModTime()})
+		out = append(out, Entry{Name: e.Name(), ModTime: info.ModTime(), Size: info.Size()})
 	}
 	return out, nil
 }

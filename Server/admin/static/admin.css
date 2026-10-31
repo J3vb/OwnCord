@@ -114,6 +114,10 @@ input,select,textarea{font-family:inherit;border:none}
 .health-meter{display:flex;height:6px;margin-top:auto;background:var(--bg-input);border-radius:var(--radius-pill);overflow:hidden}
 .health-meter span{display:block;height:100%}
 .health-meter .m-other{background:var(--border-control)}.health-meter .m-uploads{background:var(--accent)}
+#slowRequests:has(.tbl){padding:0}
+.slow-tbl th.num,.slow-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.slow-tbl .slow-route{overflow-wrap:anywhere}.slow-tbl .slow-route .badge{min-width:44px;text-align:center}.slow-tbl .slow-route code{font-family:var(--font-mono);font-size:12px}
+.slow-tbl td.slow-warn{color:var(--text-warning)}.slow-tbl td.slow-crit{color:var(--text-danger);font-weight:600}
 
 .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
 .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
@@ -680,3 +684,27 @@ code.hash{font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere;wor
 .fs-foot .fs-hint{margin-top:0}
 .fs-row .act-btn:disabled{opacity:.35;cursor:not-allowed}
 #forumSettings .setting-row{border-bottom:none;margin-bottom:8px}
+
+/* Storage page: one bar for the disk with a text legend, the file table and
+   its selection footer. */
+.storage-bar{display:flex;height:14px;border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-input)}
+.storage-bar span{display:block;height:100%;min-width:2px}
+.storage-legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin:10px 0 4px;font-size:13px;color:var(--text-muted)}
+.storage-legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+.storage-note{font-size:13px;color:var(--text-muted);margin-top:6px}
+.storage-leftovers{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px}
+.storage-chip{display:inline-flex;align-items:center;gap:6px;margin:0 0 12px;padding:4px 10px;border-radius:var(--radius-pill);background:var(--accent-glow);color:var(--accent-text);font-size:13px}
+.storage-chip .chip-remove{background:none;border:0;padding:0 2px;color:inherit;font-size:16px;line-height:1;cursor:pointer}
+.storage-tbl .col-check{width:36px}
+.storage-tbl input[type="checkbox"]{width:16px;height:16px;accent-color:var(--accent)}
+.storage-tbl tr.is-selected td{background:var(--accent-glow)}
+.storage-tbl .mono{font-family:var(--font-mono);white-space:nowrap}
+.storage-name{word-break:break-word}
+.storage-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:-8px 0 12px}
+.storage-foot .storage-note{margin-top:0}
+.storage-foot .act-group{gap:8px}
+.member-storage{white-space:nowrap;font-variant-numeric:tabular-nums}
+@media(max-width:600px){
+  .storage-tbl .col-channel,.storage-tbl .col-date,.members-tbl .col-storage{display:none}
+  .storage-tbl th,.storage-tbl td{padding:10px 8px}
+}

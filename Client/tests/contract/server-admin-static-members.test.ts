@@ -220,7 +220,7 @@ describe("Server/admin/static — Members", () => {
     expect(doc.getElementById("membersSummary")!.textContent).toBe("No members yet");
   });
 
-  it("offers no action on your own account or on anyone at or above your rank", async () => {
+  it("offers only Upload limit on your own account and nothing on anyone at or above your rank", async () => {
     const calls: string[] = [];
     const { doc, settle, show } = await boot(calls, (p) => {
       if (p === "/roles") return ROLES;
@@ -240,8 +240,14 @@ describe("Server/admin/static — Members", () => {
       doc.querySelector(
         `[data-action="toggleMemberMenu"][data-args="[${id}]"]`,
       ) as HTMLButtonElement;
-    expect(more(1).disabled).toBe(true);
-    expect(more(1).getAttribute("aria-label")).toMatch(/your account/);
+    expect(more(1).disabled).toBe(false);
+    more(1).click();
+    expect(
+      [...doc.querySelectorAll("#memberMenu [data-action]")].map((b) =>
+        b.getAttribute("data-action"),
+      ),
+    ).toEqual(["openUploadLimit"]);
+    more(1).click();
     expect(more(2).disabled).toBe(true);
     expect(more(2).getAttribute("aria-label")).toMatch(/at or above yours/);
     expect(more(3).disabled).toBe(true);
@@ -273,7 +279,7 @@ describe("Server/admin/static — Members", () => {
     const items = [...doc.querySelectorAll("#memberMenu [role=menuitem]")].map((b) =>
       b.getAttribute("data-action"),
     );
-    expect(items).toEqual(["forceLogout", "openBanUser", "openEraseUser"]);
+    expect(items).toEqual(["openUploadLimit", "forceLogout", "openBanUser", "openEraseUser"]);
   });
 
   it("drives the overflow menu from the keyboard and returns focus to its button", async () => {
@@ -298,6 +304,7 @@ describe("Server/admin/static — Members", () => {
     expect(menu.getAttribute("aria-label")).toBe("Actions for member");
     const items = [...menu.querySelectorAll<HTMLElement>("[role=menuitem]")];
     expect(items.map((i) => i.textContent)).toEqual([
+      "Upload limit",
       "Force logout",
       "Issue recovery credential",
       "Ban",
@@ -308,7 +315,7 @@ describe("Server/admin/static — Members", () => {
     expect(doc.activeElement).toBe(items[1]);
     key(doc.activeElement!, "ArrowUp");
     key(doc.activeElement!, "ArrowUp");
-    expect(doc.activeElement).toBe(items[3]);
+    expect(doc.activeElement).toBe(items[4]);
     key(doc.activeElement!, "Home");
     expect(doc.activeElement).toBe(items[0]);
 

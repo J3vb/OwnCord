@@ -660,8 +660,9 @@ type UserRole struct {
 }
 
 type UserStorage struct {
-	UserID    int64 `json:"userId"`
-	BytesUsed int64 `json:"bytesUsed"`
+	UserID    int64  `json:"userId"`
+	BytesUsed int64  `json:"bytesUsed"`
+	QuotaMb   *int64 `json:"quotaMb"`
 }
 
 type VoiceState struct {

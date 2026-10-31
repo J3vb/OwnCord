@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/J3vb/OwnCord/Server/sysstats"
 )
@@ -18,7 +20,7 @@ func TestAdminSetupOptions_CarryBackgroundAndShutdown(t *testing.T) {
 	bg := syncutil.NewGroup(context.Background())
 	shutdown := make(chan struct{})
 	rt := Runtime{Background: bg, Shutdown: shutdown, SetupToken: "tok"}
-	got := adminSetupOptions(&config.Config{}, rt, nil, nil)
+	got := adminSetupOptions(&config.Config{}, rt, nil, nil, nil)
 	if got.Background != bg {
 		t.Error("SetupOptions.Background is not Runtime.Background")
 	}
@@ -36,7 +38,7 @@ func TestAdminSetupOptions_CarryDiscordImportSettings(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Upload.ImportMaxMB = 7
 	cfg.Server.DataDir = t.TempDir()
-	got := adminSetupOptions(cfg, Runtime{}, nil, nil)
+	got := adminSetupOptions(cfg, Runtime{}, nil, nil, nil)
 	if got.ImportMaxBytes != 7<<20 {
 		t.Errorf("ImportMaxBytes = %d, want %d", got.ImportMaxBytes, 7<<20)
 	}
@@ -49,14 +51,18 @@ func TestAdminSetupOptions_CarryDiscordImportSettings(t *testing.T) {
 }
 
 // The Dashboard health row gets the runtime's sampler, the data volume and the
-// start time.
+// start time; the slow requests card gets the router's tracker.
 func TestAdminSetupOptions_CarrySystemSources(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Server.DataDir = t.TempDir()
 	sampler := sysstats.NewSampler()
-	got := adminSetupOptions(cfg, Runtime{SystemStats: sampler}, nil, nil).System
+	slow := metrics.NewSlowRoutes(time.Now)
+	got := adminSetupOptions(cfg, Runtime{SystemStats: sampler}, nil, nil, slow).System
 	if got.Sampler != sampler {
 		t.Error("System.Sampler is not Runtime.SystemStats")
+	}
+	if got.SlowRoutes != slow {
+		t.Error("System.SlowRoutes is not the router's tracker")
 	}
 	if got.Started.IsZero() {
 		t.Error("System.Started is not set")

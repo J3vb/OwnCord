@@ -340,6 +340,45 @@ function mountLoadError(
   };
 }
 
+/** What counts as "inside" a side panel for closeOnOutsidePress. */
+export interface OutsidePressTargets {
+  /** Selector of the panel's own element under the root. */
+  readonly panel: string;
+  /** Selector of the header button that toggles the panel: its click closes it. */
+  readonly toggle: string;
+}
+
+// Layers stacked over the page (a dialog, menu, sheet, toast or image viewer):
+// a press there belongs to that layer, not to the page behind the panel.
+const FLOATING_LAYERS =
+  '.modal-overlay, [aria-modal="true"], [role="dialog"], .context-menu, .bottom-sheet-overlay, .toast-container, .image-lightbox';
+
+/**
+ * Close a side panel when a press lands outside it. Listens on pointerdown in
+ * the capture phase, so a click that re-renders or removes its target inside
+ * the panel still counts as inside, and a handler that stops propagation
+ * cannot hide the press.
+ */
+export function closeOnOutsidePress(
+  root: ParentNode,
+  targets: OutsidePressTargets,
+  onClose: () => void,
+  signal: AbortSignal,
+): void {
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      if (root.querySelector(targets.panel)?.contains(target) === true) return;
+      if (target.closest(targets.toggle) !== null) return;
+      if (target.closest(FLOATING_LAYERS) !== null || dialogOpen()) return;
+      onClose();
+    },
+    { capture: true, signal },
+  );
+}
+
 /**
  * Shared shape behind an overlay that opens by awaiting a fetch: an
  * instance/opening guard against a double-click during the round trip,
@@ -363,14 +402,19 @@ export function createAsyncOverlayController<T>(opts: {
   /** When set, a failed load also mounts an inline error dialog with a Retry
    *  button (re-runs the load) instead of leaving only the toast. */
   readonly inlineError?: { readonly message: string; readonly retryLabel: string };
+  /** A side panel closes on a press outside it (see closeOnOutsidePress). */
+  readonly outsidePress?: OutsidePressTargets;
 }): { open(): Promise<void>; close(): void; isOpen(): boolean } {
   let instance: MountableComponent | null = null;
   let opening = false;
   let generation = 0;
+  let outside: Disposable | null = null;
 
   function close(): void {
     generation++;
     opening = false;
+    outside?.destroy();
+    outside = null;
     if (instance !== null) {
       instance.destroy?.();
       instance = null;
@@ -390,6 +434,10 @@ export function createAsyncOverlayController<T>(opts: {
       if (liveRoot === null) return;
       instance = opts.build(data, liveRoot, close);
       instance.mount(liveRoot);
+      if (opts.outsidePress !== undefined) {
+        outside = new Disposable();
+        closeOnOutsidePress(liveRoot, opts.outsidePress, close, outside.signal);
+      }
     } catch (err) {
       if (gen !== generation) return;
       log.error(opts.errorLog, { error: String(err) });
@@ -677,6 +725,7 @@ export function createPinnedPanelController(opts: {
     },
     errorLog: "Failed to load pinned messages", // i18n-exempt: developer log line, never shown
     errorToast: shellText("pins.loadFailed"),
+    outsidePress: { panel: ".pinned-panel", toggle: ".pins-btn" },
   });
 
   async function toggle(): Promise<void> {

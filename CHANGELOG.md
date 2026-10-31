@@ -75,6 +75,11 @@ and only when it changes something a contributor or fork holder must do
 - Picking another server in the server rail or the switch list asks "Switch to (server name)?" first, so a stray click no longer drops you out of a call. Tick "Don't ask again" to skip it; turn it back on in Settings > Advanced > Ask before switching servers.
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
 
+**Server admin panel**
+
+- New Storage page (Manage Server): one bar shows what fills the disk (uploads, database, backups, free space), and every uploaded file is listed, largest or newest first, filterable by type, channel, member and age. Tick up to 100 files and delete them; each delete goes in the audit log. It also finds leftover files no message uses and cleans them up.
+- Members page: a Storage column shows how much each member has uploaded, and the row menu's Upload limit gives one member their own limit or none, instead of the server-wide one. **This changes the database** (one new column).
+
 ### Changed
 
 **Voice**
@@ -92,6 +97,7 @@ and only when it changes something a contributor or fork holder must do
 **Admin panel**
 
 - The admin panel's Dashboard opens with a health row: CPU (OwnCord's share and the whole machine's), RAM, free disk space and uptime, each with a one-hour line, refreshed every 5 seconds. Inside Docker with a memory limit, RAM is measured against the container's limit. Tiles turn yellow or red when CPU stays high, memory is nearly full or the disk runs low. Shown to admins with View Diagnostics.
+- A Slow requests card under the health row lists the ten slowest kinds of request in the last hour: the route, how many calls, the typical and the worst time. Routes show by pattern (`/api/v1/channels/{id}/messages`), never with ids. Live connections such as voice, the log viewer and file downloads are left out. Shown to admins with View Diagnostics.
 - Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
 
 ### Fixed
@@ -124,6 +130,7 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - Turning Role Colors on or off in Settings > Accessibility now recolours the usernames already in the chat, without reopening the channel.
+- The Media panel and the Pinned messages panel stayed open when you clicked outside them — a click anywhere else now closes them.
 
 **Phones and touch screens**
 

@@ -1,0 +1,871 @@
+import { describe, expect, it, vi } from "vitest";
+import * as mocks from "../../helpers/mediaMocks";
+import {
+  renderYouTubeEmbed,
+  openImageLightbox,
+  closeActiveLightbox,
+  clearMediaCaches,
+} from "../../../src/components/message-list/media";
+import {
+  oembedResponse,
+  oembedFail,
+  createObjectURLMock,
+  useMediaHarness,
+} from "../../helpers/mediaHarness";
+
+vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentExternalMock(importOriginal),
+);
+vi.mock("../../../src/platform/desktop/externalContent", () => mocks.desktopExternalContentMock());
+vi.mock("@lib/logger", () => mocks.loggerMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.prefsMediaVisibilityMock());
+vi.mock("@lib/icons", () => mocks.iconsMock());
+vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock(importOriginal));
+vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+  mocks.listAttachmentsMock(importOriginal),
+);
+vi.mock("../../../src/components/message-list/embeds", () => mocks.listEmbedsMock());
+
+const { previewMock, imageMock } = mocks;
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("media.ts", () => {
+  useMediaHarness();
+
+  // =========================================================================
+  // renderYouTubeEmbed
+  // =========================================================================
+
+  describe("renderYouTubeEmbed", () => {
+    it("renders a YouTube embed with thumbnail and play button", () => {
+      previewMock.mockResolvedValue(oembedResponse("Test Video"));
+
+      const embed = renderYouTubeEmbed("abc123", "https://www.youtube.com/watch?v=abc123");
+      document.body.appendChild(embed);
+
+      expect(embed.classList.contains("msg-embed-youtube")).toBe(true);
+      expect(embed.querySelector(".msg-embed-host")?.textContent).toBe("YouTube");
+      expect(embed.querySelector(".msg-embed-thumb")).not.toBeNull();
+      expect(embed.querySelector(".msg-embed-play")).not.toBeNull();
+    });
+
+    it("the player frame is not allowed camera, microphone or screen capture", () => {
+      previewMock.mockResolvedValue(oembedResponse("Test Video"));
+
+      const embed = renderYouTubeEmbed("frame1", "https://www.youtube.com/watch?v=frame1");
+      document.body.appendChild(embed);
+      embed.querySelector<HTMLElement>(".msg-embed-thumb")!.parentElement!.click();
+
+      const iframe = embed.querySelector("iframe");
+      expect(iframe).not.toBeNull();
+      const allowed = (iframe!.getAttribute("allow") ?? "")
+        .split(";")
+        .map((s) => s.trim().split(/\s+/)[0]);
+      for (const feature of ["camera", "microphone", "display-capture"]) {
+        expect(allowed).not.toContain(feature);
+      }
+    });
+
+    it("shows 'Loading...' while fetching the title", () => {
+      previewMock.mockReturnValue(new Promise(() => {})); // Never resolves
+
+      const embed = renderYouTubeEmbed("pending", "https://www.youtube.com/watch?v=pending");
+      const title = embed.querySelector(".msg-embed-yt-title");
+      expect(title?.textContent).toBe("Loading...");
+    });
+
+    it("updates title when oembed fetch succeeds", async () => {
+      previewMock.mockResolvedValue(oembedResponse("My Great Video"));
+
+      const embed = renderYouTubeEmbed("success1", "https://www.youtube.com/watch?v=success1");
+      document.body.appendChild(embed);
+      expect(previewMock).toHaveBeenCalledWith(
+        expect.any(String),
+        "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=success1&format=json",
+      );
+
+      const title = embed.querySelector(".msg-embed-yt-title")!;
+      await vi.waitFor(() => {
+        expect(title.textContent).toBe("My Great Video");
+      });
+    });
+
+    it("caches the title and reuses it on subsequent renders", async () => {
+      previewMock.mockResolvedValue(oembedResponse("Cached Title"));
+
+      const embed1 = renderYouTubeEmbed("cached1", "https://www.youtube.com/watch?v=cached1");
+      document.body.appendChild(embed1);
+
+      await vi.waitFor(() => {
+        expect(embed1.querySelector(".msg-embed-yt-title")?.textContent).toBe("Cached Title");
+      });
+
+      // Second render should use cache
+      const embed2 = renderYouTubeEmbed("cached1", "https://www.youtube.com/watch?v=cached1");
+      expect(embed2.querySelector(".msg-embed-yt-title")?.textContent).toBe("Cached Title");
+      expect(previewMock).toHaveBeenCalledTimes(1); // Only one fetch
+    });
+
+    it("falls back to 'YouTube Video' when oembed returns no title", async () => {
+      previewMock.mockResolvedValue(oembedResponse(null));
+
+      const embed = renderYouTubeEmbed("notitle", "https://www.youtube.com/watch?v=notitle");
+      document.body.appendChild(embed);
+
+      await vi.waitFor(() => {
+        expect(embed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
+      });
+    });
+
+    it("falls back to 'YouTube Video' when the preview carries only non-title fields", async () => {
+      previewMock.mockResolvedValue({
+        ok: true,
+        value: { title: null, description: "desc", siteName: "YouTube", image: null },
+      });
+
+      const embed = renderYouTubeEmbed("nulldata", "https://www.youtube.com/watch?v=nulldata");
+      document.body.appendChild(embed);
+
+      await vi.waitFor(() => {
+        expect(embed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
+      });
+    });
+
+    it("falls back to 'YouTube Video' when the broker refuses the oembed URL", async () => {
+      previewMock.mockResolvedValue(oembedFail("blocked-destination"));
+
+      const embed = renderYouTubeEmbed("fail1", "https://www.youtube.com/watch?v=fail1");
+      document.body.appendChild(embed);
+
+      await vi.waitFor(() => {
+        expect(embed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
+      });
+    });
+
+    it("falls back to 'YouTube Video' when the broker reports the oembed unavailable", async () => {
+      previewMock.mockResolvedValue(oembedFail("unavailable"));
+
+      const embed = renderYouTubeEmbed("neterr", "https://www.youtube.com/watch?v=neterr");
+      document.body.appendChild(embed);
+
+      await vi.waitFor(() => {
+        expect(embed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
+      });
+    });
+
+    it("renders fallback link for invalid video ID (XSS prevention)", () => {
+      const embed = renderYouTubeEmbed(
+        "<script>alert(1)</script>",
+        "https://www.youtube.com/watch?v=<script>alert(1)</script>",
+      );
+      document.body.appendChild(embed);
+
+      // Should render a plain link fallback, not YouTube embed
+      expect(embed.classList.contains("msg-embed-youtube")).toBe(false);
+      expect(embed.classList.contains("msg-embed")).toBe(true);
+      const link = embed.querySelector("a");
+      expect(link).not.toBeNull();
+    });
+
+    it("replaces thumbnail with iframe on click", () => {
+      previewMock.mockResolvedValue(oembedResponse("Click Test"));
+
+      const embed = renderYouTubeEmbed("click1", "https://www.youtube.com/watch?v=click1");
+      document.body.appendChild(embed);
+
+      const thumbWrap = embed.querySelector(".msg-embed-yt-player")!;
+      expect(thumbWrap.querySelector("img")).not.toBeNull();
+      expect(thumbWrap.querySelector("iframe")).toBeNull();
+
+      (thumbWrap as HTMLElement).click();
+
+      expect(thumbWrap.querySelector("iframe")).not.toBeNull();
+      expect(thumbWrap.querySelector("img")).toBeNull();
+      const iframe = thumbWrap.querySelector("iframe")!;
+      expect(iframe.src).toContain("click1");
+      expect(iframe.src).toContain("autoplay=1");
+      expect(iframe.getAttribute("allowfullscreen")).toBe("");
+    });
+
+    it("only replaces thumbnail once (click handler is {once: true})", () => {
+      previewMock.mockResolvedValue(oembedResponse("Once Test"));
+
+      const embed = renderYouTubeEmbed("once1", "https://www.youtube.com/watch?v=once1");
+      document.body.appendChild(embed);
+
+      const thumbWrap = embed.querySelector(".msg-embed-yt-player") as HTMLElement;
+      thumbWrap.click();
+
+      const iframe = thumbWrap.querySelector("iframe")!;
+      const originalSrc = iframe.src;
+
+      // Second click should not replace iframe again
+      thumbWrap.click();
+      expect(thumbWrap.querySelector("iframe")!.src).toBe(originalSrc);
+    });
+
+    it("evicts oldest YouTube title cache entry when exceeding limit", async () => {
+      // Fill ytTitleCache to its max (200) and verify eviction
+      for (let i = 0; i < 201; i++) {
+        previewMock.mockResolvedValueOnce(oembedResponse(`Title ${i}`));
+        const embed = renderYouTubeEmbed(`vid${i}`, `https://www.youtube.com/watch?v=vid${i}`);
+        document.body.appendChild(embed);
+      }
+
+      await vi.waitFor(() => {
+        // Last video should have its title
+        const last = document.body.querySelector(`[href="https://www.youtube.com/watch?v=vid200"]`);
+        expect(last?.textContent).toBe("Title 200");
+      });
+    });
+
+    it("evicts oldest cache entry on catch branch too", async () => {
+      // First fill 200 entries via successful fetches
+      for (let i = 0; i < 200; i++) {
+        previewMock.mockResolvedValueOnce(oembedResponse(`Title ${i}`));
+        const embed = renderYouTubeEmbed(`errv${i}`, `https://www.youtube.com/watch?v=errv${i}`);
+        document.body.appendChild(embed);
+      }
+
+      await vi.waitFor(() => {
+        const link = document.body.querySelector(
+          `[href="https://www.youtube.com/watch?v=errv199"]`,
+        );
+        expect(link?.textContent).toBe("Title 199");
+      });
+
+      // Now add one more that the broker fails (the failure branch)
+      previewMock.mockResolvedValueOnce(oembedFail());
+      const failEmbed = renderYouTubeEmbed("errv200", "https://www.youtube.com/watch?v=errv200");
+      document.body.appendChild(failEmbed);
+
+      await vi.waitFor(() => {
+        expect(failEmbed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
+      });
+    });
+
+    it("uses fallback title when cache generation changes during successful fetch", async () => {
+      let resolveFetch: ((value: ReturnType<typeof oembedResponse>) => void) | null = null;
+      previewMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+
+      const embed = renderYouTubeEmbed("gen1", "https://www.youtube.com/watch?v=gen1");
+      document.body.appendChild(embed);
+
+      const title = embed.querySelector(".msg-embed-yt-title")!;
+      expect(title.textContent).toBe("Loading...");
+
+      // Clear caches (bumps generation)
+      clearMediaCaches();
+
+      // Resolve the fetch after cache clear
+      resolveFetch!(oembedResponse("Stale Title"));
+
+      await vi.waitFor(() => {
+        expect(title.textContent).toBe("YouTube Video");
+      });
+    });
+
+    it("uses fallback title when cache generation changes during failed fetch", async () => {
+      let resolveFetch: ((value: ReturnType<typeof oembedFail>) => void) | null = null;
+      previewMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+
+      const embed = renderYouTubeEmbed("gen2", "https://www.youtube.com/watch?v=gen2");
+      document.body.appendChild(embed);
+
+      clearMediaCaches();
+      resolveFetch!(oembedFail());
+
+      await vi.waitFor(() => {
+        expect(embed.querySelector(".msg-embed-yt-title")?.textContent).toBe("YouTube Video");
+      });
+    });
+
+    it("sets thumbnail image src and alt correctly", async () => {
+      previewMock.mockResolvedValue(oembedResponse("Thumb Test"));
+
+      const embed = renderYouTubeEmbed("thumb1", "https://www.youtube.com/watch?v=thumb1");
+      const thumb = embed.querySelector(".msg-embed-thumb") as HTMLImageElement;
+      expect(imageMock).toHaveBeenCalledWith(expect.any(String), {
+        url: "https://img.youtube.com/vi/thumb1/mqdefault.jpg",
+      });
+      await vi.waitFor(() => {
+        expect(thumb.getAttribute("src")).toBe(createObjectURLMock.mock.results[0]!.value);
+      });
+      expect(thumb.getAttribute("alt")).toBe("YouTube video");
+      expect(thumb.getAttribute("loading")).toBe("lazy");
+    });
+
+    it("title link has correct href and target attributes", () => {
+      previewMock.mockResolvedValue(oembedResponse("Link Test"));
+      const originalUrl = "https://www.youtube.com/watch?v=link1";
+
+      const embed = renderYouTubeEmbed("link1", originalUrl);
+      const titleLink = embed.querySelector(".msg-embed-yt-title") as HTMLAnchorElement;
+      expect(titleLink.getAttribute("href")).toBe(originalUrl);
+      expect(titleLink.getAttribute("target")).toBe("_blank");
+      expect(titleLink.getAttribute("rel")).toBe("noopener noreferrer");
+    });
+  });
+
+  // =========================================================================
+  // openImageLightbox
+  // =========================================================================
+
+  describe("openImageLightbox", () => {
+    it("appends a lightbox overlay to document.body", () => {
+      openImageLightbox("https://example.com/test.png", "Test image");
+
+      const lightbox = document.body.querySelector(".image-lightbox");
+      expect(lightbox).not.toBeNull();
+    });
+
+    it("contains an image with the provided src and alt", () => {
+      openImageLightbox("https://example.com/pic.jpg", "My photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLImageElement;
+      expect(img).not.toBeNull();
+      expect(img.getAttribute("src")).toBe("https://example.com/pic.jpg");
+      expect(img.getAttribute("alt")).toBe("My photo");
+    });
+
+    it("names the dialog after the image, not after its close button", () => {
+      openImageLightbox("https://example.com/pic.jpg", "My photo");
+
+      const dialog = document.body.querySelector(".image-lightbox")!;
+      expect(dialog.getAttribute("role")).toBe("dialog");
+      expect(dialog.getAttribute("aria-label")).toBe("My photo");
+      expect(dialog.querySelector(".image-lightbox-close")!.getAttribute("aria-label")).toBe(
+        "Close image",
+      );
+    });
+
+    it("contains a close button", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const closeBtn = document.body.querySelector(".image-lightbox-close");
+      expect(closeBtn).not.toBeNull();
+    });
+
+    it("closes on close button click", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const closeBtn = document.body.querySelector(".image-lightbox-close") as HTMLElement;
+      closeBtn.click();
+
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+    });
+
+    it("closes on overlay background click", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const overlay = document.body.querySelector(".image-lightbox") as HTMLElement;
+      // Click the overlay itself (not a child)
+      overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+    });
+
+    it("does not close when clicking on the image", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      // Simulate a click where mouse didn't move (dx=0, dy=0)
+      img.dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 100, bubbles: true }));
+      img.dispatchEvent(new MouseEvent("click", { clientX: 100, clientY: 100, bubbles: true }));
+
+      // The image click toggles zoom, not close. Lightbox should still exist.
+      expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
+    });
+
+    it("closes on Escape key", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+    });
+
+    it("zooms in on + key", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+
+      // After zoom, transform should contain scale > 1
+      expect(img.style.transform).toContain("scale(");
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(scaleMatch).not.toBeNull();
+      const scale = parseFloat(scaleMatch![1]!);
+      expect(scale).toBeGreaterThan(1);
+    });
+
+    it("leaves the image alone on Ctrl/Cmd zoom keys (those zoom the app)", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const before = img.style.transform;
+      for (const key of ["+", "=", "-", "0"]) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, bubbles: true }));
+        document.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true, bubbles: true }));
+      }
+
+      expect(img.style.transform).toBe(before);
+    });
+
+    it("zooms in on = key (same as +)", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "=", bubbles: true }));
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(scaleMatch).not.toBeNull();
+      const scale = parseFloat(scaleMatch![1]!);
+      expect(scale).toBeGreaterThan(1);
+    });
+
+    it("zooms out on - key", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "-", bubbles: true }));
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(scaleMatch).not.toBeNull();
+      const scale = parseFloat(scaleMatch![1]!);
+      expect(scale).toBeLessThan(1);
+    });
+
+    it("resets zoom on 0 key", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      // Zoom in first
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+
+      // Reset
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "0", bubbles: true }));
+
+      expect(img.style.transform).toContain("scale(1)");
+      expect(img.style.transform).toContain("translate(0px, 0px)");
+    });
+
+    it("toggles zoom on image click (zoom in when not zoomed)", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      // Mock getBoundingClientRect for the click zoom calculation
+      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      // Simulate mousedown then click at same position (no drag)
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+
+      // Should zoom to scale 3
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(scaleMatch).not.toBeNull();
+      expect(parseFloat(scaleMatch![1]!)).toBe(3);
+    });
+
+    it("toggles zoom on image click (zoom out when zoomed in)", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      // Zoom in first
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
+      );
+
+      // Now click again to zoom out (scale > 1.1 so it resets)
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
+      );
+
+      expect(img.style.transform).toContain("scale(1)");
+    });
+
+    it("does not toggle zoom when mouse moves during click (drag gesture)", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      // Mousedown at one position, click at another (moved > 5px)
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 100,
+          clientY: 100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 120, clientY: 100, bubbles: true, cancelable: true }),
+      );
+
+      // Should remain at scale(1) because dx=20 > 5
+      expect(img.style.transform).toBe("");
+    });
+
+    it("supports panning when zoomed in", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const overlay = document.body.querySelector(".image-lightbox") as HTMLElement;
+
+      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      // Zoom in first
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      img.dispatchEvent(
+        new MouseEvent("click", { clientX: 200, clientY: 150, bubbles: true, cancelable: true }),
+      );
+
+      // Now start panning (mousedown while zoomed)
+      img.dispatchEvent(
+        new MouseEvent("mousedown", {
+          clientX: 200,
+          clientY: 150,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(overlay.classList.contains("dragging")).toBe(true);
+
+      // Move mouse
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 250, clientY: 200, bubbles: true }),
+      );
+
+      // Transform should reflect pan offset
+      expect(img.style.transform).toContain("translate(");
+
+      // Mouse up ends dragging
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      expect(overlay.classList.contains("dragging")).toBe(false);
+    });
+
+    it("mouseup does nothing when not dragging", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+      const overlay = document.body.querySelector(".image-lightbox") as HTMLElement;
+
+      // mouseup without prior drag should not throw or change anything
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      expect(overlay.classList.contains("dragging")).toBe(false);
+    });
+
+    it("mousemove does nothing when not dragging", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      // mousemove without prior drag should not alter transform
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 300, clientY: 300, bubbles: true }),
+      );
+      expect(img.style.transform).toBe("");
+    });
+
+    it("handles wheel zoom in", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
+
+      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      // Scroll up (negative deltaY = zoom in)
+      const wheelEvent = new WheelEvent("wheel", {
+        deltaY: -100,
+        clientX: 200,
+        clientY: 150,
+        bubbles: true,
+        cancelable: true,
+      });
+      imgWrap.dispatchEvent(wheelEvent);
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(scaleMatch).not.toBeNull();
+      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThan(1);
+    });
+
+    it("handles wheel zoom out", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
+
+      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      // Scroll down (positive deltaY = zoom out)
+      const wheelEvent = new WheelEvent("wheel", {
+        deltaY: 100,
+        clientX: 200,
+        clientY: 150,
+        bubbles: true,
+        cancelable: true,
+      });
+      imgWrap.dispatchEvent(wheelEvent);
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(scaleMatch).not.toBeNull();
+      expect(parseFloat(scaleMatch![1]!)).toBeLessThan(1);
+    });
+
+    it("clamps wheel zoom to min scale 0.5", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
+
+      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      // Zoom out many times
+      for (let i = 0; i < 20; i++) {
+        imgWrap.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: 100,
+            clientX: 200,
+            clientY: 150,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThanOrEqual(0.5);
+    });
+
+    it("clamps wheel zoom to max scale 10", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+      const imgWrap = document.body.querySelector(".image-lightbox-wrap") as HTMLElement;
+
+      vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+        left: 0,
+        top: 0,
+        width: 400,
+        height: 300,
+        right: 400,
+        bottom: 300,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+
+      // Zoom in many times
+      for (let i = 0; i < 50; i++) {
+        imgWrap.dispatchEvent(
+          new WheelEvent("wheel", {
+            deltaY: -100,
+            clientX: 200,
+            clientY: 150,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(parseFloat(scaleMatch![1]!)).toBeLessThanOrEqual(10);
+    });
+
+    it("clamps keyboard zoom to max scale 10", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      for (let i = 0; i < 50; i++) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "+", bubbles: true }));
+      }
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(parseFloat(scaleMatch![1]!)).toBeLessThanOrEqual(10);
+    });
+
+    it("clamps keyboard zoom to min scale 0.5", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+      const img = document.body.querySelector(".image-lightbox img") as HTMLElement;
+
+      for (let i = 0; i < 50; i++) {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "-", bubbles: true }));
+      }
+
+      const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+      expect(parseFloat(scaleMatch![1]!)).toBeGreaterThanOrEqual(0.5);
+    });
+
+    it("closes previous lightbox when opening a new one", () => {
+      openImageLightbox("https://example.com/first.png", "First");
+      expect(document.body.querySelectorAll(".image-lightbox").length).toBe(1);
+
+      openImageLightbox("https://example.com/second.png", "Second");
+
+      // Should have replaced the first one
+      const lightboxes = document.body.querySelectorAll(".image-lightbox");
+      expect(lightboxes.length).toBe(1);
+      const img = lightboxes[0]!.querySelector("img") as HTMLImageElement;
+      expect(img.getAttribute("src")).toBe("https://example.com/second.png");
+    });
+
+    it("cleans up document-level listeners on close", () => {
+      const addEventListenerSpy = vi.spyOn(document, "addEventListener");
+
+      openImageLightbox("https://example.com/cleanup.png", "Cleanup");
+
+      // The document-level keydown listener is registered with the lightbox's
+      // AbortController signal; capture it to prove the controller is aborted
+      // on close (rather than just re-dispatching events and asserting nothing).
+      const keydownCall = addEventListenerSpy.mock.calls.find(
+        (call) => call[0] === "keydown" && typeof call[2] === "object" && call[2] !== null,
+      );
+      const signal = (keydownCall?.[2] as AddEventListenerOptions | undefined)?.signal;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal!.aborted).toBe(false);
+
+      const closeBtn = document.body.querySelector(".image-lightbox-close") as HTMLElement;
+      closeBtn.click();
+
+      expect(signal!.aborted).toBe(true);
+
+      addEventListenerSpy.mockRestore();
+    });
+  });
+
+  // =========================================================================
+  // closeActiveLightbox (B6-15: lightbox survives logout/page swap)
+  // =========================================================================
+
+  describe("closeActiveLightbox", () => {
+    it("closes the active lightbox and removes it from the DOM", () => {
+      openImageLightbox("https://example.com/pic.jpg", "Photo");
+      expect(document.body.querySelector(".image-lightbox")).not.toBeNull();
+
+      closeActiveLightbox();
+
+      expect(document.body.querySelector(".image-lightbox")).toBeNull();
+    });
+
+    it("is a no-op when no lightbox is open", () => {
+      expect(() => closeActiveLightbox()).not.toThrow();
+    });
+  });
+});
