@@ -22,6 +22,7 @@ import {
 } from "@stores/members.store";
 import { listSessionResets, runSessionResets } from "@lib/net/sessionRegistry";
 import type { ListeningActivity, ReadyMember } from "@lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 const ALICE: ReadyMember = {
   id: 1,
@@ -177,7 +178,7 @@ describe("members store presence and profile", () => {
     });
 
     it("counts revisions from 0 when the state never had them", () => {
-      membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+      resetMembersState();
       setMembers([ALICE]);
       expect(membersStore.getState().roleRevision).toBe(1);
       expect(membersStore.getState().snapshotRevision).toBe(1);
@@ -269,7 +270,7 @@ describe("members store presence and profile", () => {
     });
 
     it("counts from 0 when the revision was never set", () => {
-      membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+      resetMembersState();
       addMember({ user: { id: 7, username: "g", avatar: null, role: "member" } });
       expect(roleRevision()).toBe(1);
     });
@@ -285,7 +286,7 @@ describe("members store presence and profile", () => {
     });
 
     it("counts from 0 when the revision was never set", () => {
-      membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+      resetMembersState();
       removeMember(1);
       expect(roleRevision()).toBe(1);
     });
@@ -817,7 +818,7 @@ describe("members store presence and profile", () => {
     });
 
     it("counts revisions from 0 when the state never had them", () => {
-      membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+      resetMembersState();
       resetMembersStore();
       expect(membersStore.getState().roleRevision).toBe(1);
       expect(membersStore.getState().snapshotRevision).toBe(1);

@@ -10,7 +10,6 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 import { createMessageList } from "@components/MessageList";
 import { messagesStore, type Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { resetThreadsStore } from "@stores/threads.store";
 import {
@@ -21,6 +20,7 @@ import {
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
+import { resetMembersState } from "../helpers/storeResets";
 
 function seed(messages: Message[]): void {
   messagesStore.setState(() => ({
@@ -51,7 +51,7 @@ describe("Create Thread in the message menu", () => {
     resetGateStores();
     signInAs("member");
     setChannel();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     applyReadyCapabilities({ threads: true });
     onCreate.mockClear();
     container = document.createElement("div");

@@ -24,9 +24,9 @@ import {
   setChannelLoading,
   invalidateLoadedMessageWindows,
 } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { readingAnchor } from "../../src/features/messaging/readingAnchor";
 import type { MessageResponse } from "@lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 
@@ -63,7 +63,7 @@ describe("MessageList — a full-ready resync keeps the reading position (P2-T4)
 
   beforeEach(() => {
     resetMessagesStore();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     container = document.createElement("div");
     document.body.appendChild(container);
     options = {

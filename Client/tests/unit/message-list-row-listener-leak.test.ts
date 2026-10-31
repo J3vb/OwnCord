@@ -18,10 +18,10 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 // Reaction controls lock while the socket is down (3A-3); these tests react online.
 beforeEach(() => {
@@ -30,18 +30,8 @@ beforeEach(() => {
 });
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMessagesState();
+  resetMembersState();
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {

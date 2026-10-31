@@ -28,7 +28,6 @@ import {
 } from "@stores/messages.store";
 import type { MessageResponse } from "@lib/types";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import {
   channelsStore,
   setChannels,
@@ -40,6 +39,7 @@ import { closeSettings, openSettings } from "@stores/ui.store";
 import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
 import { createReconnectClock } from "../../src/features/connection/dispatchContext";
 import { formatMessageTimestamp } from "@lib/text/formatting";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 const ME = 1;
@@ -57,15 +57,8 @@ function nextFrame(): Promise<void> {
 }
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMessagesState();
+  resetMembersState();
   channelsStore.setState(() => ({
     channels: new Map(),
     activeChannelId: null,

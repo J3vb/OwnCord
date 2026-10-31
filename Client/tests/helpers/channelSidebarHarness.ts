@@ -4,8 +4,8 @@ import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
-import { membersStore } from "../../src/stores/members.store";
 import { type ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "./storeResets";
 
 export function resetStores(): void {
   channelsStore.setState(() => ({
@@ -54,10 +54,7 @@ export function resetStores(): void {
     voiceStatus: "idle",
     peerVerifications: new Map(),
   }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
 }
 
 /** Add a connected voice user to a channel (via the same store path the WS uses). */

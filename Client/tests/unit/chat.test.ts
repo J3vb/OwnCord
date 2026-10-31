@@ -31,18 +31,8 @@ import { membersStore, setMembers } from "../../src/stores/members.store";
 
 // Reset stores before each test
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMessagesState();
+  resetMembersState();
 }
 
 // Helper to create a basic message payload
@@ -523,7 +513,7 @@ describe("MessageList", () => {
 // ---------------------------------------------------------------------------
 
 import { createTypingIndicator } from "../../src/components/TypingIndicator";
-import { setTyping, clearTyping } from "../../src/stores/members.store";
+import { setTyping } from "../../src/stores/members.store";
 
 describe("TypingIndicator", () => {
   let container: HTMLDivElement;
@@ -630,6 +620,7 @@ describe("TypingIndicator", () => {
 // ---------------------------------------------------------------------------
 
 import { createMessageInput } from "../../src/components/MessageInput";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;

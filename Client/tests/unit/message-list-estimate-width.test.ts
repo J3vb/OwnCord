@@ -11,10 +11,10 @@ const { observers } = vi.hoisted(() => ({ observers: [] as Array<() => void> }))
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 
@@ -76,15 +76,8 @@ describe("MessageList: estimates follow the list's width", () => {
       configurable: true,
       get: () => 600,
     });
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMessagesState();
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     container = document.createElement("div");

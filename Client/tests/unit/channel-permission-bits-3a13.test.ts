@@ -30,6 +30,7 @@ import type { Message } from "@stores/messages.store";
 import { messagesStore } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 import { createReactionController } from "../../src/pages/main-page/ReactionController";
+import { resetMessagesState } from "../helpers/storeResets";
 
 const ME = 1;
 const OTHER = 2;
@@ -112,14 +113,7 @@ describe("channel permission bits (3A-13)", () => {
       roles: [],
       categories: [],
     }));
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState();
     setConnectionStatus("connected");
     uiStore.flush();
     container = document.createElement("div");

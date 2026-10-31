@@ -53,13 +53,13 @@ import {
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { setDmChannels } from "@stores/dm.store";
-import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
 import { expectConsole } from "../helpers/console";
 import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -67,15 +67,8 @@ const CHANNELS: ReadyChannel[] = [
 ];
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMessagesState();
+  resetMembersState();
   authStore.setState(() => ({
     token: "t",
     user: { id: 1, username: "alice", avatar: null, role: "member" },

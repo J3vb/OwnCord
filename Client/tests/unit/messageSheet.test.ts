@@ -11,7 +11,6 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, type Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { closeBottomSheet } from "@lib/ui/bottomSheet";
 import {
   ME,
@@ -21,6 +20,7 @@ import {
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
+import { resetMembersState } from "../helpers/storeResets";
 
 const SHEET = '[data-testid="message-sheet"]';
 
@@ -79,7 +79,7 @@ describe("message actions sheet on a phone", () => {
     localStorage.clear();
     signInAs("member");
     setChannel();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     container = document.createElement("div");
     document.body.appendChild(container);
   });

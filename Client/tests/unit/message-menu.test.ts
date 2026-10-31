@@ -13,7 +13,6 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { bindImageMenu, closeActiveLightbox } from "@components/message-list/attachments";
 import { messagesStore, type Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
@@ -26,6 +25,7 @@ import {
   setDeveloperMode,
   signInAs,
 } from "../helpers/message-actions-fixtures";
+import { resetMembersState } from "../helpers/storeResets";
 
 const MENU = ".message-context-menu";
 
@@ -100,7 +100,7 @@ describe("message right-click menu", () => {
     localStorage.clear();
     signInAs("member");
     setChannel();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     container = document.createElement("div");
     document.body.appendChild(container);
     writeText = vi.fn().mockResolvedValue(undefined);

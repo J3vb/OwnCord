@@ -33,6 +33,7 @@ import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { setChannels, setActiveChannel, setRoles, channelsStore } from "@stores/channels.store";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
@@ -93,15 +94,8 @@ describe("MessageList — inline editor lifecycle", () => {
   beforeEach(() => {
     loader.failLoad = false;
     resetServerCapabilities();
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMessagesState();
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");

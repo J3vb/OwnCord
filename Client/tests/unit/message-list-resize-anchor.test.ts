@@ -11,11 +11,11 @@ const { observers } = vi.hoisted(() => ({ observers: [] as Array<() => void> }))
 
 import { createMessageList } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { clearRowHeights } from "@components/message-list/rowHeights";
 import { buildMessage } from "../helpers/messageFactory";
+import { resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 const ROW = 100;
@@ -151,7 +151,7 @@ describe("MessageList: rows resizing after they are drawn", () => {
       historyLoadState: new Map(),
       detachedChannels: new Set(),
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     container = document.createElement("div");

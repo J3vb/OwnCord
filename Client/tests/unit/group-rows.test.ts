@@ -32,6 +32,7 @@ import {
   setDeveloperMode,
   signInAs,
 } from "../helpers/message-actions-fixtures";
+import { resetMembersState } from "../helpers/storeResets";
 
 const CAROL = 12;
 
@@ -90,7 +91,7 @@ describe("group row wording", () => {
     signInAs("member");
     setChannel({ type: "dm" });
     seedDm();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
   });
   afterEach(() => {
     resetGateStores();

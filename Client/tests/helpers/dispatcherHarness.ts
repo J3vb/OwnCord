@@ -2,8 +2,6 @@ import { vi, expect, beforeEach, afterEach } from "vitest";
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
-import { messagesStore } from "../../src/stores/messages.store";
-import { membersStore } from "../../src/stores/members.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { blocksStore } from "../../src/stores/blocks.store";
@@ -14,6 +12,7 @@ import { resetJoinRequest } from "../../src/features/voice/joinRequest";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
 import { getLazyVoiceImportsInFlight } from "./dispatcherMocks";
+import { resetMessagesState, resetMembersState } from "./storeResets";
 
 // Suppress console output from every dispatcher test file that loads the harness.
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -112,18 +111,8 @@ export function resetDispatcherStores(): void {
     activeChannelId: null,
     roles: [],
   }));
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMessagesState();
+  resetMembersState();
   voiceStore.setState(() => ({
     currentChannelId: null,
     voiceUsers: new Map(),

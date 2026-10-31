@@ -49,6 +49,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { Permission } from "../../src/lib/types";
 import type { MemberListOptions } from "../../src/components/MemberList";
+import { resetMembersState } from "../helpers/storeResets";
 
 interface Harness {
   panel: MemberPanel;
@@ -81,7 +82,7 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
   channelsStore.setState(() => ({
     categories: [],
     channels: new Map(),

@@ -19,23 +19,16 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMessagesState();
+  resetMembersState();
   // The unread count a test gives the channel would otherwise leak a NEW
   // divider into the next test's list.
   setChannels([]);
