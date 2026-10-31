@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
-import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
+import {
+  createChannelSidebar,
+  type ChannelSidebarOptions,
+} from "../../../src/components/ChannelSidebar";
 import { channelsStore, setChannels } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import {
@@ -8,17 +11,14 @@ import {
   safetyStore,
   setActiveTimeout,
 } from "../../../src/features/safety/store";
-import {
-  voiceStore,
-  updateVoiceState,
-  setSpeakers,
-  removeVoiceUser,
-} from "../../../src/stores/voice.store";
+import { voiceStore, setSpeakers, removeVoiceUser } from "../../../src/stores/voice.store";
 import { membersStore } from "../../../src/stores/members.store";
 import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
 import {
   resetStores,
+  useSidebarFixture,
   addVoiceUser,
+  joinVoiceRoomWith,
   setPeerVerif,
   testChannels,
   voiceModCallbacks,
@@ -44,30 +44,24 @@ describe("ChannelSidebar", () => {
   let onVoiceJoin: Mock<(channelId: number) => void>;
   let onOpenCall: Mock<() => void>;
 
-  beforeEach(() => {
-    resetStores();
-    mockOpenUserProfilePopup.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onVoiceJoin = vi.fn<(channelId: number) => void>();
-    onOpenCall = vi.fn<() => void>();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
-  });
-
-  afterEach(() => {
+  /** Replace the fixture sidebar with one that has extra callbacks. */
+  const rebuildSidebar = (extra: Partial<ChannelSidebarOptions>): void => {
     sidebar.destroy?.();
-    container.remove();
-    // Clean up any context menus left on document.body
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    document.querySelectorAll(".user-vol-menu").forEach((el) => el.remove());
-  });
+    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, ...extra });
+  };
+
+  useSidebarFixture(
+    (fx) => {
+      ({ container, sidebar, onVoiceJoin, onOpenCall } = fx);
+    },
+    () => sidebar,
+  );
 
   // ── V11: a voice user with nothing to watch opens their profile ──
 
   it("clicking a voice user without camera or stream opens their profile (V11)", () => {
     const onWatchStream = vi.fn();
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+    rebuildSidebar({ onWatchStream });
     setChannels(testChannels);
     addVoiceUser(3, 30, "alice");
     sidebar.mount(container);
@@ -107,19 +101,9 @@ describe("ChannelSidebar", () => {
 
   it("clicking a voice user with a stream watches it and opens no profile (V11)", () => {
     const onWatchStream = vi.fn();
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+    rebuildSidebar({ onWatchStream });
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 30,
-      username: "alice",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: true,
-      screenshare: false,
-    });
+    addVoiceUser(3, 30, "alice", { camera: true });
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
@@ -253,16 +237,7 @@ describe("ChannelSidebar", () => {
         ],
       ]),
     }));
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 10,
-      username: "Alice",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 10, "Alice");
     sidebar.mount(container);
 
     const voiceUsersList = container.querySelector(".voice-users-list");
@@ -295,16 +270,7 @@ describe("ChannelSidebar", () => {
         ],
       ]),
     }));
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 10,
-      username: "Bob",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 10, "Bob");
     sidebar.mount(container);
 
     const userName = container.querySelector(".voice-user-item .vu-name");
@@ -329,16 +295,7 @@ describe("ChannelSidebar", () => {
     expect(voiceUsers.length).toBe(0);
 
     // Add a voice user
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 20,
-      username: "Bob",
-      muted: true,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 20, "Bob", { muted: true });
     voiceStore.flush();
 
     voiceUsers = container.querySelectorAll(".voice-user-item");
@@ -351,16 +308,7 @@ describe("ChannelSidebar", () => {
 
   it("shows LIVE badge when user has screenshare active", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 30,
-      username: "Streamer",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: true,
-    });
+    addVoiceUser(3, 30, "Streamer", { screenshare: true });
     sidebar.mount(container);
 
     const liveBadge = container.querySelector(".vu-live-badge");
@@ -370,16 +318,7 @@ describe("ChannelSidebar", () => {
 
   it("shows monitor icon when user has screenshare active", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 30,
-      username: "Streamer",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: true,
-    });
+    addVoiceUser(3, 30, "Streamer", { screenshare: true });
     sidebar.mount(container);
 
     // The screenshare user row should contain an SVG icon (monitor)
@@ -391,20 +330,10 @@ describe("ChannelSidebar", () => {
 
   it("calls onWatchStream when clicking a user row with active stream", () => {
     const onWatchStream = vi.fn();
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+    rebuildSidebar({ onWatchStream });
 
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 30,
-      username: "Streamer",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: true,
-    });
+    addVoiceUser(3, 30, "Streamer", { screenshare: true });
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
     sidebar.mount(container);
 
@@ -418,20 +347,10 @@ describe("ChannelSidebar", () => {
 
   it("clicking a peer's stream row also joins the channel when not already in it", () => {
     const onWatchStream = vi.fn();
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+    rebuildSidebar({ onWatchStream });
 
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 30,
-      username: "Streamer",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: true,
-    });
+    addVoiceUser(3, 30, "Streamer", { screenshare: true });
     sidebar.mount(container);
 
     const voiceUserItem = container.querySelector(".voice-user-item") as HTMLElement;
@@ -446,20 +365,10 @@ describe("ChannelSidebar", () => {
 
   it("opens no stream when the join backoff refuses the stream row's join", () => {
     const onWatchStream = vi.fn();
-    sidebar.destroy?.();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+    rebuildSidebar({ onWatchStream });
 
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 30,
-      username: "Streamer",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: true,
-    });
+    addVoiceUser(3, 30, "Streamer", { screenshare: true });
     sidebar.mount(container);
     noteJoinFailed();
 
@@ -477,16 +386,7 @@ describe("ChannelSidebar", () => {
 
   it("shows only the headphones-off icon for a deafened user (deafen implies mute)", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 40,
-      username: "DeafUser",
-      muted: false,
-      deafened: true,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 40, "DeafUser", { deafened: true });
     sidebar.mount(container);
 
     const userRow = container.querySelector(".voice-user-item");
@@ -500,16 +400,7 @@ describe("ChannelSidebar", () => {
 
   it("shows camera icon for user with active camera", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 50,
-      username: "CameraUser",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: true,
-      screenshare: false,
-    });
+    addVoiceUser(3, 50, "CameraUser", { camera: true });
     sidebar.mount(container);
 
     const statusIcon = container.querySelector(".vu-status");
@@ -520,16 +411,7 @@ describe("ChannelSidebar", () => {
 
   it("toggles speaking class in-place without re-rendering entire DOM", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 60,
-      username: "Talker",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 60, "Talker");
     sidebar.mount(container);
 
     const userRow = container.querySelector('.voice-user-item[data-voice-uid="60"]');
@@ -551,16 +433,7 @@ describe("ChannelSidebar", () => {
 
   it("speaking patch keeps the exact row element (cached map, no rebuild)", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 61,
-      username: "Talker2",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 61, "Talker2");
     // setSpeakers only applies to the channel the client is in; set it before
     // mount so the later flip is speaking-only.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
@@ -578,16 +451,7 @@ describe("ChannelSidebar", () => {
     expect(rowAfter!.classList.contains("speaking")).toBe(true);
 
     // …and a structural change (mute) still re-renders with a fresh row.
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 61,
-      username: "Talker2",
-      muted: true,
-      deafened: false,
-      speaking: true,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 61, "Talker2", { muted: true, speaking: true });
     voiceStore.flush();
 
     const rowRebuilt = container.querySelector('.voice-user-item[data-voice-uid="61"]');
@@ -601,16 +465,7 @@ describe("ChannelSidebar", () => {
 
   it("renders first-letter avatar with deterministic color for voice user", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 70,
-      username: "Zara",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 70, "Zara");
     sidebar.mount(container);
 
     const avatar = container.querySelector(".vu-avatar");
@@ -637,16 +492,7 @@ describe("ChannelSidebar", () => {
         ],
       ]),
     }));
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 72,
-      username: "Pic",
-      muted: false,
-      deafened: false,
-      speaking: true,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 72, "Pic", { speaking: true });
     sidebar.mount(container);
 
     const row = container.querySelector(".voice-user-item")!;
@@ -671,16 +517,7 @@ describe("ChannelSidebar", () => {
         ],
       ]),
     }));
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 73,
-      username: "Nopic",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 73, "Nopic");
     sidebar.mount(container);
 
     const avatar = container.querySelector(".vu-avatar")!;
@@ -690,16 +527,7 @@ describe("ChannelSidebar", () => {
 
   it("shows '?' avatar for user with empty username", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 71,
-      username: "",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 71, "");
     sidebar.mount(container);
 
     const avatar = container.querySelector(".vu-avatar");
@@ -709,16 +537,7 @@ describe("ChannelSidebar", () => {
 
   it("shows 'Unknown' name for user with empty username", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 71,
-      username: "",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 71, "");
     sidebar.mount(container);
 
     const name = container.querySelector(".vu-name");
@@ -729,26 +548,8 @@ describe("ChannelSidebar", () => {
 
   it("renders multiple voice users under the same channel", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 90,
-      username: "UserA",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 91,
-      username: "UserB",
-      muted: true,
-      deafened: false,
-      speaking: true,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 90, "UserA");
+    addVoiceUser(3, 91, "UserB", { muted: true, speaking: true });
     sidebar.mount(container);
 
     const userItems = container.querySelectorAll(".voice-user-item");
@@ -763,16 +564,7 @@ describe("ChannelSidebar", () => {
 
   it("shows both camera and monitor icons when user has camera and screenshare", () => {
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 92,
-      username: "MultiStream",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: true,
-      screenshare: true,
-    });
+    addVoiceUser(3, 92, "MultiStream", { camera: true, screenshare: true });
     sidebar.mount(container);
 
     const userRow = container.querySelector(".voice-user-item");
@@ -790,36 +582,7 @@ describe("ChannelSidebar", () => {
     const onWatchStream = vi.fn();
     const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
     setChannels(testChannels);
-    voiceStore.setState(() => ({
-      currentChannelId: 3,
-      voiceUsers: new Map([
-        [
-          3,
-          new Map([
-            [
-              99,
-              {
-                userId: 99,
-                username: "Streamer",
-                speaking: false,
-                muted: false,
-                deafened: false,
-                camera: false,
-                screenshare: true,
-              },
-            ],
-          ]),
-        ],
-      ]),
-      voiceConfigs: new Map(),
-      localMuted: false,
-      localDeafened: false,
-      localCamera: false,
-      localScreenshare: false,
-      joinedAt: null,
-      listenOnly: false,
-      voiceStatus: "idle",
-    }));
+    joinVoiceRoomWith(99, "Streamer", { screenshare: true });
     sidebarWithWatch.mount(container);
 
     const userRow = container.querySelector<HTMLElement>(".voice-user-item");
@@ -835,36 +598,7 @@ describe("ChannelSidebar", () => {
     const onWatchStream = vi.fn();
     const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
     setChannels(testChannels);
-    voiceStore.setState(() => ({
-      currentChannelId: 3,
-      voiceUsers: new Map([
-        [
-          3,
-          new Map([
-            [
-              99,
-              {
-                userId: 99,
-                username: "Cammer",
-                speaking: false,
-                muted: false,
-                deafened: false,
-                camera: true,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
-      voiceConfigs: new Map(),
-      localMuted: false,
-      localDeafened: false,
-      localCamera: false,
-      localScreenshare: false,
-      joinedAt: null,
-      listenOnly: false,
-      voiceStatus: "idle",
-    }));
+    joinVoiceRoomWith(99, "Cammer", { camera: true });
     sidebarWithWatch.mount(container);
 
     const userRow = container.querySelector<HTMLElement>(".voice-user-item");
@@ -879,36 +613,7 @@ describe("ChannelSidebar", () => {
   it("opens no stream preview when a voice row with video is hovered or focused", () => {
     vi.useFakeTimers();
     setChannels(testChannels);
-    voiceStore.setState(() => ({
-      currentChannelId: 3,
-      voiceUsers: new Map([
-        [
-          3,
-          new Map([
-            [
-              99,
-              {
-                userId: 99,
-                username: "User",
-                speaking: false,
-                muted: false,
-                deafened: false,
-                camera: true,
-                screenshare: false,
-              },
-            ],
-          ]),
-        ],
-      ]),
-      voiceConfigs: new Map(),
-      localMuted: false,
-      localDeafened: false,
-      localCamera: false,
-      localScreenshare: false,
-      joinedAt: null,
-      listenOnly: false,
-      voiceStatus: "idle",
-    }));
+    joinVoiceRoomWith(99, "User", { camera: true });
     sidebar.mount(container);
     const row = container.querySelector<HTMLElement>(".voice-user-item")!;
     row.dispatchEvent(new MouseEvent("mouseenter"));
@@ -924,36 +629,7 @@ describe("ChannelSidebar", () => {
     const onWatchStream = vi.fn();
     const sidebarWithWatch = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
     setChannels(testChannels);
-    voiceStore.setState(() => ({
-      currentChannelId: 3,
-      voiceUsers: new Map([
-        [
-          3,
-          new Map([
-            [
-              1,
-              {
-                userId: 1,
-                username: "User",
-                speaking: false,
-                muted: false,
-                deafened: false,
-                camera: false,
-                screenshare: true,
-              },
-            ],
-          ]),
-        ],
-      ]),
-      voiceConfigs: new Map(),
-      localMuted: false,
-      localDeafened: false,
-      localCamera: false,
-      localScreenshare: false,
-      joinedAt: null,
-      listenOnly: false,
-      voiceStatus: "idle",
-    }));
+    joinVoiceRoomWith(1, "User", { screenshare: true });
     sidebarWithWatch.mount(container);
 
     container.querySelector<HTMLElement>(".voice-user-item")?.click();
@@ -1004,6 +680,14 @@ describe("ChannelSidebar voice rows on models", () => {
       container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${channelId}"]`)
         ?.parentElement ?? null
     );
+  }
+
+  /** Two participants in the voice channel, with the sidebar mounted. */
+  function mountAliceAndBob(): void {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 10, "alice");
+    addVoiceUser(VOICE_CH, 11, "bob");
+    sidebar.mount(container);
   }
 
   function leave(channelId: number, userId: number): void {
@@ -1094,10 +778,7 @@ describe("ChannelSidebar voice rows on models", () => {
   });
 
   it("focused user row survives a voice channel rename", () => {
-    setChannels(testChannels);
-    addVoiceUser(VOICE_CH, 10, "alice");
-    addVoiceUser(VOICE_CH, 11, "bob");
-    sidebar.mount(container);
+    mountAliceAndBob();
     const wrapper = wrapperOf(VOICE_CH);
     userRow(11)!.focus();
 
@@ -1174,10 +855,7 @@ describe("ChannelSidebar voice rows on models", () => {
   });
 
   it("connection drop disables the channel without rebuilding user rows", () => {
-    setChannels(testChannels);
-    addVoiceUser(VOICE_CH, 10, "alice");
-    addVoiceUser(VOICE_CH, 11, "bob");
-    sidebar.mount(container);
+    mountAliceAndBob();
     const wrapper = wrapperOf(VOICE_CH);
     const rows = [userRow(10), userRow(11)];
 

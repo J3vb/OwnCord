@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/sidebarAreaMocks";
-import { createSidebarArea } from "../../../src/pages/main-page/SidebarArea";
+import { byName } from "../../helpers/tableCases";
+import {
+  createSidebarArea,
+  type SidebarAreaOptions,
+} from "../../../src/pages/main-page/SidebarArea";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import { authStore } from "../../../src/stores/auth.store";
@@ -20,7 +24,14 @@ import {
   resetMocks,
   enterVoiceAndAwaitWidget,
   defaultOpts,
+  makeDm,
   cleanup,
+  mountArea,
+  firstCallArg,
+  enterDmsMode,
+  optsWithToast,
+  makeChannel,
+  seedChannels,
 } from "../../helpers/sidebarAreaHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -60,17 +71,51 @@ describe("SidebarArea", () => {
     document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
   });
 
+  const flushMicrotasks = async (count: number): Promise<void> => {
+    for (let i = 0; i < count; i++) await Promise.resolve();
+  };
+
+  /** Queue each PATCH outcome in call order: an Error rejects, anything else resolves. */
+  const queueWrites = (
+    opts: SidebarAreaOptions,
+    outcomes: ReadonlyArray<Error | undefined>,
+  ): void => {
+    const write = opts.api.adminUpdateChannel as MockedFn;
+    for (const outcome of outcomes) {
+      if (outcome === undefined) write.mockResolvedValueOnce(undefined);
+      else write.mockRejectedValueOnce(outcome);
+    }
+  };
+
+  const reorderTwo = () => [
+    { channelId: 1, newPosition: 0 },
+    { channelId: 2, newPosition: 1 },
+  ];
+
+  /** Deliver a channel_update broadcast through the handler SidebarArea registered. */
+  const emitChannelUpdate = (opts: SidebarAreaOptions, id: number): void => {
+    const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
+      (c: unknown[]) => c[0] === "channel_update",
+    )![1] as (payload: { id: number }) => void;
+    onUpdate({ id });
+  };
+
   // -------------------------------------------------------------------------
   // Channel sidebar callbacks
   // -------------------------------------------------------------------------
 
   describe("channel sidebar callbacks", () => {
+    const mountWithOpenCall = () => {
+      const onOpenCall = vi.fn();
+      const result = mountArea(container, { ...defaultOpts(), onOpenCall });
+      return { onOpenCall, result };
+    };
+
     it("passes correct callbacks to createChannelSidebar", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createChannelSidebar).toHaveBeenCalled();
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       expect(typeof callArgs.onVoiceJoin).toBe("function");
       expect(typeof callArgs.onOpenCall).toBe("function");
       expect(callArgs).not.toHaveProperty("onVoiceLeave");
@@ -84,10 +129,8 @@ describe("SidebarArea", () => {
     });
 
     it("the voice widget's call name opens a guild call only after leaving DM mode has shown the channel (1B-1)", async () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-      const onOpenCall = vi.fn();
-      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
-      container.appendChild(result.sidebarWrapper);
+      enterDmsMode();
+      const { onOpenCall, result } = mountWithOpenCall();
       await enterVoiceAndAwaitWidget();
 
       // The page's channel subscriber shows that channel's chat; the call
@@ -112,9 +155,7 @@ describe("SidebarArea", () => {
     });
 
     it("openCall (the phone call bar's tap) opens a guild call at once from the server view", () => {
-      const onOpenCall = vi.fn();
-      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
-      container.appendChild(result.sidebarWrapper);
+      const { onOpenCall, result } = mountWithOpenCall();
 
       result.openCall(4242);
 
@@ -123,10 +164,8 @@ describe("SidebarArea", () => {
     });
 
     it("openCall leaves DM mode before opening a guild call", async () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-      const onOpenCall = vi.fn();
-      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
-      container.appendChild(result.sidebarWrapper);
+      enterDmsMode();
+      const { onOpenCall, result } = mountWithOpenCall();
 
       result.openCall(4242);
       expect(onOpenCall).not.toHaveBeenCalled();
@@ -139,24 +178,10 @@ describe("SidebarArea", () => {
     });
 
     it("openCall opens a DM call by selecting the DM, not the call view", () => {
-      setDmChannels([
-        {
-          channelId: 77,
-          recipient: { id: 7, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ]);
+      const bob = { id: 7, username: "bob", avatar: "", status: "online" } as const;
+      setDmChannels([makeDm({ channelId: 77, recipient: bob, participants: [bob] })]);
       dmStore.flush();
-      const onOpenCall = vi.fn();
-      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
-      container.appendChild(result.sidebarWrapper);
+      const { onOpenCall, result } = mountWithOpenCall();
 
       result.openCall(77);
 
@@ -167,11 +192,9 @@ describe("SidebarArea", () => {
     });
 
     it("onOpenCall forwards to the page's call opener", () => {
-      const onOpenCall = vi.fn();
-      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
-      container.appendChild(result.sidebarWrapper);
+      const { onOpenCall, result } = mountWithOpenCall();
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       callArgs.onOpenCall();
 
       expect(onOpenCall).toHaveBeenCalledOnce();
@@ -180,10 +203,9 @@ describe("SidebarArea", () => {
     });
 
     it("onCreateChannel opens create channel modal", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       callArgs.onCreateChannel("General");
       await vi.dynamicImportSettled();
 
@@ -193,10 +215,9 @@ describe("SidebarArea", () => {
     });
 
     it("onCreateChannel does not open a second modal if one is active", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       callArgs.onCreateChannel("General");
       await vi.dynamicImportSettled();
       callArgs.onCreateChannel("Another");
@@ -208,10 +229,9 @@ describe("SidebarArea", () => {
     });
 
     it("onEditChannel opens edit channel modal", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       callArgs.onEditChannel({ id: 1, name: "general", type: "text" });
       await vi.dynamicImportSettled();
 
@@ -221,10 +241,9 @@ describe("SidebarArea", () => {
     });
 
     it("onEditChannel opens nothing when the sidebar is torn down while the editor loads", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       callArgs.onEditChannel({ id: 1, name: "general", type: "text" });
       cleanup(result);
       await vi.dynamicImportSettled();
@@ -233,10 +252,9 @@ describe("SidebarArea", () => {
     });
 
     it("onDeleteChannel opens delete channel modal", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       callArgs.onDeleteChannel({ id: 1, name: "general" });
 
       expect(createDeleteChannelModal).toHaveBeenCalled();
@@ -245,14 +263,13 @@ describe("SidebarArea", () => {
     });
 
     it("onPurgeChannel calls the purge API and toasts the server's count", async () => {
-      const opts = defaultOpts();
-      const toast = { show: vi.fn() };
-      (opts.getToast as MockedFn).mockReturnValue(toast);
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const { opts, toast } = optsWithToast();
+      const result = mountArea(container, opts);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      await callArgs.onPurgeChannel({ id: 1, name: "general" }, 50);
+      await firstCallArg(createChannelSidebar as MockedFn).onPurgeChannel(
+        { id: 1, name: "general" },
+        50,
+      );
 
       expect(opts.api.purgeMessages).toHaveBeenCalledWith(1, 50);
       expect(toast.show).toHaveBeenCalledWith("Purged 2 messages from #general", "success");
@@ -261,15 +278,14 @@ describe("SidebarArea", () => {
     });
 
     it("onPurgeChannel surfaces a failure as an error toast", async () => {
-      const opts = defaultOpts();
-      const toast = { show: vi.fn() };
-      (opts.getToast as MockedFn).mockReturnValue(toast);
+      const { opts, toast } = optsWithToast();
       (opts.api.purgeMessages as MockedFn).mockRejectedValue(new Error("forbidden"));
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      await callArgs.onPurgeChannel({ id: 1, name: "general" }, 50);
+      await firstCallArg(createChannelSidebar as MockedFn).onPurgeChannel(
+        { id: 1, name: "general" },
+        50,
+      );
 
       expect(toast.show).toHaveBeenCalledWith("forbidden", "error");
 
@@ -278,14 +294,9 @@ describe("SidebarArea", () => {
 
     it("onReorderChannel calls API for each reorder", () => {
       const opts = defaultOpts();
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      callArgs.onReorderChannel([
-        { channelId: 1, newPosition: 0 },
-        { channelId: 2, newPosition: 1 },
-      ]);
+      firstCallArg(createChannelSidebar as MockedFn).onReorderChannel(reorderTwo());
 
       expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(1, { position: 0 });
       expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(2, { position: 1 });
@@ -297,25 +308,14 @@ describe("SidebarArea", () => {
       // Previously fired with bare `void` and no .catch: a rejected PATCH left
       // the sidebar showing an order the server never accepted, with nothing
       // telling the admin.
-      const opts = defaultOpts();
-      const toast = { show: vi.fn() };
-      (opts.getToast as MockedFn).mockReturnValue(toast);
-      (opts.api.adminUpdateChannel as MockedFn)
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error("forbidden"));
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const { opts, toast } = optsWithToast();
+      queueWrites(opts, [undefined, new Error("forbidden")]);
+      const result = mountArea(container, opts);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      callArgs.onReorderChannel([
-        { channelId: 1, newPosition: 0 },
-        { channelId: 2, newPosition: 1 },
-      ]);
+      firstCallArg(createChannelSidebar as MockedFn).onReorderChannel(reorderTwo());
 
       // Flush the Promise.allSettled(...).then(...) microtask chain.
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushMicrotasks(3);
 
       expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(1, { position: 0 });
       expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(2, { position: 1 });
@@ -325,18 +325,14 @@ describe("SidebarArea", () => {
     });
 
     it("onReorderChannel does not toast when every write succeeds", async () => {
-      const opts = defaultOpts();
-      const toast = { show: vi.fn() };
-      (opts.getToast as MockedFn).mockReturnValue(toast);
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const { opts, toast } = optsWithToast();
+      const result = mountArea(container, opts);
 
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      callArgs.onReorderChannel([{ channelId: 1, newPosition: 0 }]);
+      firstCallArg(createChannelSidebar as MockedFn).onReorderChannel([
+        { channelId: 1, newPosition: 0 },
+      ]);
 
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushMicrotasks(3);
 
       expect(toast.show).not.toHaveBeenCalled();
 
@@ -345,35 +341,14 @@ describe("SidebarArea", () => {
 
     describe("onReorderChannel rollback", () => {
       function seedOrder(positions: Record<number, number>): void {
-        channelsStore.setState((prev) => {
-          const channels = new Map(prev.channels);
-          for (const [id, position] of Object.entries(positions)) {
-            channels.set(Number(id), {
-              id: Number(id),
-              name: `ch-${id}`,
-              type: "text",
-              category: null,
-              position,
-              unreadCount: 0,
-              mentionCount: 0,
-              lastMessageId: null,
-              canSend: true,
-              topic: "",
-              slowMode: 0,
-              nsfw: false,
-              isPrivate: false,
-              voiceMaxUsers: 0,
-              voiceMaxVideo: 0,
-            });
-          }
-          return { ...prev, channels };
-        });
+        seedChannels(
+          Object.entries(positions).map(([id, position]) =>
+            makeChannel({ id: Number(id), name: `ch-${id}`, position }),
+          ),
+        );
       }
       const positionOf = (id: number): number | undefined =>
         channelsStore.getState().channels.get(id)?.position;
-      const flush = async (): Promise<void> => {
-        for (let i = 0; i < 5; i++) await Promise.resolve();
-      };
 
       // The sidebar has already applied the optimistic order (channels 1 and
       // 2 swapped) by the time onReorderChannel runs.
@@ -381,21 +356,18 @@ describe("SidebarArea", () => {
         { channelId: 1, newPosition: 1, previousPosition: 0 },
         { channelId: 2, newPosition: 0, previousPosition: 1 },
       ];
+      const reorderSwap = (opts: SidebarAreaOptions): ReturnType<typeof createSidebarArea> => {
+        const result = mountArea(container, opts);
+        seedOrder({ 1: 1, 2: 0 });
+        firstCallArg(createChannelSidebar as MockedFn).onReorderChannel(swap);
+        return result;
+      };
 
       it("restores only the entry whose own write failed", async () => {
-        const opts = defaultOpts();
-        const toast = { show: vi.fn() };
-        (opts.getToast as MockedFn).mockReturnValue(toast);
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockResolvedValueOnce(undefined)
-          .mockRejectedValueOnce(new Error("forbidden"));
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedOrder({ 1: 1, 2: 0 });
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel(swap);
-        await flush();
+        const { opts, toast } = optsWithToast();
+        queueWrites(opts, [undefined, new Error("forbidden")]);
+        const result = reorderSwap(opts);
+        await flushMicrotasks(5);
 
         // Channel 1's PATCH was accepted, so it stays at its new position;
         // channel 2's was rejected, so it goes back.
@@ -407,16 +379,9 @@ describe("SidebarArea", () => {
       });
 
       it("leaves the new positions in place when every write succeeds", async () => {
-        const opts = defaultOpts();
-        const toast = { show: vi.fn() };
-        (opts.getToast as MockedFn).mockReturnValue(toast);
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedOrder({ 1: 1, 2: 0 });
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel(swap);
-        await flush();
+        const { opts, toast } = optsWithToast();
+        const result = reorderSwap(opts);
+        await flushMicrotasks(5);
 
         expect(positionOf(1)).toBe(1);
         expect(positionOf(2)).toBe(0);
@@ -427,19 +392,12 @@ describe("SidebarArea", () => {
 
       it("leaves a confirmed entry alone when its broadcast lands before the batch settles", async () => {
         const opts = defaultOpts();
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockResolvedValueOnce(undefined)
-          .mockRejectedValueOnce(new Error("forbidden"));
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedOrder({ 1: 1, 2: 0 });
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel(swap);
+        queueWrites(opts, [undefined, new Error("forbidden")]);
+        const result = reorderSwap(opts);
         // The server broadcasts channel_update before it answers the PATCH, so
         // channel 1's confirmed position can arrive before the batch settles.
         seedOrder({ 1: 1 });
-        await flush();
+        await flushMicrotasks(5);
 
         expect(positionOf(1)).toBe(1);
         expect(positionOf(2)).toBe(1);
@@ -449,23 +407,13 @@ describe("SidebarArea", () => {
 
       it("keeps the server value of a channel confirmed by a broadcast before its write failed", async () => {
         const opts = defaultOpts();
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockResolvedValueOnce(undefined)
-          .mockRejectedValueOnce(new Error("response lost"));
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedOrder({ 1: 1, 2: 0 });
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel(swap);
+        queueWrites(opts, [undefined, new Error("response lost")]);
+        const result = reorderSwap(opts);
         // The server persisted channel 2's move and broadcast it, then the
         // response was lost: the broadcast carries the same position the
         // optimistic update set, so only the broadcast itself tells them apart.
-        const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
-          (c: unknown[]) => c[0] === "channel_update",
-        )![1] as (payload: { id: number }) => void;
-        onUpdate({ id: 2 });
-        await flush();
+        emitChannelUpdate(opts, 2);
+        await flushMicrotasks(5);
 
         expect(positionOf(2)).toBe(0);
 
@@ -474,15 +422,8 @@ describe("SidebarArea", () => {
 
       it("still rolls back when only an unread badge touched the channel while the write failed", async () => {
         const opts = defaultOpts();
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockResolvedValueOnce(undefined)
-          .mockRejectedValueOnce(new Error("forbidden"));
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedOrder({ 1: 1, 2: 0 });
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel(swap);
+        queueWrites(opts, [undefined, new Error("forbidden")]);
+        const result = reorderSwap(opts);
         // An ordinary badge mutation replaces the channel object but is not a
         // channel_update, so it must not count as a server confirmation.
         channelsStore.setState((prev) => {
@@ -491,7 +432,7 @@ describe("SidebarArea", () => {
           channels.set(2, { ...ch, unreadCount: ch.unreadCount + 1 });
           return { ...prev, channels };
         });
-        await flush();
+        await flushMicrotasks(5);
 
         expect(positionOf(2)).toBe(1);
 
@@ -500,19 +441,12 @@ describe("SidebarArea", () => {
 
       it("does not overwrite a newer position that arrived while the failed write was in flight", async () => {
         const opts = defaultOpts();
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockResolvedValueOnce(undefined)
-          .mockRejectedValueOnce(new Error("response lost"));
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedOrder({ 1: 1, 2: 0 });
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel(swap);
+        queueWrites(opts, [undefined, new Error("response lost")]);
+        const result = reorderSwap(opts);
         // A newer reorder (or broadcast) moved channel 2 elsewhere before the
         // failure surfaced; the stale rollback must not clobber it.
         seedOrder({ 2: 5 });
-        await flush();
+        await flushMicrotasks(5);
 
         expect(positionOf(2)).toBe(5);
 
@@ -525,48 +459,11 @@ describe("SidebarArea", () => {
        *  moved it to category 11 "B" (position 1) at position 6; channel 2 in B was
        *  re-slotted from 6 to 7. The store already shows the optimistic result. */
       function seedMoved(): void {
-        const base = {
-          type: "text" as const,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        };
-        channelsStore.setState((prev) => ({
-          ...prev,
-          channels: new Map([
-            [
-              1,
-              {
-                ...base,
-                id: 1,
-                name: "one",
-                category: "B",
-                categoryId: 11,
-                categoryPosition: 1,
-                position: 6,
-              },
-            ],
-            [
-              2,
-              {
-                ...base,
-                id: 2,
-                name: "two",
-                category: "B",
-                categoryId: 11,
-                categoryPosition: 1,
-                position: 7,
-              },
-            ],
-          ]),
-        }));
+        const inB = { category: "B", categoryId: 11, categoryPosition: 1 };
+        seedChannels([
+          makeChannel({ id: 1, name: "one", position: 6, ...inB }),
+          makeChannel({ id: 2, name: "two", position: 7, ...inB }),
+        ]);
       }
       const moved = {
         channelId: 1,
@@ -579,18 +476,16 @@ describe("SidebarArea", () => {
       };
       const reslotted = { channelId: 2, newPosition: 7, previousPosition: 6 };
       const stored = (id: number) => channelsStore.getState().channels.get(id);
-      const flush = async (): Promise<void> => {
-        for (let i = 0; i < 5; i++) await Promise.resolve();
+      const reorderMoved = (opts: SidebarAreaOptions): ReturnType<typeof createSidebarArea> => {
+        const result = mountArea(container, opts);
+        seedMoved();
+        firstCallArg(createChannelSidebar as MockedFn).onReorderChannel([moved, reslotted]);
+        return result;
       };
 
       it("PATCHes category_id and position for the moved channel and position alone for the rest", () => {
         const opts = defaultOpts();
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedMoved();
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel([moved, reslotted]);
+        const result = reorderMoved(opts);
 
         expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(1, {
           category_id: 11,
@@ -602,19 +497,10 @@ describe("SidebarArea", () => {
       });
 
       it("a failed PATCH rolls back both the category and the position, with one error toast", async () => {
-        const opts = defaultOpts();
-        const toast = { show: vi.fn() };
-        (opts.getToast as MockedFn).mockReturnValue(toast);
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockRejectedValueOnce(new Error("forbidden"))
-          .mockResolvedValueOnce(undefined);
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedMoved();
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel([moved, reslotted]);
-        await flush();
+        const { opts, toast } = optsWithToast();
+        queueWrites(opts, [new Error("forbidden"), undefined]);
+        const result = reorderMoved(opts);
+        await flushMicrotasks(5);
 
         expect(stored(1)).toMatchObject({
           categoryId: 10,
@@ -632,20 +518,10 @@ describe("SidebarArea", () => {
 
       it("does not roll the category back once a channel_update confirmed the write", async () => {
         const opts = defaultOpts();
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockRejectedValueOnce(new Error("response lost"))
-          .mockResolvedValueOnce(undefined);
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedMoved();
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel([moved, reslotted]);
-        const onUpdate = (opts.ws.on as MockedFn).mock.calls.find(
-          (c: unknown[]) => c[0] === "channel_update",
-        )![1] as (payload: { id: number }) => void;
-        onUpdate({ id: 1 });
-        await flush();
+        queueWrites(opts, [new Error("response lost"), undefined]);
+        const result = reorderMoved(opts);
+        emitChannelUpdate(opts, 1);
+        await flushMicrotasks(5);
 
         expect(stored(1)).toMatchObject({ categoryId: 11, position: 6 });
 
@@ -654,22 +530,15 @@ describe("SidebarArea", () => {
 
       it("does not overwrite a newer category that arrived while the failed write was in flight", async () => {
         const opts = defaultOpts();
-        (opts.api.adminUpdateChannel as MockedFn)
-          .mockRejectedValueOnce(new Error("response lost"))
-          .mockResolvedValueOnce(undefined);
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        seedMoved();
-
-        const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-        callArgs.onReorderChannel([moved, reslotted]);
+        queueWrites(opts, [new Error("response lost"), undefined]);
+        const result = reorderMoved(opts);
         // Another move put the channel in category 12 before the failure surfaced.
         channelsStore.setState((prev) => {
           const channels = new Map(prev.channels);
           channels.set(1, { ...channels.get(1)!, categoryId: 12, category: "C" });
           return { ...prev, channels };
         });
-        await flush();
+        await flushMicrotasks(5);
 
         expect(stored(1)).toMatchObject({ categoryId: 12, category: "C", position: 6 });
 
@@ -683,20 +552,79 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("channel modal inner callbacks", () => {
-    it("onCreate callback calls API and destroys modal on success", async () => {
+    type SidebarCallbacks = Record<string, (arg?: unknown) => unknown>;
+    interface ModalKind {
+      readonly method: "adminCreateChannel" | "adminUpdateChannel" | "adminDeleteChannel";
+      readonly factory: MockedFn;
+      readonly loadsLazily: boolean;
+      readonly open: (sidebar: SidebarCallbacks, again?: boolean) => void;
+      readonly submit: (modal: SidebarCallbacks) => unknown;
+    }
+    const createKind: ModalKind = {
+      method: "adminCreateChannel",
+      factory: createCreateChannelModal as MockedFn,
+      loadsLazily: true,
+      open: (sidebar, again) => sidebar.onCreateChannel!(again === true ? "Another" : "General"),
+      submit: (modal) => modal.onCreate!({ name: "test", type: "text" }),
+    };
+    const editKind: ModalKind = {
+      method: "adminUpdateChannel",
+      factory: createEditChannelModal as MockedFn,
+      loadsLazily: true,
+      open: (sidebar, again) =>
+        sidebar.onEditChannel!(
+          again === true
+            ? { id: 2, name: "random", type: "text" }
+            : { id: 1, name: "general", type: "text" },
+        ),
+      submit: (modal) => modal.onSave!({ name: "updated" }),
+    };
+    const deleteKind: ModalKind = {
+      method: "adminDeleteChannel",
+      factory: createDeleteChannelModal as MockedFn,
+      loadsLazily: false,
+      open: (sidebar, again) =>
+        sidebar.onDeleteChannel!(
+          again === true ? { id: 2, name: "random" } : { id: 1, name: "general" },
+        ),
+      submit: (modal) => modal.onConfirm!(),
+    };
+
+    /** Mount, open the modal, and hand back the sidebar and modal callbacks. */
+    const openModal = async (kind: ModalKind, opts: SidebarAreaOptions) => {
+      const result = mountArea(container, opts);
+      const sidebar: SidebarCallbacks = firstCallArg(createChannelSidebar as MockedFn);
+      kind.open(sidebar);
+      if (kind.loadsLazily) await vi.dynamicImportSettled();
+      const modal: SidebarCallbacks = firstCallArg(kind.factory);
+      return { result, sidebar, modal };
+    };
+
+    it.each(
+      byName([
+        {
+          name: "onCreate callback calls API and destroys modal on success",
+          kind: createKind,
+          calledWith: [{ name: "test", type: "text" }],
+        },
+        {
+          name: "onSave callback calls API for edit modal",
+          kind: editKind,
+          calledWith: [1, { name: "updated" }],
+        },
+        {
+          name: "onConfirm callback calls API for delete modal",
+          kind: deleteKind,
+          calledWith: [1],
+        },
+      ]),
+    )("%s", async (_name, { kind, calledWith }) => {
       const opts = defaultOpts();
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const { result, modal } = await openModal(kind, opts);
 
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onCreateChannel("General");
-      await vi.dynamicImportSettled();
+      await kind.submit(modal);
 
-      // Get the createCreateChannelModal call args
-      const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onCreate({ name: "test", type: "text" });
-
-      expect(opts.api.adminCreateChannel).toHaveBeenCalledWith({ name: "test", type: "text" });
+      expect(opts.api[kind.method]).toHaveBeenCalledWith(...calledWith);
 
       cleanup(result);
     });
@@ -704,221 +632,86 @@ describe("SidebarArea", () => {
     // The modal's own catch is what re-enables the submit button and renders
     // the inline error, so the callback must reject on failure — a swallowed
     // error leaves the modal disabled on "Creating..." with no way to retry.
-    it("onCreate rejects and shows error toast on API failure", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminCreateChannel as MockedFn).mockRejectedValue(new Error("Create failed"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+    it.each(
+      byName([
+        {
+          name: "onCreate rejects and shows error toast on API failure",
+          kind: createKind,
+          message: "Create failed",
+        },
+        {
+          name: "onSave rejects and shows error toast on edit API failure",
+          kind: editKind,
+          message: "Update failed",
+        },
+        {
+          name: "onConfirm rejects and shows error toast on delete API failure",
+          kind: deleteKind,
+          message: "Delete failed",
+        },
+      ]),
+    )("%s", async (_name, { kind, message }) => {
+      const { opts, toast } = optsWithToast();
+      (opts.api[kind.method] as MockedFn).mockRejectedValue(new Error(message));
+      const { result, modal } = await openModal(kind, opts);
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      await expect(kind.submit(modal)).rejects.toThrow(message);
 
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onCreateChannel("General");
-      await vi.dynamicImportSettled();
-
-      const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
-      await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toThrow(
-        "Create failed",
-      );
-
-      expect(mockShow).toHaveBeenCalledWith("Create failed", "error");
+      expect(toast.show).toHaveBeenCalledWith(message, "error");
       // The modal stays open so the user can fix the input and retry.
-      expect(getMockDestroy(createCreateChannelModal as MockedFn)).not.toHaveBeenCalled();
+      expect(getMockDestroy(kind.factory)).not.toHaveBeenCalled();
 
       cleanup(result);
     });
 
-    it("onCreate rejects with the original value and shows generic toast for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminCreateChannel as MockedFn).mockRejectedValue("string error");
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+    it.each(
+      byName([
+        {
+          name: "onCreate rejects with the original value and shows generic toast for non-Error exceptions",
+          kind: createKind,
+          reason: "string error",
+          toastMessage: "Failed to create channel",
+        },
+        {
+          name: "onSave rejects with the original value and shows generic toast for non-Error exceptions on edit",
+          kind: editKind,
+          reason: 42,
+          toastMessage: "Failed to update channel",
+        },
+        {
+          name: "onConfirm rejects with the original value and shows generic toast for non-Error exceptions on delete",
+          kind: deleteKind,
+          reason: 42,
+          toastMessage: "Failed to delete channel",
+        },
+      ]),
+    )("%s", async (_name, { kind, reason, toastMessage }) => {
+      const { opts, toast } = optsWithToast();
+      (opts.api[kind.method] as MockedFn).mockRejectedValue(reason);
+      const { result, modal } = await openModal(kind, opts);
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      await expect(kind.submit(modal)).rejects.toBe(reason);
 
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onCreateChannel("General");
-      await vi.dynamicImportSettled();
-
-      const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
-      await expect(modalCallArgs.onCreate({ name: "test", type: "text" })).rejects.toBe(
-        "string error",
-      );
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to create channel", "error");
+      expect(toast.show).toHaveBeenCalledWith(toastMessage, "error");
 
       cleanup(result);
     });
 
-    it("onClose callback destroys create modal", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+    it.each(
+      byName([
+        { name: "onClose callback destroys create modal", kind: createKind },
+        { name: "onClose callback destroys edit modal", kind: editKind },
+        { name: "onClose callback destroys delete modal", kind: deleteKind },
+      ]),
+    )("%s", async (_name, { kind }) => {
+      const { result, sidebar, modal } = await openModal(kind, defaultOpts());
 
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onCreateChannel("General");
-      await vi.dynamicImportSettled();
-
-      const modalCallArgs = (createCreateChannelModal as MockedFn).mock.calls[0]![0];
-      modalCallArgs.onClose();
+      modal.onClose!();
 
       // After close, should be able to open another modal
-      channelCallArgs.onCreateChannel("Another");
-      await vi.dynamicImportSettled();
-      expect(createCreateChannelModal).toHaveBeenCalledTimes(2);
-
-      cleanup(result);
-    });
-
-    it("onSave callback calls API for edit modal", async () => {
-      const opts = defaultOpts();
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
-      await vi.dynamicImportSettled();
-
-      const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onSave({ name: "updated" });
-
-      expect(opts.api.adminUpdateChannel).toHaveBeenCalledWith(1, { name: "updated" });
-
-      cleanup(result);
-    });
-
-    it("onSave rejects and shows error toast on edit API failure", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminUpdateChannel as MockedFn).mockRejectedValue(new Error("Update failed"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
-
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
-      await vi.dynamicImportSettled();
-
-      const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
-      await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toThrow("Update failed");
-
-      expect(mockShow).toHaveBeenCalledWith("Update failed", "error");
-      expect(getMockDestroy(createEditChannelModal as MockedFn)).not.toHaveBeenCalled();
-
-      cleanup(result);
-    });
-
-    it("onSave rejects with the original value and shows generic toast for non-Error exceptions on edit", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminUpdateChannel as MockedFn).mockRejectedValue(42);
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
-
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
-      await vi.dynamicImportSettled();
-
-      const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
-      await expect(modalCallArgs.onSave({ name: "updated" })).rejects.toBe(42);
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to update channel", "error");
-
-      cleanup(result);
-    });
-
-    it("onClose callback destroys edit modal", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onEditChannel({ id: 1, name: "general", type: "text" });
-      await vi.dynamicImportSettled();
-
-      const modalCallArgs = (createEditChannelModal as MockedFn).mock.calls[0]![0];
-      modalCallArgs.onClose();
-
-      channelCallArgs.onEditChannel({ id: 2, name: "random", type: "text" });
-
-      await vi.dynamicImportSettled();
-      expect(createEditChannelModal).toHaveBeenCalledTimes(2);
-
-      cleanup(result);
-    });
-
-    it("onConfirm callback calls API for delete modal", async () => {
-      const opts = defaultOpts();
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onDeleteChannel({ id: 1, name: "general" });
-
-      const modalCallArgs = (createDeleteChannelModal as MockedFn).mock.calls[0]![0];
-      await modalCallArgs.onConfirm();
-
-      expect(opts.api.adminDeleteChannel).toHaveBeenCalledWith(1);
-
-      cleanup(result);
-    });
-
-    it("onConfirm rejects and shows error toast on delete API failure", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminDeleteChannel as MockedFn).mockRejectedValue(new Error("Delete failed"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
-
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onDeleteChannel({ id: 1, name: "general" });
-
-      const modalCallArgs = (createDeleteChannelModal as MockedFn).mock.calls[0]![0];
-      await expect(modalCallArgs.onConfirm()).rejects.toThrow("Delete failed");
-
-      expect(mockShow).toHaveBeenCalledWith("Delete failed", "error");
-      expect(getMockDestroy(createDeleteChannelModal as MockedFn)).not.toHaveBeenCalled();
-
-      cleanup(result);
-    });
-
-    it("onConfirm rejects with the original value and shows generic toast for non-Error exceptions on delete", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminDeleteChannel as MockedFn).mockRejectedValue(42);
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
-
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onDeleteChannel({ id: 1, name: "general" });
-
-      const modalCallArgs = (createDeleteChannelModal as MockedFn).mock.calls[0]![0];
-      await expect(modalCallArgs.onConfirm()).rejects.toBe(42);
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to delete channel", "error");
-
-      cleanup(result);
-    });
-
-    it("onClose callback destroys delete modal", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-
-      const channelCallArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
-      channelCallArgs.onDeleteChannel({ id: 1, name: "general" });
-
-      const modalCallArgs = (createDeleteChannelModal as MockedFn).mock.calls[0]![0];
-      modalCallArgs.onClose();
-
-      channelCallArgs.onDeleteChannel({ id: 2, name: "random" });
-      expect(createDeleteChannelModal).toHaveBeenCalledTimes(2);
+      kind.open(sidebar, true);
+      if (kind.loadsLazily) await vi.dynamicImportSettled();
+      expect(kind.factory).toHaveBeenCalledTimes(2);
 
       cleanup(result);
     });
@@ -929,9 +722,22 @@ describe("SidebarArea", () => {
   // -------------------------------------------------------------------------
 
   describe("quick switch overlay", () => {
+    /** The next profile manager's loadProfiles() stays pending until resolveLoad(). */
+    const holdProfileLoad = (): { pending: Promise<void>; resolveLoad: () => void } => {
+      let resolveLoad!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        resolveLoad = resolve;
+      });
+      (createProfileManager as MockedFn).mockReturnValueOnce({
+        loadProfiles: vi.fn().mockReturnValue(pending),
+        getAll: vi.fn().mockReturnValue([]),
+        store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
+      });
+      return { pending, resolveLoad };
+    };
+
     it("openQuickSwitch does not throw", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(() => result.openQuickSwitch()).not.toThrow();
 
@@ -944,23 +750,14 @@ describe("SidebarArea", () => {
       // the guard and mount a second, orphaned overlay (the same class of bug
       // already fixed with an `opening` flag on the sibling overlay
       // controllers in OverlayManagers.ts).
-      let resolveLoad!: () => void;
-      const pending = new Promise<void>((resolve) => {
-        resolveLoad = resolve;
-      });
-      (createProfileManager as MockedFn).mockReturnValueOnce({
-        loadProfiles: vi.fn().mockReturnValue(pending),
-        getAll: vi.fn().mockReturnValue([]),
-        store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
-      });
+      const { pending, resolveLoad } = holdProfileLoad();
 
       // createQuickSwitchOverlay's mock call count is not reset between
       // tests in this file (resetMocks() doesn't touch it), so compare
       // against a baseline rather than an absolute count.
       const callsBefore = (createQuickSwitchOverlay as MockedFn).mock.calls.length;
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       result.openQuickSwitch();
       result.openQuickSwitch();
@@ -989,20 +786,11 @@ describe("SidebarArea", () => {
       // test, teardown runs (the real unsubscriber list, same as
       // MainPage.destroy()'s loop) while loadProfiles() is still pending, and
       // only then does the profile load resolve.
-      let resolveLoad!: () => void;
-      const pending = new Promise<void>((resolve) => {
-        resolveLoad = resolve;
-      });
-      (createProfileManager as MockedFn).mockReturnValueOnce({
-        loadProfiles: vi.fn().mockReturnValue(pending),
-        getAll: vi.fn().mockReturnValue([]),
-        store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
-      });
+      const { pending, resolveLoad } = holdProfileLoad();
 
       const callsBefore = (createQuickSwitchOverlay as MockedFn).mock.calls.length;
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       result.openQuickSwitch();
 
@@ -1021,8 +809,7 @@ describe("SidebarArea", () => {
 
     it("leaves through Add server as a switch, keeping the departed sign-in", async () => {
       const callsBefore = (createQuickSwitchOverlay as MockedFn).mock.calls.length;
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       result.openQuickSwitch();
       await vi.waitFor(() =>

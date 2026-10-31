@@ -4,6 +4,7 @@ import { cascadedDeclaration } from "../../helpers/app-css";
 import {
   createChannelSidebar,
   type ChannelReorderData,
+  type ChannelSidebarOptions,
 } from "../../../src/components/ChannelSidebar";
 import {
   channelsStore,
@@ -31,6 +32,7 @@ import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 import { setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import {
   resetStores,
+  useSidebarFixture,
   addVoiceUser,
   testChannels,
   setAdminUser,
@@ -47,7 +49,21 @@ vi.mock("../../../src/features/profiles/openUserProfilePopup", () =>
   mocks.profilesOpenUserProfilePopupMock(),
 );
 
-const { mockOpenUserProfilePopup } = mocks;
+const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
+  id,
+  name: `text-${id}`,
+  type: "text",
+  category: "Text Channels",
+  position: id,
+  unread_count: 0,
+  last_message_id: 1,
+  ...extra,
+});
+
+const channelRowIds = (container: HTMLElement): string[] =>
+  Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
+    (el) => el.dataset.channelId ?? "",
+  );
 
 describe("ChannelSidebar", () => {
   let container: HTMLDivElement;
@@ -55,23 +71,15 @@ describe("ChannelSidebar", () => {
   let onVoiceJoin: Mock<(channelId: number) => void>;
   let onOpenCall: Mock<() => void>;
 
-  beforeEach(() => {
-    resetStores();
-    mockOpenUserProfilePopup.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onVoiceJoin = vi.fn<(channelId: number) => void>();
-    onOpenCall = vi.fn<() => void>();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
-  });
+  useSidebarFixture(
+    (fx) => {
+      ({ container, sidebar, onVoiceJoin, onOpenCall } = fx);
+    },
+    () => sidebar,
+  );
 
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    // Clean up any context menus left on document.body
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    document.querySelectorAll(".user-vol-menu").forEach((el) => el.remove());
-  });
+  const createSidebarWith = (extra: Partial<ChannelSidebarOptions>) =>
+    createChannelSidebar({ onVoiceJoin, onOpenCall, ...extra });
 
   it("renders channel list from store", () => {
     setChannels(testChannels);
@@ -484,16 +492,6 @@ describe("ChannelSidebar", () => {
   // ── WP 3D-4d: Hide Muted Channels ──
 
   describe("Hide Muted Channels", () => {
-    const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
-      id,
-      name: `text-${id}`,
-      type: "text",
-      category: "Text Channels",
-      position: id,
-      unread_count: 0,
-      last_message_id: 1,
-      ...extra,
-    });
     const voice = (id: number): ReadyChannel => ({
       id,
       name: `voice-${id}`,
@@ -501,10 +499,7 @@ describe("ChannelSidebar", () => {
       category: "Voice Channels",
       position: id,
     });
-    const rowIds = (): string[] =>
-      Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
-        (el) => el.dataset.channelId ?? "",
-      );
+    const rowIds = (): string[] => channelRowIds(container);
     const flush = (): void => {
       channelsStore.flush();
       voiceStore.flush();
@@ -694,23 +689,10 @@ describe("ChannelSidebar", () => {
   });
 
   describe("collapsed category shows what matters", () => {
-    const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
-      id,
-      name: `text-${id}`,
-      type: "text",
-      category: "Text Channels",
-      position: id,
-      unread_count: 0,
-      last_message_id: 1,
-      ...extra,
-    });
     const collapse = (...names: string[]): void => {
       uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set(names) }));
     };
-    const rowIds = (): string[] =>
-      Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
-        (el) => el.dataset.channelId ?? "",
-      );
+    const rowIds = (): string[] => channelRowIds(container);
 
     beforeEach(() => {
       localStorage.clear();
@@ -825,7 +807,7 @@ describe("ChannelSidebar", () => {
       const onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
       sidebar.destroy?.();
       setAdminUser();
-      sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onReorderChannel });
+      sidebar = createSidebarWith({ onReorderChannel });
       setChannels([text(1, { unread_count: 1 }), text(2), text(3, { unread_count: 1 })]);
       collapse("Text Channels");
       sidebar.mount(container);
@@ -883,7 +865,7 @@ describe("ChannelSidebar", () => {
     const onCreateChannel = vi.fn();
     sidebar.destroy?.();
     setAdminUser();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onCreateChannel });
+    sidebar = createSidebarWith({ onCreateChannel });
     sidebar.mount(container);
 
     const btn = container.querySelector<HTMLElement>("[data-testid='create-channel-empty']");
@@ -966,11 +948,7 @@ describe("ChannelSidebar", () => {
     const onReorderChannel = vi.fn();
     sidebar.destroy?.();
     setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onReorderChannel,
-    });
+    sidebar = createSidebarWith({ onReorderChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -984,11 +962,7 @@ describe("ChannelSidebar", () => {
     const onReorderChannel = vi.fn();
     sidebar.destroy?.();
     signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onReorderChannel,
-    });
+    sidebar = createSidebarWith({ onReorderChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1001,11 +975,7 @@ describe("ChannelSidebar", () => {
     const onReorderChannel = vi.fn();
     sidebar.destroy?.();
     setAdminUser();
-    sidebar = createChannelSidebar({
-      onVoiceJoin,
-      onOpenCall,
-      onReorderChannel,
-    });
+    sidebar = createSidebarWith({ onReorderChannel });
 
     setChannels(testChannels);
     sidebar.mount(container);
@@ -1263,20 +1233,7 @@ describe("ChannelSidebar on one select", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
-  const text = (id: number, extra: Partial<ReadyChannel> = {}): ReadyChannel => ({
-    id,
-    name: `text-${id}`,
-    type: "text",
-    category: "Text Channels",
-    position: id,
-    unread_count: 0,
-    last_message_id: 1,
-    ...extra,
-  });
-  const rowIds = (): string[] =>
-    Array.from(container.querySelectorAll<HTMLElement>(".channel-item")).map(
-      (el) => el.dataset.channelId ?? "",
-    );
+  const rowIds = (): string[] => channelRowIds(container);
   const row = (id: number): HTMLElement | null =>
     container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${id}"]`);
 

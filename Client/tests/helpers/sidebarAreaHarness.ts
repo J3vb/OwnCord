@@ -1,6 +1,8 @@
 import { vi } from "vitest";
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { dmStore } from "../../src/stores/dm.store";
+import { dmStore, addDmChannel } from "../../src/stores/dm.store";
+import { membersStore, type Member } from "../../src/stores/members.store";
+import { channelsStore, type Channel, type ChannelsState } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
 import { voiceStore, joinVoiceChannel } from "../../src/stores/voice.store";
@@ -186,4 +188,109 @@ export function defaultOpts(): SidebarAreaOptions {
 /** Helper to clean up a SidebarAreaResult */
 export function cleanup(result: ReturnType<typeof createSidebarArea>): void {
   for (const unsub of result.unsubscribers) unsub();
+}
+
+// ---------------------------------------------------------------------------
+// Arrange helpers
+// ---------------------------------------------------------------------------
+
+/** Mount a fresh SidebarArea into `container`; each call builds its own options unless given. */
+export function mountArea(
+  container: HTMLElement,
+  opts: SidebarAreaOptions = defaultOpts(),
+): ReturnType<typeof createSidebarArea> {
+  const result = createSidebarArea(opts);
+  container.appendChild(result.sidebarWrapper);
+  return result;
+}
+
+/** The first argument of the first call to a mocked component factory. */
+export function firstCallArg(factory: MockedFn) {
+  return factory.mock.calls[0]![0];
+}
+
+/** The first argument of the most recent call to a mocked component factory. */
+export function lastCallArg(factory: MockedFn) {
+  const calls = factory.mock.calls;
+  return calls[calls.length - 1]![0];
+}
+
+/** Start in DMs mode, as if the user had already switched. */
+export function enterDmsMode(): void {
+  uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+}
+
+/** A complete Channel with quiet defaults; override only what the test cares about. */
+export function makeChannel(overrides: Partial<Channel> & Pick<Channel, "id" | "name">): Channel {
+  return {
+    type: "text",
+    category: null,
+    position: 0,
+    unreadCount: 0,
+    mentionCount: 0,
+    lastMessageId: null,
+    canSend: true,
+    topic: "",
+    slowMode: 0,
+    nsfw: false,
+    isPrivate: false,
+    voiceMaxUsers: 0,
+    voiceMaxVideo: 0,
+    ...overrides,
+  };
+}
+
+/** Add channels to channelsStore, optionally patching other state in the same write. */
+export function seedChannels(
+  channels: readonly Channel[],
+  extra: Partial<ChannelsState> = {},
+): void {
+  channelsStore.setState((prev) => {
+    const next = new Map(prev.channels);
+    for (const channel of channels) next.set(channel.id, channel);
+    return { ...prev, channels: next, ...extra };
+  });
+}
+
+/** Replace the roster with members that have no avatar. */
+export function seedMembers(
+  members: ReadonlyArray<Pick<Member, "id" | "username" | "role" | "status">>,
+): void {
+  membersStore.setState((prev) => ({
+    ...prev,
+    members: new Map(members.map((m) => [m.id, { ...m, avatar: null }])),
+  }));
+}
+
+/** Click the "+" beside the DM section and wait for the picker to load; returns the button. */
+export async function openMemberPicker(container: HTMLElement): Promise<HTMLElement> {
+  const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
+  addBtn.click();
+  await vi.dynamicImportSettled();
+  return addBtn;
+}
+
+/** Click the first DM row in the sidebar. */
+export function clickDmEntry(container: HTMLElement): void {
+  (container.querySelector("[data-testid='dm-entry']") as HTMLElement).click();
+}
+
+/** Default options whose toast is a fresh spy the test can assert on. */
+export function optsWithToast(): { opts: SidebarAreaOptions; toast: { show: MockedFn } } {
+  const toast = { show: vi.fn() };
+  const opts = defaultOpts();
+  (opts.getToast as MockedFn).mockReturnValue(toast);
+  return { opts, toast };
+}
+
+/** Add `count` one-to-one DMs (channel ids 100+, users User0..) in the dm store. */
+export function addUserDms(count: number): void {
+  for (let i = 0; i < count; i++) {
+    addDmChannel(
+      makeDm({
+        channelId: 100 + i,
+        recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
+      }),
+    );
+  }
 }

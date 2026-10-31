@@ -27,6 +27,11 @@ import {
   makeDm,
   defaultOpts,
   cleanup,
+  mountArea,
+  enterDmsMode,
+  openMemberPicker,
+  seedMembers,
+  addUserDms,
 } from "../../helpers/sidebarAreaHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -109,8 +114,7 @@ describe("SidebarArea", () => {
 
   describe("server header", () => {
     it("renders server header with server name from auth store", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const header = container.querySelector(".unified-sidebar-header");
       expect(header).not.toBeNull();
@@ -122,8 +126,7 @@ describe("SidebarArea", () => {
     });
 
     it("renders server icon with OC text", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const icon = container.querySelector(".server-icon-sm");
       expect(icon!.textContent).toBe("OC");
@@ -132,26 +135,13 @@ describe("SidebarArea", () => {
     });
 
     it("renders online count from members store", () => {
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "User1", avatar: null, role: "member", status: "online" as const },
-          ],
-          [
-            2,
-            { id: 2, username: "User2", avatar: null, role: "member", status: "offline" as const },
-          ],
-          [
-            3,
-            { id: 3, username: "User3", avatar: null, role: "member", status: "online" as const },
-          ],
-        ]),
-      }));
+      seedMembers([
+        { id: 1, username: "User1", role: "member", status: "online" },
+        { id: 2, username: "User2", role: "member", status: "offline" },
+        { id: 3, username: "User3", role: "member", status: "online" },
+      ]);
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const onlineEl = container.querySelector(".server-online");
       expect(onlineEl!.textContent).toBe("2 online");
@@ -162,8 +152,7 @@ describe("SidebarArea", () => {
     it("shows 'Server' as fallback when serverName is null", () => {
       authStore.setState((prev) => ({ ...prev, serverName: null }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const serverName = container.querySelector(".server-name");
       expect(serverName!.textContent).toBe("Server");
@@ -172,8 +161,7 @@ describe("SidebarArea", () => {
     });
 
     it("updates server name when auth store changes", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       authStore.setState((prev) => ({ ...prev, serverName: "New Name" }));
       authStore.flush();
@@ -185,26 +173,13 @@ describe("SidebarArea", () => {
     });
 
     it("updates online count when members store changes", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "User1", avatar: null, role: "member", status: "online" as const },
-          ],
-          [
-            2,
-            { id: 2, username: "User2", avatar: null, role: "member", status: "online" as const },
-          ],
-          [
-            3,
-            { id: 3, username: "User3", avatar: null, role: "member", status: "online" as const },
-          ],
-        ]),
-      }));
+      seedMembers([
+        { id: 1, username: "User1", role: "member", status: "online" },
+        { id: 2, username: "User2", role: "member", status: "online" },
+        { id: 3, username: "User3", role: "member", status: "online" },
+      ]);
       membersStore.flush();
 
       const onlineEl = container.querySelector(".server-online");
@@ -214,8 +189,7 @@ describe("SidebarArea", () => {
     });
 
     it("renders invite button in header", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const inviteBtn = container.querySelector("[data-testid='invite-btn']");
       expect(inviteBtn).not.toBeNull();
@@ -247,8 +221,7 @@ describe("SidebarArea", () => {
     }
 
     function mount(): ReturnType<typeof createSidebarArea> {
-      const result = createSidebarArea({ ...defaultOpts(), destinations: destinations() });
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, { ...defaultOpts(), destinations: destinations() });
       return result;
     }
 
@@ -378,8 +351,7 @@ describe("SidebarArea", () => {
 
   describe("channels mode", () => {
     it("mounts channel sidebar in channels mode (initial)", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createChannelSidebar).toHaveBeenCalled();
       expect(getMockMount(createChannelSidebar as MockedFn)).toHaveBeenCalled();
@@ -390,8 +362,7 @@ describe("SidebarArea", () => {
     it("renders DM section above channels", () => {
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const dmSection = container.querySelector(".sidebar-dm-section");
       expect(dmSection).not.toBeNull();
@@ -403,8 +374,7 @@ describe("SidebarArea", () => {
     });
 
     it("renders member list section below channels", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createMemberList).toHaveBeenCalled();
       expect(getMockMount(createMemberList as MockedFn)).toHaveBeenCalled();
@@ -417,8 +387,7 @@ describe("SidebarArea", () => {
 
     it("right layout mounts no sidebar member section", () => {
       localStorage.setItem("owncord:settings:memberListLayout", '"right"');
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(container.querySelector("[data-testid='sidebar-members']")).toBeNull();
       expect(createMemberList).not.toHaveBeenCalled();
@@ -429,8 +398,7 @@ describe("SidebarArea", () => {
 
     it("syncMemberSection adds and removes the section without remounting the channel list", () => {
       localStorage.setItem("owncord:settings:memberListLayout", '"right"');
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
       const inner = container.querySelector(".sidebar-content-inner");
       expect(inner).not.toBeNull();
       expect(createChannelSidebar).toHaveBeenCalledTimes(1);
@@ -456,9 +424,8 @@ describe("SidebarArea", () => {
     });
 
     it("syncMemberSection builds nothing in DMs mode, in either layout", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      enterDmsMode();
+      const result = mountArea(container);
 
       localStorage.setItem("owncord:settings:memberListLayout", '"left"');
       result.syncMemberSection();
@@ -470,8 +437,7 @@ describe("SidebarArea", () => {
 
     it("returning to channels mode follows the stored layout", () => {
       localStorage.setItem("owncord:settings:memberListLayout", '"right"');
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       setSidebarMode("dms");
       uiStore.flush();
@@ -490,17 +456,9 @@ describe("SidebarArea", () => {
     });
 
     it("renders DM list with up to 3 entries", () => {
-      for (let i = 0; i < 5; i++) {
-        addDmChannel(
-          makeDm({
-            channelId: 100 + i,
-            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-          }),
-        );
-      }
+      addUserDms(5);
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const entries = container.querySelectorAll("[data-testid='dm-entry']");
       expect(entries.length).toBe(3);
@@ -509,17 +467,9 @@ describe("SidebarArea", () => {
     });
 
     it("shows View All button when more than 3 DMs exist", () => {
-      for (let i = 0; i < 5; i++) {
-        addDmChannel(
-          makeDm({
-            channelId: 100 + i,
-            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-          }),
-        );
-      }
+      addUserDms(5);
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const viewAll = container.querySelector(".sidebar-dm-view-all") as HTMLElement;
       expect(viewAll).not.toBeNull();
@@ -531,8 +481,7 @@ describe("SidebarArea", () => {
     it("hides View All button when 3 or fewer DMs exist", () => {
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const viewAll = container.querySelector(".sidebar-dm-view-all") as HTMLElement;
       expect(viewAll.style.display).toBe("none");
@@ -541,17 +490,9 @@ describe("SidebarArea", () => {
     });
 
     it("View All button switches to DMs mode", () => {
-      for (let i = 0; i < 5; i++) {
-        addDmChannel(
-          makeDm({
-            channelId: 100 + i,
-            recipient: { id: 10 + i, username: `User${i}`, avatar: "", status: "online" },
-          }),
-        );
-      }
+      addUserDms(5);
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const viewAll = container.querySelector(".sidebar-dm-view-all") as HTMLElement;
       viewAll.click();
@@ -564,8 +505,7 @@ describe("SidebarArea", () => {
     it("shows unread badge on DM entries with unreads", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 7 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const badge = container.querySelector(".dm-unread-badge");
       expect(badge).not.toBeNull();
@@ -584,8 +524,7 @@ describe("SidebarArea", () => {
         }),
       );
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const headerBadge = container.querySelector(".dm-header-unread-badge") as HTMLElement;
       expect(headerBadge.textContent).toBe("5");
@@ -597,8 +536,7 @@ describe("SidebarArea", () => {
     it("hides total unread badge when all have 0 unreads", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 0 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const headerBadge = container.querySelector(".dm-header-unread-badge") as HTMLElement;
       expect(headerBadge.style.display).toBe("none");
@@ -609,8 +547,7 @@ describe("SidebarArea", () => {
     it("collapses DM section when header is clicked", () => {
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const dmHeaders = container.querySelectorAll(".category");
       const dmHeader = Array.from(dmHeaders).find(
@@ -629,12 +566,9 @@ describe("SidebarArea", () => {
     });
 
     it("add DM button opens member picker", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      await openMemberPicker(container);
 
       const modal = document.querySelector(".dm-member-picker-modal");
       expect(modal).not.toBeNull();
@@ -662,8 +596,7 @@ describe("SidebarArea", () => {
         }),
       );
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const entries = container.querySelectorAll("[data-testid='dm-entry']");
       // Entries are rendered from store (last added first)
@@ -679,8 +612,7 @@ describe("SidebarArea", () => {
     });
 
     it("re-renders DM list when DM store changes", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(container.querySelectorAll("[data-testid='dm-entry']").length).toBe(0);
 
@@ -693,8 +625,7 @@ describe("SidebarArea", () => {
     });
 
     it("hides old channel-sidebar-header inside the mounted channel sidebar", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       // The channel sidebar mounts into the inner slot, whose stylesheet hides
       // its header (jsdom applies no CSS, so the rule is asserted directly).
@@ -752,8 +683,7 @@ describe("SidebarArea", () => {
 
   describe("voice widget and user bar", () => {
     it("mounts voice widget", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
       await enterVoiceAndAwaitWidget();
 
       expect(createVoiceWidget).toHaveBeenCalled();
@@ -764,8 +694,7 @@ describe("SidebarArea", () => {
     });
 
     it("mounts user bar", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createUserBar).toHaveBeenCalled();
       expect(getMockMount(createUserBar as MockedFn)).toHaveBeenCalled();
@@ -775,8 +704,7 @@ describe("SidebarArea", () => {
 
     it("passes the ws client to the user bar (presence picker send path)", () => {
       const opts = defaultOpts();
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
       // Without ws, the status picker is permanently disabled and
       // presence_update can never be sent — this pins the fix.
@@ -807,8 +735,7 @@ describe("SidebarArea", () => {
     it("restores member list height from localStorage", () => {
       localStorage.setItem("owncord:member-list-height", "200");
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const memberSection = container.querySelector(
         "[data-testid='sidebar-members']",
@@ -821,8 +748,7 @@ describe("SidebarArea", () => {
     it("restores collapsed state from localStorage", () => {
       localStorage.setItem("owncord:member-list-collapsed", "true");
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const memberHeader = container.querySelector(".sidebar-members-header") as HTMLElement;
       expect(memberHeader.classList.contains("collapsed")).toBe(true);
@@ -834,8 +760,7 @@ describe("SidebarArea", () => {
     });
 
     it("toggles member list collapse on header click", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const memberHeader = container.querySelector(".sidebar-members-header") as HTMLElement;
       memberHeader.click();
@@ -853,8 +778,7 @@ describe("SidebarArea", () => {
     it("sets height to auto when collapsed", () => {
       localStorage.setItem("owncord:member-list-height", "300");
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const memberHeader = container.querySelector(".sidebar-members-header") as HTMLElement;
       memberHeader.click();
@@ -868,8 +792,7 @@ describe("SidebarArea", () => {
     });
 
     it("hides resize handle when collapsed", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const memberHeader = container.querySelector(".sidebar-members-header") as HTMLElement;
       memberHeader.click();
@@ -881,8 +804,7 @@ describe("SidebarArea", () => {
     });
 
     it("handles mousedown/mousemove/mouseup for drag-to-resize", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const handle = container.querySelector(".sidebar-resize-handle") as HTMLElement;
       handle.dispatchEvent(new MouseEvent("mousedown", { clientY: 300, bubbles: true }));
@@ -895,8 +817,7 @@ describe("SidebarArea", () => {
     });
 
     it("does not resize when not in drag mode", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       // mousemove without mousedown should not do anything
       document.dispatchEvent(new MouseEvent("mousemove", { clientY: 250, bubbles: true }));
@@ -910,8 +831,7 @@ describe("SidebarArea", () => {
     it("restores saved height when expanding after collapse", () => {
       localStorage.setItem("owncord:member-list-height", "300");
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const memberHeader = container.querySelector(".sidebar-members-header") as HTMLElement;
       memberHeader.click(); // Collapse
@@ -932,8 +852,7 @@ describe("SidebarArea", () => {
 
   describe("section ordering", () => {
     it("sidebar structure: header, content slot, voice widget, user bar", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const wrapper = container.querySelector("[data-testid='unified-sidebar']") as HTMLElement;
       const children = Array.from(wrapper.children);
@@ -947,8 +866,7 @@ describe("SidebarArea", () => {
     it("in channels mode, DM section comes before channel sidebar in content slot", () => {
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const wrapper = container.querySelector("[data-testid='unified-sidebar']") as HTMLElement;
       const contentSlot = wrapper.children[1] as HTMLElement;

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/sidebarAreaMocks";
+import { byName } from "../../helpers/tableCases";
 import type { ApiClient } from "@lib/api";
 import {
   createSidebarArea,
@@ -12,12 +13,13 @@ import {
 import { channelsStore, setActiveChannel, setRoles } from "../../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../../src/stores/dm.store";
 import { uiStore, setSidebarMode } from "../../../src/stores/ui.store";
-import { authStore } from "../../../src/stores/auth.store";
+import { authStore, type AuthState } from "../../../src/stores/auth.store";
 import { Permission } from "../../../src/lib/types";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createMemberList } from "@components/MemberList";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import "../../../src/pages/main-page/MemberPickerModal";
+import { openBanDialogFor } from "../../helpers/banDialog";
 import {
   MockedFn,
   getMockDestroy,
@@ -26,6 +28,12 @@ import {
   makeDm,
   defaultOpts,
   cleanup,
+  mountArea,
+  firstCallArg,
+  optsWithToast,
+  lastCallArg,
+  makeChannel,
+  seedChannels,
 } from "../../helpers/sidebarAreaHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -67,6 +75,29 @@ describe("SidebarArea", () => {
     document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
   });
 
+  const mountWithStartCall = () => {
+    const onStartCall = vi.fn();
+    const opts = defaultOpts();
+    const result = mountArea(container, { ...opts, onStartCall });
+    return { onStartCall, opts, result };
+  };
+
+  const signedIn = { token: "tok", isAuthenticated: true } as const;
+
+  /** Give the current user a single role holding `permissions`. */
+  function signInWithRole(
+    roleName: string,
+    permissions: number,
+    session: Partial<AuthState> = {},
+  ): void {
+    setRoles([{ id: 9, name: roleName, color: null, permissions }]);
+    authStore.setState((prev) => ({
+      ...prev,
+      ...session,
+      user: { id: 9, username: "U", avatar: null, role: roleName },
+    }));
+  }
+
   // -------------------------------------------------------------------------
   // Member list callbacks in channels mode
   // -------------------------------------------------------------------------
@@ -78,132 +109,93 @@ describe("SidebarArea", () => {
       onBan: (userId: number, username: string, displayName: string) => void;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
-      const calls = (createMemberList as MockedFn).mock.calls;
-      return calls[calls.length - 1]![0];
+      return lastCallArg(createMemberList as MockedFn);
     }
 
     it("onKick (Force Logout) calls API and shows success toast", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      const { opts, toast } = optsWithToast();
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
       const callbacks = getMemberListCallbacks();
       await callbacks.onKick(2, "Alice");
 
       expect(opts.api.adminKickMember).toHaveBeenCalledWith(2);
-      expect(mockShow).toHaveBeenCalledWith("Forced Alice to log out", "success");
+      expect(toast.show).toHaveBeenCalledWith("Forced Alice to log out", "success");
 
       cleanup(result);
     });
 
-    it("onKick shows error toast on failure", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminKickMember as MockedFn).mockRejectedValue(new Error("Kick denied"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+    it.each(
+      byName([
+        {
+          name: "onKick shows error toast on failure",
+          reason: new Error("Kick denied"),
+          message: "Kick denied",
+        },
+        {
+          name: "onKick shows generic error for non-Error exceptions",
+          reason: "string",
+          message: "Failed to force logout",
+        },
+      ]),
+    )("%s", async (_name, { reason, message }) => {
+      const { opts, toast } = optsWithToast();
+      (opts.api.adminKickMember as MockedFn).mockRejectedValue(reason);
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onKick(2, "Alice");
+      await getMemberListCallbacks().onKick(2, "Alice");
 
-      expect(mockShow).toHaveBeenCalledWith("Kick denied", "error");
-
-      cleanup(result);
-    });
-
-    it("onKick shows generic error for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminKickMember as MockedFn).mockRejectedValue("string");
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
-
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onKick(2, "Alice");
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to force logout", "error");
+      expect(toast.show).toHaveBeenCalledWith(message, "error");
 
       cleanup(result);
     });
-
-    /** Open the Ban dialog the member menu asks for and return its controls. */
-    async function openBanDialogFor(
-      callbacks: ReturnType<typeof getMemberListCallbacks>,
-    ): Promise<{ reason: HTMLInputElement; confirm: HTMLButtonElement; status: HTMLElement }> {
-      callbacks.onBan(3, "Bob", "Bob");
-      const dialog = await vi.waitFor(() => {
-        const el = document.querySelector('[data-testid="ban-dialog"]');
-        if (el === null) throw new Error("ban dialog not open yet");
-        return el;
-      });
-      return {
-        reason: dialog.querySelector('[data-testid="ban-reason-input"]') as HTMLInputElement,
-        confirm: dialog.querySelector('[data-testid="ban-confirm"]') as HTMLButtonElement,
-        status: dialog.querySelector('[data-testid="ban-status"]') as HTMLElement,
-      };
-    }
 
     it("onBan opens the dialog, calls the API and shows the success toast", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      const { opts, toast } = optsWithToast();
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
       const { reason, confirm } = await openBanDialogFor(getMemberListCallbacks());
       reason.value = "spamming";
       confirm.click();
-      await vi.waitFor(() => expect(mockShow).toHaveBeenCalledWith("Banned Bob", "success"));
+      await vi.waitFor(() => expect(toast.show).toHaveBeenCalledWith("Banned Bob", "success"));
 
       expect(opts.api.adminBanMember).toHaveBeenCalledWith(3, "spamming", 0, undefined, 0);
 
       cleanup(result);
     });
 
-    it("onBan shows the error in the dialog on failure", async () => {
-      const opts = defaultOpts();
-      (opts.api.adminBanMember as MockedFn).mockRejectedValue(new Error("Ban denied"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: vi.fn() });
+    it.each(
+      byName([
+        {
+          name: "onBan shows the error in the dialog on failure",
+          reason: new Error("Ban denied"),
+          message: "Ban denied",
+        },
+        {
+          name: "onBan shows generic error for non-Error exceptions",
+          reason: "string",
+          message: "Failed to ban member",
+        },
+      ]),
+    )("%s", async (_name, { reason, message }) => {
+      const { opts } = optsWithToast();
+      (opts.api.adminBanMember as MockedFn).mockRejectedValue(reason);
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const { confirm, status } = await openBanDialogFor(getMemberListCallbacks());
-      confirm.click();
-      await vi.waitFor(() => expect(status.textContent).toBe("Ban denied"));
-
-      cleanup(result);
-      document.querySelector('[data-testid="ban-dialog"]')?.remove();
-    });
-
-    it("onBan shows generic error for non-Error exceptions", async () => {
-      const opts = defaultOpts();
-      (opts.api.adminBanMember as MockedFn).mockRejectedValue("string");
-      (opts.getToast as MockedFn).mockReturnValue({ show: vi.fn() });
-
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
       const { confirm, status } = await openBanDialogFor(getMemberListCallbacks());
       confirm.click();
-      await vi.waitFor(() => expect(status.textContent).toBe("Failed to ban member"));
+      await vi.waitFor(() => expect(status.textContent).toBe(message));
 
       cleanup(result);
       document.querySelector('[data-testid="ban-dialog"]')?.remove();
     });
 
     it("onChangeRole calls API with correct role ID", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      const { opts, toast } = optsWithToast();
 
       // Set up roles in channelsStore
       channelsStore.setState((prev) => ({
@@ -215,75 +207,58 @@ describe("SidebarArea", () => {
         ],
       }));
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
       const callbacks = getMemberListCallbacks();
       await callbacks.onChangeRole(4, "Charlie", "admin");
 
       expect(opts.api.adminChangeRole).toHaveBeenCalledWith(4, 2);
-      expect(mockShow).toHaveBeenCalledWith("Changed Charlie's role to admin", "success");
+      expect(toast.show).toHaveBeenCalledWith("Changed Charlie's role to admin", "success");
 
       cleanup(result);
     });
 
-    it("onChangeRole shows error toast on failure", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminChangeRole as MockedFn).mockRejectedValue(new Error("Role denied"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+    it.each(
+      byName([
+        {
+          name: "onChangeRole shows error toast on failure",
+          reason: new Error("Role denied"),
+          message: "Role denied",
+        },
+        {
+          name: "onChangeRole shows generic error for non-Error exceptions",
+          reason: "string",
+          message: "Failed to change role",
+        },
+      ]),
+    )("%s", async (_name, { reason, message }) => {
+      const { opts, toast } = optsWithToast();
+      (opts.api.adminChangeRole as MockedFn).mockRejectedValue(reason);
 
       channelsStore.setState((prev) => ({
         ...prev,
         roles: [{ id: 2, name: "admin", color: null, permissions: 0 }],
       }));
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onChangeRole(4, "Charlie", "admin");
+      await getMemberListCallbacks().onChangeRole(4, "Charlie", "admin");
 
-      expect(mockShow).toHaveBeenCalledWith("Role denied", "error");
-
-      cleanup(result);
-    });
-
-    it("onChangeRole shows generic error for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.api.adminChangeRole as MockedFn).mockRejectedValue("string");
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
-
-      channelsStore.setState((prev) => ({
-        ...prev,
-        roles: [{ id: 2, name: "admin", color: null, permissions: 0 }],
-      }));
-
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const callbacks = getMemberListCallbacks();
-      await callbacks.onChangeRole(4, "Charlie", "admin");
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to change role", "error");
+      expect(toast.show).toHaveBeenCalledWith(message, "error");
 
       cleanup(result);
     });
 
     it("onChangeRole reports an unresolvable role instead of failing silently", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
+      const { opts, toast } = optsWithToast();
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
       const callbacks = getMemberListCallbacks();
       await callbacks.onChangeRole(4, "Charlie", "nonexistent");
 
       expect(opts.api.adminChangeRole).not.toHaveBeenCalled();
-      expect(mockShow).toHaveBeenCalledWith(
+      expect(toast.show).toHaveBeenCalledWith(
         'Unknown role "nonexistent" — try reconnecting',
         "error",
       );
@@ -297,11 +272,9 @@ describe("SidebarArea", () => {
         user: { id: 1, username: "testuser", role: "owner", avatar: null, totp_enabled: false },
       }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const calls = (createMemberList as MockedFn).mock.calls;
-      const lastCall = calls[calls.length - 1]![0];
+      const lastCall = lastCallArg(createMemberList as MockedFn);
       expect(lastCall.currentUserRole).toBe("owner");
 
       cleanup(result);
@@ -310,30 +283,19 @@ describe("SidebarArea", () => {
     it("defaults currentUserRole to member when user is null", () => {
       authStore.setState((prev) => ({ ...prev, user: null }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const calls = (createMemberList as MockedFn).mock.calls;
-      const lastCall = calls[calls.length - 1]![0];
+      const lastCall = lastCallArg(createMemberList as MockedFn);
       expect(lastCall.currentUserRole).toBe("member");
 
       cleanup(result);
     });
 
     it("starts a call in the existing 1:1 DM", () => {
-      addDmChannel(
-        makeDm({
-          channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-        }),
-      );
-      const onStartCall = vi.fn();
-      const opts = defaultOpts();
-      const result = createSidebarArea({ ...opts, onStartCall });
-      container.appendChild(result.sidebarWrapper);
+      addDmChannel(makeDm({ channelId: 100 }));
+      const { onStartCall, opts, result } = mountWithStartCall();
 
-      const calls = (createMemberList as MockedFn).mock.calls;
-      const lastCall = calls[calls.length - 1]![0];
+      const lastCall = lastCallArg(createMemberList as MockedFn);
       lastCall.onCallUser(10);
 
       // The known DM is selected (no REST create) and the call starts in it.
@@ -345,13 +307,9 @@ describe("SidebarArea", () => {
     });
 
     it("creates the 1:1 DM first, then starts the call in it", async () => {
-      const onStartCall = vi.fn();
-      const opts = defaultOpts();
-      const result = createSidebarArea({ ...opts, onStartCall });
-      container.appendChild(result.sidebarWrapper);
+      const { onStartCall, opts, result } = mountWithStartCall();
 
-      const calls = (createMemberList as MockedFn).mock.calls;
-      const lastCall = calls[calls.length - 1]![0];
+      const lastCall = lastCallArg(createMemberList as MockedFn);
       // The default api stub resolves a DM with channel_id 200.
       lastCall.onCallUser(20);
 
@@ -365,20 +323,11 @@ describe("SidebarArea", () => {
 
   describe("buildMemberPanel", () => {
     it("Call opens an existing DM and starts the call", () => {
-      addDmChannel(
-        makeDm({
-          channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-        }),
-      );
-      const onStartCall = vi.fn();
-      const opts = defaultOpts();
-      const result = createSidebarArea({ ...opts, onStartCall });
-      container.appendChild(result.sidebarWrapper);
+      addDmChannel(makeDm({ channelId: 100 }));
+      const { onStartCall, opts, result } = mountWithStartCall();
 
       const panel = result.buildMemberPanel();
-      const calls = (createMemberList as MockedFn).mock.calls;
-      calls[calls.length - 1]![0].onCallUser(10);
+      lastCallArg(createMemberList as MockedFn).onCallUser(10);
 
       expect(opts.api.createDm).not.toHaveBeenCalled();
       expect(onStartCall).toHaveBeenCalledTimes(1);
@@ -395,11 +344,10 @@ describe("SidebarArea", () => {
 
   describe("cleanup", () => {
     it("calling all unsubscribers cleans up active modal", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       // Open a modal
-      const callArgs = (createChannelSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createChannelSidebar as MockedFn);
       callArgs.onCreateChannel("General");
       await vi.dynamicImportSettled();
 
@@ -411,8 +359,7 @@ describe("SidebarArea", () => {
     });
 
     it("calling all unsubscribers cleans up active sidebar content", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const destroyFn = getMockDestroy(createChannelSidebar as MockedFn);
 
@@ -422,8 +369,7 @@ describe("SidebarArea", () => {
     });
 
     it("calling all unsubscribers cleans up channel mode extras", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const destroyFn = getMockDestroy(createMemberList as MockedFn);
 
@@ -441,31 +387,28 @@ describe("SidebarArea", () => {
   // to survive `ready` landing after the header is built.
 
   describe("audit log entry point", () => {
-    function signInAs(roleName: string, permissions: number): void {
-      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
-      authStore.setState((prev) => ({
-        ...prev,
-        token: "tok",
-        user: { id: 9, username: "U", avatar: null, role: roleName },
-        isAuthenticated: true,
-      }));
-    }
+    const auditBtn = (result: ReturnType<typeof createSidebarArea>): HTMLElement | null =>
+      result.sidebarWrapper.querySelector("[data-testid='audit-log-btn']");
 
-    function auditBtn(result: ReturnType<typeof createSidebarArea>): HTMLElement | null {
-      return result.sidebarWrapper.querySelector("[data-testid='audit-log-btn']");
-    }
-
-    it("is shown to a role holding VIEW_AUDIT_LOG", () => {
-      signInAs("Moderator", Permission.VIEW_AUDIT_LOG);
+    it.each(
+      byName([
+        {
+          name: "is shown to a role holding VIEW_AUDIT_LOG",
+          role: "Moderator",
+          permissions: Permission.VIEW_AUDIT_LOG,
+          shown: true,
+        },
+        {
+          name: "is hidden from a role without the bit",
+          role: "Member",
+          permissions: Permission.SEND_MESSAGES,
+          shown: false,
+        },
+      ]),
+    )("%s", (_name, { role, permissions, shown }) => {
+      signInWithRole(role, permissions, signedIn);
       const result = createSidebarArea(defaultOpts());
-      expect(auditBtn(result)?.style.display).not.toBe("none");
-      cleanup(result);
-    });
-
-    it("is hidden from a role without the bit", () => {
-      signInAs("Member", Permission.SEND_MESSAGES);
-      const result = createSidebarArea(defaultOpts());
-      expect(auditBtn(result)?.style.display).toBe("none");
+      expect(auditBtn(result)?.style.display === "none").toBe(!shown);
       cleanup(result);
     });
 
@@ -492,7 +435,7 @@ describe("SidebarArea", () => {
 
     it("opens the admin panel's audit section in the browser", async () => {
       mockOpenUrl.mockClear();
-      signInAs("Owner", Permission.ADMINISTRATOR);
+      signInWithRole("Owner", Permission.ADMINISTRATOR, signedIn);
       const result = createSidebarArea(defaultOpts());
 
       auditBtn(result)?.click();
@@ -505,7 +448,7 @@ describe("SidebarArea", () => {
 
     it("toasts instead of opening a bogus URL with no host", async () => {
       mockOpenUrl.mockClear();
-      signInAs("Owner", Permission.ADMINISTRATOR);
+      signInWithRole("Owner", Permission.ADMINISTRATOR, signedIn);
       const opts = defaultOpts();
       (opts.api.getConfig as ReturnType<typeof vi.fn>).mockReturnValue({ host: "" });
       const show = vi.fn();
@@ -528,38 +471,34 @@ describe("SidebarArea", () => {
   // hidden from roles without the bit instead of failing on click.
 
   describe("invite entry point", () => {
-    function signInAs(roleName: string, permissions: number): void {
-      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
-      authStore.setState((prev) => ({
-        ...prev,
-        token: "tok",
-        user: { id: 9, username: "U", avatar: null, role: roleName },
-        isAuthenticated: true,
-      }));
-    }
+    const inviteBtn = (result: ReturnType<typeof createSidebarArea>): HTMLElement | null =>
+      result.sidebarWrapper.querySelector("[data-testid='invite-btn']");
 
-    function inviteBtn(result: ReturnType<typeof createSidebarArea>): HTMLElement | null {
-      return result.sidebarWrapper.querySelector("[data-testid='invite-btn']");
-    }
-
-    it("is shown to a role holding MANAGE_INVITES", () => {
-      signInAs("Inviter", Permission.MANAGE_INVITES);
+    it.each(
+      byName([
+        {
+          name: "is shown to a role holding MANAGE_INVITES",
+          role: "Inviter",
+          permissions: Permission.MANAGE_INVITES,
+          shown: true,
+        },
+        {
+          name: "is shown to ADMINISTRATOR",
+          role: "Owner",
+          permissions: Permission.ADMINISTRATOR,
+          shown: true,
+        },
+        {
+          name: "is hidden from a role without the bit",
+          role: "Member",
+          permissions: Permission.SEND_MESSAGES,
+          shown: false,
+        },
+      ]),
+    )("%s", (_name, { role, permissions, shown }) => {
+      signInWithRole(role, permissions, signedIn);
       const result = createSidebarArea(defaultOpts());
-      expect(inviteBtn(result)?.style.display).not.toBe("none");
-      cleanup(result);
-    });
-
-    it("is shown to ADMINISTRATOR", () => {
-      signInAs("Owner", Permission.ADMINISTRATOR);
-      const result = createSidebarArea(defaultOpts());
-      expect(inviteBtn(result)?.style.display).not.toBe("none");
-      cleanup(result);
-    });
-
-    it("is hidden from a role without the bit", () => {
-      signInAs("Member", Permission.SEND_MESSAGES);
-      const result = createSidebarArea(defaultOpts());
-      expect(inviteBtn(result)?.style.display).toBe("none");
+      expect(inviteBtn(result)?.style.display === "none").toBe(!shown);
       cleanup(result);
     });
 
@@ -622,14 +561,6 @@ describe("SidebarArea", () => {
       for (const fn of pendingListeners) fn();
     }
 
-    function signInAs(roleName: string, permissions: number): void {
-      setRoles([{ id: 9, name: roleName, color: null, permissions }]);
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 9, username: "U", avatar: null, role: roleName },
-      }));
-    }
-
     function mount(extra: Partial<SidebarAreaOptions> = {}): ReturnType<typeof createSidebarArea> {
       const result = createSidebarArea({ ...defaultOpts(), ...extra });
       host.appendChild(result.sidebarWrapper);
@@ -653,7 +584,7 @@ describe("SidebarArea", () => {
     });
 
     it("shows no entry for a destination this build does not ship", () => {
-      signInAs("Owner", Permission.ADMINISTRATOR);
+      signInWithRole("Owner", Permission.ADMINISTRATOR);
       const result = mount();
       expect(q(result, "moderation-btn")).toBeNull();
       expect(q(result, "dm-requests-badge")).toBeNull();
@@ -666,7 +597,7 @@ describe("SidebarArea", () => {
 
     describe("Moderation", () => {
       it("sits beside Audit Log for a role holding MODERATE_MEMBERS", () => {
-        signInAs("Moderator", Permission.MODERATE_MEMBERS | Permission.VIEW_AUDIT_LOG);
+        signInWithRole("Moderator", Permission.MODERATE_MEMBERS | Permission.VIEW_AUDIT_LOG);
         const result = mount({ destinations: destinations() });
         const btn = q(result, "moderation-btn");
         expect(btn?.style.display).not.toBe("none");
@@ -677,7 +608,7 @@ describe("SidebarArea", () => {
       });
 
       it("is hidden without the bit, and follows a role list that arrives or changes later", () => {
-        signInAs("Member", Permission.SEND_MESSAGES);
+        signInWithRole("Member", Permission.SEND_MESSAGES);
         const result = mount({ destinations: destinations() });
         expect(q(result, "moderation-btn")?.style.display).toBe("none");
 
@@ -694,7 +625,7 @@ describe("SidebarArea", () => {
       });
 
       it("opens the content view with itself as the opener, and marks itself current", () => {
-        signInAs("Moderator", Permission.MODERATE_MEMBERS);
+        signInWithRole("Moderator", Permission.MODERATE_MEMBERS);
         const onOpenView = vi.fn();
         const result = mount({ destinations: destinations(), onOpenView });
         const btn = q(result, "moderation-btn")!;
@@ -851,31 +782,11 @@ describe("SidebarArea", () => {
 
     describe("the back path", () => {
       function seed(): void {
-        const ch = (id: number, name: string, type: "text" | "dm", position: number) => ({
-          id,
-          name,
-          type,
-          category: null,
-          position,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        channelsStore.setState((prev) => ({
-          ...prev,
-          channels: new Map([
-            [1, ch(1, "general", "text", 0)],
-            [2, ch(2, "random", "text", 1)],
-            [100, ch(100, "alice", "dm", 0)],
-          ]),
-        }));
+        seedChannels([
+          makeChannel({ id: 1, name: "general", position: 0 }),
+          makeChannel({ id: 2, name: "random", position: 1 }),
+          makeChannel({ id: 100, name: "alice", type: "dm", position: 0 }),
+        ]);
       }
 
       it("returns to the remembered channel and leaves DM mode", () => {

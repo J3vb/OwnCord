@@ -90,61 +90,77 @@ describe("ServerPanel", () => {
     container.remove();
   });
 
+  /** Open the Add Server modal and type a name and host into it. */
+  function fillAddForm(name: string, host: string): NodeListOf<HTMLInputElement> {
+    (container.querySelector(".btn-add-server") as HTMLElement).click();
+    const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+    inputs[0]!.value = name;
+    inputs[1]!.value = host;
+    return inputs;
+  }
+
+  function clickSave(): void {
+    (container.querySelector(".modal-footer .btn-primary") as HTMLElement).click();
+  }
+
+  /** Build a panel over `profiles` and attach it to the test container. */
+  function mountPanel(
+    opts: ServerPanelOptions,
+    profiles: readonly SimpleProfile[],
+  ): ReturnType<typeof createServerPanel> {
+    const panel = createServerPanel(opts, profiles);
+    container.appendChild(panel.element);
+    return panel;
+  }
+
   // -----------------------------------------------------------------------
   // Basic rendering
   // -----------------------------------------------------------------------
 
   describe("rendering", () => {
     it("renders a server-panel element", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       expect(container.querySelector(".server-panel")).not.toBeNull();
     });
 
     it("renders a heading with text 'Servers'", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const heading = container.querySelector("h2");
       expect(heading?.textContent).toBe("Servers");
     });
 
     it("renders one server-item per profile", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const items = container.querySelectorAll(".server-item");
       expect(items.length).toBe(2);
     });
 
     it("renders server name and host", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       expect(container.querySelector(".srv-name")?.textContent).toBe("Test Server");
       expect(container.querySelector(".srv-host")?.textContent).toBe("localhost:8443");
     });
 
     it("renders an icon with the first letter of the server name", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       const icon = container.querySelector(".srv-icon");
       expect(icon?.textContent).toBe("T");
     });
 
     it("renders an icon with a background color from the palette", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       const icon = container.querySelector(".srv-icon") as HTMLElement;
       expect(icon.style.background).toBeTruthy();
     });
 
     it("renders data-host attribute on each server-item", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const items = container.querySelectorAll(".server-item");
       expect(items[0]?.getAttribute("data-host")).toBe("localhost:8443");
@@ -152,16 +168,14 @@ describe("ServerPanel", () => {
     });
 
     it("renders a status dot with unknown class initially", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       const dot = container.querySelector(".srv-status-dot");
       expect(dot?.classList.contains("unknown")).toBe(true);
     });
 
     it("renders the '+ Add Server' button in the footer", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server");
       expect(addBtn?.textContent).toBe("+ Add Server");
@@ -175,8 +189,7 @@ describe("ServerPanel", () => {
   describe("username display", () => {
     it("renders username in meta when profile has one", () => {
       const fp = fullProfile();
-      const panel = createServerPanel(makeOpts(), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fp]);
 
       const hosts = container.querySelectorAll(".srv-host");
       // First is the host address, second is the username
@@ -185,8 +198,7 @@ describe("ServerPanel", () => {
     });
 
     it("does NOT render extra username span for simple profiles", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       const hosts = container.querySelectorAll(".srv-host");
       expect(hosts.length).toBe(1);
@@ -200,8 +212,7 @@ describe("ServerPanel", () => {
   describe("server click", () => {
     it("calls onServerClick with host when a server item is clicked", () => {
       const onServerClick = vi.fn();
-      const panel = createServerPanel(makeOpts({ onServerClick }), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick }), [SIMPLE_PROFILES[0]!]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
@@ -212,8 +223,7 @@ describe("ServerPanel", () => {
     it("calls onServerClick with host AND username for full profiles", () => {
       const onServerClick = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick }), [fp]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
@@ -224,8 +234,7 @@ describe("ServerPanel", () => {
     it("calls onServerClick with autoConnect true when the profile has it enabled", () => {
       const onServerClick = vi.fn();
       const fp = fullProfile({ autoConnect: true });
-      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick }), [fp]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
@@ -236,8 +245,7 @@ describe("ServerPanel", () => {
     it("calls onServerClick with autoConnect false when the profile has it disabled", () => {
       const onServerClick = vi.fn();
       const fp = fullProfile({ autoConnect: false });
-      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick }), [fp]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
@@ -248,8 +256,7 @@ describe("ServerPanel", () => {
     it("passes the profile's rememberPassword so the form never re-opts in", () => {
       const onServerClick = vi.fn();
       const fp = fullProfile({ autoConnect: false, rememberPassword: true });
-      const panel = createServerPanel(makeOpts({ onServerClick }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick }), [fp]);
 
       (container.querySelector(".server-item") as HTMLElement).click();
 
@@ -258,8 +265,7 @@ describe("ServerPanel", () => {
 
     it("does not read the credential store for a profile that opted out of remembering", () => {
       vi.mocked(loadCredential).mockClear();
-      const panel = createServerPanel(makeOpts(), [fullProfile({ rememberPassword: false })]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fullProfile({ rememberPassword: false })]);
 
       (container.querySelector(".server-item") as HTMLElement).click();
 
@@ -268,10 +274,9 @@ describe("ServerPanel", () => {
 
     it("leaves the defaults to the form for an unsaved placeholder row", () => {
       const onServerClick = vi.fn();
-      const panel = createServerPanel(makeOpts({ onServerClick }), [
+      mountPanel(makeOpts({ onServerClick }), [
         { name: "Local", host: "localhost:8443", synthetic: true },
       ]);
-      container.appendChild(panel.element);
 
       (container.querySelector(".server-item") as HTMLElement).click();
 
@@ -279,8 +284,7 @@ describe("ServerPanel", () => {
     });
 
     it("attempts to load credentials from credential store on click", async () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
@@ -299,8 +303,7 @@ describe("ServerPanel", () => {
         hasPassword: false,
       });
 
-      const panel = createServerPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
@@ -315,8 +318,7 @@ describe("ServerPanel", () => {
       const onCredentialLoaded = vi.fn();
       vi.mocked(loadCredential).mockResolvedValueOnce(null);
 
-      const panel = createServerPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onCredentialLoaded }), [SIMPLE_PROFILES[0]!]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       item.click();
@@ -333,16 +335,14 @@ describe("ServerPanel", () => {
 
   describe("auto-login toggle", () => {
     it("renders auto-login button for full profiles with onToggleAutoLogin", () => {
-      const panel = createServerPanel(makeOpts(), [fullProfile()]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fullProfile()]);
 
       const autoLoginBtn = container.querySelector(".auto-login");
       expect(autoLoginBtn).not.toBeNull();
     });
 
     it("does NOT render auto-login button for simple profiles", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       const autoLoginBtn = container.querySelector(".auto-login");
       expect(autoLoginBtn).toBeNull();
@@ -356,8 +356,7 @@ describe("ServerPanel", () => {
         onCredentialLoaded: vi.fn(),
         // onToggleAutoLogin intentionally omitted
       };
-      const panel = createServerPanel(opts, [fullProfile()]);
-      container.appendChild(panel.element);
+      mountPanel(opts, [fullProfile()]);
 
       const autoLoginBtn = container.querySelector(".auto-login");
       expect(autoLoginBtn).toBeNull();
@@ -365,8 +364,7 @@ describe("ServerPanel", () => {
 
     it("renders active class and correct aria-label when autoConnect is true", () => {
       const fp = fullProfile({ autoConnect: true });
-      const panel = createServerPanel(makeOpts(), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fp]);
 
       const autoLoginBtn = container.querySelector(".auto-login") as HTMLElement;
       expect(autoLoginBtn.classList.contains("active")).toBe(true);
@@ -376,8 +374,7 @@ describe("ServerPanel", () => {
 
     it("renders without active class when autoConnect is false", () => {
       const fp = fullProfile({ autoConnect: false });
-      const panel = createServerPanel(makeOpts(), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fp]);
 
       const autoLoginBtn = container.querySelector(".auto-login") as HTMLElement;
       expect(autoLoginBtn.classList.contains("active")).toBe(false);
@@ -388,8 +385,7 @@ describe("ServerPanel", () => {
     it("calls onToggleAutoLogin with profile id and toggled state", () => {
       const onToggleAutoLogin = vi.fn();
       const fp = fullProfile({ autoConnect: false });
-      const panel = createServerPanel(makeOpts({ onToggleAutoLogin }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onToggleAutoLogin }), [fp]);
 
       const autoLoginBtn = container.querySelector(".auto-login") as HTMLElement;
       autoLoginBtn.click();
@@ -401,8 +397,7 @@ describe("ServerPanel", () => {
       const onServerClick = vi.fn();
       const onToggleAutoLogin = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(makeOpts({ onServerClick, onToggleAutoLogin }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick, onToggleAutoLogin }), [fp]);
 
       const autoLoginBtn = container.querySelector(".auto-login") as HTMLElement;
       autoLoginBtn.click();
@@ -412,8 +407,7 @@ describe("ServerPanel", () => {
     });
 
     it("renders the zap icon inside the auto-login button", () => {
-      const panel = createServerPanel(makeOpts(), [fullProfile()]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fullProfile()]);
 
       const autoLoginBtn = container.querySelector(".auto-login") as HTMLElement;
       const svg = autoLoginBtn.querySelector("svg");
@@ -427,16 +421,14 @@ describe("ServerPanel", () => {
 
   describe("delete button", () => {
     it("renders delete button for full profiles with onDeleteProfile", () => {
-      const panel = createServerPanel(makeOpts(), [fullProfile()]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fullProfile()]);
 
       const deleteBtn = container.querySelector(".srv-btn.danger");
       expect(deleteBtn).not.toBeNull();
     });
 
     it("does NOT render delete button for simple profiles", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       const deleteBtn = container.querySelector(".srv-btn.danger");
       expect(deleteBtn).toBeNull();
@@ -450,8 +442,7 @@ describe("ServerPanel", () => {
         onCredentialLoaded: vi.fn(),
         // onDeleteProfile intentionally omitted
       };
-      const panel = createServerPanel(opts, [fullProfile()]);
-      container.appendChild(panel.element);
+      mountPanel(opts, [fullProfile()]);
 
       const deleteBtn = container.querySelector(".srv-btn.danger");
       expect(deleteBtn).toBeNull();
@@ -460,8 +451,7 @@ describe("ServerPanel", () => {
     it("calls onDeleteProfile with profile id on click", () => {
       const onDeleteProfile = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(makeOpts({ onDeleteProfile }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onDeleteProfile }), [fp]);
 
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
       deleteBtn.click();
@@ -479,8 +469,7 @@ describe("ServerPanel", () => {
     it("mounts the delete confirmation on the page root, not inside the panel (#19)", () => {
       // Inside .server-panel the dialog shares that panel's stacking context and
       // the login form paints over its buttons, so pointer users cannot click them.
-      const panel = createServerPanel(makeOpts({ onDeleteProfile: vi.fn() }), [fullProfile()]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onDeleteProfile: vi.fn() }), [fullProfile()]);
 
       (container.querySelector(".srv-btn.danger") as HTMLElement).click();
 
@@ -495,8 +484,7 @@ describe("ServerPanel", () => {
       const onServerClick = vi.fn();
       const onDeleteProfile = vi.fn();
       const fp = fullProfile();
-      const panel = createServerPanel(makeOpts({ onServerClick, onDeleteProfile }), [fp]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick, onDeleteProfile }), [fp]);
 
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
       deleteBtn.click();
@@ -508,8 +496,7 @@ describe("ServerPanel", () => {
 
     it("keyboard users can reach and activate a server row (#19)", () => {
       const onServerClick = vi.fn();
-      const panel = createServerPanel(makeOpts({ onServerClick }), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick }), [SIMPLE_PROFILES[0]!]);
 
       const item = container.querySelector(".server-item") as HTMLElement;
       expect(item.getAttribute("role")).toBe("button");
@@ -521,10 +508,7 @@ describe("ServerPanel", () => {
     it("Enter on the row's delete button is left to the button, not the row (#19)", () => {
       const onServerClick = vi.fn();
       const onDeleteProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onServerClick, onDeleteProfile }), [
-        fullProfile(),
-      ]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onServerClick, onDeleteProfile }), [fullProfile()]);
 
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
       const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
@@ -535,14 +519,12 @@ describe("ServerPanel", () => {
     });
 
     it("shows an empty state when the profile list is empty (#19)", () => {
-      const panel = createServerPanel(makeOpts(), []);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), []);
       expect(container.querySelector("[data-testid='server-list-empty']")).not.toBeNull();
     });
 
     it("renders the x icon inside the delete button", () => {
-      const panel = createServerPanel(makeOpts(), [fullProfile()]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [fullProfile()]);
 
       const deleteBtn = container.querySelector(".srv-btn.danger") as HTMLElement;
       const svg = deleteBtn.querySelector("svg");
@@ -558,11 +540,10 @@ describe("ServerPanel", () => {
     it("updates every row that shares a host, not just the last (F8)", () => {
       // Two profiles on one host (same server, different accounts) are
       // legitimate; keying the element map by host kept only the last row.
-      const panel = createServerPanel(makeOpts(), [
+      const panel = mountPanel(makeOpts(), [
         { name: "A", host: "shared.example:8443" },
         { name: "B", host: "shared.example:8443" },
       ]);
-      container.appendChild(panel.element);
 
       panel.updateHealthStatus("shared.example:8443", {
         status: "online",
@@ -578,8 +559,7 @@ describe("ServerPanel", () => {
     });
 
     it("updates the status dot class to online", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "online",
@@ -593,8 +573,7 @@ describe("ServerPanel", () => {
     });
 
     it("updates latency text and class for good latency", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "online",
@@ -612,8 +591,7 @@ describe("ServerPanel", () => {
       // The badge times one REST call through the desktop TLS tunnel, which
       // opens a fresh connection and handshake per request — about 3× the
       // network RTT, not a ping. The label must not claim otherwise.
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "online",
@@ -628,8 +606,7 @@ describe("ServerPanel", () => {
     });
 
     it("applies warn class for moderate latency (100-500ms)", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "slow",
@@ -644,8 +621,7 @@ describe("ServerPanel", () => {
     });
 
     it("applies bad class for high latency (>500ms)", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "slow",
@@ -660,8 +636,7 @@ describe("ServerPanel", () => {
     });
 
     it("clears latency text when latencyMs is null", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       // First set a latency
       panel.updateHealthStatus("localhost:8443", {
@@ -685,8 +660,7 @@ describe("ServerPanel", () => {
     });
 
     it("displays online users count", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "online",
@@ -701,8 +675,7 @@ describe("ServerPanel", () => {
     });
 
     it("displays online users without has-users class when count is 0", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "online",
@@ -717,8 +690,7 @@ describe("ServerPanel", () => {
     });
 
     it("clears online users text when onlineUsers is null", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "offline",
@@ -733,8 +705,7 @@ describe("ServerPanel", () => {
     });
 
     it("ignores updates for unknown hosts", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       // Should not throw
       panel.updateHealthStatus("unknown.host:9999", {
@@ -750,8 +721,7 @@ describe("ServerPanel", () => {
     });
 
     it("updates status dot to offline class", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "offline",
@@ -765,8 +735,7 @@ describe("ServerPanel", () => {
     });
 
     it("updates status dot to checking class", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "checking",
@@ -780,8 +749,7 @@ describe("ServerPanel", () => {
     });
 
     it("clears online users when onlineUsers is negative", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateHealthStatus("localhost:8443", {
         status: "online",
@@ -801,8 +769,7 @@ describe("ServerPanel", () => {
 
   describe("renderProfiles", () => {
     it("replaces existing profiles with new ones", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       expect(container.querySelectorAll(".server-item").length).toBe(1);
 
@@ -811,8 +778,7 @@ describe("ServerPanel", () => {
     });
 
     it("clears health elements so old hosts no longer receive updates", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       // Re-render with different profiles
       panel.renderProfiles([SIMPLE_PROFILES[1]!]);
@@ -831,8 +797,7 @@ describe("ServerPanel", () => {
     });
 
     it("renders with empty array (no profiles)", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       panel.renderProfiles([]);
       expect(container.querySelectorAll(".server-item").length).toBe(0);
@@ -845,8 +810,7 @@ describe("ServerPanel", () => {
     // click handler still live — until then.
     it("does not fire onServerClick for a row discarded by a later render", () => {
       const onServerClick = vi.fn();
-      const panel = createServerPanel(makeOpts({ onServerClick }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts({ onServerClick }), SIMPLE_PROFILES);
 
       const staleItem = container.querySelector(".server-item") as HTMLElement;
       expect(staleItem).not.toBeNull();
@@ -867,8 +831,7 @@ describe("ServerPanel", () => {
 
   describe("updateCompatibility", () => {
     it("badges a client-older server as needing a client update", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateCompatibility("localhost:8443", "client-older");
 
@@ -878,8 +841,7 @@ describe("ServerPanel", () => {
     });
 
     it("badges a server-older server as needing a server update", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateCompatibility("localhost:8443", "server-older");
 
@@ -889,8 +851,7 @@ describe("ServerPanel", () => {
     });
 
     it("shows no badge for a compatible server", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateCompatibility("localhost:8443", "client-older");
       panel.updateCompatibility("localhost:8443", "compatible");
@@ -901,8 +862,7 @@ describe("ServerPanel", () => {
     });
 
     it("shows no badge when the probe could not reach the server", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateCompatibility("localhost:8443", "unreachable");
 
@@ -911,8 +871,7 @@ describe("ServerPanel", () => {
     });
 
     it("ignores updates for unknown hosts", () => {
-      const panel = createServerPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), [SIMPLE_PROFILES[0]!]);
 
       panel.updateCompatibility("unknown.host:9999", "client-older");
 
@@ -926,8 +885,7 @@ describe("ServerPanel", () => {
 
   describe("Add Server modal", () => {
     it("opens a modal when the Add Server button is clicked", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -945,8 +903,7 @@ describe("ServerPanel", () => {
         onCredentialLoaded: vi.fn(),
         // onAddProfile intentionally omitted
       };
-      const panel = createServerPanel(opts, SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(opts, SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -956,8 +913,7 @@ describe("ServerPanel", () => {
     });
 
     it("modal has name and host input fields", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -969,8 +925,7 @@ describe("ServerPanel", () => {
     });
 
     it("modal has Cancel and Add Server buttons", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -980,8 +935,7 @@ describe("ServerPanel", () => {
     });
 
     it("closes modal when Cancel is clicked", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -995,8 +949,7 @@ describe("ServerPanel", () => {
     });
 
     it("closes modal when the X close button is clicked", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -1008,8 +961,7 @@ describe("ServerPanel", () => {
     });
 
     it("closes modal when clicking the backdrop", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -1022,8 +974,7 @@ describe("ServerPanel", () => {
     });
 
     it("stays open when drag-selecting the address text ends on the backdrop", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -1039,8 +990,7 @@ describe("ServerPanel", () => {
     });
 
     it("does NOT close modal when clicking inside the modal body", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -1053,18 +1003,11 @@ describe("ServerPanel", () => {
 
     it("calls onAddProfile and closes modal on valid save", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("My New Server", "newserver.com:8443");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "My New Server";
-      inputs[1]!.value = "newserver.com:8443";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).toHaveBeenCalledWith("My New Server", "newserver.com:8443");
       expect(container.querySelector(".modal-overlay")).toBeNull();
@@ -1072,17 +1015,11 @@ describe("ServerPanel", () => {
 
     it("refuses a host that already has a saved profile (case-insensitive)", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), [
-        { name: "Existing", host: "chat.example.com:8443" },
-      ]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), [{ name: "Existing", host: "chat.example.com:8443" }]);
 
-      (container.querySelector(".btn-add-server") as HTMLElement).click();
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Second account";
-      inputs[1]!.value = "CHAT.example.com:8443";
+      const inputs = fillAddForm("Second account", "CHAT.example.com:8443");
 
-      (container.querySelector(".modal-footer .btn-primary") as HTMLElement).click();
+      clickSave();
 
       expect(onAddProfile).not.toHaveBeenCalled();
       expect(inputs[1]!.validationMessage).toBe("This server is already in your list.");
@@ -1091,35 +1028,24 @@ describe("ServerPanel", () => {
 
     it("lets the synthetic localhost fallback be added as the first saved profile", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), [
+      mountPanel(makeOpts({ onAddProfile }), [
         { name: "Local", host: "localhost:8443", synthetic: true },
       ]);
-      container.appendChild(panel.element);
 
-      (container.querySelector(".btn-add-server") as HTMLElement).click();
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Local";
-      inputs[1]!.value = "localhost:8443";
+      fillAddForm("Local", "localhost:8443");
 
-      (container.querySelector(".modal-footer .btn-primary") as HTMLElement).click();
+      clickSave();
 
       expect(onAddProfile).toHaveBeenCalledWith("Local", "localhost:8443");
     });
 
     it("does NOT call onAddProfile when name is empty", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("", "host.com:8443");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "";
-      inputs[1]!.value = "host.com:8443";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).not.toHaveBeenCalled();
       // Modal stays open
@@ -1128,36 +1054,22 @@ describe("ServerPanel", () => {
 
     it("does NOT call onAddProfile when host is empty", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("Some Server", "");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Some Server";
-      inputs[1]!.value = "";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).not.toHaveBeenCalled();
     });
 
     it("rejects invalid host addresses with special characters", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("Bad Server", "evil.com:80!<x>");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Bad Server";
-      inputs[1]!.value = "evil.com:80!<x>";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).not.toHaveBeenCalled();
       expect(container.querySelector(".modal-overlay")).not.toBeNull();
@@ -1165,54 +1077,33 @@ describe("ServerPanel", () => {
 
     it("saves only the host of a pasted link", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("Pasted", "https://Chat.Example.com:8443/path");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Pasted";
-      inputs[1]!.value = "https://Chat.Example.com:8443/path";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).toHaveBeenCalledWith("Pasted", "chat.example.com:8443");
     });
 
     it("accepts host without port", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("Port-less", "myserver.example.com");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Port-less";
-      inputs[1]!.value = "myserver.example.com";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).toHaveBeenCalledWith("Port-less", "myserver.example.com");
     });
 
     it("accepts a bracketed IPv6 host with port", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("v6", "[::1]:8443");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "v6";
-      inputs[1]!.value = "[::1]:8443";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).toHaveBeenCalledWith("v6", "[::1]:8443");
       expect(container.querySelector(".modal-overlay")).toBeNull();
@@ -1220,18 +1111,11 @@ describe("ServerPanel", () => {
 
     it("accepts a bare (unbracketed) IPv6 host without port", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("v6-bare", "2001:db8::1");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "v6-bare";
-      inputs[1]!.value = "2001:db8::1";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).toHaveBeenCalledWith("v6-bare", "2001:db8::1");
       expect(container.querySelector(".modal-overlay")).toBeNull();
@@ -1239,13 +1123,9 @@ describe("ServerPanel", () => {
 
     it("Enter that commits an IME candidate in the host input does not save", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      (container.querySelector(".btn-add-server") as HTMLElement).click();
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "IME Server";
-      inputs[1]!.value = "ime.example.com:8443";
+      const inputs = fillAddForm("IME Server", "ime.example.com:8443");
 
       inputs[1]!.dispatchEvent(
         new KeyboardEvent("keydown", {
@@ -1262,15 +1142,9 @@ describe("ServerPanel", () => {
 
     it("submits on Enter key in host input", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
-
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Enter Server";
-      inputs[1]!.value = "enter.example.com:8443";
+      const inputs = fillAddForm("Enter Server", "enter.example.com:8443");
 
       // Dispatch Enter keydown on the host input
       inputs[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -1280,18 +1154,11 @@ describe("ServerPanel", () => {
 
     it("trims whitespace from name and host values", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
+      fillAddForm("  Trimmed Server  ", "  trimmed.com:8443  ");
 
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "  Trimmed Server  ";
-      inputs[1]!.value = "  trimmed.com:8443  ";
-
-      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
-      saveBtn.click();
+      clickSave();
 
       expect(onAddProfile).toHaveBeenCalledWith("Trimmed Server", "trimmed.com:8443");
     });
@@ -1304,15 +1171,9 @@ describe("ServerPanel", () => {
     // reachable through it — for the rest of the connect page's life.
     it("does not fire onAddProfile from a closed modal's stale save button", () => {
       const onAddProfile = vi.fn();
-      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
 
-      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
-      addBtn.click();
-
-      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
-      inputs[0]!.value = "Stale Server";
-      inputs[1]!.value = "stale.example.com:8443";
+      fillAddForm("Stale Server", "stale.example.com:8443");
 
       const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
       const cancelBtn = container.querySelector(".btn-ghost") as HTMLElement;
@@ -1327,8 +1188,7 @@ describe("ServerPanel", () => {
     });
 
     it("focuses the name input on modal open", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
       addBtn.click();
@@ -1344,8 +1204,7 @@ describe("ServerPanel", () => {
 
   describe("destroy", () => {
     it("destroy() can be called without errors", () => {
-      const panel = createServerPanel(makeOpts(), SIMPLE_PROFILES);
-      container.appendChild(panel.element);
+      const panel = mountPanel(makeOpts(), SIMPLE_PROFILES);
 
       expect(() => panel.destroy()).not.toThrow();
     });
@@ -1357,16 +1216,14 @@ describe("ServerPanel", () => {
 
   describe("icon generation", () => {
     it("handles single-character server names", () => {
-      const panel = createServerPanel(makeOpts(), [{ name: "X", host: "x.com:443" }]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [{ name: "X", host: "x.com:443" }]);
 
       const icon = container.querySelector(".srv-icon");
       expect(icon?.textContent).toBe("X");
     });
 
     it("handles lowercase names by uppercasing the initial", () => {
-      const panel = createServerPanel(makeOpts(), [{ name: "lowercase", host: "lower.com:443" }]);
-      container.appendChild(panel.element);
+      mountPanel(makeOpts(), [{ name: "lowercase", host: "lower.com:443" }]);
 
       const icon = container.querySelector(".srv-icon");
       expect(icon?.textContent).toBe("L");
@@ -1386,11 +1243,10 @@ describe("ServerPanel", () => {
     });
 
     it("generates different colors for different names", () => {
-      const panel = createServerPanel(makeOpts(), [
+      mountPanel(makeOpts(), [
         { name: "Alpha", host: "a.com:443" },
         { name: "Zulu", host: "z.com:443" },
       ]);
-      container.appendChild(panel.element);
 
       const icons = container.querySelectorAll(".srv-icon") as NodeListOf<HTMLElement>;
       // Not guaranteed to be different for all names, but for these two it should be

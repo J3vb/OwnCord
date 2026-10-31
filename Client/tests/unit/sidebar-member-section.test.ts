@@ -30,7 +30,9 @@ import { createMemberList } from "@components/MemberList";
 import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { ApiClientError } from "../../src/lib/api";
+import { openBanDialogFor } from "../helpers/banDialog";
 import { resetMembersState } from "../helpers/storeResets";
+import { byName } from "../helpers/tableCases";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -110,8 +112,20 @@ function defaultOpts(): SidebarMemberSectionOptions {
 // Tests
 // ---------------------------------------------------------------------------
 
+function lastMemberListArgs() {
+  const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
+  return calls[calls.length - 1]![0];
+}
+
 describe("SidebarMemberSection", () => {
   let container: HTMLDivElement;
+
+  /** Mount a section into the test container. */
+  function mountSection(opts: SidebarMemberSectionOptions = defaultOpts()) {
+    const section = createSidebarMemberSection(opts);
+    container.appendChild(section.element);
+    return section;
+  }
 
   beforeEach(() => {
     resetStores();
@@ -129,8 +143,7 @@ describe("SidebarMemberSection", () => {
 
   describe("rendering", () => {
     it("renders the member section root element", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const root = container.querySelector("[data-testid='sidebar-members']");
       expect(root).not.toBeNull();
@@ -139,8 +152,7 @@ describe("SidebarMemberSection", () => {
     });
 
     it("renders the member header with label and arrow", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const header = container.querySelector(".sidebar-members-header");
       expect(header).not.toBeNull();
@@ -155,8 +167,7 @@ describe("SidebarMemberSection", () => {
     });
 
     it("renders a resize handle", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const handle = container.querySelector(".sidebar-resize-handle");
       expect(handle).not.toBeNull();
@@ -165,8 +176,7 @@ describe("SidebarMemberSection", () => {
     });
 
     it("renders the member content div and calls createMemberList", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const content = container.querySelector(".sidebar-members-content");
       expect(content).not.toBeNull();
@@ -188,8 +198,7 @@ describe("SidebarMemberSection", () => {
     it("restores saved height from localStorage", () => {
       localStorage.setItem(LS_KEY_HEIGHT, "250");
 
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const root = container.querySelector("[data-testid='sidebar-members']") as HTMLElement;
       expect(root.style.height).toBe("250px");
@@ -198,8 +207,7 @@ describe("SidebarMemberSection", () => {
     });
 
     it("has no height style when no saved height exists", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const root = container.querySelector("[data-testid='sidebar-members']") as HTMLElement;
       // Height should be empty or unset (depends on collapsed state)
@@ -226,8 +234,7 @@ describe("SidebarMemberSection", () => {
 
     it("drops the sized class when a saved height is cleared", () => {
       localStorage.setItem(LS_KEY_HEIGHT, "250");
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
       const header = section.element.querySelector(".sidebar-members-header") as HTMLElement;
       expect(section.element.classList.contains("sized")).toBe(true);
 
@@ -253,8 +260,7 @@ describe("SidebarMemberSection", () => {
     it("starts collapsed when localStorage says collapsed", () => {
       localStorage.setItem(LS_KEY_COLLAPSED, "true");
 
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const header = container.querySelector(".sidebar-members-header") as HTMLElement;
       expect(header.classList.contains("collapsed")).toBe(true);
@@ -274,8 +280,7 @@ describe("SidebarMemberSection", () => {
     it("starts expanded when localStorage says not collapsed", () => {
       localStorage.setItem(LS_KEY_COLLAPSED, "false");
 
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const header = container.querySelector(".sidebar-members-header") as HTMLElement;
       expect(header.classList.contains("collapsed")).toBe(false);
@@ -294,8 +299,7 @@ describe("SidebarMemberSection", () => {
       vi.spyOn(Storage.prototype, "setItem").mockImplementation(blocked);
 
       try {
-        const section = createSidebarMemberSection(defaultOpts());
-        container.appendChild(section.element);
+        const section = mountSection();
         const header = container.querySelector(".sidebar-members-header") as HTMLElement;
         expect(header.classList.contains("collapsed")).toBe(false);
 
@@ -308,8 +312,7 @@ describe("SidebarMemberSection", () => {
     });
 
     it("toggles collapsed state when header is clicked", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const header = container.querySelector(".sidebar-members-header") as HTMLElement;
 
@@ -337,8 +340,7 @@ describe("SidebarMemberSection", () => {
     // user could never collapse the member list — unlike the channel
     // categories and DM section, which use a real <button>.
     it("exposes the collapse control as a focusable button that toggles on Enter", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const arrow = container.querySelector(".sidebar-members-header .category-arrow");
       expect(arrow).not.toBeNull();
@@ -358,8 +360,7 @@ describe("SidebarMemberSection", () => {
     });
 
     it("expands when header is clicked twice", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const header = container.querySelector(".sidebar-members-header") as HTMLElement;
 
@@ -383,8 +384,7 @@ describe("SidebarMemberSection", () => {
     it("sets height to auto when collapsed", () => {
       localStorage.setItem(LS_KEY_HEIGHT, "300");
 
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const header = container.querySelector(".sidebar-members-header") as HTMLElement;
       header.click(); // Collapse
@@ -398,8 +398,7 @@ describe("SidebarMemberSection", () => {
     it("restores height when expanded after being collapsed", () => {
       localStorage.setItem(LS_KEY_HEIGHT, "300");
 
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const header = container.querySelector(".sidebar-members-header") as HTMLElement;
       // Collapse
@@ -420,8 +419,7 @@ describe("SidebarMemberSection", () => {
 
   describe("drag-to-resize", () => {
     it("starts resize on mousedown on the handle", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       const handle = container.querySelector(".sidebar-resize-handle") as HTMLElement;
       const mousedown = new MouseEvent("mousedown", { clientY: 300, bubbles: true });
@@ -443,8 +441,7 @@ describe("SidebarMemberSection", () => {
     });
 
     function startDrag(): { section: ReturnType<typeof createSidebarMemberSection> } {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
       const handle = container.querySelector(".sidebar-resize-handle") as HTMLElement;
       handle.dispatchEvent(new MouseEvent("mousedown", { clientY: 300, bubbles: true }));
       return { section };
@@ -495,8 +492,7 @@ describe("SidebarMemberSection", () => {
     });
 
     it("does not resize when not dragging", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       // Move mouse without mousedown
       const mousemove = new MouseEvent("mousemove", { clientY: 250, bubbles: true });
@@ -518,30 +514,40 @@ describe("SidebarMemberSection", () => {
   // -------------------------------------------------------------------------
 
   describe("member actions", () => {
+    type MemberApi = Partial<
+      Record<"adminKickMember" | "adminBanMember" | "adminChangeRole", ReturnType<typeof vi.fn>>
+    >;
+
+    /** Mount the section over an api stub whose methods are fresh spies unless overridden. */
+    function mountMembers(api: MemberApi = {}) {
+      const mockShow = vi.fn();
+      const mockApi = {
+        adminKickMember: vi.fn(),
+        adminBanMember: vi.fn(),
+        adminChangeRole: vi.fn(),
+        ...api,
+      };
+      const section = createSidebarMemberSection({
+        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
+        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      });
+      container.appendChild(section.element);
+      return { mockApi, mockShow, section };
+    }
+
     /** Extract the callbacks passed to createMemberList */
     function getCapturedCallbacks(): {
       onKick: (userId: number, username: string) => Promise<void>;
       onBan: (userId: number, username: string, displayName: string) => void;
       onChangeRole: (userId: number, username: string, newRole: string) => Promise<void>;
     } {
-      const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
-      return calls[calls.length - 1]![0];
+      return lastMemberListArgs();
     }
 
     it("force logout: calls API and shows success toast", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
+      const { mockApi, mockShow, section } = mountMembers({
         adminKickMember: vi.fn().mockResolvedValue(undefined),
-        adminBanMember: vi.fn(),
-        adminChangeRole: vi.fn(),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      });
 
       const callbacks = getCapturedCallbacks();
       await callbacks.onKick(2, "Alice");
@@ -552,83 +558,35 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
-    it("force logout: shows error toast on API failure", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn().mockRejectedValue(new Error("Kick denied")),
-        adminBanMember: vi.fn(),
-        adminChangeRole: vi.fn(),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
-
-      const callbacks = getCapturedCallbacks();
-      await callbacks.onKick(2, "Alice");
-
-      expect(mockShow).toHaveBeenCalledWith("Kick denied", "error");
-
-      section.destroy();
-    });
-
-    it("force logout: shows generic error for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn().mockRejectedValue("string error"),
-        adminBanMember: vi.fn(),
-        adminChangeRole: vi.fn(),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
-
-      const callbacks = getCapturedCallbacks();
-      await callbacks.onKick(2, "Alice");
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to force logout", "error");
-
-      section.destroy();
-    });
-
-    /** Open the Ban dialog the member menu asks for and return its controls. */
-    async function openBanDialogFor(
-      callbacks: ReturnType<typeof getCapturedCallbacks>,
-    ): Promise<{ reason: HTMLInputElement; confirm: HTMLButtonElement; status: HTMLElement }> {
-      callbacks.onBan(3, "Bob", "Bob");
-      const dialog = await vi.waitFor(() => {
-        const el = document.querySelector('[data-testid="ban-dialog"]');
-        if (el === null) throw new Error("ban dialog not open yet");
-        return el;
+    it.each(
+      byName([
+        {
+          name: "force logout: shows error toast on API failure",
+          reason: new Error("Kick denied"),
+          message: "Kick denied",
+        },
+        {
+          name: "force logout: shows generic error for non-Error exceptions",
+          reason: "string error",
+          message: "Failed to force logout",
+        },
+      ]),
+    )("%s", async (_name, { reason, message }) => {
+      const { mockShow, section } = mountMembers({
+        adminKickMember: vi.fn().mockRejectedValue(reason),
       });
-      return {
-        reason: dialog.querySelector('[data-testid="ban-reason-input"]') as HTMLInputElement,
-        confirm: dialog.querySelector('[data-testid="ban-confirm"]') as HTMLButtonElement,
-        status: dialog.querySelector('[data-testid="ban-status"]') as HTMLElement,
-      };
-    }
+
+      await getCapturedCallbacks().onKick(2, "Alice");
+
+      expect(mockShow).toHaveBeenCalledWith(message, "error");
+
+      section.destroy();
+    });
 
     it("ban: opens the dialog, calls the API and shows the success toast", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn(),
+      const { mockApi, mockShow, section } = mountMembers({
         adminBanMember: vi.fn().mockResolvedValue({}),
-        adminChangeRole: vi.fn(),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      });
 
       const { reason, confirm } = await openBanDialogFor(getCapturedCallbacks());
       // Nothing is sent by opening the dialog.
@@ -644,19 +602,9 @@ describe("SidebarMemberSection", () => {
     });
 
     it("ban: shows the server's error in the dialog and keeps it open", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn(),
+      const { mockShow, section } = mountMembers({
         adminBanMember: vi.fn().mockRejectedValue(new Error("Ban denied")),
-        adminChangeRole: vi.fn(),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      });
 
       const { confirm, status } = await openBanDialogFor(getCapturedCallbacks());
       confirm.click();
@@ -670,18 +618,9 @@ describe("SidebarMemberSection", () => {
     });
 
     it("ban: shows generic error for non-Error exceptions", async () => {
-      const mockApi = {
-        adminKickMember: vi.fn(),
+      const { section } = mountMembers({
         adminBanMember: vi.fn().mockRejectedValue("string error"),
-        adminChangeRole: vi.fn(),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      });
 
       const { confirm, status } = await openBanDialogFor(getCapturedCallbacks());
       confirm.click();
@@ -691,19 +630,9 @@ describe("SidebarMemberSection", () => {
     });
 
     it("changeRole: calls API and shows success toast", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn(),
-        adminBanMember: vi.fn(),
+      const { mockApi, mockShow, section } = mountMembers({
         adminChangeRole: vi.fn().mockResolvedValue(undefined),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      });
 
       const callbacks = getCapturedCallbacks();
       await callbacks.onChangeRole(4, "Charlie", "admin");
@@ -715,18 +644,10 @@ describe("SidebarMemberSection", () => {
     });
 
     it("changeRole: keeps the role's capitalisation in the toast and still resolves its id", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn(),
-        adminBanMember: vi.fn(),
-        adminChangeRole: vi.fn().mockResolvedValue(undefined),
-      };
       setRoles([{ id: 7, name: "Moderator", color: null, permissions: 0 }]);
-      const section = createSidebarMemberSection({
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
+      const { mockApi, mockShow, section } = mountMembers({
+        adminChangeRole: vi.fn().mockResolvedValue(undefined),
       });
-      container.appendChild(section.element);
 
       await getCapturedCallbacks().onChangeRole(4, "Charlie", "Moderator");
 
@@ -736,66 +657,35 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
-    it("changeRole: shows error toast on API failure", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn(),
-        adminBanMember: vi.fn(),
-        adminChangeRole: vi.fn().mockRejectedValue(new Error("Role denied")),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
+    it.each(
+      byName([
+        {
+          name: "changeRole: shows error toast on API failure",
+          reason: new Error("Role denied"),
+          message: "Role denied",
+        },
+        {
+          name: "changeRole: shows generic error for non-Error exceptions",
+          reason: "string error",
+          message: "Failed to change role",
+        },
+      ]),
+    )("%s", async (_name, { reason, message }) => {
+      const { mockShow, section } = mountMembers({
+        adminChangeRole: vi.fn().mockRejectedValue(reason),
+      });
 
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      await getCapturedCallbacks().onChangeRole(4, "Charlie", "admin");
 
-      const callbacks = getCapturedCallbacks();
-      await callbacks.onChangeRole(4, "Charlie", "admin");
-
-      expect(mockShow).toHaveBeenCalledWith("Role denied", "error");
-
-      section.destroy();
-    });
-
-    it("changeRole: shows generic error for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn(),
-        adminBanMember: vi.fn(),
-        adminChangeRole: vi.fn().mockRejectedValue("string error"),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
-
-      const callbacks = getCapturedCallbacks();
-      await callbacks.onChangeRole(4, "Charlie", "admin");
-
-      expect(mockShow).toHaveBeenCalledWith("Failed to change role", "error");
+      expect(mockShow).toHaveBeenCalledWith(message, "error");
 
       section.destroy();
     });
 
     it("changeRole: reports an unresolvable role instead of failing silently", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        adminKickMember: vi.fn(),
-        adminBanMember: vi.fn(),
+      const { mockApi, mockShow, section } = mountMembers({
         adminChangeRole: vi.fn().mockResolvedValue(undefined),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      });
 
       const callbacks = getCapturedCallbacks();
       await callbacks.onChangeRole(4, "Charlie", "nonexistent-role");
@@ -816,18 +706,9 @@ describe("SidebarMemberSection", () => {
       // same store (previously it read a stale, never-updated roles.store).
       setRoles([{ id: 42, name: "vip", color: null, permissions: 0 }]);
 
-      const mockApi = {
-        adminKickMember: vi.fn(),
-        adminBanMember: vi.fn(),
+      const { mockApi, section } = mountMembers({
         adminChangeRole: vi.fn().mockResolvedValue(undefined),
-      };
-      const opts = {
-        api: mockApi as unknown as SidebarMemberSectionOptions["api"],
-        getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-      };
-
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      });
 
       const callbacks = getCapturedCallbacks();
       await callbacks.onChangeRole(7, "Dave", "vip");
@@ -843,11 +724,9 @@ describe("SidebarMemberSection", () => {
         user: { id: 1, username: "testuser", role: "owner", avatar: null, totp_enabled: false },
       }));
 
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
-      const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
-      const lastCall = calls[calls.length - 1]![0];
+      const lastCall = lastMemberListArgs();
       expect(lastCall.currentUserRole).toBe("owner");
 
       section.destroy();
@@ -859,11 +738,9 @@ describe("SidebarMemberSection", () => {
         user: null,
       }));
 
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
-      const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
-      const lastCall = calls[calls.length - 1]![0];
+      const lastCall = lastMemberListArgs();
       expect(lastCall.currentUserRole).toBe("member");
 
       section.destroy();
@@ -872,8 +749,7 @@ describe("SidebarMemberSection", () => {
 
   describe("user report", () => {
     it("opens the report for that user with the live member list for focus fallback", async () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
       const calls = (createMemberList as ReturnType<typeof vi.fn>).mock.calls;
       calls[calls.length - 1]![0].onReportUser(7, "bob");
       const open = openUserReport as ReturnType<typeof vi.fn>;
@@ -914,8 +790,7 @@ describe("SidebarMemberSection", () => {
 
   describe("cleanup", () => {
     it("destroy() aborts resize event listeners", () => {
-      const section = createSidebarMemberSection(defaultOpts());
-      container.appendChild(section.element);
+      const section = mountSection();
 
       section.destroy();
 
@@ -958,8 +833,7 @@ describe("SidebarMemberSection", () => {
         { ...bannedUser(4, "fine"), banned: false },
       ]);
 
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      const section = mountSection(opts);
 
       await vi.waitFor(() =>
         expect(container.querySelector("[data-testid='unban-member']")).not.toBeNull(),
@@ -990,8 +864,7 @@ describe("SidebarMemberSection", () => {
         { ...bannedUser(6, "garbled"), ban_expires: "not a date" },
       ]);
 
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      const section = mountSection(opts);
 
       await vi.waitFor(() => expect(container.querySelectorAll(".banned-row")).toHaveLength(3));
       const names = [...container.querySelectorAll(".banned-name")].map((el) => el.textContent);
@@ -1006,8 +879,7 @@ describe("SidebarMemberSection", () => {
       const listUsers = opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>;
       listUsers.mockResolvedValue([bannedUser(3, "spammer")]);
 
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      const section = mountSection(opts);
       await Promise.resolve();
       expect(container.querySelectorAll(".banned-row")).toHaveLength(0);
 
@@ -1024,8 +896,7 @@ describe("SidebarMemberSection", () => {
       const listUsers = opts.api.adminListUsers as unknown as ReturnType<typeof vi.fn>;
       listUsers.mockResolvedValue([]);
 
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      const section = mountSection(opts);
       await vi.waitFor(() => expect(listUsers).toHaveBeenCalledTimes(1));
 
       // member_ban from elsewhere: the dispatcher drops the roster row.
@@ -1053,8 +924,7 @@ describe("SidebarMemberSection", () => {
     it("stays out of the way without BAN_MEMBERS, and never asks the admin API", () => {
       const opts = defaultOpts();
 
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      const section = mountSection(opts);
 
       expect(opts.api.adminListUsers).not.toHaveBeenCalled();
       expect(container.querySelector("[data-testid='unban-member']")).toBeNull();
@@ -1079,8 +949,7 @@ describe("SidebarMemberSection", () => {
         new Error("Unban denied"),
       );
 
-      const section = createSidebarMemberSection(opts);
-      container.appendChild(section.element);
+      const section = mountSection(opts);
       await vi.waitFor(() =>
         expect(container.querySelector("[data-testid='unban-member']")).not.toBeNull(),
       );
