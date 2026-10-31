@@ -10,6 +10,11 @@ import {
   expectActiveRow,
   useSearchOverlayEnv,
   searchFor,
+  loadMoreButton,
+  retryButton,
+  scopeChip,
+  twoPageSearch,
+  searchResolving,
 } from "../../helpers/searchOverlayHarness";
 
 // ---------------------------------------------------------------------------
@@ -63,16 +68,14 @@ describe("createSearchOverlay", () => {
       .mockResolvedValueOnce({ results: [channelRow], next_before: null });
     const { overlay } = await searchFor(container, { onSearch, currentChannelId: 99 }, "hello");
 
-    const loadMore = container.querySelector(
-      "[data-testid='search-load-more']",
-    ) as HTMLButtonElement;
+    const loadMore = loadMoreButton(container);
     expect(container.querySelectorAll(".search-result-item")).toHaveLength(1);
     expect(loadMore.style.display).not.toBe("none");
 
     // Toggle scope inside the rate-limit window: the whole-server rows and
     // cursor must not survive, or Load more would page the whole-server cursor
     // with the channel-scoped request and mix scopes.
-    (container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement).click();
+    scopeChip(container, "channel").click();
     expect(container.querySelectorAll(".search-result-item")).toHaveLength(0);
     expect(loadMore.style.display).toBe("none");
 
@@ -96,7 +99,7 @@ describe("createSearchOverlay", () => {
     expect(onSearch).toHaveBeenCalledTimes(1);
     const wholeServerSignal = abortedSignal;
 
-    (container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement).click();
+    scopeChip(container, "channel").click();
     expect(wholeServerSignal!.aborted).toBe(true);
 
     overlay.destroy?.();
@@ -116,9 +119,9 @@ describe("createSearchOverlay", () => {
     const { overlay } = await searchFor(container, { onSearch, currentChannelId: 99 }, "scoped");
 
     // Narrow, then widen back: the whole-server search drops channel_id.
-    (container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement).click();
+    scopeChip(container, "channel").click();
     await vi.advanceTimersByTimeAsync(500);
-    (container.querySelector("[data-testid='search-scope-server']") as HTMLButtonElement).click();
+    scopeChip(container, "server").click();
     await vi.advanceTimersByTimeAsync(500);
 
     expect(onSearch).toHaveBeenLastCalledWith(
@@ -148,17 +151,10 @@ describe("createSearchOverlay", () => {
   });
 
   it("shows 'Load more' when a page returns a cursor and pages with it", async () => {
-    const first = makeResult({ message_id: 30 });
-    const second = makeResult({ message_id: 20 });
-    const onSearch = vi
-      .fn()
-      .mockResolvedValueOnce({ results: [first], next_before: 30 })
-      .mockResolvedValueOnce({ results: [second], next_before: null });
+    const onSearch = twoPageSearch();
     const { overlay } = await searchFor(container, { onSearch }, "page");
 
-    const loadMore = container.querySelector(
-      "[data-testid='search-load-more']",
-    ) as HTMLButtonElement;
+    const loadMore = loadMoreButton(container);
     expect(loadMore.style.display).not.toBe("none");
 
     // The second page asks for sort=recent's cursor (next_before from page one).
@@ -175,17 +171,10 @@ describe("createSearchOverlay", () => {
   });
 
   it("pages the query that produced the shown results, not an edited box", async () => {
-    const first = makeResult({ message_id: 30 });
-    const second = makeResult({ message_id: 20 });
-    const onSearch = vi
-      .fn()
-      .mockResolvedValueOnce({ results: [first], next_before: 30 })
-      .mockResolvedValueOnce({ results: [second], next_before: null });
+    const onSearch = twoPageSearch();
     const { overlay, input } = await searchFor(container, { onSearch }, "hello");
 
-    const loadMore = container.querySelector(
-      "[data-testid='search-load-more']",
-    ) as HTMLButtonElement;
+    const loadMore = loadMoreButton(container);
     expect(loadMore.style.display).not.toBe("none");
 
     // Edit the box but leave the 300 ms debounce pending: the "hello" rows and
@@ -203,12 +192,9 @@ describe("createSearchOverlay", () => {
   });
 
   it("does not show 'Load more' when the first page has no cursor", async () => {
-    const onSearch = vi.fn().mockResolvedValue({ results: [makeResult()] });
-    const { overlay } = await searchFor(container, { onSearch }, "single");
+    const { overlay } = await searchResolving(container, [makeResult()], "single");
 
-    const loadMore = container.querySelector(
-      "[data-testid='search-load-more']",
-    ) as HTMLButtonElement;
+    const loadMore = loadMoreButton(container);
     expect(loadMore.style.display).toBe("none");
 
     overlay.destroy?.();
@@ -364,7 +350,7 @@ describe("createSearchOverlay", () => {
         .mockRejectedValueOnce(new Error("net"))
         .mockResolvedValue({ results: [makeResult()] });
       const { overlay } = await run([], "hello", onSearch);
-      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      const retryBtn = retryButton(container);
       expect(retryBtn.style.display).not.toBe("none");
       expect(retryBtn.textContent).toBe("Retry");
       retryBtn.click();
@@ -383,12 +369,12 @@ describe("createSearchOverlay", () => {
         .mockRejectedValueOnce(new Error("net"))
         .mockResolvedValue({ results: [makeResult({ message_id: 2, content: "second" })] });
       const { overlay } = await run([], "hello", onSearch);
-      const more = container.querySelector("[data-testid='search-load-more']") as HTMLButtonElement;
+      const more = loadMoreButton(container);
       more.click();
       await vi.advanceTimersByTimeAsync(0);
       const status = container.querySelector(".search-overlay-status")!;
       expect(status.textContent).toBe("Search failed");
-      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      const retryBtn = retryButton(container);
       retryBtn.click();
       await vi.advanceTimersByTimeAsync(0);
       expect(status.textContent).not.toContain("failed");
@@ -403,7 +389,7 @@ describe("createSearchOverlay", () => {
         .mockRejectedValueOnce(new Error("net"))
         .mockResolvedValue({ results: [makeResult()] });
       const { overlay, input } = await run([], "hello", onSearch);
-      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      const retryBtn = retryButton(container);
       retryBtn.focus();
       expect(document.activeElement).toBe(retryBtn);
       retryBtn.click();
@@ -416,16 +402,16 @@ describe("createSearchOverlay", () => {
         .fn()
         .mockRejectedValueOnce(new Error("net"))
         .mockResolvedValue({ results: [] });
-      const overlay = mountOverlay(container, makeOptions({ onSearch, currentChannelId: 42 }));
-      const input = searchInput(container);
-      await typeQuery(input, "h");
+      const { overlay, input } = await searchFor(
+        container,
+        { onSearch, currentChannelId: 42 },
+        "h",
+      );
       await typeQuery(input, "hello", 600);
-      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      const retryBtn = retryButton(container);
       expect(retryBtn.style.display).not.toBe("none");
       input.value = "";
-      (
-        container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement
-      ).click();
+      scopeChip(container, "channel").click();
       expect(retryBtn.style.display).toBe("none");
       expect(container.querySelector(".search-overlay-status")!.textContent).toBe("");
       overlay.destroy?.();
@@ -444,7 +430,7 @@ describe("createSearchOverlay", () => {
         )
         .mockResolvedValue({ results: [makeResult({ message_id: 9, content: "newer" })] });
       const { overlay } = await run([], "hello", onSearch);
-      const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+      const retryBtn = retryButton(container);
       retryBtn.click(); // second call: stays pending
       const input = searchInput(container);
       await typeQuery(input, "hello2", 600);
@@ -463,8 +449,7 @@ describe("createSearchOverlay", () => {
         makeResult({ message_id: 2 }),
         makeResult({ message_id: 3 }),
       ];
-      const onSearch = vi.fn().mockResolvedValue({ results });
-      const { overlay, input } = await searchFor(container, { onSearch }, "test");
+      const { overlay, input } = await searchResolving(container, results, "test");
 
       // First item is active
       expectActiveRow(container, 0);
@@ -478,8 +463,7 @@ describe("createSearchOverlay", () => {
 
     it("ArrowDown wraps from last to first", async () => {
       const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
-      const onSearch = vi.fn().mockResolvedValue({ results });
-      const { overlay, input } = await searchFor(container, { onSearch }, "test");
+      const { overlay, input } = await searchResolving(container, results, "test");
 
       // Move to last
       pressKey(input, "ArrowDown");
@@ -535,11 +519,7 @@ describe("createSearchOverlay", () => {
       makeResult({ message_id: 2 }),
       makeResult({ message_id: 3 }),
     ];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const overlay = mountOverlay(container, makeOptions({ onSearch }));
-
-    const input = searchInput(container);
-    await typeQuery(input, "test");
+    const { overlay, input } = await searchResolving(container, results, "test");
 
     scrollIntoView.mockClear();
     pressKey(input, "ArrowDown");
@@ -632,8 +612,7 @@ describe("createSearchOverlay", () => {
   });
 
   it("ArrowUp/ArrowDown are no-ops when results are empty", async () => {
-    const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const { overlay, input } = await searchFor(container, { onSearch }, "empty");
+    const { overlay, input } = await searchResolving(container, [], "empty");
 
     // Should not throw
     pressKey(input, "ArrowDown");

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createSearchOverlay } from "../../../src/components/SearchOverlay";
 import { setDmChannels } from "../../../src/stores/dm.store";
-import { membersStore, setMembers } from "../../../src/stores/members.store";
+import { setMembers } from "../../../src/stores/members.store";
+import { seedMemberEntries } from "../../helpers/composerAutocomplete";
 import { setBlockedByMe } from "../../../src/stores/blocks.store";
 import {
   makeResult,
@@ -14,6 +15,7 @@ import {
   useSearchOverlayEnv,
   makeDmChannel,
   searchFor,
+  searchResolving,
 } from "../../helpers/searchOverlayHarness";
 
 // ---------------------------------------------------------------------------
@@ -85,8 +87,7 @@ describe("createSearchOverlay", () => {
       makeResult({ message_id: 1, content: "first result" }),
       makeResult({ message_id: 2, content: "second result", channel_name: "random" }),
     ];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const { overlay } = await searchFor(container, { onSearch }, "result");
+    const { overlay } = await searchResolving(container, results, "result");
 
     const items = container.querySelectorAll(".search-result-item");
     expect(items).toHaveLength(2);
@@ -134,11 +135,7 @@ describe("createSearchOverlay", () => {
     const bareResult = makeResult({ message_id: 1, timestamp: "2026-01-15 12:00:00" });
     const zResult = makeResult({ message_id: 2, timestamp: "2026-01-15T12:00:00Z" });
 
-    const onSearch = vi.fn().mockResolvedValue({ results: [bareResult, zResult] });
-    const overlay = mountOverlay(container, makeOptions({ onSearch }));
-
-    const input = searchInput(container);
-    await typeQuery(input, "hello");
+    const { overlay } = await searchResolving(container, [bareResult, zResult], "hello");
 
     const times = container.querySelectorAll(".search-result-time");
     expect(times[0]!.textContent).toBe(times[1]!.textContent);
@@ -153,10 +150,7 @@ describe("createSearchOverlay", () => {
     const onSearch = vi
       .fn()
       .mockResolvedValue({ results: [makeResult({ timestamp: at.toISOString() })] });
-    const overlay = mountOverlay(container, makeOptions({ onSearch }));
-
-    const input = searchInput(container);
-    await typeQuery(input, "hello");
+    const { overlay } = await searchFor(container, { onSearch }, "hello");
 
     const time = container.querySelector(".search-result-time")!.textContent!;
     expect(time).toContain("18:34");
@@ -181,8 +175,7 @@ describe("createSearchOverlay", () => {
     ]);
 
     const results = [makeResult({ channel_id: 42, channel_name: "" })];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const { overlay } = await searchFor(container, { onSearch }, "dm search");
+    const { overlay } = await searchResolving(container, results, "dm search");
 
     const channelLabel = container.querySelector(".search-result-channel")!;
     expect(channelLabel.textContent).toBe("@bob");
@@ -192,29 +185,10 @@ describe("createSearchOverlay", () => {
   });
 
   it("shows the author's display name when the member list has one", async () => {
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice_w",
-            displayName: "Alice",
-            avatar: null,
-            role: "member" as const,
-            status: "online" as const,
-          },
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMemberEntries([{ username: "alice_w", displayName: "Alice" }]);
 
     const results = [makeResult({ user: { id: 1, username: "alice_w", avatar: null } })];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const overlay = mountOverlay(container, makeOptions({ onSearch }));
-
-    const input = searchInput(container);
-    await typeQuery(input, "hello");
+    const { overlay } = await searchResolving(container, results, "hello");
 
     expect(container.querySelector(".search-result-author")!.textContent).toBe("Alice");
     expect(container.querySelector(".search-result-handle")!.textContent).toBe("@alice_w");
@@ -225,11 +199,7 @@ describe("createSearchOverlay", () => {
   it("falls back to the username when no display name is set", async () => {
     setMembers([]);
     const results = [makeResult()];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const overlay = mountOverlay(container, makeOptions({ onSearch }));
-
-    const input = searchInput(container);
-    await typeQuery(input, "hello");
+    const { overlay } = await searchResolving(container, results, "hello");
 
     expect(container.querySelector(".search-result-author")!.textContent).toBe("alice");
     expect(container.querySelector(".search-result-handle")).toBeNull();
@@ -238,8 +208,7 @@ describe("createSearchOverlay", () => {
   });
 
   it("shows 'No results found' for empty results", async () => {
-    const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const { overlay } = await searchFor(container, { onSearch }, "no match");
+    const { overlay } = await searchResolving(container, [], "no match");
 
     const status = container.querySelector(".search-overlay-status");
     expect(status!.textContent).toBe("No results found");
@@ -379,8 +348,7 @@ describe("createSearchOverlay", () => {
   describe("keyboard navigation", () => {
     it("ArrowDown moves active index", async () => {
       const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
-      const onSearch = vi.fn().mockResolvedValue({ results });
-      const { overlay, input } = await searchFor(container, { onSearch }, "test");
+      const { overlay, input } = await searchResolving(container, results, "test");
 
       // First item should be active
       expectActiveRow(container, 0);
@@ -464,10 +432,7 @@ describe("createSearchOverlay", () => {
     const result = makeResult({ message_id: 9, content: "secret hello" });
     const onSearch = vi.fn().mockResolvedValue({ results: [result] });
     const onSelectResult = vi.fn();
-    const overlay = mountOverlay(container, makeOptions({ onSearch, onSelectResult }));
-
-    const input = searchInput(container);
-    await typeQuery(input, "hello");
+    const { overlay, input } = await searchFor(container, { onSearch, onSelectResult }, "hello");
 
     const item = container.querySelector("[data-testid='search-result-0']") as HTMLElement;
     const body = item.querySelector(".search-result-content") as HTMLElement;
@@ -495,8 +460,7 @@ describe("createSearchOverlay", () => {
       makeResult({ message_id: 2 }),
       makeResult({ message_id: 3 }),
     ];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const { overlay, input } = await searchFor(container, { onSearch }, "test");
+    const { overlay, input } = await searchResolving(container, results, "test");
 
     expect(container.querySelectorAll(".search-result-item")).toHaveLength(3);
 

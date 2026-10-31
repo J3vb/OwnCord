@@ -28,6 +28,7 @@ import { Permission } from "../../src/lib/types";
 import {
   composerTextarea,
   pressIn,
+  seedMemberEntries,
   seedMembers as seedRoster,
   signInAs,
   typeInto,
@@ -177,33 +178,10 @@ describe("filterMentionSuggestions", () => {
   });
 
   it("matches a member by display name and shows it, keeping the username as the token", () => {
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice_w",
-            displayName: "Alice",
-            avatar: null,
-            role: "member" as const,
-            status: "online" as const,
-          },
-        ],
-        [
-          2,
-          {
-            id: 2,
-            username: "bob",
-            displayName: null,
-            avatar: null,
-            role: "member" as const,
-            status: "online" as const,
-          },
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMemberEntries([
+      { username: "alice_w", displayName: "Alice" },
+      { username: "bob", displayName: null },
+    ]);
 
     const found = filterMentionSuggestions("Ali");
     expect(found.map((s) => s.token)).toEqual(["alice_w"]);

@@ -20,6 +20,11 @@ vi.mock("../../../src/platform/desktop/externalContent", () => mocks.desktopExte
 
 const { imageMock, consent } = mocks;
 
+function expectNoImageEmbed(container: HTMLElement, url: string): void {
+  expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
+  expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
+}
+
 describe("renderers", () => {
   let container: HTMLDivElement;
   useRenderersHarness((el) => {
@@ -36,8 +41,7 @@ describe("renderers", () => {
     for (const ext of imageExtensions) {
       it(`produces a .msg-image embed for a ${ext} URL`, async () => {
         const url = `https://example.com/image${ext}`;
-        const msg = makeMessage({ content: url });
-        const { ac } = mountMessage(container, msg);
+        const { ac } = mountContent(container, url);
 
         // renderUrlEmbeds calls isDirectImageUrl → renderInlineImage
         // which produces a div.msg-image inside the message element.
@@ -53,8 +57,7 @@ describe("renderers", () => {
 
     it("does not produce a .msg-image embed for a non-image URL", () => {
       const url = "https://example.com/page.html";
-      const msg = makeMessage({ content: url });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, url);
 
       // A generic link card (.msg-embed-link) should appear instead
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
@@ -67,11 +70,9 @@ describe("renderers", () => {
     it("does not produce a .msg-image embed for a URL with image extension as query param", () => {
       // The path itself has no image extension — only a query string does
       const url = "https://example.com/image?format=png";
-      const msg = makeMessage({ content: url });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, url);
 
-      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
-      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
+      expectNoImageEmbed(container, url);
 
       ac.abort();
     });
@@ -164,8 +165,7 @@ describe("renderers", () => {
   describe("renderInlineImage — img element and lightbox behaviour", () => {
     it("creates an img element with the correct src attribute", async () => {
       const url = "https://example.com/photo.jpg";
-      const msg = makeMessage({ content: url });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, url);
 
       const img = container.querySelector(`.msg-image img`) as HTMLImageElement | null;
       expect(img).not.toBeNull();
@@ -180,8 +180,7 @@ describe("renderers", () => {
 
     it("wraps the img in a div with class msg-image", () => {
       const url = "https://cdn.example.com/banner.gif";
-      const msg = makeMessage({ content: url });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, url);
 
       const wrap = container.querySelector(".msg-image");
       expect(wrap).not.toBeNull();
@@ -367,8 +366,7 @@ describe("renderers", () => {
           has_attachments: false,
         },
       });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(reply, false, [reply], makeOpts(), ac.signal));
+      const { ac } = mountMessage(container, reply);
 
       const ref = container.querySelector(".msg-reply-ref")!;
       expect(ref.querySelector(".rr-author")?.textContent).toBe("alice");
@@ -388,8 +386,7 @@ describe("renderers", () => {
           has_attachments: false,
         },
       });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(reply, false, [reply], makeOpts(), ac.signal));
+      const { ac } = mountMessage(container, reply);
 
       const ref = container.querySelector(".msg-reply-ref")!;
       expect(ref.querySelector(".rr-author")).toBeNull();
@@ -494,8 +491,7 @@ describe("renderers", () => {
   describe("renderUrlEmbeds — embed routing via renderMessage", () => {
     it("produces a .msg-image element for a direct image URL instead of a generic link card", () => {
       const url = "https://static.example.com/hero.png";
-      const msg = makeMessage({ content: url });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, url);
 
       expect(container.querySelector(".msg-image")).not.toBeNull();
       expect(container.querySelector(".msg-embed-link")).toBeNull();
@@ -505,8 +501,7 @@ describe("renderers", () => {
 
     it("does not duplicate embeds for the same URL appearing twice in content", async () => {
       const url = "https://example.com/img.gif";
-      const msg = makeMessage({ content: `${url} and again ${url}` });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, `${url} and again ${url}`);
 
       // URL dedup inside renderUrlEmbeds — only one img embed produced
       expect(container.querySelectorAll(".msg-image img").length).toBe(1);
@@ -519,23 +514,19 @@ describe("renderers", () => {
 
     it("skips image URLs that appear inside code blocks", () => {
       const url = "https://example.com/hidden.png";
-      const msg = makeMessage({ content: `\`\`\`${url}\`\`\`` });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, `\`\`\`${url}\`\`\``);
 
       // URL inside a code block must not produce an embed
-      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
-      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
+      expectNoImageEmbed(container, url);
 
       ac.abort();
     });
 
     it("skips image URLs inside inline code", () => {
       const url = "https://example.com/inline.png";
-      const msg = makeMessage({ content: `Look at \`${url}\`` });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, `Look at \`${url}\``);
 
-      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
-      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
+      expectNoImageEmbed(container, url);
 
       ac.abort();
     });
@@ -555,19 +546,16 @@ describe("renderers", () => {
 
     it("renders a generic link card for a plain https URL with no image extension", () => {
       const url = "https://example.com/some-article";
-      const msg = makeMessage({ content: url });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, url);
 
       expect(container.querySelector(".msg-embed-link")).not.toBeNull();
-      expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
-      expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
+      expectNoImageEmbed(container, url);
 
       ac.abort();
     });
 
     it("produces no embeds for a message with no URLs", () => {
-      const msg = makeMessage({ content: "just plain text, no links" });
-      const { ac } = mountMessage(container, msg);
+      const { ac } = mountContent(container, "just plain text, no links");
 
       expect(container.querySelector(".msg-embed")).toBeNull();
       expect(container.querySelector(".msg-image")).toBeNull();

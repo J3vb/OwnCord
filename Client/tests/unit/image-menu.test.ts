@@ -2,7 +2,7 @@
  * The right-click menu on chat images and the lightbox (image-menu.ts):
  * Copy Image, Copy Link, Open Link, Save Image.
  */
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type Mock } from "vitest";
 
 const { openUrlMock, saveMock, writeFileMock, showToastMock } = vi.hoisted(() => ({
   openUrlMock: vi.fn(),
@@ -102,6 +102,16 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/** Makes every canvas draw into a spy and encode to `png`; returns the draw spy. */
+function stubCanvas(png: Blob): Mock {
+  const drawImage = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    drawImage,
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((cb) => cb(png));
+  return drawImage;
+}
+
 describe("bindImageMenu", () => {
   it("offers Copy Image, Copy Link, Open Link and Save Image for a linked image", async () => {
     const img = loadedImage();
@@ -192,11 +202,7 @@ describe("bindImageMenu", () => {
 
   it("Copy Image puts a PNG of the image on the clipboard", async () => {
     const png = new Blob(["png"], { type: "image/png" });
-    const drawImage = vi.fn();
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-      drawImage,
-    } as unknown as CanvasRenderingContext2D);
-    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((cb) => cb(png));
+    const drawImage = stubCanvas(png);
     class FakeClipboardItem {
       constructor(readonly items: Record<string, Promise<Blob>>) {}
     }
@@ -215,13 +221,7 @@ describe("bindImageMenu", () => {
   });
 
   it("Copy Image copies the full image when the row shows a preview", async () => {
-    const drawImage = vi.fn();
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-      drawImage,
-    } as unknown as CanvasRenderingContext2D);
-    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation((cb) =>
-      cb(new Blob(["png"], { type: "image/png" })),
-    );
+    const drawImage = stubCanvas(new Blob(["png"], { type: "image/png" }));
     // jsdom has no HTMLImageElement.decode.
     Object.defineProperty(HTMLImageElement.prototype, "decode", {
       configurable: true,

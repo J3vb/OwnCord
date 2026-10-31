@@ -118,3 +118,34 @@ export async function searchFor(
   await typeQuery(input, query, ms);
   return { opts, overlay, input };
 }
+
+export function loadMoreButton(container: HTMLElement): HTMLButtonElement {
+  return container.querySelector("[data-testid='search-load-more']") as HTMLButtonElement;
+}
+
+export function retryButton(container: HTMLElement): HTMLButtonElement {
+  return container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
+}
+
+export function scopeChip(container: HTMLElement, scope: "channel" | "server"): HTMLButtonElement {
+  return container.querySelector(`[data-testid='search-scope-${scope}']`) as HTMLButtonElement;
+}
+
+/** A search that answers page one (cursor 30) and then page two (no cursor). */
+export function twoPageSearch(): SearchOverlayOptions["onSearch"] & ReturnType<typeof vi.fn> {
+  return vi
+    .fn()
+    .mockResolvedValueOnce({ results: [makeResult({ message_id: 30 })], next_before: 30 })
+    .mockResolvedValueOnce({ results: [makeResult({ message_id: 20 })], next_before: null });
+}
+
+/** Like searchFor, with a search that answers `results`; extra options are merged in. */
+export function searchResolving(
+  container: HTMLElement,
+  results: SearchResultItem[],
+  query: string,
+  extra: Partial<SearchOverlayOptions> = {},
+): ReturnType<typeof searchFor> {
+  const onSearch = vi.fn().mockResolvedValue({ results });
+  return searchFor(container, { onSearch, ...extra }, query);
+}

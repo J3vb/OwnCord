@@ -57,15 +57,21 @@ export function pressIn(container: HTMLElement, key: string): boolean {
   return ev.defaultPrevented;
 }
 
-/** Seeds the member list with `names`, ids 1..n. */
-export function seedMembers(names: readonly string[]): void {
+export interface SeededMember {
+  username: string;
+  displayName?: string | null;
+}
+
+/** Seeds the member list with these members, ids 1..n. */
+export function seedMemberEntries(entries: readonly SeededMember[]): void {
   membersStore.setState(() => ({
     members: new Map(
-      names.map((n, i) => [
+      entries.map((entry, i) => [
         i + 1,
         {
           id: i + 1,
-          username: n,
+          username: entry.username,
+          ...(entry.displayName === undefined ? {} : { displayName: entry.displayName }),
           avatar: null,
           role: "member" as const,
           status: "online" as const,
@@ -74,6 +80,11 @@ export function seedMembers(names: readonly string[]): void {
     ),
     typingUsers: new Map(),
   }));
+}
+
+/** Seeds the member list with `names`, ids 1..n. */
+export function seedMembers(names: readonly string[]): void {
+  seedMemberEntries(names.map((username) => ({ username })));
 }
 
 /** Sign in as a role, and register that role's permission mask. */
