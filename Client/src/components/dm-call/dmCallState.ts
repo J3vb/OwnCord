@@ -7,6 +7,7 @@ import type { DmChannel } from "@stores/dm.store";
 import type { GridPerson } from "@components/VideoGrid";
 import type { AvatarRef, ControlRefs, DmCallView } from "../DmCallViewModel";
 import type { DmCallPanelOptions } from "../DmCallPanel";
+import type { TalkSlot } from "../../features/voice/talkSlot";
 
 export interface DmCallState {
   readonly options: DmCallPanelOptions;
@@ -57,6 +58,9 @@ export interface DmCallState {
   answeredAt: number | null;
   readonly resizeOpts: { signal: AbortSignal };
   focusedShield: HTMLElement | null;
+  /** Push to Talk in the Android app: a hold-to-talk button first in the
+   *  controls, moved into each redrawn bar. */
+  readonly talkSlot: TalkSlot;
 }
 
 /** Every function the DM call panel's modules share, filled in once by createDmCallPanel. */

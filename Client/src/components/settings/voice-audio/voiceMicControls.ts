@@ -13,7 +13,7 @@ import { setStatusIcon, statusIcon } from "../../../features/settings/status";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
 import { autoInputSensitivity, inputMode, type InputMode } from "@lib/ui/inputMode";
 import { buildPttControls } from "../pttControls";
-import { sensitivityLabel, MIC_NOISE_FLOOR, MIC_HEARD_HOLD_MS } from "./voiceTabShared";
+import { log, sensitivityLabel, MIC_NOISE_FLOOR, MIC_HEARD_HOLD_MS } from "./voiceTabShared";
 import type { VoiceTabScope } from "./voiceTabScope";
 
 export function mountMicControls(sc: VoiceTabScope): void {
@@ -248,7 +248,11 @@ export function mountMicControls(sc: VoiceTabScope): void {
 
   sc.pttBox = createElement("div", { class: "input-mode-ptt", "data-testid": "ptt-controls" });
 
-  if (!sc.android) sc.pttBox.append(...buildPttControls(sc.signal));
+  if (sc.android) {
+    sc.pttBox.appendChild(
+      createElement("div", { class: "setting-desc" }, t("voiceAudio.inputMode.ptt.android")),
+    );
+  } else sc.pttBox.append(...buildPttControls(sc.signal));
 
   sc.modeButtons = new Map<InputMode, HTMLButtonElement>();
 
@@ -271,6 +275,12 @@ export function mountMicControls(sc: VoiceTabScope): void {
     applyInputMode();
     sc.syncMeterGate();
     sc.resetNativeTestGate();
+    if (sc.android) {
+      void import("../../../features/voice/talkButton")
+        .then((m) => m.syncTalkSource())
+        .catch((err: unknown) => log.warn("Talk button failed to follow the input mode", err));
+      return;
+    }
     const vk = loadPref<number>("pttVk", 0);
     if (mode === "vad") void desktop.pushToTalk.stop();
     else if (vk !== 0)
@@ -311,8 +321,7 @@ export function mountMicControls(sc: VoiceTabScope): void {
 
   enableRovingNavigation(sc.modeGroup, "[role='radio']", sc.signal);
 
-  if (sc.android) sc.inputModeCard.remove();
-  else appendChildren(sc.inputModeCard, sc.modeGroup, sc.pttBox);
+  appendChildren(sc.inputModeCard, sc.modeGroup, sc.pttBox);
 
   sc.updateThresholdIndicator = function updateThresholdIndicator(sensitivity: number): void {
     // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),

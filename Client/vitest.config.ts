@@ -51,6 +51,7 @@ if (!(process.env.NODE_OPTIONS ?? "").includes(WEBSTORAGE_OFF)) {
 // that also happens in the forks pool.
 const NODE_PROCESS_FILES = [
   "tests/contract/server-admin-*.test.ts",
+  "tests/contract/serverAdminStaticPanel/*.test.ts",
   "tests/unit/api/infraAndTransport.test.ts",
   "tests/unit/app-deepLinks.test.ts",
   "tests/unit/app-globalGuards.test.ts",

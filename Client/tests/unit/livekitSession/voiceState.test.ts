@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { LiveKitSession, setPttPollingLive } from "../../../src/lib/voice/livekitSession";
+import { setTalkButton } from "../../../src/lib/ui/inputMode";
 import { setLocalMuted, setLocalDeafened, setPttGated, setListenOnly } from "@stores/voice.store";
 import { getLiveKitProxyPort } from "../../../src/platform/desktop/nativeProxies";
 import { takeWatchRefusal } from "../../../src/lib/voice/watchRequest";
@@ -527,6 +528,47 @@ describe("LiveKitSession", () => {
       expect(gateSpy).not.toHaveBeenCalledWith(true);
       expect(setPttGated).toHaveBeenCalledWith(false);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("closes the gate at join when the talk button is the trigger, with no key bound", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "inputMode" ? "ptt" : defaultVal,
+      );
+      setTalkButton(true);
+      setPttPollingLive(true);
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+      const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
+
+      try {
+        await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      } finally {
+        setTalkButton(false);
+      }
+
+      expect(gateSpy).toHaveBeenCalledWith(true);
+      expect(setPttGated).toHaveBeenCalledWith(true);
+      expect(setLocalMuted).not.toHaveBeenCalledWith(true);
+      expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("does not close the gate at join for the talk button in Voice Activity mode", async () => {
+      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
+        key === "inputMode" ? "vad" : defaultVal,
+      );
+      setTalkButton(true);
+      setPttPollingLive(true);
+      session.setServerHost("localhost:7880");
+      session.setWsClient({ send: vi.fn() } as any);
+
+      try {
+        await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      } finally {
+        setTalkButton(false);
+      }
+
+      expect(setPttGated).toHaveBeenCalledWith(false);
+      expect(setPttGated).not.toHaveBeenCalledWith(true);
     });
 
     it("does not mute at join when the poller is live but no PTT key is bound", async () => {

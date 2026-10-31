@@ -31,11 +31,11 @@ export interface VoiceTabScope {
   // and in the capture-only monitor the meter runs outside a call. The
   // webview's microphone is not the engine's, so the meter opens none there.
   nativeAudio: boolean;
-  // The Android app has no key service for Push to Talk, no output device
-  // choice and no screen sharing, so those controls are left out.
+  // The Android app has no output device choice and no screen sharing, so
+  // those controls are left out; its Push to Talk is the talk button in a
+  // call, not a bound key.
   android: boolean;
-  // The mode the gate runs in. The saved choice is kept as it is, but a phone
-  // always gates on the sensitivity, as a call there does.
+  // The mode the gate runs in: the saved choice, on every platform.
   currentMode: () => InputMode;
   // Five cards: when you transmit, what you speak into, what you hear, what
   // you show, and how your voice is processed.

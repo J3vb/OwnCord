@@ -1041,6 +1041,43 @@ for (const profile of PROFILES) {
       await expect(page.locator("[data-testid='phone-call-bar']")).toBeHidden();
     });
 
+    test("Push to Talk in the Android app: a hold-to-talk button opens the mic while held", async ({
+      page,
+    }) => {
+      await page.addInitScript(() =>
+        localStorage.setItem("owncord:settings:inputMode", JSON.stringify("ptt")),
+      );
+      await joinAndOpenCallView(page);
+      const call = page.locator("[data-testid='talk-button-call']");
+      if (profile.name !== "Pixel 7") {
+        // A phone browser has no talk button: Push to Talk is the app's.
+        await expect(call).toHaveCount(0);
+        return;
+      }
+      await expect(call).toBeVisible();
+      const box = (await call.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(56);
+      expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+      await expect(call).toHaveAttribute("aria-pressed", "false");
+      const label = call.locator(".talk-btn__label");
+      expect((await textContrast(label)).ratio).toBeGreaterThanOrEqual(Q1.text);
+      expect(
+        await findUnnamedControls(page.locator("[data-testid='video-grid'] .video-grid__controls")),
+      ).toEqual([]);
+
+      await call.dispatchEvent("pointerdown", { pointerId: 1, pointerType: "touch", button: 0 });
+      await expect(call).toHaveAttribute("aria-pressed", "true");
+      await expect(call).toHaveClass(/talking/);
+      expect((await textContrast(label)).ratio).toBeGreaterThanOrEqual(Q1.text);
+      await call.dispatchEvent("pointerup", { pointerId: 1, pointerType: "touch", button: 0 });
+      await expect(call).toHaveAttribute("aria-pressed", "false");
+      await expect(call).not.toHaveClass(/talking/);
+
+      // The call bar has one too, beside Mute.
+      await page.locator("[data-call-control='chat']").tap();
+      await expect(page.locator("[data-testid='talk-button-bar']")).toBeVisible();
+    });
+
     test("tapping a tile focuses it, and tapping it again unfocuses it", async ({ page }) => {
       await mockTauriFullSessionWithVoice(page);
       await page.goto("/");

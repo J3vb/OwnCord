@@ -50,12 +50,9 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
     expect(labelled("Video Codec")).toBe(true);
   });
 
-  it("leaves out the input mode, output device, screen share and codec controls on Android", () => {
+  it("leaves out the output device, screen share and codec controls on Android", () => {
     hostAndroidApp();
     mount();
-    expect(heading("Input Mode")).toBe(false);
-    expect(el.querySelector('[data-testid="input-mode"]')).toBeNull();
-    expect(el.querySelector('[data-testid="ptt-controls"]')).toBeNull();
     expect(labelled("Output Device")).toBe(false);
     expect(labelled("Screen Share Quality")).toBe(false);
     expect(labelled("Screen Share FPS")).toBe(false);
@@ -69,17 +66,35 @@ describe("VoiceAudioTab on the Android app and the desktop app", () => {
     expect(heading("Camera & screen share")).toBe(false);
   });
 
-  it("keeps a saved Push to Talk choice on Android, and gates on the sensitivity", () => {
-    localStorage.setItem(INPUT_MODE_KEY, '"ptt"');
-    localStorage.setItem("owncord:settings:pttVk", "65");
+  it("offers Push to Talk on Android with the talk button, not a key to bind", () => {
     hostAndroidApp();
     mount();
-    // The saved choice is neither shown nor changed.
+    expect(heading("Input Mode")).toBe(true);
+    expect(el.querySelector('[data-testid="input-mode-ptt"]')).not.toBeNull();
+    const ptt = el.querySelector<HTMLElement>('[data-testid="ptt-controls"]')!;
+    expect(ptt.textContent).toContain("Hold to talk");
+    expect(ptt.querySelector(".kbd")).toBeNull();
+    expect(el.querySelector('[data-testid="ptt-release-delay"]')).toBeNull();
+  });
+
+  it("choosing Push to Talk on Android arms the talk button, never the key service", async () => {
+    hostAndroidApp();
+    mount();
+    el.querySelector<HTMLButtonElement>('[data-testid="input-mode-ptt"]')!.click();
     expect(localStorage.getItem(INPUT_MODE_KEY)).toBe('"ptt"');
-    expect(localStorage.getItem("owncord:settings:pttVk")).toBe("65");
-    // A saved Push to Talk on a desktop hides the sensitivity row; here it shows.
-    expect(el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden).toBe(false);
-    expect(el.querySelector<HTMLElement>("[data-testid='auto-sensitivity']")!.hidden).toBe(false);
+    expect(el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden).toBe(true);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mocks.mockPttUpdateKey).not.toHaveBeenCalled();
+    expect(mocks.mockPttStop).not.toHaveBeenCalled();
+  });
+
+  it("keeps a saved Push to Talk choice on Android, and hides the sensitivity row as on the desktop", () => {
+    localStorage.setItem(INPUT_MODE_KEY, '"ptt"');
+    hostAndroidApp();
+    mount();
+    expect(localStorage.getItem(INPUT_MODE_KEY)).toBe('"ptt"');
+    expect(el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden).toBe(true);
+    expect(el.querySelector<HTMLElement>("[data-testid='auto-sensitivity']")!.hidden).toBe(true);
     expect(mocks.mockPttUpdateKey).not.toHaveBeenCalled();
   });
 

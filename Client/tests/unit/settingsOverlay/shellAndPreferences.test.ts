@@ -308,8 +308,9 @@ describe("SettingsOverlay", () => {
       overlay.mount(container);
       expect(navNames()).not.toContain("Keybinds");
       expect(navNames()).toHaveLength(9);
+      // Push to Talk there is the talk button, chosen under Voice & Video.
       searchFor("push to talk");
-      expect(visibleNav()).toEqual([]);
+      expect(visibleNav()).toEqual(["Voice & Video"]);
       searchFor("shortcut");
       expect(visibleNav()).not.toContain("Keybinds");
       overlay.destroy?.();

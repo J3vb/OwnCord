@@ -5,7 +5,7 @@
 import { createElement } from "@lib/dom";
 import { isAndroidApp, isLinuxDesktop } from "../../features/voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
-import { inputMode, type InputMode } from "@lib/ui/inputMode";
+import { inputMode } from "@lib/ui/inputMode";
 import { mountMicControls } from "./voice-audio/voiceMicControls";
 import { mountMicTest } from "./voice-audio/voiceMicTest";
 import { mountOutputAndVideo } from "./voice-audio/voiceOutputVideo";
@@ -138,12 +138,12 @@ function buildVoiceAudioTabInner(
   // and in the capture-only monitor the meter runs outside a call. The
   // webview's microphone is not the engine's, so the meter opens none there.
   sc.nativeAudio = isLinuxDesktop();
-  // The Android app has no key service for Push to Talk, no output device
-  // choice and no screen sharing, so those controls are left out.
+  // The Android app has no output device choice and no screen sharing, so
+  // those controls are left out; its Push to Talk is the talk button in a
+  // call, not a bound key.
   sc.android = isAndroidApp();
-  // The mode the gate runs in. The saved choice is kept as it is, but a phone
-  // always gates on the sensitivity, as a call there does.
-  sc.currentMode = (): InputMode => (sc.android ? "vad" : inputMode());
+  // The mode the gate runs in: the saved choice, on every platform.
+  sc.currentMode = inputMode;
 
   // Five cards: when you transmit, what you speak into, what you hear, what
   // you show, and how your voice is processed.

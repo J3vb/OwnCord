@@ -49,6 +49,7 @@ import { HEIGHT_PREF, MIN_HEIGHT, MESSAGES_MIN_HEIGHT, KEY_STEP } from "./dm-cal
 import type { DmCallState, DmCallApi } from "./dm-call/dmCallState";
 import { connectedStatus, createDmCallRender } from "./dm-call/dmCallRender";
 import { createDmCallVerify, identitiesOf } from "./dm-call/dmCallVerify";
+import { createTalkSlot } from "../features/voice/talkSlot";
 
 export { absentMembers, deriveCallView } from "./DmCallViewModel";
 export type { DmCallView, DmCallViewInput } from "./DmCallViewModel";
@@ -106,6 +107,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     options,
     disposable,
     unsubs: [],
+    talkSlot: createTalkSlot("bar"),
     incoming: null,
     outgoing: null,
     collapsed: false,
@@ -152,6 +154,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     resizeOpts: { signal: disposable.signal },
     focusedShield: null,
   };
+  disposable.addCleanup(() => st.talkSlot.clear());
   const dc = {} as DmCallApi;
   Object.assign(dc, createDmCallRender(st, dc), createDmCallVerify(st, dc), { update });
 

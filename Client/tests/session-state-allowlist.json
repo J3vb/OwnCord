@@ -426,6 +426,18 @@
       "binding": "pendingResets",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the copy button; a pending label reset goes with its button, and an owner's signal drops it on abort"
+    },
+    {
+      "file": "features/voice/talkButton.ts",
+      "binding": "releaseTimer",
+      "category": "transient",
+      "reason": "A release's pending gate write for the call in progress; it checks that call's channel and join time before writing, so it never touches a later session's call"
+    },
+    {
+      "file": "features/voice/talkButton.ts",
+      "binding": "heldListeners",
+      "category": "dom-owned",
+      "reason": "Repaint callbacks of the mounted talk buttons, each removed when its button's owner signal aborts"
     }
   ]
 }

@@ -9,8 +9,7 @@ import {
   setPttGated as setPttGatedState,
   setListenOnly,
 } from "@stores/voice.store";
-import { loadPref } from "@lib/prefs/preferences";
-import { inputMode } from "@lib/ui/inputMode";
+import { pttGates } from "@lib/ui/inputMode";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
 import type { AudioElements } from "@lib/voice/audioElements";
@@ -41,9 +40,10 @@ export async function restoreLocalVoiceState(
   syncShareGrant(room);
 
   const state = voiceStore.getState();
-  // In Push to Talk mode a bound key means transmission is gated by
-  // press/release (a key bound in Voice Activity mode gates nothing), but the
-  // Rust poller only emits ptt-state on a state TRANSITION — an idle key
+  // In Push to Talk mode a bound key (or, in the Android app, the on-screen
+  // talk button) means transmission is gated by press/release (a key bound
+  // in Voice Activity mode gates nothing), but the Rust poller only emits
+  // ptt-state on a state TRANSITION, and an idle button sends nothing — an idle key
   // produces no event at all, so without this the freshly published mic
   // would stay hot and transmitting until the user's first press+release.
   // Only arm this when the poller is confirmed live (setPttPollingLive) —
@@ -60,10 +60,7 @@ export async function restoreLocalVoiceState(
   // gate is still supposed to be closed; reading it back here (instead of
   // silently reopening the mic) is what keeps that promise across a
   // reconnect.
-  const pttArmed =
-    mode === "join"
-      ? isPttPollingLive() && inputMode() === "ptt" && loadPref<number>("pttVk", 0) !== 0
-      : state.pttGated === true;
+  const pttArmed = mode === "join" ? pttGates(isPttPollingLive()) : state.pttGated === true;
   if (mode === "join") setPttGatedState(pttArmed);
   host.audioPipeline.setPttGated(pttArmed);
   const muted = state.localMuted || state.localDeafened;

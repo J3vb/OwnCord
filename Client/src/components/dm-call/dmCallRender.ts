@@ -150,6 +150,7 @@ export function createDmCallRender(st: DmCallState, dc: DmCallApi) {
       ),
     };
     appendChildren(bar, st.controls.mute!, st.controls.deafen!, st.controls.camera!);
+    st.talkSlot.attach(bar);
     if (canPublishScreen()) {
       bar.appendChild(st.controls.share!);
     }
