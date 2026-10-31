@@ -7,7 +7,7 @@
 import type { Page } from "@playwright/test";
 import { devices } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, MOCK_MESSAGES } from "./helpers";
+import { buildTauriMockScript, BASE_SESSION_ROUTES } from "./helpers";
 
 const A = "localhost:8443";
 const B = "other.example:8443";
@@ -56,11 +56,7 @@ test.describe("Profile switch", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
-        httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        ],
+        httpRoutes: [...BASE_SESSION_ROUTES],
         simulateWsFlow: true,
         storedSettings: {
           "owncord:profiles": {

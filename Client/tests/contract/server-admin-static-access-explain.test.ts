@@ -9,9 +9,11 @@
 // preview must never write an override.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
-
-const ADMIN_HTML_SOURCE = adminPanelHtml();
+import {
+  adminHtmlWithBridge,
+  loadAdminPanel as loadPanel,
+  type FetchCall,
+} from "../helpers/adminPanelFetch";
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
 const BRIDGE = `<script>
@@ -23,16 +25,7 @@ window.__test = {
   previewPermChange: previewPermChange
 };
 </script>`;
-if (!ADMIN_HTML_SOURCE.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
-
-interface FetchCall {
-  method: string;
-  path: string;
-  body: unknown;
-}
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 /* eslint-disable  @typescript-eslint/no-explicit-any */
 interface Bridge {
@@ -47,21 +40,7 @@ async function openModal(
   calls: FetchCall[],
   respond: (p: string) => unknown,
 ): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        const body = typeof opts.body === "string" ? JSON.parse(opts.body) : undefined;
-        calls.push({ method, path: p, body });
-        const json = p === "/setup/status" ? { needs_setup: false } : respond(p);
-        return { ok: true, status: 200, json: async () => json ?? {} } as Response;
-      }) as typeof fetch;
-    },
-  });
+  const dom = loadPanel(ADMIN_HTML, calls, (p) => ({ json: respond(p) }));
   await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
   calls.length = 0;
   const bridge = (dom.window as unknown as { __test: Bridge }).__test;

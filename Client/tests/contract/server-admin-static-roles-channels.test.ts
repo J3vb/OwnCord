@@ -10,9 +10,11 @@
 // broken registration fails here too.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
-
-const ADMIN_HTML_SOURCE = adminPanelHtml();
+import {
+  adminHtmlWithBridge,
+  loadAdminPanel as loadPanel,
+  type FetchCall,
+} from "../helpers/adminPanelFetch";
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
 const BRIDGE = `<script>
@@ -31,16 +33,7 @@ window.__test = {
   renderChannels: renderChannels
 };
 </script>`;
-if (!ADMIN_HTML_SOURCE.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
-
-interface FetchCall {
-  method: string;
-  path: string;
-  body: unknown;
-}
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 interface Bridge {
   state: any;
@@ -73,22 +66,10 @@ async function boot(
   respond: (p: string, method: string) => unknown = () => ({}),
   status: (p: string, method: string) => number = () => 200,
 ): Promise<{ dom: JSDOM; bridge: Bridge; doc: Document }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        const body = typeof opts.body === "string" ? JSON.parse(opts.body) : undefined;
-        calls.push({ method, path: p, body });
-        const json = p === "/setup/status" ? { needs_setup: false } : respond(p, method);
-        const code = status(p, method);
-        return { ok: code < 400, status: code, json: async () => json ?? {} } as Response;
-      }) as typeof fetch;
-    },
-  });
+  const dom = loadPanel(ADMIN_HTML, calls, (p, method) => ({
+    status: status(p, method),
+    json: respond(p, method),
+  }));
   await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
   calls.length = 0;
   const bridge = (dom.window as unknown as { __test: Bridge }).__test;

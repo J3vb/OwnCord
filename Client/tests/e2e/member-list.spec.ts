@@ -8,10 +8,9 @@ import {
   openSettings,
   switchSettingsTab,
   waitForWsReady,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   openDmRow,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 
 test.describe("Member List", () => {
@@ -195,9 +194,7 @@ test.describe("Member List — right column (3C-6b)", () => {
     await page.addInitScript(
       buildTauriMockScript({
         httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          ...BASE_SESSION_ROUTES,
           { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         ],
         simulateWsFlow: true,

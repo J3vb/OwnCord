@@ -17,84 +17,15 @@ import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   MOCK_ROLES,
   MOCK_MEMBERS_MULTI_ROLE,
   navigateToMainPage,
   waitForWsReady,
   openHome,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// Call capture — records plugin:http|fetch and ws_send invocations
-// ---------------------------------------------------------------------------
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly method?: string;
-  readonly url?: string;
-  readonly body?: string | null;
-  readonly message?: string;
-}
-
-/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      let body: string | null = null;
-      if (Array.isArray(cfg.data)) {
-        try {
-          body = new TextDecoder().decode(new Uint8Array(cfg.data));
-        } catch {
-          body = null;
-        }
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({
-        cmd,
-        method: cfg.method,
-        url: cfg.url,
-        body,
-      });
-    } else if (cmd === "ws_send") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, message: a?.message });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function getCapturedCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__capturedCalls ?? []) as CapturedCall[];
-  });
-}
-
-/** Poll until a captured call matches, and return it. Avoids racing the async request. */
-async function waitForCapturedCall(
-  page: Page,
-  predicate: (call: CapturedCall) => boolean,
-  timeout = 5_000,
-): Promise<CapturedCall> {
-  let found: CapturedCall | undefined;
-  await expect(async () => {
-    const calls = await getCapturedCalls(page);
-    found = calls.find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
+import { captureCalls, waitForCapturedCall } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
 // Feature 1: Group DM create + leave
@@ -139,11 +70,9 @@ const CREATED_GROUP_DM = {
 async function mockSocialSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         // More specific pattern first is not required — buildTauriMockScript
         // sorts by pattern length, so "/api/v1/dms/group" always outranks the
@@ -253,11 +182,9 @@ test.describe("@parity Group DM create + leave", () => {
 async function mockRoleChangeSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         { pattern: "/api/v1/moderation/members/", status: 200, body: {} },
       ],

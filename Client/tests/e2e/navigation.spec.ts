@@ -16,11 +16,10 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   submitLogin,
   waitForWsReady,
   openDmRow,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/accessibility";
 
@@ -55,12 +54,7 @@ test.describe("shared navigation", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
-        httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-          { pattern: "/api/v1/invites", status: 200, body: [] },
-        ],
+        httpRoutes: [...BASE_SESSION_ROUTES, { pattern: "/api/v1/invites", status: 200, body: [] }],
         simulateWsFlow: true,
         // The mock signs in as "admin", whose role holds ADMINISTRATOR and so
         // MODERATE_MEMBERS: the strongest case for a Moderation entry.
@@ -229,12 +223,7 @@ test.describe("Mark Server as Read in the server header", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
-        httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-          { pattern: "/api/v1/invites", status: 200, body: [] },
-        ],
+        httpRoutes: [...BASE_SESSION_ROUTES, { pattern: "/api/v1/invites", status: 200, body: [] }],
         simulateWsFlow: true,
         // "general" is the open channel; "random" is the unread one, so opening
         // the app does not mark it read.

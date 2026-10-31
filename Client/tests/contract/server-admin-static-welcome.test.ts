@@ -7,26 +7,18 @@
 // admin scripts in jsdom.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  bootAdminPanel,
+  type FetchCall,
+  type PanelReply as Reply,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = { renderSettings: renderSettings, saveSettings: saveSettings };
 </script>`;
-const source = adminPanelHtml();
-if (!source.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = source.replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
-interface FetchCall {
-  method: string;
-  path: string;
-  body: unknown;
-}
-interface Reply {
-  status?: number;
-  json?: unknown;
-}
 interface Bridge {
   renderSettings: () => Promise<string>;
   saveSettings: () => Promise<void>;
@@ -39,38 +31,8 @@ const CHANNELS = [
   { id: 4, name: "hello", type: "text", archived: false },
 ];
 
-async function boot(
-  calls: FetchCall[],
-  respond: (path: string, method: string) => Reply,
-): Promise<{ dom: JSDOM; bridge: Bridge; doc: Document }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const path = String(input).replace(/^\/admin\/api/, "");
-        const body = typeof opts.body === "string" ? (JSON.parse(opts.body) as unknown) : undefined;
-        calls.push({ method, path, body });
-        const r =
-          path === "/setup/status" ? { json: { needs_setup: false } } : respond(path, method);
-        const status = r.status ?? 200;
-        return {
-          ok: status >= 200 && status < 300,
-          status,
-          headers: new Headers(),
-          json: async () => r.json ?? {},
-          text: async () => JSON.stringify(r.json ?? {}),
-        } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  calls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  expect(bridge).toBeTruthy();
-  return { dom, bridge, doc: dom.window.document };
+function boot(calls: FetchCall[], respond: (path: string, method: string) => Reply) {
+  return bootAdminPanel<Bridge>(ADMIN_HTML, calls, respond);
 }
 
 async function mountSettings(bridge: Bridge, doc: Document): Promise<void> {

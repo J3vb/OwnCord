@@ -994,6 +994,9 @@ const ROUTE_MESSAGES_RICH = { pattern: "/messages", status: 200, body: MOCK_MESS
 const ROUTE_PINS = { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES };
 const ROUTE_INVITES = { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES };
 
+/** The three routes nearly every mocked session needs: health, login and the message history. */
+export const BASE_SESSION_ROUTES = [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES];
+
 /** The category/member ready state most presets share. */
 const READY_MULTI_ROLE = {
   channels: MOCK_CHANNELS_WITH_CATEGORIES,

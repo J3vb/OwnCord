@@ -15,12 +15,11 @@ import {
   buildTauriMockScript,
   emitWsEvent,
   emitWsMessage,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   submitLogin,
   waitForWsReady,
   openDmRow,
   openHome,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 import {
   findUnnamedControls,
@@ -84,9 +83,7 @@ function mockScript(decisions: readonly Route[] = []): string {
   return buildTauriMockScript({
     httpRoutes: [
       ...decisions,
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ...BASE_SESSION_ROUTES,
       { pattern: "/api/v1/dm-requests", status: 200, body: { requests: REQUESTS } },
     ],
     simulateWsFlow: true,

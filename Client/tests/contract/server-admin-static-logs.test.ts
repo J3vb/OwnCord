@@ -124,6 +124,38 @@ function nextFrame(window: JSDOM["window"]): Promise<void> {
   return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
+/** Lets `count` macrotasks run so the panel's own awaited fetches settle. */
+async function ticks(window: JSDOM["window"], count: number): Promise<void> {
+  for (let i = 0; i < count; i++) await new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+/** Delivers `count` backfill lines to a stream, the way the server's replay does. */
+function replayBackfill(es: FakeEventSource | undefined, count: number): void {
+  for (let i = 0; i < count; i++) es?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
+}
+
+/** Signs in as an administrator on the Logs page and switches the timed log level on. */
+function startLogLevelBoost(window: JSDOM["window"], bridge: Bridge): void {
+  const doc = window.document;
+  bridge.state.me = { permissions: 0x40000000, is_owner: true };
+  bridge.state.token = "admin-token";
+  bridge.state.section = "logs";
+  doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+  (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
+}
+
+/** Waits for the panel's bootstrap and returns its window and test bridge. */
+async function readyPanel(
+  dom: JSDOM,
+  wait: (window: JSDOM["window"]) => Promise<void> = (w) => ticks(w, 1),
+): Promise<{ window: JSDOM["window"]; bridge: Bridge }> {
+  const { window } = dom;
+  await wait(window);
+  const bridge = (window as unknown as { __test: Bridge }).__test;
+  expect(bridge).toBeTruthy();
+  return { window, bridge };
+}
+
 function backfillEntry(i: number) {
   return {
     ts: "2026-09-12T00:00:00Z",
@@ -146,12 +178,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("replaces the buffered entries on reconnect instead of appending the server's full replay on top", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    const bridge = (window as unknown as { __test: Bridge }).__test;
-    expect(bridge).toBeTruthy();
+    const { bridge } = await readyPanel(dom);
     bridge.state.section = "logs";
 
     // First connect: the server replays its whole ring-buffer backfill.
@@ -159,9 +186,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
     expect(FakeEventSource.instances.length).toBe(1);
     const first = FakeEventSource.instances[0];
     expect(first).toBeDefined();
-    for (let i = 0; i < 5; i++) {
-      first?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
-    }
+    replayBackfill(first, 5);
     expect(bridge.state.logEntries.length).toBe(5);
 
     // Re-entering the Logs tab (or an SSE error) tears down the old stream
@@ -183,9 +208,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
     second?.onopen?.();
     expect(bridge.state.logEntries.length).toBe(0);
 
-    for (let i = 0; i < 5; i++) {
-      second?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
-    }
+    replayBackfill(second, 5);
 
     // Not 10: each backfilled line must appear once, not once per connect.
     expect(bridge.state.logEntries.length).toBe(5);
@@ -199,20 +222,13 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("keeps the existing entries on screen when a reconnect's new stream never connects", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    const bridge = (window as unknown as { __test: Bridge }).__test;
-    expect(bridge).toBeTruthy();
+    const { bridge } = await readyPanel(dom);
     bridge.state.section = "logs";
 
     await bridge.connectLogStream();
     const first = FakeEventSource.instances[0];
     expect(first).toBeDefined();
-    for (let i = 0; i < 5; i++) {
-      first?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
-    }
+    replayBackfill(first, 5);
     expect(bridge.state.logEntries.length).toBe(5);
 
     // The stream drops and the reconnect's own stream fails too: no open,
@@ -231,26 +247,17 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("replaces the buffer on the first replayed line when no open event fires", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    const bridge = (window as unknown as { __test: Bridge }).__test;
-    expect(bridge).toBeTruthy();
+    const { bridge } = await readyPanel(dom);
     bridge.state.section = "logs";
 
     await bridge.connectLogStream();
     const first = FakeEventSource.instances[0];
-    for (let i = 0; i < 5; i++) {
-      first?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
-    }
+    replayBackfill(first, 5);
 
     await bridge.connectLogStream();
     const second = FakeEventSource.instances[1];
     expect(second).toBeDefined();
-    for (let i = 0; i < 5; i++) {
-      second?.onmessage?.({ data: JSON.stringify(backfillEntry(i)) });
-    }
+    replayBackfill(second, 5);
 
     expect(bridge.state.logEntries.length).toBe(5);
   });
@@ -260,14 +267,11 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("renders level chips as aria-pressed toggles and an icon toolbar", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom);
     const doc = window.document;
     bridge.state.section = "logs";
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 2);
 
     const toolbar = doc.querySelector(".log-toolbar")!;
     expect(toolbar.textContent).not.toMatch(/[⬇⏸▶]/);
@@ -319,9 +323,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("toggles the server log level for a bounded window, admin-gated", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom);
     const doc = window.document;
     // A non-admin sees the switch disabled with the reason.
     bridge.state.me = { permissions: 0, is_owner: false };
@@ -339,8 +341,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
     expect(adminToggle.getAttribute("role")).toBe("switch");
     fetchCalls.length = 0;
     adminToggle.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 2);
     const patch = fetchCalls.find((c) => c.path === "/logs/level" && c.method === "PATCH");
     expect(patch).toBeTruthy();
     expect(patch!.body).toMatchObject({ level: "debug", duration_seconds: 900 });
@@ -353,17 +354,9 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("stops the log-level countdown on sign-out", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const bridge = (window as unknown as { __test: Bridge }).__test;
-    const doc = window.document;
-    bridge.state.me = { permissions: 0x40000000, is_owner: true };
-    bridge.state.token = "admin-token";
-    bridge.state.section = "logs";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    const { window, bridge } = await readyPanel(dom);
+    startLogLevelBoost(window, bridge);
+    await ticks(window, 2);
     expect(bridge.state.logLevelTimer).toBeTruthy();
 
     (window as unknown as { doLogout: () => void }).doLogout();
@@ -374,18 +367,10 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("does not start the countdown from a response that lands after sign-out", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const bridge = (window as unknown as { __test: Bridge }).__test;
-    const doc = window.document;
-    bridge.state.me = { permissions: 0x40000000, is_owner: true };
-    bridge.state.token = "admin-token";
-    bridge.state.section = "logs";
-    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    (doc.getElementById("logLevelToggle") as HTMLButtonElement).click();
+    const { window, bridge } = await readyPanel(dom);
+    startLogLevelBoost(window, bridge);
     (window as unknown as { doLogout: () => void }).doLogout();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 2);
     expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "PATCH")).toBe(true);
     expect(bridge.state.logLevelTimer).toBeNull();
   });
@@ -400,15 +385,12 @@ describe("Server/admin/static — log stream (re)connect", () => {
       base_level: "warn",
       reverts_at: new Date(Date.now() + 600000).toISOString(),
     });
-    const { window } = dom;
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom);
     const doc = window.document;
     bridge.state.me = { permissions: 0x40000000, is_owner: true };
     bridge.state.section = "logs";
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 2);
 
     const toggle = doc.getElementById("logLevelToggle") as HTMLButtonElement;
     expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "GET")).toBe(true);
@@ -418,8 +400,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
 
     fetchCalls.length = 0;
     toggle.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 2);
     expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "DELETE")).toBe(true);
     expect(fetchCalls.some((c) => c.path === "/logs/level" && c.method === "PATCH")).toBe(false);
     expect(bridge.state.logLevel).toBe("warn");
@@ -433,14 +414,11 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("renders structured log lines with the full attrs behind details", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom);
     const doc = window.document;
     bridge.state.section = "logs";
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 2);
 
     const es = FakeEventSource.instances[0]!;
     const attrs = JSON.stringify({
@@ -487,12 +465,11 @@ describe("Server/admin/static — log stream (re)connect", () => {
   });
 
   async function openLogsPage(window: JSDOM["window"]) {
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 1);
     const bridge = (window as unknown as { __test: Bridge }).__test;
     bridge.state.section = "logs";
     window.document.getElementById("content")!.innerHTML = bridge.renderLogs();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 2);
     return { bridge, es: FakeEventSource.instances.at(-1)! };
   }
 
@@ -658,9 +635,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
   it("shows a grey dot while connecting or reconnecting and a live dot only once open", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom);
     const doc = window.document;
     bridge.state.section = "logs";
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
@@ -668,11 +643,9 @@ describe("Server/admin/static — log stream (re)connect", () => {
       doc.getElementById("logDot")!.className,
       doc.getElementById("logStatusText")!.textContent,
     ];
-    const tick = () => new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(conn()).toEqual(["dot-wait", "Connecting..."]);
-    await tick();
-    await tick();
+    await ticks(window, 2);
     FakeEventSource.instances[0]!.onopen?.();
     expect(conn()).toEqual(["dot-live", "Connected"]);
 
@@ -684,8 +657,7 @@ describe("Server/admin/static — log stream (re)connect", () => {
     expect(conn()).toEqual(["dot-off", "Paused"]);
     pause.click();
     expect(conn()).toEqual(["dot-wait", "Connecting..."]);
-    await tick();
-    await tick();
+    await ticks(window, 2);
     FakeEventSource.instances.at(-1)!.onopen?.();
     expect(conn()).toEqual(["dot-live", "Connected"]);
   });
@@ -711,7 +683,7 @@ describe("Server/admin/static — saved log history", () => {
   });
 
   async function settle(window: JSDOM["window"]): Promise<void> {
-    for (let i = 0; i < 5; i++) await new Promise((resolve) => window.setTimeout(resolve, 0));
+    await ticks(window, 5);
   }
 
   function tab(doc: Document, label: string): HTMLButtonElement {
@@ -741,9 +713,7 @@ describe("Server/admin/static — saved log history", () => {
             next_cursor: "c1",
           };
     });
-    const { window } = dom;
-    await settle(window);
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom, settle);
     const doc = window.document;
     bridge.state.section = "logs";
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
@@ -788,9 +758,7 @@ describe("Server/admin/static — saved log history", () => {
       enabled: true,
       entries: [savedEntry(1, "saved")],
     }));
-    const { window } = dom;
-    await settle(window);
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom, settle);
     const doc = window.document;
     bridge.state.section = "logs";
     doc.getElementById("content")!.innerHTML = bridge.renderLogs();
@@ -817,9 +785,7 @@ describe("Server/admin/static — saved log history", () => {
       if (queries.length === 1) return new Promise((resolve) => (releaseFirst = resolve));
       return { enabled: true, entries: [savedEntry(5, "fresh")] };
     });
-    const { window } = dom;
-    await settle(window);
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom, settle);
     const doc = window.document;
     bridge.state.section = "logs";
     bridge.state.logMode = "history";
@@ -840,9 +806,7 @@ describe("Server/admin/static — saved log history", () => {
   it("says when saved logs are turned off on the server", async () => {
     const fetchCalls: FetchCall[] = [];
     dom = loadAdminPanel(fetchCalls, undefined, () => ({ enabled: false, entries: [] }));
-    const { window } = dom;
-    await settle(window);
-    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const { window, bridge } = await readyPanel(dom, settle);
     const doc = window.document;
     bridge.state.section = "logs";
     bridge.state.logMode = "history";

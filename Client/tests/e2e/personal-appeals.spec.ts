@@ -13,13 +13,7 @@
  */
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import {
-  buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
-  submitLogin,
-  waitForWsReady,
-} from "./helpers";
+import { buildTauriMockScript, submitLogin, waitForWsReady, BASE_SESSION_ROUTES } from "./helpers";
 import {
   Q1,
   findUnnamedControls,
@@ -86,9 +80,7 @@ async function start(page: Page, opts: { fileStatus?: number } = {}): Promise<vo
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/api/v1/users/me/moderation", method: "GET", status: 200, body: HISTORY },
         { pattern: "/api/v1/appeals/mine", method: "GET", status: 200, body: APPEALS },
         {

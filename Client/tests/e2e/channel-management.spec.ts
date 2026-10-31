@@ -29,66 +29,12 @@ import {
   MOCK_MEMBERS_MULTI_ROLE,
   navigateToMainPageReady,
 } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// IPC capture
-// ---------------------------------------------------------------------------
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly method?: string;
-  readonly url?: string;
-  readonly body?: string | null;
-}
-
-/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      let body: string | null = null;
-      if (Array.isArray(cfg.data)) {
-        try {
-          body = new TextDecoder().decode(new Uint8Array(cfg.data));
-        } catch {
-          body = null;
-        }
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, method: cfg.method, url: cfg.url, body });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function getCapturedCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__capturedCalls ?? []) as CapturedCall[];
-  });
-}
-
-/** Poll until a captured call matches, and return it — avoids racing the request. */
-async function waitForCapturedCall(
-  page: Page,
-  predicate: (call: CapturedCall) => boolean,
-  timeout = 5_000,
-): Promise<CapturedCall> {
-  let found: CapturedCall | undefined;
-  await expect(async () => {
-    const calls = await getCapturedCalls(page);
-    found = calls.find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
+import {
+  captureCalls,
+  getCapturedCalls,
+  waitForCapturedCall,
+  type CapturedCall,
+} from "./support/ipcCapture";
 
 function adminCalls(calls: readonly CapturedCall[]): CapturedCall[] {
   return calls.filter((c) => (c.url ?? "").includes("/api/v1/moderation/channels"));
@@ -151,7 +97,7 @@ interface MockOpts {
 async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
         { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
         { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
