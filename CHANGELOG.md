@@ -49,6 +49,7 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+- Voice & Video has a "Mirror my camera preview" switch (on by default). Turn it off to see your own camera (call tiles, pop-out and the settings preview) exactly as others see it, with your right hand on the right. Others always see you the right way round.
 - While you are in a DM call, that person's avatar stays in the server rail under Home with a green call badge, so you can see the call and get back to it in one click from any server.
 - On Linux, after the app closes unexpectedly, the next start adds what the system recorded about it (the crash report from `coredumpctl` and the kernel's crash line, where the system keeps them) to the app's log, so a support bundle shows what crashed. Nothing extra needs to be installed; without those tools it is skipped. The log also notes whether the camera or a screen share was running.
 
@@ -57,7 +58,6 @@ and only when it changes something a contributor or fork holder must do
 - Android: calls stopped (no mic, then no sound) once the app went to the background or the screen turned off. A call now shows an "In a call" notification and keeps your mic, sound and camera running in the background until you leave.
 - In a call, turning your camera on and back off no longer leaves your tile showing the first letter of your name instead of your profile picture. This happened in DM calls and, in some cases, in voice channels.
 - On Linux, dragging files from the file manager into a channel, or pasting files you copied there (Ctrl+V), attached nothing. Both now attach the files, as on Windows.
-- Your own camera preview was mirrored, so your right hand showed on the left while everyone else saw it the right way round. Your preview (call tiles, pop-out and the settings preview) now shows you as others see you; turn on "Mirror my camera preview" in Voice & Video if you prefer a mirror.
 - Voice Activity with the sensitivity slider set by hand let typing, a fan or breathing through, and after you spoke it stayed open through them. The slider now also asks the noise filter whether it hears a voice, as automatic sensitivity already did.
 
 ## v2.7.0

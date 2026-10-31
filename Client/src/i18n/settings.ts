@@ -565,7 +565,7 @@ export const settingsText = defineCatalog("settings", {
     "Others' cameras play as soon as they turn them on. Off, each camera waits for you to click Watch stream.",
   "voiceAudio.mirrorSelfCamera": "Mirror my camera preview",
   "voiceAudio.mirrorSelfCameraDesc":
-    "Flips only your own preview, like a mirror. Others always see you the right way round.",
+    "Flips only your own preview, like a mirror. Off, it shows you exactly as others see you. Others always see you the right way round.",
   "voiceAudio.sensitivityValue": "{value} dB",
   "voiceAudio.sensitivityOff": "Off",
   "voiceAudio.outputDevice": "Output Device",

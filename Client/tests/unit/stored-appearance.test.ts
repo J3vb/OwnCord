@@ -44,6 +44,15 @@ describe("applyStoredAppearance", () => {
     document.body.removeAttribute("style");
   });
 
+  it("mirrors your own camera preview by default, and not once it is switched off", () => {
+    applyStoredAppearance();
+    expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(true);
+
+    localStorage.setItem("owncord:settings:mirrorSelfCamera", "false");
+    applyStoredAppearance();
+    expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(false);
+  });
+
   it("restores built-in themes through the palette helper and still applies other stored appearance prefs", () => {
     localStorage.setItem("owncord:settings:fontSize", "16");
     localStorage.setItem("owncord:settings:compactMode", "true");

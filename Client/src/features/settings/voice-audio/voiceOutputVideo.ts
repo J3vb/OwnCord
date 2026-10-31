@@ -6,7 +6,11 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "../helpers";
 import { SHARE_FPS_OPTIONS, offeredShareFps } from "@lib/voice/shareFps";
 import { AUTO_PLAY_CAMERAS_PREF, autoPlayCameras } from "../../voice/autoPlayCameras";
-import { MIRROR_SELF_CAMERA_PREF, applyMirrorSelfCamera } from "@lib/prefs/appearance";
+import {
+  MIRROR_SELF_CAMERA_PREF,
+  applyMirrorSelfCamera,
+  mirrorSelfCamera,
+} from "@lib/prefs/appearance";
 import { setOutputVolume } from "@lib/voice/livekitSession";
 import { isLinuxDesktop } from "../../voice/native/platform";
 import {
@@ -261,7 +265,7 @@ export function mountOutputAndVideo(sc: VoiceTabScope): void {
   appendChildren(
     mirrorRow,
     mirrorInfo,
-    createToggle(loadPref<boolean>(MIRROR_SELF_CAMERA_PREF, false), {
+    createToggle(mirrorSelfCamera(), {
       signal: sc.signal,
       label: t("voiceAudio.mirrorSelfCamera"),
       onChange: (nowOn) => {

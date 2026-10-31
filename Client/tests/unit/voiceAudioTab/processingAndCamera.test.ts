@@ -60,20 +60,20 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("Mirror my camera preview is off by default and flips the preview at once", () => {
+  it("Mirror my camera preview is on by default and flips the preview at once", () => {
     stubNavigator();
     const { ac, el } = mountTab();
 
     const toggle = el.querySelector<HTMLElement>("[data-testid='mirror-self-camera'] .toggle")!;
-    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(toggle.getAttribute("aria-label")).toBe("Mirror my camera preview");
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:mirrorSelfCamera")).toBe("false");
     expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(false);
     toggle.click();
     expect(localStorage.getItem("owncord:settings:mirrorSelfCamera")).toBe("true");
     expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(true);
-    toggle.click();
-    expect(localStorage.getItem("owncord:settings:mirrorSelfCamera")).toBe("false");
-    expect(document.documentElement.classList.contains("mirror-self-camera")).toBe(false);
+    document.documentElement.classList.remove("mirror-self-camera");
     ac.abort();
   });
 

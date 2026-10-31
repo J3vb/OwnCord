@@ -84,11 +84,13 @@ export function applySaturation(): void {
 
 export const MIRROR_SELF_CAMERA_PREF = "mirrorSelfCamera";
 
-/** Your own camera preview shows what others see unless this is on (default
- *  off); others always get the unflipped picture either way. */
-export function applyMirrorSelfCamera(
-  on: boolean = loadPref<boolean>(MIRROR_SELF_CAMERA_PREF, false),
-): void {
+/** Your own camera preview is mirrored (default on), or shows what others
+ *  see when off; others always get the unflipped picture either way. */
+export function mirrorSelfCamera(): boolean {
+  return loadPref<boolean>(MIRROR_SELF_CAMERA_PREF, true);
+}
+
+export function applyMirrorSelfCamera(on: boolean = mirrorSelfCamera()): void {
   document.documentElement.classList.toggle("mirror-self-camera", on);
 }
 
