@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { withOverrides } from "./voiceSessionMock";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -23,10 +24,9 @@ export function voiceStoreMock() {
 }
 
 export function voiceLivekitSessionMock() {
-  return {
+  return withOverrides({
     getLocalCameraStream: mockGetLocalCameraStream,
     getLocalScreenshareStream: mockGetLocalScreenshareStream,
     hasLocalScreenshareAudio: mockHasLocalScreenshareAudio,
-    setScreenshareAudioVolume: vi.fn(),
-  };
+  });
 }

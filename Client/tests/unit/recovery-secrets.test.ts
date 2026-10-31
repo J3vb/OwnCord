@@ -8,6 +8,7 @@
 // so this is the only thing standing between a careless `log.debug(body)`
 // and a secret in the persisted log files.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { mockFetch } = vi.hoisted(() => ({ mockFetch: vi.fn() }));
 vi.mock("@tauri-apps/plugin-http", () => ({ fetch: mockFetch }));
@@ -29,15 +30,12 @@ vi.mock("@stores/ui.store", () => ({
   setTransientError: vi.fn(),
   setTheme: vi.fn(),
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 vi.mock("@stores/auth.store", () => ({
   authStore: {
     getState: () => ({ user: { id: 1, username: "alice", totp_enabled: true } }),

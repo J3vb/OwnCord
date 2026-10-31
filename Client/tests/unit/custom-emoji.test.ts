@@ -5,16 +5,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 // The emoji image is behind the session token, so buildCustomEmojiImage goes
 // through the same authenticated fetch attachments use. Stub just that call —

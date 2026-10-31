@@ -1,16 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 // We need to mock livekitSession before importing anything that uses auth.store
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 
 // Mock MemberList to capture the callbacks passed to it
 vi.mock("@components/MemberList", () => ({

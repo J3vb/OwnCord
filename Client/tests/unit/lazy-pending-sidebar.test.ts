@@ -5,6 +5,7 @@
  * module stays loaded.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const h = vi.hoisted(() => ({
   failCreate: { value: true },
@@ -28,22 +29,12 @@ vi.mock("../../src/pages/main-page/MemberPickerModal", () => {
   return { createMemberPickerModal: h.createPicker };
 });
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-  setMuted: vi.fn(),
-  setDeafened: vi.fn(),
-  enableCamera: vi.fn().mockResolvedValue(undefined),
-  disableCamera: vi.fn().mockResolvedValue(undefined),
-  enableScreenshare: vi.fn().mockResolvedValue(undefined),
-  disableScreenshare: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({

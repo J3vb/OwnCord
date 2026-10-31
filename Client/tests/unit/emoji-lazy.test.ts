@@ -6,16 +6,9 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import { createEmojiPicker } from "@components/EmojiPicker";
 import { createMessageInput } from "@components/MessageInput";

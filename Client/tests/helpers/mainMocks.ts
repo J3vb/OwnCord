@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { withOverrides } from "./voiceSessionMock";
 
 // main.ts registers its deep-link listener once at startup, and every test
 // runs with its mock calls cleared, so the handler is kept here as it arrives.
@@ -178,9 +179,9 @@ export function deepLinkMock() {
 }
 
 export function voiceLivekitSessionMock() {
-  return {
+  return withOverrides({
     leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
-  };
+  });
 }
 
 export function navMessageNavigationMock() {

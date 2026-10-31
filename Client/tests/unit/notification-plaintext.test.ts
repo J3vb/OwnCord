@@ -5,6 +5,7 @@
  * route the popup body through it.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 import { markdownToPlainText } from "../../src/lib/text/markdown";
 import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
@@ -21,15 +22,7 @@ vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
 
-vi.mock("../../src/lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("../../src/lib/voice/livekitSession", () => voiceSession.defaults());
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),

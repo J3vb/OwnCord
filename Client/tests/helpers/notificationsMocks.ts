@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { defaults } from "./voiceSessionMock";
 
 // vi.hoisted ensures testPrefs is available when vi.mock factory runs
 export const { testPrefs } = {
@@ -64,15 +65,7 @@ export async function prefsPreferencesMock(importOriginal: <T>() => Promise<T>) 
 
 // Mock livekitSession (imported transitively by auth.store)
 export function voiceLivekitSessionMock() {
-  return {
-    leaveVoice: vi.fn(),
-    switchInputDevice: vi.fn(),
-    switchOutputDevice: vi.fn(),
-    setVoiceSensitivity: vi.fn(),
-    setInputVolume: vi.fn(),
-    setOutputVolume: vi.fn(),
-    getSessionDebugInfo: vi.fn().mockReturnValue({}),
-  };
+  return defaults();
 }
 
 // Mock Tauri notification plugin (not available in test env)

@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { withOverrides } from "./voiceSessionMock";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be declared before importing VideoGrid
@@ -27,7 +28,7 @@ export function uiToastMock() {
 }
 
 export function voiceLivekitSessionMock() {
-  return {
+  return withOverrides({
     muteScreenshareAudio: (...args: unknown[]) => mockMuteScreenshareAudio(...args),
     setScreenshareAudioVolume: (...args: unknown[]) => mockSetScreenshareAudioVolume(...args),
     setUserVolume: (...args: unknown[]) => mockSetUserVolume(...args),
@@ -36,5 +37,5 @@ export function voiceLivekitSessionMock() {
     getUserVolume: (userId: unknown) => mockGetUserVolume(userId),
     getUserLocalMute: (userId: unknown) => mockGetUserLocalMute(userId),
     setUserLocalMute: (...args: unknown[]) => mockSetUserLocalMute(...args),
-  };
+  });
 }

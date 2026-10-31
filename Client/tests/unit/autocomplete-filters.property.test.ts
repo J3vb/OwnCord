@@ -12,17 +12,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import fc from "fast-check";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   filterMentionSuggestions,

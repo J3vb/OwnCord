@@ -5,6 +5,7 @@
  * "was this sound asked for".
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { playNotificationSound, playVoiceSound } = vi.hoisted(() => ({
   playNotificationSound: vi.fn(),
@@ -12,10 +13,7 @@ const { playNotificationSound, playVoiceSound } = vi.hoisted(() => ({
 }));
 
 vi.mock("../../src/lib/media/notificationSound", () => ({ playNotificationSound, playVoiceSound }));
-vi.mock("../../src/lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("../../src/lib/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   voiceStore,

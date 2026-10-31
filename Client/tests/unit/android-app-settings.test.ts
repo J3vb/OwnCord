@@ -2,6 +2,7 @@
 // rest without "desktop", "taskbar" or a keyboard shortcut. Each case checks the
 // desktop app still shows what the Android app hides.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { mockGetVersion, mockLoad } = vi.hoisted(() => ({
   mockGetVersion: vi.fn<() => Promise<string | null>>(),
@@ -19,10 +20,7 @@ vi.mock("../../src/platform/desktop", async (importOriginal) => {
   };
 });
 vi.mock("../../src/features/whats-new/changelogSource", () => ({ loadChangelog: mockLoad }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-  getShareDiagnostics: vi.fn().mockReturnValue(null),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 vi.mock("@stores/ui.store", () => ({ setTheme: vi.fn() }));
 
 import { buildAboutTab } from "@components/settings/AboutTab";

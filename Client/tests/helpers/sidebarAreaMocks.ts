@@ -1,25 +1,14 @@
 import { vi } from "vitest";
 import { loggerMock as sharedLoggerMock } from "./loggerMock";
+import { withOverrides } from "./voiceSessionMock";
 
 export const mockOpenUrl = vi.fn(async (_url: string) => {});
 
 export function voiceLivekitSessionMock() {
-  return {
-    leaveVoice: vi.fn(),
+  return withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-    setVoiceSensitivity: vi.fn(),
-    setInputVolume: vi.fn(),
-    setOutputVolume: vi.fn(),
-    reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-    getSessionDebugInfo: vi.fn().mockReturnValue({}),
-    setMuted: vi.fn(),
-    setDeafened: vi.fn(),
-    enableCamera: vi.fn().mockResolvedValue(undefined),
-    disableCamera: vi.fn().mockResolvedValue(undefined),
-    enableScreenshare: vi.fn().mockResolvedValue(undefined),
-    disableScreenshare: vi.fn().mockResolvedValue(undefined),
-  };
+  });
 }
 
 export function loggerMock() {

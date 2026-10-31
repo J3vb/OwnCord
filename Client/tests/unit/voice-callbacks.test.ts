@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -60,15 +61,17 @@ vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: mockUiGetState },
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: mockVoiceSessionLeave,
-  setMuted: mockSetMuted,
-  setDeafened: mockSetDeafened,
-  enableCamera: mockEnableCamera,
-  disableCamera: mockDisableCamera,
-  enableScreenshare: mockEnableScreenshare,
-  disableScreenshare: mockDisableScreenshare,
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    leaveVoice: mockVoiceSessionLeave,
+    setMuted: mockSetMuted,
+    setDeafened: mockSetDeafened,
+    enableCamera: mockEnableCamera,
+    disableCamera: mockDisableCamera,
+    enableScreenshare: mockEnableScreenshare,
+    disableScreenshare: mockDisableScreenshare,
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Imports

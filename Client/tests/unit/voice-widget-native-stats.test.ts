@@ -2,6 +2,7 @@
 // widget and the host is mocked except the host itself: a real stats poller
 // reads a real `NativeRoom`, connected through a stubbed `platform/desktop`.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import type { NativeVoiceStats } from "../../src/platform/contracts/nativeVoice";
 
 const host = vi.hoisted(() => ({
@@ -25,20 +26,13 @@ vi.mock("../../src/features/voice/native/platform", () => ({
   isWindowsDesktop: () => false,
   canPublishScreen: () => true,
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  getLocalScreenshareStream: () => null,
-  getScreenshareQuality: () => null,
-  changeScreenshareSource: vi.fn(),
-  canChangeScreenshareSource: () => false,
-  setScreenshareQuality: vi.fn(),
-  getRoomForStats: () => host.room,
-  retryMicPermission: vi.fn(),
-  reapplyEnhancedNoiseSuppression: vi.fn(),
-  joinVoice: vi.fn(),
-  leaveVoice: vi.fn(),
-  toggleMute: vi.fn(),
-  toggleDeafen: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getLocalScreenshareStream: () => null,
+    getRoomForStats: () => host.room,
+    retryMicPermission: vi.fn(),
+  }),
+);
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createNativeRoom } from "../../src/features/voice/native/nativeRoom";
