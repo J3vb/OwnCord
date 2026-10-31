@@ -3,7 +3,7 @@ import * as mocks from "../../helpers/messageInputMocks";
 import { createMessageInput } from "@components/MessageInput";
 import {
   makeOptions,
-  mountInput,
+  mountMessageInput,
   selectFiles,
   useMessageInputContainer,
 } from "../../helpers/messageInputHarness";
@@ -23,7 +23,7 @@ describe("MessageInput", () => {
   });
 
   it("mounts with message-input-wrap class", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     expect(container.querySelector(".message-input-wrap")).not.toBeNull();
 
@@ -31,7 +31,7 @@ describe("MessageInput", () => {
   });
 
   it("has textarea with correct placeholder", () => {
-    const { comp } = mountInput(container, { channelName: "random" });
+    const { comp } = mountMessageInput(container, { channelName: "random" });
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     expect(textarea).not.toBeNull();
@@ -41,7 +41,7 @@ describe("MessageInput", () => {
   });
 
   it("send button click calls onSend with textarea content", () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Hello world";
@@ -55,7 +55,7 @@ describe("MessageInput", () => {
   });
 
   it("enter key sends message", () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Enter message";
@@ -70,7 +70,7 @@ describe("MessageInput", () => {
   it("Enter during an IME composition does not send the half-composed text (F3)", () => {
     // CJK IMEs commit a candidate on Enter, firing keydown with isComposing
     // true. Sending there would ship the raw kana/composition string.
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "\u3042"; // composing kana
@@ -86,7 +86,7 @@ describe("MessageInput", () => {
 
   it("the desktop app sends on Enter and keeps the default Enter key hint", () => {
     hostDesktopApp();
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     expect(textarea.hasAttribute("enterkeyhint")).toBe(false);
@@ -102,7 +102,7 @@ describe("MessageInput", () => {
 
   it("the Android app adds a new line on Enter and sends only from the send button", () => {
     hostAndroidApp();
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     expect(textarea.getAttribute("enterkeyhint")).toBe("enter");
@@ -122,7 +122,7 @@ describe("MessageInput", () => {
   });
 
   it("shift+enter does NOT send (just newlines)", () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Line 1";
@@ -137,7 +137,7 @@ describe("MessageInput", () => {
   });
 
   it("empty textarea does not send", () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "";
@@ -151,7 +151,7 @@ describe("MessageInput", () => {
   });
 
   it("refuses a send past the server's 4000 code point limit", () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "a".repeat(4001);
@@ -168,7 +168,7 @@ describe("MessageInput", () => {
   });
 
   it("dismisses the refusal line with its close button", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "a".repeat(4001);
@@ -191,7 +191,7 @@ describe("MessageInput", () => {
   });
 
   it("keeps the dismiss button, and its focus, when the shown reason changes", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setSendGate("Slow mode: wait 5s");
     (container.querySelector(".send-btn") as HTMLButtonElement).click();
@@ -212,7 +212,7 @@ describe("MessageInput", () => {
   });
 
   it("accepts content of exactly 4000 code points", () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "a".repeat(4000);
@@ -228,7 +228,7 @@ describe("MessageInput", () => {
   it("counts astral characters as one code point, not two UTF-16 units", () => {
     // 2001 astral code points is 4002 UTF-16 units: the server's
     // utf8.RuneCountInString accepts it, a `.length` guard would wrongly refuse it.
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "\u{1F600}".repeat(2001);
@@ -242,7 +242,7 @@ describe("MessageInput", () => {
   });
 
   it("setReplyTo shows reply bar", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setReplyTo(42, "testuser");
 
@@ -254,7 +254,7 @@ describe("MessageInput", () => {
   });
 
   it("clearReply hides reply bar", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setReplyTo(42, "testuser");
     comp.clearReply();
@@ -288,7 +288,7 @@ describe("MessageInput", () => {
 
   it("typing emits onTyping (throttled)", () => {
     vi.useFakeTimers();
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
 
@@ -310,7 +310,7 @@ describe("MessageInput", () => {
   });
 
   it("attach button is disabled with tooltip", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const attachBtn = container.querySelector(".attach-btn") as HTMLButtonElement;
     expect(attachBtn).not.toBeNull();
@@ -322,7 +322,7 @@ describe("MessageInput", () => {
 
   it("debounces rapid sends", () => {
     vi.useFakeTimers();
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
@@ -349,7 +349,7 @@ describe("MessageInput", () => {
   it("sends an attachment-only message with no text", async () => {
     const uploadResult = { id: "srv-7", url: "http://server/pic.png", filename: "pic.png" };
     const onUploadFile = vi.fn(async () => uploadResult);
-    const { opts, comp } = mountInput(container, { onUploadFile });
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     const testFile = new File(["image data"], "pic.png", { type: "image/png" });
     selectFiles(container, [testFile]);
@@ -382,7 +382,7 @@ describe("MessageInput", () => {
   // ── Reply context is included in send ──
 
   it("sending with reply includes replyTo messageId", () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     comp.setReplyTo(55, "replyuser");
 
@@ -404,7 +404,7 @@ describe("MessageInput", () => {
   // ── Escape key behavior ──
 
   it("escape key clears reply when not in edit mode", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setReplyTo(44, "replyuser");
 
@@ -461,7 +461,7 @@ describe("MessageInput", () => {
   // ── ArrowUp on empty textarea dispatches edit-last-message ──
 
   it("ArrowUp on empty textarea dispatches edit-last-message custom event", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "";
@@ -517,7 +517,7 @@ describe("MessageInput", () => {
   });
 
   it("ArrowUp with content in textarea does NOT dispatch edit-last-message", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "some text";
@@ -561,7 +561,7 @@ describe("MessageInput", () => {
     });
 
     it("drops restored attachments past the server's unlinked-upload sweep, with one notice", () => {
-      const { opts, comp } = mountInput(container);
+      const { opts, comp } = mountMessageInput(container);
       const now = Date.now();
 
       comp.restoreDraft({
@@ -650,7 +650,7 @@ describe("MessageInput", () => {
     });
 
     it("refuses Send with the reason while gated, then sends once re-enabled", () => {
-      const { opts, comp } = mountInput(container);
+      const { opts, comp } = mountMessageInput(container);
       const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
       textarea.value = "queued";
 
@@ -665,7 +665,7 @@ describe("MessageInput", () => {
     });
 
     it("keeps the refusal line in sync as the slow-mode countdown ticks", () => {
-      const { opts, comp } = mountInput(container);
+      const { opts, comp } = mountMessageInput(container);
       const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
       textarea.value = "next message";
       comp.setDisabled("Slow mode — 5s");
@@ -682,7 +682,7 @@ describe("MessageInput", () => {
     });
 
     it("shows a slow-mode note under the composer and hides it again, never gating Send", () => {
-      const { opts, comp } = mountInput(container);
+      const { opts, comp } = mountMessageInput(container);
       const note = (): HTMLElement | null =>
         container.querySelector<HTMLElement>("[data-testid='slow-mode-note']");
       expect(note()?.hidden).toBe(true);
@@ -714,7 +714,7 @@ describe("MessageInput", () => {
     });
 
     it("keeps the composer editable under a send gate, only refusing Send (#12)", () => {
-      const { opts, comp } = mountInput(container);
+      const { opts, comp } = mountMessageInput(container);
       const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
       textarea.focus();
       textarea.value = "typing through the cooldown";
@@ -747,7 +747,7 @@ describe("MessageInput", () => {
     });
 
     it("keeps the send-gate refusal line in step with the countdown and clears it at the end", () => {
-      const { comp } = mountInput(container);
+      const { comp } = mountMessageInput(container);
       const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
       textarea.value = "next message";
       comp.setSendGate("Slow mode — 7s");
@@ -768,7 +768,7 @@ describe("MessageInput", () => {
     });
 
     it("shows the reason when Enter is pressed mid-sentence during reconnect", () => {
-      const { opts, comp } = mountInput(container);
+      const { opts, comp } = mountMessageInput(container);
       const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
       textarea.value = "mid-sentence";
       comp.setDisabled("Reconnecting…");
@@ -836,7 +836,7 @@ describe("MessageInput", () => {
   // ── File attachment via onUploadFile ──
 
   it("attach button is enabled when onUploadFile is provided", () => {
-    const { comp } = mountInput(container, {
+    const { comp } = mountMessageInput(container, {
       onUploadFile: vi.fn(async () => ({ id: "a1", url: "http://x.png", filename: "x.png" })),
     });
 
@@ -847,7 +847,7 @@ describe("MessageInput", () => {
   });
 
   it("file picker does not restrict file types (the server decides)", () => {
-    const { comp } = mountInput(container, {
+    const { comp } = mountMessageInput(container, {
       onUploadFile: vi.fn(async () => ({ id: "a1", url: "http://x.png", filename: "x.png" })),
     });
 

@@ -9,6 +9,7 @@
 import { vi } from "vitest";
 import type { PushToTalk } from "../../../src/platform/contracts/pushToTalk";
 import { describePushToTalkSuite } from "./pushToTalk.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.fn();
 const listen = vi.fn();
@@ -20,9 +21,7 @@ let pollingSupported = true;
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 vi.mock("@lib/prefs/preferences", () => ({
   loadPref: () => configuredVk,
   savePref: (_key: string, vk: number) => {

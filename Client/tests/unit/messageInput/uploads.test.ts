@@ -5,7 +5,7 @@ import { authStore } from "@stores/auth.store";
 import {
   makeOptions,
   makeOversizedFile,
-  mountInput,
+  mountMessageInput,
   selectFiles,
   useMessageInputContainer,
 } from "../../helpers/messageInputHarness";
@@ -22,7 +22,7 @@ describe("MessageInput", () => {
   it("file upload shows preview and sends attachment ID with message", async () => {
     const uploadResult = { id: "srv-123", url: "http://server/file.png", filename: "file.png" };
     const onUploadFile = vi.fn(async () => uploadResult);
-    const { opts, comp } = mountInput(container, { onUploadFile });
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     // Simulate file selection via the hidden input
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -64,7 +64,7 @@ describe("MessageInput", () => {
 
   it("rejects file exceeding 100 MB size limit", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     // Create a file > 100MB
     const bigFile = makeOversizedFile();
@@ -87,7 +87,7 @@ describe("MessageInput", () => {
 
   it("upload error makes the (initially hidden) preview bar visible", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     // Nothing queued yet, so the preview bar starts without the "visible"
     // class -- app.css only shows it via .visible.
@@ -109,7 +109,7 @@ describe("MessageInput", () => {
   it("keeps the error until the user edits, then clears and hides the preview bar (A11Y-05)", async () => {
     vi.useFakeTimers();
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const bigFile = makeOversizedFile();
     selectFiles(container, [bigFile]);
@@ -324,7 +324,7 @@ describe("MessageInput", () => {
           );
         }),
     );
-    const { opts, comp } = mountInput(container, { onUploadFile });
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "big.pdf", { type: "application/pdf" });
     selectFiles(container, [file]);
@@ -356,7 +356,7 @@ describe("MessageInput", () => {
       >()
       .mockResolvedValueOnce({ id: "srv-a", url: "/a", filename: "a.pdf" })
       .mockImplementationOnce(() => new Promise(() => {}));
-    const { opts, comp } = mountInput(container, { onUploadFile });
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const attach = (name: string): void => {
       Object.defineProperty(fileInput, "files", {
@@ -403,7 +403,7 @@ describe("MessageInput", () => {
           );
         }),
     );
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "big.pdf", { type: "application/pdf" });
     selectFiles(container, [file]);
@@ -422,7 +422,7 @@ describe("MessageInput", () => {
     const onUploadFile = vi.fn(async () => {
       throw new Error("Server exploded");
     });
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "doc.pdf", { type: "application/pdf" });
     selectFiles(container, [file]);
@@ -446,7 +446,7 @@ describe("MessageInput", () => {
           resolveUpload = res;
         }),
     );
-    const { opts, comp } = mountInput(container, { onUploadFile });
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "doc.txt", { type: "text/plain" });
     selectFiles(container, [file]);
@@ -487,7 +487,7 @@ describe("MessageInput", () => {
           resolveUpload = res;
         }),
     );
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["text"], "file.txt", { type: "text/plain" });
     selectFiles(container, [file]);
@@ -522,7 +522,7 @@ describe("MessageInput", () => {
   it("remove button removes attachment preview after the upload has completed", async () => {
     const uploadResult = { id: "srv-123", url: "http://server/file.png", filename: "file.png" };
     const onUploadFile = vi.fn(async () => uploadResult);
-    const { opts, comp } = mountInput(container, { onUploadFile });
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     const testFile = new File(["image data"], "test.png", { type: "image/png" });
     selectFiles(container, [testFile]);
@@ -561,7 +561,7 @@ describe("MessageInput", () => {
   // ── Reply close button ──
 
   it("clicking reply close button hides reply bar", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setReplyTo(42, "replyuser");
     const replyBar = container.querySelector(".reply-bar") as HTMLDivElement;
@@ -578,7 +578,7 @@ describe("MessageInput", () => {
   // ── Accessible names for icon-only composer controls (B9-22) ──
 
   it("names the reply close button", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setReplyTo(1, "x");
 
@@ -612,7 +612,7 @@ describe("MessageInput", () => {
   // ── Textarea auto-resize ──
 
   it("textarea height adjusts on input (auto-resize)", () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     // After mount, textarea should have style.height set
@@ -629,7 +629,7 @@ describe("MessageInput", () => {
   // ── Emoji picker ──
 
   it("clicking emoji button opens emoji picker", async () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();

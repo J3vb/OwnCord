@@ -33,7 +33,7 @@ export function useMessageInputContainer(bind: (container: HTMLDivElement) => vo
 }
 
 /** Creates a MessageInput from the given overrides and mounts it into the container. */
-export function mountInput(
+export function mountMessageInput(
   container: HTMLDivElement,
   overrides: Partial<MessageInputOptions> = {},
 ): { opts: MessageInputOptions; comp: ReturnType<typeof createMessageInput> } {

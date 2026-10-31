@@ -9,7 +9,7 @@ import { canMention, mentionInComposer } from "../../../src/features/messaging/a
 import { lastEmojiPickerOptions, lastGifPickerOptions } from "../../helpers/messageInputMocks";
 import {
   makeOptions,
-  mountInput,
+  mountMessageInput,
   selectFiles,
   useMessageInputContainer,
 } from "../../helpers/messageInputHarness";
@@ -25,7 +25,7 @@ describe("MessageInput", () => {
   });
 
   it("selecting emoji inserts it into textarea at cursor position", async () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Hello  world";
@@ -112,7 +112,7 @@ describe("MessageInput", () => {
   // ── GIF picker ──
 
   it("clicking GIF button opens GIF picker", async () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
@@ -125,7 +125,7 @@ describe("MessageInput", () => {
   });
 
   it("selecting a GIF sends it as a message immediately", async () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
     gifBtn.click();
@@ -146,7 +146,7 @@ describe("MessageInput", () => {
   });
 
   it("selecting a GIF under a slow-mode send gate is refused with the reason", async () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     comp.setSendGate("Slow mode — 5s");
     (container.querySelector(".gif-btn") as HTMLElement).click();
@@ -161,7 +161,7 @@ describe("MessageInput", () => {
   });
 
   it("selecting a GIF sends it without discarding a typed draft", async () => {
-    const { opts, comp } = mountInput(container);
+    const { opts, comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "wait for it...";
@@ -188,7 +188,7 @@ describe("MessageInput", () => {
   });
 
   it("opening GIF picker closes emoji picker", async () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     // Open emoji picker first
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
@@ -232,7 +232,7 @@ describe("MessageInput", () => {
   });
 
   it("opening emoji picker closes GIF picker", async () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     // Open GIF picker first
     const gifBtn = container.querySelector(".gif-btn") as HTMLElement;
@@ -256,7 +256,7 @@ describe("MessageInput", () => {
   // ── Destroy cleans up ──
 
   it("destroy removes DOM and cleans up pickers", async () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     // Open a picker so there's state to clean up
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
@@ -280,7 +280,7 @@ describe("MessageInput", () => {
       url: "http://x",
       filename,
     }));
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     const file = new File(["bytes"], filename, { type });
@@ -452,7 +452,7 @@ describe("MessageInput", () => {
 
   it("files with empty MIME type are uploaded", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "unk-1", url: "http://x", filename: "data" }));
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const noTypeFile = new File(["data"], "mystery", { type: "" });
     selectFiles(container, [noTypeFile]);
@@ -467,7 +467,7 @@ describe("MessageInput", () => {
 
   it("refuses to queue an 11th attachment instead of uploading it", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "http://x", filename: "x" }));
-    const { comp } = mountInput(container, { onUploadFile });
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
 
@@ -494,7 +494,7 @@ describe("MessageInput", () => {
   // ── Toggling emoji picker closed ──
 
   it("clicking emoji button again closes the picker", async () => {
-    const { comp } = mountInput(container);
+    const { comp } = mountMessageInput(container);
 
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
 
