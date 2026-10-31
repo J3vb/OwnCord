@@ -6,14 +6,6 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
@@ -30,6 +22,7 @@ import {
   signInAs,
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 function seed(messages: readonly Message[]): void {
   messagesStore.setState(() => ({

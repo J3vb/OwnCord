@@ -1,18 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-// jsdom does not provide ResizeObserver; importing MessageList does not need it
-// at load, but a sibling import may.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { estimateItemHeight, type VirtualItem } from "@components/MessageList";
 import { clearImageSizes, setImageBox } from "../../src/components/message-list/imageSizes";
 import type { Message } from "@stores/messages.store";
+import "../helpers/resizeObserverStub";
 
 const LINE = 22;
 /** 900 px list, 120 px of row padding, 7.5 px glyphs: 104 characters a line. */

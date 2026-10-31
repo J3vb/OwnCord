@@ -7,14 +7,6 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListComponent, MessageListOptions } from "@components/MessageList";
 import {
@@ -27,6 +19,7 @@ import {
 import type { Message } from "@stores/messages.store";
 import { INITIAL_STATE } from "../../src/features/messaging/messageModel";
 import { buildMessage } from "../helpers/messageFactory";
+import "../helpers/resizeObserverStub";
 
 function makeMessage(id: number): Message {
   return buildMessage({ id });

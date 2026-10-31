@@ -5,14 +5,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
 import { messageActionGates } from "@components/message-list/messageActions";
@@ -33,6 +25,7 @@ import {
   signInAs,
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CAROL = 12;
 

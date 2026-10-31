@@ -7,14 +7,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { isChannelAway } from "@lib/readState";
@@ -29,6 +21,7 @@ import {
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import type { MessageResponse } from "@lib/types";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 let scrollHeight = 100_000;

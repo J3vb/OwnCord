@@ -1,26 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 // Unique markers so the offsetHeight stub below can tell the two unconfirmed
 // (id: 0) optimistic rows apart by content, since both currently collide on

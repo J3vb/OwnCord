@@ -1,20 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
-
 const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
   fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
@@ -43,6 +28,7 @@ import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const ROW_H = 61;
 

@@ -28,15 +28,6 @@ vi.mock("@lib/ui/toast", () => ({
   initToast: vi.fn(),
 }));
 
-// jsdom has no ResizeObserver — MessageList needs one to mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageJumper } from "../../src/pages/main-page/MessageJump";
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import { createMessageList } from "@components/MessageList";
@@ -60,6 +51,7 @@ import type { MessageResponse, ReadyChannel } from "@lib/types";
 import { expectConsole } from "../helpers/console";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },

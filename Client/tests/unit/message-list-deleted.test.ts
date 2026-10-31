@@ -6,14 +6,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, deleteMessage, bulkDeleteMessages } from "@stores/messages.store";
@@ -21,6 +13,7 @@ import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };

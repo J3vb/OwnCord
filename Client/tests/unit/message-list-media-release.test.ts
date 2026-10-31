@@ -1,20 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
-
 // Spy on the media-visibility manager: MessageList must release every tracked
 // <img> (discardMedia) before discarding rendered rows, otherwise the
 // IntersectionObserver + allTracked set + pending timers retain every GIF
@@ -44,6 +29,7 @@ import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 function resetStores(): void {
   resetMessagesState();

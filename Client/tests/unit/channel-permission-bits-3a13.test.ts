@@ -6,20 +6,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { channelBitOrRole } from "@lib/permissions";
@@ -31,6 +17,7 @@ import { messagesStore } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 import { createReactionController } from "../../src/pages/main-page/ReactionController";
 import { resetMessagesState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const ME = 1;
 const OTHER = 2;

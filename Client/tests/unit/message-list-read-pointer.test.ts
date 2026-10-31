@@ -7,14 +7,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
@@ -39,6 +31,7 @@ import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/server
 import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 
