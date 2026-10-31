@@ -105,7 +105,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Voice**
 
-- On Linux, a built-in laptop camera (one that runs through PipeWire) could show the same few frames over and over. Each frame is now copied out as it arrives, so the picture moves normally. USB webcams were not affected.
+- On Linux, the app could crash when you switched or restarted the camera, and a built-in laptop camera could show the same few frames over and over. Cameras are now opened directly instead of through PipeWire where they can be (PipeWire is still used for cameras that need it, with each frame copied out as it arrives).
 
 **Admin panel**
 

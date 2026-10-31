@@ -547,9 +547,47 @@ fn monitor_element(id: &str) -> Option<(gst::Element, Option<gst::Caps>)> {
         .devices()
         .iter()
         .find(|d| device_id(d).as_deref() == Some(id))
-        .and_then(|d| d.create_element(None).ok().map(|e| (e, d.caps())));
+        .and_then(|d| {
+            direct_v4l2(d)
+                .or_else(|| d.create_element(None).ok())
+                .map(|e| (e, d.caps()))
+        });
     monitor.stop();
     found
+}
+
+/// The `/dev/video*` node behind a PipeWire camera, when it is a plain V4L2
+/// device and not a libcamera one. PipeWire names it in `api.v4l2.path`, and
+/// in `object.path` as `v4l2:<node>`.
+fn v4l2_node(props: &gst::StructureRef) -> Option<String> {
+    props
+        .get::<&str>("api.v4l2.path")
+        .ok()
+        .or_else(|| {
+            props
+                .get::<&str>("object.path")
+                .ok()
+                .and_then(|p| p.strip_prefix("v4l2:"))
+        })
+        .filter(|path| path.starts_with("/dev/video"))
+        .map(str::to_string)
+}
+
+/// A `v4l2src` on the node behind a PipeWire V4L2 camera. The AppImage carries
+/// GStreamer 1.20's `pipewiresrc`, which runs against the host's far newer
+/// PipeWire: switching cameras could crash its streaming thread, and raw
+/// frames could be read after PipeWire reused their buffer. A V4L2 camera
+/// does not need PipeWire in between, so it is opened directly; only a
+/// libcamera camera (no V4L2 node) still goes through `pipewiresrc`.
+fn direct_v4l2(device: &gst::Device) -> Option<gst::Element> {
+    let props = device.properties()?;
+    let node = v4l2_node(&props)?;
+    let element = gst::ElementFactory::make("v4l2src")
+        .property("device", &node)
+        .build()
+        .ok()?;
+    log::info!("[native_voice] camera opened directly at {node}");
+    Some(element)
 }
 
 /// Start `pipeline`; on a refusal it goes back to Null so the device is free.
@@ -1260,6 +1298,52 @@ mod tests {
 
     /// A pinned mode is a capsfilter between the source and decodebin: a
     /// source that can produce the mode negotiates it and frames flow.
+    #[test]
+    fn a_pipewire_v4l2_camera_resolves_to_its_video_node() {
+        if gst::init().is_err() {
+            eprintln!("no GStreamer runtime; skipping the V4L2 node proof");
+            return;
+        }
+        let node = |s: gst::Structure| v4l2_node(&s);
+        assert_eq!(
+            node(
+                gst::Structure::builder("props")
+                    .field("api.v4l2.path", "/dev/video2")
+                    .field("object.path", "v4l2:/dev/video2")
+                    .build()
+            ),
+            Some("/dev/video2".to_string())
+        );
+        assert_eq!(
+            node(
+                gst::Structure::builder("props")
+                    .field("object.path", "v4l2:/dev/video0")
+                    .build()
+            ),
+            Some("/dev/video0".to_string()),
+            "older PipeWire names the node only in object.path"
+        );
+        assert_eq!(
+            node(
+                gst::Structure::builder("props")
+                    .field("object.path", "libcamera:\\_SB_.PCI0.I2C2")
+                    .field("api.libcamera.path", "\\_SB_.PCI0.I2C2")
+                    .build()
+            ),
+            None,
+            "a libcamera camera stays on pipewiresrc"
+        );
+        assert_eq!(
+            node(
+                gst::Structure::builder("props")
+                    .field("api.v4l2.path", "/etc/passwd")
+                    .build()
+            ),
+            None
+        );
+        assert_eq!(node(gst::Structure::new_empty("props")), None);
+    }
+
     #[test]
     fn a_pipewire_source_copies_frames_out_and_a_v4l2_source_is_left_alone() {
         if gst::init().is_err() {
