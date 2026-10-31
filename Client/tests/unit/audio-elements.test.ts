@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
@@ -13,14 +14,7 @@ vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 
 vi.mock("livekit-client", () => ({
   RoomEvent: { ActiveDeviceChanged: "activeDeviceChanged" },
@@ -84,6 +78,22 @@ function stubPrefs(values: Record<string, unknown>): void {
   mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
     key in values ? values[key] : defaultVal,
   );
+}
+
+function chooseHeadsetWithBoostedUser(): void {
+  mockLoadPref.mockImplementation((key: string, def: unknown) => {
+    if (key === "audioOutputDevice") return "headset-1";
+    return key === "userVolume_42" ? 150 : def;
+  });
+}
+
+function expectBoostedOnGain(
+  ctx: { gains: Array<{ gain: { value: number } }> },
+  audioEl: { muted: boolean },
+): void {
+  expect(ctx.gains).toHaveLength(1);
+  expect(ctx.gains[0]!.gain.value).toBe(1.5);
+  expect(audioEl.muted).toBe(true);
 }
 
 describe("AudioElements", () => {
@@ -1086,9 +1096,7 @@ describe("AudioElements", () => {
 
       ctx.setState("running");
 
-      expect(ctx.gains).toHaveLength(1);
-      expect(ctx.gains[0]!.gain.value).toBe(1.5);
-      expect(audioEl.muted).toBe(true);
+      expectBoostedOnGain(ctx, audioEl);
     });
 
     it("hands tracks back to their elements when a running context suspends", () => {
@@ -1136,10 +1144,7 @@ describe("AudioElements", () => {
     });
 
     it("keeps boosted voice on its element while the context cannot reach the chosen output", async () => {
-      mockLoadPref.mockImplementation((key: string, def: unknown) => {
-        if (key === "audioOutputDevice") return "headset-1";
-        return key === "userVolume_42" ? 150 : def;
-      });
+      chooseHeadsetWithBoostedUser();
       vi.stubGlobal(
         "AudioContext",
         class extends FakeAudioContext {
@@ -1161,10 +1166,7 @@ describe("AudioElements", () => {
     });
 
     it("moves boosted voice onto its gain node once the chosen output is set", async () => {
-      mockLoadPref.mockImplementation((key: string, def: unknown) => {
-        if (key === "audioOutputDevice") return "headset-1";
-        return key === "userVolume_42" ? 150 : def;
-      });
+      chooseHeadsetWithBoostedUser();
       const { audioEl } = subscribeWebParticipant();
       const ctx = FakeAudioContext.instances[0]!;
       expect(ctx.gains).toHaveLength(0);
@@ -1172,16 +1174,11 @@ describe("AudioElements", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(ctx.gains).toHaveLength(1);
-      expect(ctx.gains[0]!.gain.value).toBe(1.5);
-      expect(audioEl.muted).toBe(true);
+      expectBoostedOnGain(ctx, audioEl);
     });
 
     it("never boosts on a context that cannot change output while another one is chosen", () => {
-      mockLoadPref.mockImplementation((key: string, def: unknown) => {
-        if (key === "audioOutputDevice") return "headset-1";
-        return key === "userVolume_42" ? 150 : def;
-      });
+      chooseHeadsetWithBoostedUser();
       vi.stubGlobal(
         "AudioContext",
         class extends FakeAudioContext {

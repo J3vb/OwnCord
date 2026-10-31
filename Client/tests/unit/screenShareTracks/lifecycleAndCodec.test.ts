@@ -23,6 +23,13 @@ import {
   RoomRig,
   fakeRoom,
   fakeDeps,
+  reconcileStaleFlags,
+  publishCamera,
+  publishScreen,
+  publishScreenWithAudio,
+  publishedOptions,
+  expectAnnounced,
+  expectNotAnnounced,
   useScreenShareTracksHarness,
 } from "../../helpers/screenShareTracksHarness";
 
@@ -269,10 +276,7 @@ describe("video codec", () => {
 
   it("publishes the camera as VP8 by default", async () => {
     prefs({});
-    const rig = fakeRoom();
-    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
-
-    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+    const rig = await publishCamera();
 
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
       videoCodec: "vp8",
@@ -312,7 +316,7 @@ describe("video codec", () => {
       const video = fakeVideoTrack();
       createLocalScreenTracks.mockResolvedValue([video, fakeAudioTrack()]);
       await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
-      const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+      const videoOpts = publishedOptions(rig, video);
       expect(videoOpts).toMatchObject({ videoCodec: "vp8" });
     } finally {
       restore();
@@ -321,10 +325,7 @@ describe("video codec", () => {
 
   it("publishes the camera with the saved codec", async () => {
     prefs({ videoCodec: "h264" });
-    const rig = fakeRoom();
-    createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
-
-    await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+    const rig = await publishCamera();
 
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
       videoCodec: "h264",
@@ -398,16 +399,11 @@ describe("video codec", () => {
 
   it("publishes the screen share's video with the saved codec, audio without", async () => {
     prefs({ videoCodec: "h264" });
-    const rig = fakeRoom();
-    const video = fakeVideoTrack();
-    const audio = fakeAudioTrack();
-    createLocalScreenTracks.mockResolvedValue([video, audio]);
+    const { rig, video, audio } = await publishScreenWithAudio();
 
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
-
-    const videoOpts = rig.publishTrack.mock.calls.find((c) => c[0] === video)?.[1];
+    const videoOpts = publishedOptions(rig, video);
     expect(videoOpts).toMatchObject({ videoCodec: "h264" });
-    const audioOpts = rig.publishTrack.mock.calls.find((c) => c[0] === audio)?.[1];
+    const audioOpts = publishedOptions(rig, audio);
     expect(audioOpts).not.toHaveProperty("videoCodec");
   });
 
@@ -458,10 +454,7 @@ describe("video codec", () => {
     offer120.value = true;
     prefs({ videoCodec: "vp8", screenShareQuality: "high", screenShareFps: 120 });
     encodingInfo.mockResolvedValue({ supported: true, smooth: true, powerEfficient: true });
-    const rig = fakeRoom();
-    createLocalScreenTracks.mockResolvedValue([capturedVideoTrack()]);
-
-    await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+    const rig = await publishScreen([capturedVideoTrack()]);
 
     expect(encodingInfo).toHaveBeenCalledTimes(1);
     expect(rig.publishTrack.mock.calls[0]?.[1]).toMatchObject({
@@ -487,10 +480,7 @@ describe("video codec", () => {
     await enabling;
 
     expect(rig.publishTrack).not.toHaveBeenCalled();
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_camera",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_camera", true);
     expect(track.stop).toHaveBeenCalled();
     expect(voiceStore.getState().localCamera).toBe(false);
   });
@@ -513,10 +503,7 @@ describe("video codec", () => {
     await enabling;
 
     expect(rig.publishTrack).not.toHaveBeenCalled();
-    expect(deps.wsSend).not.toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: true },
-    });
+    expectNotAnnounced(deps, "voice_screenshare", true);
     expect(video.stop).toHaveBeenCalled();
     expect(audio.stop).toHaveBeenCalled();
     expect(voiceStore.getState().localScreenshare).toBe(false);
@@ -554,7 +541,7 @@ describe("reconcileVideoFlags", () => {
     reconcileVideoFlags(camera, { manualScreenTracks: [] }, deps, off);
 
     expect(deps.wsSend).toHaveBeenCalledTimes(1);
-    expect(deps.wsSend).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: true } });
+    expectAnnounced(deps, "voice_camera", true);
     deps.wsSend.mockReturnValue("req-2");
     reconcileVideoFlags(camera, { manualScreenTracks: [] }, deps, off);
     expect(rollbackPendingVideo("req-1")).toBeUndefined();
@@ -570,26 +557,17 @@ describe("reconcileVideoFlags", () => {
     reconcileVideoFlags({ manualCameraTrack: null }, screen, deps, off);
 
     expect(deps.wsSend).toHaveBeenCalledTimes(1);
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: true },
-    });
+    expectAnnounced(deps, "voice_screenshare", true);
     expect(rollbackPendingVideo("req-3")).toBe("screen");
   });
 
   it("turns off a flag the server still holds for media already stopped", () => {
     const deps = fakeDeps(fakeRoom().room);
 
-    reconcileVideoFlags({ manualCameraTrack: null }, { manualScreenTracks: [] }, deps, {
-      camera: true,
-      screenshare: true,
-    });
+    reconcileStaleFlags(deps);
 
-    expect(deps.wsSend).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: false },
-    });
+    expectAnnounced(deps, "voice_camera", false);
+    expectAnnounced(deps, "voice_screenshare", false);
   });
 
   it("sends nothing when the server already agrees", async () => {
@@ -625,25 +603,16 @@ describe("reconcileVideoFlags", () => {
   it("turns off a stale flag while the media room is still reconnecting", () => {
     const deps = fakeDeps(null);
 
-    reconcileVideoFlags({ manualCameraTrack: null }, { manualScreenTracks: [] }, deps, {
-      camera: true,
-      screenshare: true,
-    });
+    reconcileStaleFlags(deps);
 
-    expect(deps.wsSend).toHaveBeenCalledWith({ type: "voice_camera", payload: { enabled: false } });
-    expect(deps.wsSend).toHaveBeenCalledWith({
-      type: "voice_screenshare",
-      payload: { enabled: false },
-    });
+    expectAnnounced(deps, "voice_camera", false);
+    expectAnnounced(deps, "voice_screenshare", false);
   });
 
   it("does nothing without a socket", () => {
     const deps = fakeDeps(fakeRoom().room, false);
 
-    reconcileVideoFlags({ manualCameraTrack: null }, { manualScreenTracks: [] }, deps, {
-      camera: true,
-      screenshare: true,
-    });
+    reconcileStaleFlags(deps);
 
     expect(deps.wsSend).not.toHaveBeenCalled();
   });

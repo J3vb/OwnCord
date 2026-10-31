@@ -43,6 +43,29 @@ export function stubNavigator(devices: FakeDevice[] = []): {
   };
 }
 
+const CAM_1: FakeDevice = { kind: "videoinput", deviceId: "cam-1", label: "Camera 1" };
+
+/**
+ * Stubs the navigator so video-only `getUserMedia` calls resolve through
+ * `camera` and every other call yields an audio stream.
+ */
+export function stubCameraNavigator(opts: {
+  camera: () => Promise<MediaStream>;
+  devices?: FakeDevice[];
+  audio?: MediaStream;
+}): void {
+  const audio = opts.audio ?? fakeAudioStream();
+  vi.stubGlobal("navigator", {
+    mediaDevices: {
+      enumerateDevices: vi.fn().mockResolvedValue(opts.devices ?? [CAM_1]),
+      getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
+        if (constraints.video && constraints.audio === false) return opts.camera();
+        return Promise.resolve(audio);
+      }),
+    },
+  });
+}
+
 /** A stream with one audio track whose `stop` is the given spy. */
 export function fakeAudioStream(stop: () => void = vi.fn()): MediaStream {
   return {

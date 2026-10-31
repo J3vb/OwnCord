@@ -3,9 +3,11 @@ import * as mocks from "../../helpers/videoGridMocks";
 import { cascadedDeclaration } from "../../helpers/app-css";
 import { computeGridLayout, type VideoGridComponent } from "../../../src/components/VideoGrid";
 import {
+  addAudioTile,
   fakeStream,
   fakeStreamWithTrack,
   makeTileConfig,
+  stubVideoPlay,
   useVideoGridHarness,
 } from "../../helpers/videoGridHarness";
 
@@ -23,20 +25,13 @@ const {
   mockSetUserLocalMute,
 } = mocks;
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("VideoGrid", () => {
   let container: HTMLDivElement;
   let grid: VideoGridComponent;
 
-  useVideoGridHarness({
-    wired: (c, g) => {
-      container = c;
-      grid = g;
-    },
-    currentGrid: () => grid,
+  useVideoGridHarness((c, g) => {
+    container = c;
+    grid = g;
   });
 
   it("mount creates a grid container with data-testid", () => {
@@ -172,17 +167,7 @@ describe("VideoGrid", () => {
 
   describe("video autoplay", () => {
     it("addStream calls .play() on the video element", () => {
-      const playMock = vi.fn().mockResolvedValue(undefined);
-      const origCreate = document.createElement.bind(document);
-      vi.spyOn(document, "createElement").mockImplementation(
-        (tag: string, opts?: ElementCreationOptions) => {
-          const el = origCreate(tag, opts);
-          if (tag === "video") {
-            (el as HTMLVideoElement).play = playMock;
-          }
-          return el;
-        },
-      );
+      const playMock = stubVideoPlay();
 
       grid.addStream(1, "Alice", fakeStream());
 
@@ -192,17 +177,7 @@ describe("VideoGrid", () => {
     });
 
     it("addStream calls .play() when replacing srcObject on existing tile", () => {
-      const playMock = vi.fn().mockResolvedValue(undefined);
-      const origCreate = document.createElement.bind(document);
-      vi.spyOn(document, "createElement").mockImplementation(
-        (tag: string, opts?: ElementCreationOptions) => {
-          const el = origCreate(tag, opts);
-          if (tag === "video") {
-            (el as HTMLVideoElement).play = playMock;
-          }
-          return el;
-        },
-      );
+      const playMock = stubVideoPlay();
 
       const { stream: s1 } = fakeStreamWithTrack();
       const { stream: s2 } = fakeStreamWithTrack();
@@ -322,8 +297,7 @@ describe("VideoGrid", () => {
     });
 
     it("mute button toggles screenshare audio when isScreenshare=true", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 99, isScreenshare: true });
-      grid.addStream(99, "bob (Screen)", fakeStream(), config);
+      addAudioTile(grid, 99, "bob (Screen)", true);
 
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
 
@@ -335,8 +309,7 @@ describe("VideoGrid", () => {
     });
 
     it("mute button toggles the user's local Mute when isScreenshare=false", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 55, isScreenshare: false });
-      grid.addStream(55, "charlie", fakeStream(), config);
+      addAudioTile(grid, 55, "charlie", false);
 
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
 
@@ -351,8 +324,7 @@ describe("VideoGrid", () => {
 
     it("a voice tile starts muted when the user is locally muted", () => {
       mockGetUserLocalMute.mockReturnValueOnce(true);
-      const config = makeTileConfig({ isSelf: false, audioUserId: 56, isScreenshare: false });
-      grid.addStream(56, "erin", fakeStream(), config);
+      addAudioTile(grid, 56, "erin", false);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
@@ -362,8 +334,7 @@ describe("VideoGrid", () => {
     });
 
     it("a Mute set from the sidebar menu updates the open voice tile", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 57, isScreenshare: false });
-      grid.addStream(57, "finn", fakeStream(), config);
+      addAudioTile(grid, 57, "finn", false);
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
       expect(muteBtn.getAttribute("aria-label")).toBe("Mute");
 
@@ -421,8 +392,7 @@ describe("VideoGrid", () => {
     });
 
     it("volume slider adjusts user volume for non-screenshare tiles", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
-      grid.addStream(77, "dave", fakeStream(), config);
+      addAudioTile(grid, 77, "dave", false);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       expect(slider).not.toBeNull();
@@ -436,8 +406,7 @@ describe("VideoGrid", () => {
 
     it("seeds the mic-tile slider from the persisted per-user volume, not a hardcoded 100%", () => {
       mockGetUserVolume.mockReturnValueOnce(30);
-      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: false });
-      grid.addStream(88, "erin", fakeStream(), config);
+      addAudioTile(grid, 88, "erin", false);
 
       expect(mockGetUserVolume).toHaveBeenCalledWith(88);
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
@@ -449,8 +418,7 @@ describe("VideoGrid", () => {
 
     it("starts a mic tile muted when the persisted per-user volume is 0", () => {
       mockGetUserVolume.mockReturnValueOnce(0);
-      const config = makeTileConfig({ isSelf: false, audioUserId: 89, isScreenshare: false });
-      grid.addStream(89, "frank", fakeStream(), config);
+      addAudioTile(grid, 89, "frank", false);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       expect(slider.value).toBe("0");
@@ -461,8 +429,7 @@ describe("VideoGrid", () => {
     });
 
     it("volume slider at 0 triggers mute icon swap and calls setUserVolume(0)", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
-      grid.addStream(77, "dave", fakeStream(), config);
+      addAudioTile(grid, 77, "dave", false);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
@@ -481,8 +448,7 @@ describe("VideoGrid", () => {
     });
 
     it("volume slider for screenshare tiles calls muteScreenshareAudio", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: true });
-      grid.addStream(88, "screen", fakeStream(), config);
+      addAudioTile(grid, 88, "screen", true);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
 
@@ -498,8 +464,7 @@ describe("VideoGrid", () => {
     });
 
     it("screenshare slider uses 0-100 range where 100 maps to volume 1.0", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: true });
-      grid.addStream(88, "screen", fakeStream(), config);
+      addAudioTile(grid, 88, "screen", true);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       expect(slider.max).toBe("100");
@@ -517,8 +482,7 @@ describe("VideoGrid", () => {
     it("screenshare slider initializes from stored volume and mute state", () => {
       mockGetScreenshareAudioVolume.mockReturnValueOnce(0.3);
       mockGetScreenshareAudioMuted.mockReturnValueOnce(true);
-      const config = makeTileConfig({ isSelf: false, audioUserId: 88, isScreenshare: true });
-      grid.addStream(88, "screen", fakeStream(), config);
+      addAudioTile(grid, 88, "screen", true);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
@@ -529,16 +493,14 @@ describe("VideoGrid", () => {
     });
 
     it("mic slider tops out at 200%", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
-      grid.addStream(77, "dave", fakeStream(), config);
+      addAudioTile(grid, 77, "dave", false);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       expect(slider.max).toBe("200");
     });
 
     it("mute button unmutes with previous volume when currentVolume was non-zero", () => {
-      const config = makeTileConfig({ isSelf: false, audioUserId: 77, isScreenshare: false });
-      grid.addStream(77, "dave", fakeStream(), config);
+      addAudioTile(grid, 77, "dave", false);
 
       const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
       const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;

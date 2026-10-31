@@ -11,7 +11,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, deleteMessage, bulkDeleteMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
-import { buildMessage } from "../helpers/messageFactory";
+import { buildMessage, spacedTimestamp } from "../helpers/messageFactory";
 import {
   makeListOptions,
   resetStoresAndChannels,
@@ -36,7 +36,7 @@ function makeMessage(overrides: Partial<Message> & { id: number }): Message {
 function spaced(id: number): Message {
   return makeMessage({
     id,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
+    timestamp: spacedTimestamp(id),
   });
 }
 

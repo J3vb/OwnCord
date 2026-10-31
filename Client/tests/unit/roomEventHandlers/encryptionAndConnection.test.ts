@@ -20,6 +20,7 @@ import {
   remotePub,
   withEncryption,
   useRoomEventHandlersHarness,
+  roomWithRemotePubs,
 } from "../../helpers/roomEventHandlersHarness";
 
 vi.mock("@stores/voice.store", (importOriginal) => mocks.voiceStoreMock(importOriginal));
@@ -70,20 +71,7 @@ describe("remote publications without end-to-end encryption", () => {
     h.spies.isWatched.mockReturnValue(true);
     const camera = withEncryption(remotePub(Track.Source.Camera), Encryption_Type.NONE);
     const mic = withEncryption(remotePub(Track.Source.Microphone), Encryption_Type.GCM);
-    const room = {
-      remoteParticipants: new Map([
-        [
-          "user-7:tok",
-          {
-            identity: "user-7:tok",
-            trackPublications: new Map([
-              ["c", camera],
-              ["m", mic],
-            ]),
-          },
-        ],
-      ]),
-    } as unknown as Room;
+    const room = roomWithRemotePubs({ c: camera, m: mic });
 
     h.handlers.handleConnected(room);
     expectConsole("warn", /without end-to-end encryption/);

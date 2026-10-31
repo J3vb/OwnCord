@@ -1,4 +1,4 @@
-import { beforeEach, vi, type Mock } from "vitest";
+import { beforeEach, expect, vi, type Mock } from "vitest";
 import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -148,5 +148,131 @@ export function useScreenShareTracksHarness(): void {
         }
       },
     );
+  });
+}
+
+export function cameraState(): { manualCameraTrack: LocalVideoTrack | null } {
+  return { manualCameraTrack: null as LocalVideoTrack | null };
+}
+
+/** Makes the native camera support check wait; returns the function that answers it. */
+export function holdNativeCameraSupport(): (s: { available: boolean; missing: string[] }) => void {
+  let resolveSupport!: (s: { available: boolean; missing: string[] }) => void;
+  nativeCameraSupport.mockReturnValue(
+    new Promise((resolve) => {
+      resolveSupport = resolve;
+    }),
+  );
+  return (s) => resolveSupport(s);
+}
+
+/** Starts enableCamera with a publish that stays in flight until `resolvePublish()`. */
+export async function enableCameraHoldingPublish(rig: RoomRig) {
+  const deps = fakeDeps(rig.room);
+  const track = fakeVideoTrack();
+  createLocalVideoTrack.mockResolvedValue(track);
+  let resolvePublish!: () => void;
+  rig.publishTrack.mockReturnValue(
+    new Promise<void>((resolve) => {
+      resolvePublish = resolve;
+    }),
+  );
+  const state = cameraState();
+  const enabling = enableCamera(state, deps);
+  await vi.waitFor(() => {
+    expect(rig.publishTrack).toHaveBeenCalled();
+  });
+  return { deps, track, state, enabling, resolvePublish: () => resolvePublish() };
+}
+
+/** Fires "ended" on the track and expects the camera to be announced off and unpublished. */
+export async function expectUnplugTurnsCameraOff(
+  rig: RoomRig,
+  deps: ReturnType<typeof fakeDeps>,
+  state: { manualCameraTrack: LocalVideoTrack | null },
+  video: LocalVideoTrack,
+): Promise<void> {
+  (video.mediaStreamTrack as unknown as { dispatch: (t: string) => void }).dispatch("ended");
+
+  await vi.waitFor(() => {
+    expect(deps.wsSend).toHaveBeenCalledWith({
+      type: "voice_camera",
+      payload: { enabled: false },
+    });
+  });
+  expect(voiceStore.getState().localCamera).toBe(false);
+  expect(state.manualCameraTrack).toBeNull();
+  expect(rig.unpublishTrack).toHaveBeenCalledWith(video.mediaStreamTrack);
+}
+
+export function expectAnnounced(
+  deps: { wsSend: ReturnType<typeof vi.fn> },
+  type: "voice_camera" | "voice_screenshare",
+  enabled: boolean,
+): void {
+  expect(deps.wsSend).toHaveBeenCalledWith({ type, payload: { enabled } });
+}
+
+export function expectNotAnnounced(
+  deps: { wsSend: ReturnType<typeof vi.fn> },
+  type: "voice_camera" | "voice_screenshare",
+  enabled: boolean,
+): void {
+  expect(deps.wsSend).not.toHaveBeenCalledWith({ type, payload: { enabled } });
+}
+
+/** Shares the screen with a video and an audio track on a fresh room. */
+export async function publishScreenWithAudio() {
+  const rig = fakeRoom();
+  const video = fakeVideoTrack();
+  const audio = fakeAudioTrack();
+  createLocalScreenTracks.mockResolvedValue([video, audio]);
+  await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+  return { rig, video, audio };
+}
+
+/** The publish options the room was given for `track`. */
+export function publishedOptions(rig: RoomRig, track: unknown): unknown {
+  return rig.publishTrack.mock.calls.find((c) => c[0] === track)?.[1];
+}
+
+/** Enables the camera on a fresh room with a fake device track. */
+export async function publishCamera(): Promise<RoomRig> {
+  const rig = fakeRoom();
+  createLocalVideoTrack.mockResolvedValue(fakeVideoTrack());
+  await enableCamera({ manualCameraTrack: null }, fakeDeps(rig.room));
+  return rig;
+}
+
+/** Shares the screen on a fresh room with the given captured tracks. */
+export async function publishScreen(tracks: LocalTrack[]): Promise<RoomRig> {
+  const rig = fakeRoom();
+  createLocalScreenTracks.mockResolvedValue(tracks);
+  await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
+  return rig;
+}
+
+export function firstPublishOptions(rig: RoomRig): Record<string, unknown> {
+  return rig.publishTrack.mock.calls[0]?.[1] as Record<string, unknown>;
+}
+
+/** Starts enableCamera on a native room and returns once its support check is in flight. */
+export async function enableCameraAwaitingSupport() {
+  const rig = fakeNativeRoom();
+  const deps = fakeDeps(rig.room);
+  const resolveSupport = holdNativeCameraSupport();
+  const state = cameraState();
+  const enabling = enableCamera(state, deps);
+  await vi.waitFor(() => {
+    expect(nativeCameraSupport).toHaveBeenCalled();
+  });
+  return { rig, deps, resolveSupport, state, enabling };
+}
+
+/** Reconciles with nothing live while the server still holds both flags. */
+export function reconcileStaleFlags(deps: ReturnType<typeof fakeDeps>): void {
+  reconcileVideoFlags({ manualCameraTrack: null }, { manualScreenTracks: [] }, deps, {
+    camera: true,
+    screenshare: true,
   });
 }

@@ -18,6 +18,7 @@ import {
   restorePeerKeyMocks,
   createManager,
   sendsOfType,
+  stallNextWrap,
 } from "../../helpers/livekitE2eeHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
@@ -165,11 +166,7 @@ describe("E2EEManager", () => {
     const { ws, mgr } = newManager();
     await mgr.setupKeyExchange(true, 1); // holder, epoch 1
 
-    let releaseWrap!: (v: { encryptedKey: string; iv: string }) => void;
-    const stalledWrap = new Promise<{ encryptedKey: string; iv: string }>((resolve) => {
-      releaseWrap = resolve;
-    });
-    vi.mocked(wrapRoomKey).mockReturnValueOnce(stalledWrap);
+    const releaseWrap = stallNextWrap();
 
     const announcePromise = mgr.handleAnnounce(PEER_ID, "cGVlcg==", "sig");
     await vi.waitFor(() => expect(wrapRoomKey).toHaveBeenCalled());
@@ -209,11 +206,7 @@ describe("E2EEManager", () => {
     // announce — clear that history so the count below tracks only the
     // redistribution loop.)
     vi.mocked(wrapRoomKey).mockClear();
-    let releaseWrap!: (v: { encryptedKey: string; iv: string }) => void;
-    const stalledWrap = new Promise<{ encryptedKey: string; iv: string }>((resolve) => {
-      releaseWrap = resolve;
-    });
-    vi.mocked(wrapRoomKey).mockReturnValueOnce(stalledWrap);
+    const releaseWrap = stallNextWrap();
 
     const leftPromise = mgr.handleParticipantLeft(99); // re-elects us as holder
     await vi.waitFor(() => expect(wrapRoomKey).toHaveBeenCalledTimes(1));

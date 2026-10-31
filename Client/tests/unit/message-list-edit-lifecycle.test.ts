@@ -22,34 +22,27 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { setChannels, setActiveChannel, setRoles, channelsStore } from "@stores/channels.store";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
-import { makeListOptions, stubTallRowLayout } from "../helpers/messageListHarness";
-import { buildMessage } from "../helpers/messageFactory";
+import {
+  makeListOptions,
+  seedMember,
+  stubTallRowLayout,
+  setMessages as setChannelMessages,
+} from "../helpers/messageListHarness";
+import { spacedMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
 
 function makeMessage(id: number, over: Partial<Message> = {}): Message {
-  return buildMessage(
-    { id, ...over },
-    {
-      channelId: CHANNEL_ID,
-      user: ME,
-      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    },
-  );
+  return spacedMessage({ id, ...over }, { user: ME });
 }
 
 function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
+  setChannelMessages(CHANNEL_ID, messages);
 }
 
 describe("MessageList — inline editor lifecycle", () => {
@@ -75,6 +68,38 @@ describe("MessageList — inline editor lifecycle", () => {
     messagesStore.flush();
     await new Promise((r) => setTimeout(r, 25));
   };
+
+  /** Mounts 60 rows, scrolls to the lower middle and opens an editor on a row near the bottom of the window. */
+  async function startEditNearTheBottom(): Promise<number> {
+    setMessages(Array.from({ length: 60 }, (_, i) => makeMessage(i + 1)));
+    mount();
+    await settle();
+    await scrollTo(3300);
+    const visibleIds = [
+      ...container.querySelectorAll<HTMLElement>(".virtual-content > .message"),
+    ].map((el) => Number(el.dataset.testid!.replace("message-", "")));
+    const id = visibleIds[visibleIds.length - 2]!;
+    expect(list!.startEdit(id)).toBe(true);
+    await vi.waitFor(() => expect(editor(id)).not.toBeNull());
+    return id;
+  }
+  /** Scrolls up from 3300 in small steps until row `id` leaves the window; returns the offset. */
+  async function scrollUntilGone(id: number): Promise<number> {
+    let top = 3300;
+    while (row(id) !== null && top > 0) {
+      top -= 100;
+      await scrollTo(top);
+    }
+    return top;
+  }
+  /** Scrolls down from `from` in `step`s until row `id` is rendered again. */
+  async function scrollUntilBack(id: number, from: number, step: number): Promise<void> {
+    let top = from;
+    while (row(id) === null && top < 6000) {
+      top += step;
+      await scrollTo(top);
+    }
+  }
 
   beforeEach(() => {
     loader.failLoad = false;
@@ -110,12 +135,7 @@ describe("MessageList — inline editor lifecycle", () => {
 
   it("the edit box shows id tokens as @name and converts untouched spans back on save", async () => {
     applyReadyCapabilities({ id_mentions: true });
-    membersStore.setState(() => ({
-      members: new Map([
-        [10, { id: 10, username: "bob", avatar: null, role: "member", status: "online" as const }],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMember(10, "bob");
     setRoles([{ id: 5, name: "Mods", color: null, permissions: 0 }]);
     channelsStore.flush();
     setMessages([makeMessage(1, { content: "hi <@10> <@&5> <@77>" })]);
@@ -134,21 +154,7 @@ describe("MessageList — inline editor lifecycle", () => {
 
   it("refuses an edit that is within the limit as shown but over it once mentions expand", async () => {
     applyReadyCapabilities({ id_mentions: true });
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          123456789012,
-          {
-            id: 123456789012,
-            username: "Zed",
-            avatar: null,
-            role: "member",
-            status: "online" as const,
-          },
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMember(123456789012, "Zed");
     setMessages([makeMessage(1, { content: "<@123456789012> <@123456789012> short" })]);
     mount();
     expect(list!.startEdit(1)).toBe(true);
@@ -165,12 +171,7 @@ describe("MessageList — inline editor lifecycle", () => {
   });
 
   it("saves the shown text as is without the id_mentions capability", async () => {
-    membersStore.setState(() => ({
-      members: new Map([
-        [10, { id: 10, username: "bob", avatar: null, role: "member", status: "online" as const }],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMember(10, "bob");
     setMessages([makeMessage(1, { content: "hi <@10>" })]);
     mount();
     expect(list!.startEdit(1)).toBe(true);
@@ -182,12 +183,7 @@ describe("MessageList — inline editor lifecycle", () => {
 
   it("converts a restored edit text (a failed save) too", async () => {
     applyReadyCapabilities({ id_mentions: true });
-    membersStore.setState(() => ({
-      members: new Map([
-        [10, { id: 10, username: "bob", avatar: null, role: "member", status: "online" as const }],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMember(10, "bob");
     setMessages([makeMessage(1, { content: "hi <@10>" })]);
     mount();
     expect(list!.startEdit(1, "hey <@10> again")).toBe(true);
@@ -261,32 +257,16 @@ describe("MessageList — inline editor lifecycle", () => {
   });
 
   it("an editor that held focus gets it back when its row scrolls out of the window and back", async () => {
-    setMessages(Array.from({ length: 60 }, (_, i) => makeMessage(i + 1)));
-    mount();
-    await settle();
-    await scrollTo(3300);
-    const visibleIds = [
-      ...container.querySelectorAll<HTMLElement>(".virtual-content > .message"),
-    ].map((el) => Number(el.dataset.testid!.replace("message-", "")));
-    const id = visibleIds[visibleIds.length - 2]!;
-    expect(list!.startEdit(id)).toBe(true);
-    await vi.waitFor(() => expect(editor(id)).not.toBeNull());
+    const id = await startEditNearTheBottom();
     const textarea = editor(id)!;
     textarea.focus();
     expect(document.activeElement).toBe(textarea);
 
     // Scroll up in small steps until the row has left the rendered window...
-    let top = 3300;
-    while (row(id) !== null && top > 0) {
-      top -= 100;
-      await scrollTo(top);
-    }
+    let top = await scrollUntilGone(id);
     expect(row(id)).toBeNull();
     // ...and back until it is rendered again.
-    while (row(id) === null && top < 6000) {
-      top += 100;
-      await scrollTo(top);
-    }
+    await scrollUntilBack(id, top, 100);
 
     expect(row(id)).not.toBeNull();
     expect(editor(id)).toBe(textarea);
@@ -295,27 +275,14 @@ describe("MessageList — inline editor lifecycle", () => {
   });
 
   it("an editor that held focus gets it back after a jump away and back (full rebuild)", async () => {
-    setMessages(Array.from({ length: 60 }, (_, i) => makeMessage(i + 1)));
-    mount();
-    await settle();
-    await scrollTo(3300);
-    const visibleIds = [
-      ...container.querySelectorAll<HTMLElement>(".virtual-content > .message"),
-    ].map((el) => Number(el.dataset.testid!.replace("message-", "")));
-    const id = visibleIds[visibleIds.length - 2]!;
-    expect(list!.startEdit(id)).toBe(true);
-    await vi.waitFor(() => expect(editor(id)).not.toBeNull());
+    const id = await startEditNearTheBottom();
     const textarea = editor(id)!;
     textarea.focus();
 
     await scrollTo(0);
     expect(row(id)).toBeNull();
     // Jump back in big steps, so the window is rebuilt rather than slid.
-    let top = 0;
-    while (row(id) === null && top < 6000) {
-      top += 1500;
-      await scrollTo(top);
-    }
+    await scrollUntilBack(id, 0, 1500);
 
     expect(row(id)).not.toBeNull();
     expect(editor(id)).toBe(textarea);
@@ -323,30 +290,14 @@ describe("MessageList — inline editor lifecycle", () => {
   });
 
   it("does not steal focus back from another field when the row returns", async () => {
-    setMessages(Array.from({ length: 60 }, (_, i) => makeMessage(i + 1)));
-    mount();
-    await settle();
-    await scrollTo(3300);
-    const visibleIds = [
-      ...container.querySelectorAll<HTMLElement>(".virtual-content > .message"),
-    ].map((el) => Number(el.dataset.testid!.replace("message-", "")));
-    const id = visibleIds[visibleIds.length - 2]!;
-    expect(list!.startEdit(id)).toBe(true);
-    await vi.waitFor(() => expect(editor(id)).not.toBeNull());
+    const id = await startEditNearTheBottom();
     editor(id)!.focus();
 
-    let top = 3300;
-    while (row(id) !== null && top > 0) {
-      top -= 100;
-      await scrollTo(top);
-    }
+    let top = await scrollUntilGone(id);
     const other = document.createElement("input");
     document.body.appendChild(other);
     other.focus();
-    while (row(id) === null && top < 6000) {
-      top += 100;
-      await scrollTo(top);
-    }
+    await scrollUntilBack(id, top, 100);
 
     expect(document.activeElement).toBe(other);
     other.remove();

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 import {
   generateECDHKeyPair,
   exportPublicKey,
@@ -17,9 +18,13 @@ import {
   importIdentityKeyPair,
 } from "@lib/net/e2eeCrypto";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
+
+async function twoParties() {
+  const alice = await generateECDHKeyPair();
+  const bob = await generateECDHKeyPair();
+  return { alice, bob, roomKey: generateRoomKey() };
+}
 
 describe("e2eeCrypto", () => {
   // ── module-load WebCrypto guard ────────────────────────────────────────────
@@ -57,9 +62,7 @@ describe("e2eeCrypto", () => {
 
   describe("wrapRoomKey / unwrapRoomKey", () => {
     it("round-trips a room key between two keypairs", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const roomKey = generateRoomKey();
+      const { alice, bob, roomKey } = await twoParties();
 
       const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
       const { roomKey: unwrapped, epoch } = await unwrapRoomKey(
@@ -74,9 +77,7 @@ describe("e2eeCrypto", () => {
     });
 
     it("produces a different ciphertext each call (fresh IV)", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const roomKey = generateRoomKey();
+      const { alice, bob, roomKey } = await twoParties();
 
       const first = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
       const second = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
@@ -90,9 +91,7 @@ describe("e2eeCrypto", () => {
 
   describe("unwrapRoomKey", () => {
     it("throws when the ciphertext has been tampered", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const roomKey = generateRoomKey();
+      const { alice, bob, roomKey } = await twoParties();
 
       const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 1);
 
@@ -111,6 +110,19 @@ describe("e2eeCrypto", () => {
     const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
     const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
+    /** A fresh pair of parties and the decoded bytes of a room key wrapped for `epoch`. */
+    async function wrappedBlob(epoch: number) {
+      const alice = await generateECDHKeyPair();
+      const bob = await generateECDHKeyPair();
+      const { encryptedKey, iv } = await wrapRoomKey(
+        alice.privateKey,
+        bob.publicKey,
+        generateRoomKey(),
+        epoch,
+      );
+      return { alice, bob, iv, bytes: fromB64(encryptedKey) };
+    }
+
     it("carries the epoch as a 0x01 version byte + u64 big-endian header", async () => {
       const alice = await generateECDHKeyPair();
       const bob = await generateECDHKeyPair();
@@ -127,15 +139,7 @@ describe("e2eeCrypto", () => {
     });
 
     it("rejects a blob whose epoch header was edited", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const { encryptedKey, iv } = await wrapRoomKey(
-        alice.privateKey,
-        bob.publicKey,
-        generateRoomKey(),
-        3,
-      );
-      const bytes = fromB64(encryptedKey);
+      const { alice, bob, iv, bytes } = await wrappedBlob(3);
       bytes[8] = 9; // epoch 3 -> 9, ciphertext untouched
       await expect(
         unwrapRoomKey(bob.privateKey, alice.publicKey, b64(bytes), iv),
@@ -143,15 +147,7 @@ describe("e2eeCrypto", () => {
     });
 
     it("rejects an unknown format version byte", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const { encryptedKey, iv } = await wrapRoomKey(
-        alice.privateKey,
-        bob.publicKey,
-        generateRoomKey(),
-        3,
-      );
-      const bytes = fromB64(encryptedKey);
+      const { alice, bob, iv, bytes } = await wrappedBlob(3);
       bytes[0] = 2;
       await expect(
         unwrapRoomKey(bob.privateKey, alice.publicKey, b64(bytes), iv),
@@ -159,15 +155,7 @@ describe("e2eeCrypto", () => {
     });
 
     it("rejects a decoded header epoch above Number.MAX_SAFE_INTEGER", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const { encryptedKey, iv } = await wrapRoomKey(
-        alice.privateKey,
-        bob.publicKey,
-        generateRoomKey(),
-        3,
-      );
-      const bytes = fromB64(encryptedKey);
+      const { alice, bob, iv, bytes } = await wrappedBlob(3);
       // Overwrite the u64 epoch (bytes 1-8) with 0xFFFFFFFFFFFFFFFF, well
       // above 2^53-1. The range check runs before decrypt, so the AAD
       // mismatch this also creates never gets a chance to fire.
@@ -189,9 +177,7 @@ describe("e2eeCrypto", () => {
     });
 
     it("accepts epoch 0 (the first epoch) at both ends", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const roomKey = generateRoomKey();
+      const { alice, bob, roomKey } = await twoParties();
 
       const { encryptedKey, iv } = await wrapRoomKey(alice.privateKey, bob.publicKey, roomKey, 0);
       expect(Array.from(fromB64(encryptedKey).subarray(0, 9))).toEqual([1, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -202,9 +188,7 @@ describe("e2eeCrypto", () => {
     });
 
     it("accepts an epoch of exactly Number.MAX_SAFE_INTEGER", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const roomKey = generateRoomKey();
+      const { alice, bob, roomKey } = await twoParties();
 
       const { encryptedKey, iv } = await wrapRoomKey(
         alice.privateKey,
@@ -239,9 +223,7 @@ describe("e2eeCrypto", () => {
     });
 
     it("still unwraps a legacy blob (no header, no additional data) and reports epoch null", async () => {
-      const alice = await generateECDHKeyPair();
-      const bob = await generateECDHKeyPair();
-      const roomKey = generateRoomKey();
+      const { alice, bob, roomKey } = await twoParties();
 
       // Build the pre-epoch wire format by hand: ECDH -> HKDF(salt, info) ->
       // AES-GCM with no additional data, raw ciphertext in encrypted_key.

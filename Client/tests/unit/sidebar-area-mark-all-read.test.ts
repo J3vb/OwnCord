@@ -10,53 +10,24 @@
  * the composed DOM, and the CSS check below reads it from there.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as mocks from "../helpers/sidebarAreaMocks";
+import { lightSidebarAreaOpts, resetSidebarStoresAsMember } from "../helpers/sidebarAreaOpts";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    rePinPeerIdentity: vi.fn(),
-  }),
-);
-vi.mock("@lib/net/e2eeCrypto", () => ({
-  importIdentityPublicKey: vi.fn(),
-  computeKeyFingerprint: vi.fn(),
-}));
-vi.mock("@lib/presence/profiles", () => ({
-  createProfileManager: vi.fn().mockReturnValue({
-    loadProfiles: vi.fn().mockResolvedValue(undefined),
-    getAll: vi.fn().mockReturnValue([]),
-    store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
-  }),
-  createTauriBackend: vi.fn().mockReturnValue({}),
-}));
-vi.mock("@components/UserBar", () => ({
-  createUserBar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/VoiceWidget", () => ({
-  createVoiceWidget: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/MemberList", () => ({
-  createMemberList: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/QuickSwitchOverlay", () => ({
-  createQuickSwitchOverlay: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
-  createInviteManagerController: vi.fn().mockReturnValue({
-    open: vi.fn().mockResolvedValue(undefined),
-    cleanup: vi.fn(),
-  }),
-}));
+vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
+vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
+vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
+vi.mock("@components/UserBar", () => mocks.userBarMock());
+vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("@components/MemberList", () => mocks.memberListMock());
+vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.inviteManagerMock());
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
 import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { uiStore } from "../../src/stores/ui.store";
 import { setMarkReadSender } from "@lib/readState";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
-import { resetMembersState } from "../helpers/storeResets";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -75,17 +46,7 @@ const CHANNELS: ReadyChannel[] = [
 const shown = (el: HTMLElement): boolean => el.style.display !== "none";
 
 function opts(): SidebarAreaOptions {
-  return {
-    ws: { send: vi.fn(), close: vi.fn(), on: vi.fn(), off: vi.fn() } as never,
-    api: { getConfig: vi.fn().mockReturnValue({ host: "example.com" }) } as never,
-    limiters: {
-      voice: { tryConsume: vi.fn().mockReturnValue(true) },
-      voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
-    } as never,
-    presenceSender: { send: vi.fn(), rollbackRefused: vi.fn(), destroy: vi.fn() },
-    getRoot: vi.fn().mockReturnValue(document.createElement("div")),
-    getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-  };
+  return lightSidebarAreaOpts("example.com");
 }
 
 describe("SidebarArea — Mark All as Read", () => {
@@ -96,15 +57,7 @@ describe("SidebarArea — Mark All as Read", () => {
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    resetChannelsState();
-    dmStore.setState(() => ({ channels: [] }));
-    resetMembersState();
-    uiStore.setState((prev) => ({
-      ...prev,
-      collapsedCategories: new Set(),
-      sidebarMode: "channels" as const,
-    }));
-    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
+    resetSidebarStoresAsMember();
     container = document.createElement("div");
     document.body.appendChild(container);
   });

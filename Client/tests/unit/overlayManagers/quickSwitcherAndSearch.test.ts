@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Mock } from "vitest";
 import * as mocks from "../../helpers/overlayManagersMocks";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { createSearchOverlay } from "@components/SearchOverlay";
@@ -7,7 +6,13 @@ import {
   createQuickSwitcherManager,
   createSearchOverlayController,
 } from "@pages/main-page/OverlayManagers";
-import { makeMockApi } from "../../helpers/overlayManagersHarness";
+import {
+  firstCallOpts,
+  makeMockApi,
+  type SearchQueryOpts,
+  type SelectChannelOpts,
+  type SelectResultOpts,
+} from "../../helpers/overlayManagersHarness";
 import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -212,9 +217,7 @@ describe("createQuickSwitcherManager", () => {
     await pressCtrlK();
 
     // Extract the onSelectChannel callback
-    const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
-      onSelectChannel: (channelId: number) => void;
-    };
+    const opts = firstCallOpts<SelectChannelOpts>(createQuickSwitcher);
 
     opts.onSelectChannel(42);
     expect(mockSetActiveChannel).toHaveBeenCalledWith(42);
@@ -227,9 +230,7 @@ describe("createQuickSwitcherManager", () => {
     const { cleanup } = attachSwitcher(undefined, join);
     await pressCtrlK();
 
-    const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
-      onSelectChannel: (channelId: number) => void;
-    };
+    const opts = firstCallOpts<SelectChannelOpts>(createQuickSwitcher);
     opts.onSelectChannel(3);
 
     expect(join).toHaveBeenCalledWith(3);
@@ -243,9 +244,7 @@ describe("createQuickSwitcherManager", () => {
     const { cleanup } = attachSwitcher(undefined, join);
     await pressCtrlK();
 
-    const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
-      onSelectChannel: (channelId: number) => void;
-    };
+    const opts = firstCallOpts<SelectChannelOpts>(createQuickSwitcher);
     opts.onSelectChannel(4);
 
     expect(mockSetActiveChannel).toHaveBeenCalledWith(4);
@@ -262,9 +261,9 @@ describe("createQuickSwitcherManager", () => {
     expect(createQuickSwitcher).toHaveBeenCalledOnce();
 
     // Simulate component calling onClose directly
-    const opts = (createQuickSwitcher as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onClose: () => void;
-    };
+    }>(createQuickSwitcher);
     opts.onClose();
 
     // Re-open should work
@@ -400,9 +399,9 @@ describe("createSearchOverlayController", () => {
     const api = makeMockApi();
     await openSearch(api, { getCurrentChannelId: () => null });
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       currentChannelId: number | undefined;
-    };
+    }>(createSearchOverlay);
 
     expect(opts.currentChannelId).toBeUndefined();
   });
@@ -411,14 +410,14 @@ describe("createSearchOverlayController", () => {
     const api = makeMockApi();
     await openSearch(api);
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onSearch: (
         query: string,
         chId: number | undefined,
         signal?: AbortSignal,
         before?: number,
       ) => Promise<{ results: unknown[] }>;
-    };
+    }>(createSearchOverlay);
 
     const resp = await opts.onSearch("hello", 5, undefined, 42);
     expect(api.search).toHaveBeenCalledWith(
@@ -436,13 +435,7 @@ describe("createSearchOverlayController", () => {
     });
     await openSearch(api);
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSearch: (
-        query: string,
-        chId: number | undefined,
-        signal?: AbortSignal,
-      ) => Promise<unknown[]>;
-    };
+    const opts = firstCallOpts<SearchQueryOpts>(createSearchOverlay);
 
     await expect(opts.onSearch("test", 5)).rejects.toThrow("Aborted");
     // Should NOT show toast for abort errors
@@ -455,13 +448,7 @@ describe("createSearchOverlayController", () => {
     });
     await openSearch(api);
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSearch: (
-        query: string,
-        chId: number | undefined,
-        signal?: AbortSignal,
-      ) => Promise<unknown[]>;
-    };
+    const opts = firstCallOpts<SearchQueryOpts>(createSearchOverlay);
 
     await expect(opts.onSearch("test", 5)).rejects.toThrow("network failure");
     expect(mockShowToast).toHaveBeenCalledWith("Search failed", "error");
@@ -473,9 +460,7 @@ describe("createSearchOverlayController", () => {
     const mockJump = vi.fn();
     await openSearch(api, { onJumpToMessage: mockJump });
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSelectResult: (result: { channel_id: number; message_id: number }) => void;
-    };
+    const opts = firstCallOpts<SelectResultOpts>(createSearchOverlay);
 
     opts.onSelectResult({ channel_id: 3, message_id: 42 });
 
@@ -490,9 +475,7 @@ describe("createSearchOverlayController", () => {
     const mockJump = vi.fn();
     await openSearch(api, { onJumpToMessage: mockJump });
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSelectResult: (result: { channel_id: number; message_id: number }) => void;
-    };
+    const opts = firstCallOpts<SelectResultOpts>(createSearchOverlay);
 
     opts.onSelectResult({ channel_id: 3, message_id: 999 });
 
@@ -504,9 +487,7 @@ describe("createSearchOverlayController", () => {
     const api = makeMockApi();
     await openSearch(api);
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
-      onSelectResult: (result: { channel_id: number; message_id: number }) => void;
-    };
+    const opts = firstCallOpts<SelectResultOpts>(createSearchOverlay);
 
     // Should not throw
     opts.onSelectResult({ channel_id: 3, message_id: 42 });
@@ -517,9 +498,9 @@ describe("createSearchOverlayController", () => {
     const api = makeMockApi();
     const controller = await openSearch(api);
 
-    const opts = (createSearchOverlay as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onClose: () => void;
-    };
+    }>(createSearchOverlay);
 
     opts.onClose();
     expect(mockSearchOverlayDestroy).toHaveBeenCalled();

@@ -5,8 +5,6 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { WsClient, WsListener, ConnectionState } from "@lib/ws";
-import type { ServerMessage } from "@lib/types";
 import { wireDispatcher } from "@lib/dispatcher";
 
 // ── Stores ──────────────────────────────────────────────────────────
@@ -25,101 +23,8 @@ function addPendingSend(correlationId: string, channelId: number): void {
 import { voiceStore } from "@stores/voice.store";
 import { authStore, setAuth } from "@stores/auth.store";
 import { dmStore } from "@stores/dm.store";
-
-// ── Mock WsClient ───────────────────────────────────────────────────
-
-interface MockWsClient extends WsClient {
-  /** Fire a server event into all registered handlers. */
-  simulate(type: string, payload: unknown, id?: string): void;
-  /** All messages passed to send(). */
-  readonly sent: Array<{ type: string; payload: unknown }>;
-}
-
-function createMockWsClient(): MockWsClient {
-  const listeners = new Map<string, Set<WsListener<ServerMessage["type"]>>>();
-  const stateListeners = new Set<(s: ConnectionState) => void>();
-  const sent: Array<{ type: string; payload: unknown }> = [];
-  let currentState: ConnectionState = "connected";
-
-  return {
-    async ping() {},
-    connect() {
-      // no-op
-    },
-
-    disconnect() {
-      // no-op
-    },
-
-    send(msg) {
-      sent.push(msg as { type: string; payload: unknown });
-      return crypto.randomUUID();
-    },
-
-    on<T extends ServerMessage["type"]>(type: T, listener: WsListener<T>): () => void {
-      if (!listeners.has(type)) {
-        listeners.set(type, new Set());
-      }
-      const set = listeners.get(type)!;
-      const wrapped = listener as unknown as WsListener<ServerMessage["type"]>;
-      set.add(wrapped);
-      return () => {
-        set.delete(wrapped);
-      };
-    },
-
-    onStateChange(listener: (s: ConnectionState) => void): () => void {
-      stateListeners.add(listener);
-      return () => stateListeners.delete(listener);
-    },
-
-    onSendFailure(): () => void {
-      return () => {};
-    },
-
-    async startCertListener(): Promise<void> {},
-
-    onCertFirstUse(): () => void {
-      return () => {};
-    },
-
-    onServerBusy(): () => void {
-      return () => {};
-    },
-
-    onCertMismatch(): () => void {
-      return () => {};
-    },
-
-    async acceptCertFingerprint(): Promise<void> {
-      // no-op in mock
-    },
-
-    getConnectFailureCode(): string | null {
-      return null;
-    },
-
-    getState(): ConnectionState {
-      return currentState;
-    },
-
-    _getWs() {
-      return null;
-    },
-
-    simulate(type: string, payload: unknown, id?: string): void {
-      const typeListeners = listeners.get(type);
-      if (!typeListeners) return;
-      for (const listener of typeListeners) {
-        (listener as (p: unknown, i?: string) => void)(payload, id);
-      }
-    },
-
-    get sent() {
-      return sent;
-    },
-  };
-}
+import { resetVoiceState } from "../helpers/storeSeeds";
+import { createMockWsClient, type MockWsClient } from "../helpers/mock-ws";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -142,18 +47,7 @@ function resetAllStores(): void {
     historyLoadState: new Map(),
     detachedChannels: new Set(),
   }));
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
+  resetVoiceState();
   authStore.setState(() => ({
     token: null,
     user: null,
@@ -166,6 +60,9 @@ function resetAllStores(): void {
   }));
 }
 
+const firstMessageIn = (channelId: number) =>
+  messagesStore.getState().messagesByChannel.get(channelId)![0]!;
+
 // ── Test Suite ───────────────────────────────────────────────────────
 
 describe("Store integration via dispatcher", () => {
@@ -176,6 +73,7 @@ describe("Store integration via dispatcher", () => {
     vi.restoreAllMocks();
     resetAllStores();
     ws = createMockWsClient();
+    ws.connect();
     cleanup = wireDispatcher(ws);
   });
 
@@ -393,8 +291,7 @@ describe("Store integration via dispatcher", () => {
         action: "add",
       });
 
-      const messages = messagesStore.getState().messagesByChannel.get(7);
-      const msg = messages![0]!;
+      const msg = firstMessageIn(7);
       expect(msg.reactions).toHaveLength(1);
       expect(msg.reactions[0]!.emoji).toBe("thumbsup");
       expect(msg.reactions[0]!.count).toBe(1);
@@ -420,8 +317,7 @@ describe("Store integration via dispatcher", () => {
         action: "remove",
       });
 
-      const messages = messagesStore.getState().messagesByChannel.get(7);
-      const msg = messages![0]!;
+      const msg = firstMessageIn(7);
       // Count drops to 0, so the reaction is filtered out
       expect(msg.reactions).toHaveLength(0);
     });
@@ -445,8 +341,7 @@ describe("Store integration via dispatcher", () => {
         action: "add",
       });
 
-      const messages = messagesStore.getState().messagesByChannel.get(7);
-      const msg = messages![0]!;
+      const msg = firstMessageIn(7);
       expect(msg.reactions).toHaveLength(1);
       expect(msg.reactions[0]!.count).toBe(2);
       expect(msg.reactions[0]!.me).toBe(true); // still me

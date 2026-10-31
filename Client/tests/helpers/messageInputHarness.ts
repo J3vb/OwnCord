@@ -55,6 +55,16 @@ export function queueFile(container: HTMLElement, file: File): void {
   selectFiles(container, [file]);
 }
 
+/** Pastes one file into the composer textarea. jsdom has no ClipboardEvent, so a plain Event carries the data. */
+export function pasteFile(container: HTMLElement, file: File): void {
+  const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+  const pasteEvent = new Event("paste", { bubbles: true });
+  Object.defineProperty(pasteEvent, "clipboardData", {
+    value: { items: [{ kind: "file", type: file.type, getAsFile: () => file }] },
+  });
+  textarea.dispatchEvent(pasteEvent);
+}
+
 /** Clicks the composer's send button. */
 export function clickSend(container: HTMLElement): void {
   (container.querySelector(".send-btn") as HTMLButtonElement).click();
@@ -99,4 +109,29 @@ export function makeOversizedFile(): File {
   const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
   Object.defineProperty(bigFile, "size", { value: 101 * 1024 * 1024 });
   return bigFile;
+}
+
+export type UploadResult = { id: string; url: string; filename: string };
+
+/** An upload handler whose single call the test settles by hand. */
+export function controlledUpload() {
+  let resolve: (r: UploadResult) => void = () => {};
+  let reject: (e: Error) => void = () => {};
+  let progress: ((f: number) => void) | undefined;
+  let signal: AbortSignal | undefined;
+  const fn = vi.fn((_file: File, s?: AbortSignal, onProgress?: (f: number) => void) => {
+    signal = s;
+    progress = onProgress;
+    return new Promise<UploadResult>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+  });
+  return {
+    fn,
+    resolve: (r: UploadResult) => resolve(r),
+    reject: (e: Error) => reject(e),
+    progress: (f: number) => progress?.(f),
+    signal: () => signal,
+  };
 }

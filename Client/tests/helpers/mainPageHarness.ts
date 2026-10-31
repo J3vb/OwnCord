@@ -9,7 +9,7 @@ import { membersStore } from "../../src/stores/members.store";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
-import { signInAs, resetChannelsState } from "./storeSeeds";
+import { signInAs, resetChannelsState, resetVoiceState } from "./storeSeeds";
 import {
   capturedChatAreaRef,
   mockCreateChatArea,
@@ -25,18 +25,7 @@ export function resetStores(): void {
     { token: "t", serverName: null },
   );
   uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected", settingsOpen: false }));
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
+  resetVoiceState();
   dmStore.setState(() => ({ channels: [] }));
   membersStore.setState(() => ({ members: new Map(), typingUsers: new Map(), roleRevision: 0 }));
 }
@@ -147,6 +136,44 @@ export function useMainPageHarness(binding: MainPageBinding): void {
     binding.currentPage()?.destroy?.();
     container.remove();
     localStorage.removeItem(DM_PROFILE_OPEN_KEY);
+  });
+}
+
+export type MainPageScope = {
+  wired(container: HTMLDivElement): void;
+  currentPage(): { destroy?: () => void } | undefined;
+  arrange?(): void;
+  mount?(
+    container: HTMLDivElement,
+  ): ReturnType<typeof createMainPage> | Promise<ReturnType<typeof createMainPage>>;
+  mounted?(page: ReturnType<typeof createMainPage>): void;
+  fakeTimers?: boolean;
+  teardown?(): void;
+};
+
+/**
+ * Registers a per-suite beforeEach/afterEach that resets the stores, runs
+ * `arrange`, attaches a fresh container, optionally installs fake timers and
+ * mounts the page. Teardown destroys the page and removes the container.
+ */
+export function useMainPageScope(scope: MainPageScope): void {
+  let container: HTMLDivElement;
+
+  beforeEach(async () => {
+    resetStores();
+    scope.arrange?.();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    scope.wired(container);
+    if (scope.fakeTimers) vi.useFakeTimers();
+    if (scope.mount) scope.mounted?.(await scope.mount(container));
+  });
+
+  afterEach(() => {
+    scope.currentPage()?.destroy?.();
+    container.remove();
+    if (scope.fakeTimers) vi.useRealTimers();
+    scope.teardown?.();
   });
 }
 

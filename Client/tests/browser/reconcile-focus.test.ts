@@ -3,20 +3,21 @@ import { reconcileChildren } from "../../src/lib/net/reconcile";
 
 // Moving a focused node with insertBefore blurs it in Chromium/WebView2 while
 // the node stays connected; jsdom keeps focus, so this has to run here.
+const opts = {
+  key: (name: string) => name,
+  signature: (name: string) => name,
+  create: (name: string) => {
+    const row = document.createElement("div");
+    row.tabIndex = -1;
+    row.textContent = name;
+    return row;
+  },
+};
+
 describe("reconcileChildren focus in a real browser", () => {
   it("keeps focus on a kept row that moves up the list", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
-    const opts = {
-      key: (name: string) => name,
-      signature: (name: string) => name,
-      create: (name: string) => {
-        const row = document.createElement("div");
-        row.tabIndex = -1;
-        row.textContent = name;
-        return row;
-      },
-    };
     reconcileChildren(container, ["alice", "bob"], opts);
     const bob = container.children[1] as HTMLElement;
     bob.focus();
@@ -27,17 +28,6 @@ describe("reconcileChildren focus in a real browser", () => {
     expect(document.activeElement).toBe(bob);
     container.remove();
   });
-
-  const opts = {
-    key: (name: string) => name,
-    signature: (name: string) => name,
-    create: (name: string) => {
-      const row = document.createElement("div");
-      row.tabIndex = -1;
-      row.textContent = name;
-      return row;
-    },
-  };
 
   it("a focused row stays focused when a row above it moves to the end", () => {
     const container = document.createElement("div");

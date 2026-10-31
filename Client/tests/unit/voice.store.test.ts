@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceWidget from "../helpers/voiceWidgetHarness";
 import {
   voiceStore,
   resetVoiceStore,
@@ -33,6 +34,7 @@ import {
 } from "../../src/stores/voice.store";
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
+import { resetAuthState, signInAs } from "../helpers/storeSeeds";
 import { noteJoinFailed, joinRetryInMs } from "../../src/features/voice/joinBackoff";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
@@ -40,20 +42,15 @@ import { noteJoinFailed, joinRetryInMs } from "../../src/features/voice/joinBack
 // so the singleton stays one.
 import * as appLogger from "../../src/lib/logger";
 
+function signInAsMe(): void {
+  signInAs(
+    { id: 1, username: "me", avatar: "", role: "member" },
+    { token: "t", serverName: "s", motd: "" },
+  );
+}
+
 function resetStore(): void {
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-    peerVerifications: new Map(),
-  }));
+  voiceWidget.resetVoiceState();
 }
 
 const VOICE_STATE_1: ReadyVoiceState = {
@@ -425,13 +422,7 @@ describe("voice store", () => {
       // This describe block has no shared afterEach — without this reset the
       // signed-in user leaks into every later test here (they'd silently
       // stop exercising the "no signed-in user" / currentUserId === 0 path).
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
 
     it("joinVoiceChannel overwrites previous channel", () => {
@@ -485,13 +476,7 @@ describe("voice store", () => {
 
       expect(voiceStore.getState().voiceUsers).toBe(usersBefore);
 
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
   });
 
@@ -610,25 +595,13 @@ describe("voice store", () => {
   describe("setSpeakers", () => {
     beforeEach(() => {
       // Set up: user 1 (local) and user 2 (remote) in channel 10
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
+      signInAsMe();
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
       joinVoiceChannel(10);
     });
 
     afterEach(() => {
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
 
     it("updates local user's speaking state from LiveKit", () => {
@@ -681,26 +654,14 @@ describe("voice store", () => {
 
   describe("setLocalGateSpeaking", () => {
     beforeEach(() => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
+      signInAsMe();
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
       joinVoiceChannel(10);
     });
 
     afterEach(() => {
       setLocalGateSpeaking(null);
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
 
     const localSpeaking = () => voiceStore.getState().voiceUsers.get(10)?.get(1)?.speaking;
@@ -753,16 +714,27 @@ describe("voice store", () => {
   });
 
   describe("setVoiceConfig", () => {
+    const highConfig = (channel_id: number) => ({
+      channel_id,
+      quality: "high" as const,
+      bitrate: 128000,
+      threshold_mode: "forwarding" as const,
+      mixing_threshold: 5,
+      top_speakers: 3,
+      max_users: 50,
+    });
+    const lowConfig = (channel_id: number) => ({
+      channel_id,
+      quality: "low" as const,
+      bitrate: 64000,
+      threshold_mode: "mixing" as const,
+      mixing_threshold: 3,
+      top_speakers: 2,
+      max_users: 25,
+    });
+
     it("stores voice config for a channel", () => {
-      setVoiceConfig({
-        channel_id: 10,
-        quality: "high",
-        bitrate: 128000,
-        threshold_mode: "forwarding",
-        mixing_threshold: 5,
-        top_speakers: 3,
-        max_users: 50,
-      });
+      setVoiceConfig(highConfig(10));
 
       const config = voiceStore.getState().voiceConfigs.get(10);
       expect(config).toEqual({
@@ -776,24 +748,8 @@ describe("voice store", () => {
     });
 
     it("overwrites existing config for the same channel", () => {
-      setVoiceConfig({
-        channel_id: 10,
-        quality: "low",
-        bitrate: 64000,
-        threshold_mode: "mixing",
-        mixing_threshold: 3,
-        top_speakers: 2,
-        max_users: 25,
-      });
-      setVoiceConfig({
-        channel_id: 10,
-        quality: "high",
-        bitrate: 128000,
-        threshold_mode: "forwarding",
-        mixing_threshold: 5,
-        top_speakers: 3,
-        max_users: 50,
-      });
+      setVoiceConfig(lowConfig(10));
+      setVoiceConfig(highConfig(10));
 
       const config = voiceStore.getState().voiceConfigs.get(10);
       expect(config?.quality).toBe("high");
@@ -801,24 +757,8 @@ describe("voice store", () => {
     });
 
     it("does not affect other channels' configs", () => {
-      setVoiceConfig({
-        channel_id: 10,
-        quality: "low",
-        bitrate: 64000,
-        threshold_mode: "mixing",
-        mixing_threshold: 3,
-        top_speakers: 2,
-        max_users: 25,
-      });
-      setVoiceConfig({
-        channel_id: 20,
-        quality: "high",
-        bitrate: 128000,
-        threshold_mode: "forwarding",
-        mixing_threshold: 5,
-        top_speakers: 3,
-        max_users: 50,
-      });
+      setVoiceConfig(lowConfig(10));
+      setVoiceConfig(highConfig(20));
 
       expect(voiceStore.getState().voiceConfigs.get(10)?.quality).toBe("low");
       expect(voiceStore.getState().voiceConfigs.get(20)?.quality).toBe("high");
@@ -891,13 +831,7 @@ describe("voice store", () => {
 
   describe("leaveVoiceChannel — clears user from voiceUsers", () => {
     it("removes current user from the channel's voiceUsers map", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
+      signInAsMe();
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
       joinVoiceChannel(10);
 
@@ -911,13 +845,7 @@ describe("voice store", () => {
       // User 2 should still be present
       expect(ch10?.has(2)).toBe(true);
 
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
 
     it("removes the channel entry when current user is the last user", () => {
@@ -935,48 +863,24 @@ describe("voice store", () => {
 
       expect(voiceStore.getState().voiceUsers.has(20)).toBe(false);
 
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
   });
 
   describe("setVoiceStates — auto-join for current user", () => {
     it("keeps the roster row but no channel for a self row while this device is idle", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
+      signInAsMe();
 
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
 
       expect(voiceStore.getState().currentChannelId).toBeNull();
       expect(voiceStore.getState().voiceUsers.get(10)?.has(1)).toBe(true);
 
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
 
     it("auto-joins current user's channel from ready payload when this device holds the call", () => {
-      authStore.setState(() => ({
-        token: "t",
-        user: { id: 1, username: "me", avatar: "", role: "member" },
-        serverName: "s",
-        motd: "",
-        isAuthenticated: true,
-      }));
+      signInAsMe();
       voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
 
       setVoiceStates([VOICE_STATE_1, VOICE_STATE_2]);
@@ -984,13 +888,7 @@ describe("voice store", () => {
       // Current user (id=1) is in channel 10
       expect(voiceStore.getState().currentChannelId).toBe(10);
 
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
 
     it("preserves currentChannelId when current user is not in the payload", () => {
@@ -1008,13 +906,7 @@ describe("voice store", () => {
       // Should preserve the existing channel since user isn't in the payload
       expect(voiceStore.getState().currentChannelId).toBe(42);
 
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
     });
   });
 

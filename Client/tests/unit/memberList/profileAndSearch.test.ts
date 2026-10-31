@@ -20,6 +20,8 @@ import {
   makeMember,
   setTestMembers,
   defaultOpts,
+  openProfileOf,
+  useMemberListSuite,
 } from "../../helpers/memberListHarness";
 
 // ─── Phase 6: display names, custom status, invisible ────────────────────────
@@ -35,6 +37,12 @@ describe("MemberList profile fields", () => {
     onChangeRole: vi.fn(),
     onToggleBlock: vi.fn(),
   };
+
+  function mountMembers(members: Member[]): void {
+    setTestMembers(members);
+    list = createMemberList(opts);
+    list.mount(container);
+  }
 
   beforeEach(() => {
     resetStore();
@@ -53,12 +61,10 @@ describe("MemberList profile fields", () => {
   });
 
   it("renders the display name and falls back to the username", () => {
-    setTestMembers([
+    mountMembers([
       makeMember({ id: 1, username: "alice", displayName: "Alice A." }),
       makeMember({ id: 2, username: "bob", displayName: null }),
     ]);
-    list = createMemberList(opts);
-    list.mount(container);
 
     const names = Array.from(container.querySelectorAll(".mi-name")).map((el) => el.textContent);
     expect(names).toContain("Alice A.");
@@ -68,12 +74,10 @@ describe("MemberList profile fields", () => {
   });
 
   it("shows a custom status under the name, and omits the line without one", () => {
-    setTestMembers([
+    mountMembers([
       makeMember({ id: 1, username: "alice", customStatus: "shipping phase 6" }),
       makeMember({ id: 2, username: "bob" }),
     ]);
-    list = createMemberList(opts);
-    list.mount(container);
 
     const withStatus = container.querySelector('[data-testid="member-custom-status-1"]');
     expect(withStatus?.textContent).toBe("shipping phase 6");
@@ -81,7 +85,7 @@ describe("MemberList profile fields", () => {
   });
 
   it("shows Playing <game> as the second line, with the controller icon", () => {
-    setTestMembers([
+    mountMembers([
       makeMember({
         id: 1,
         username: "alice",
@@ -89,8 +93,6 @@ describe("MemberList profile fields", () => {
       }),
       makeMember({ id: 2, username: "bob" }),
     ]);
-    list = createMemberList(opts);
-    list.mount(container);
 
     const line = container.querySelector('[data-testid="member-activity-1"]');
     expect(line?.textContent).toBe("Playing VALORANT");
@@ -102,7 +104,7 @@ describe("MemberList profile fields", () => {
   });
 
   it("lets a custom status win the row; the game is not drawn there", () => {
-    setTestMembers([
+    mountMembers([
       makeMember({
         id: 1,
         username: "alice",
@@ -110,8 +112,6 @@ describe("MemberList profile fields", () => {
         activity: { name: "VALORANT", startedAt: Date.now() },
       }),
     ]);
-    list = createMemberList(opts);
-    list.mount(container);
 
     expect(container.querySelector('[data-testid="member-custom-status-1"]')?.textContent).toBe(
       "shipping phase 6",
@@ -120,9 +120,7 @@ describe("MemberList profile fields", () => {
   });
 
   it("follows a game starting and stopping in place", () => {
-    setTestMembers([makeMember({ id: 1, username: "alice" })]);
-    list = createMemberList(opts);
-    list.mount(container);
+    mountMembers([makeMember({ id: 1, username: "alice" })]);
     expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
 
     setTestMembers([
@@ -148,12 +146,10 @@ describe("MemberList profile fields", () => {
     };
 
     it("shows Listening to <player> as the second line, with the music note", () => {
-      setTestMembers([
+      mountMembers([
         makeMember({ id: 1, username: "alice", listening: song }),
         makeMember({ id: 2, username: "bob" }),
       ]);
-      list = createMemberList(opts);
-      list.mount(container);
 
       const line = container.querySelector('[data-testid="member-activity-1"]');
       expect(line?.textContent).toBe("Listening to Spotify");
@@ -166,13 +162,11 @@ describe("MemberList profile fields", () => {
 
     it("priority: a custom status beats a game, and a game beats music", () => {
       const activity = { name: "VALORANT", startedAt: Date.now() };
-      setTestMembers([
+      mountMembers([
         makeMember({ id: 1, username: "alice", customStatus: "busy", activity, listening: song }),
         makeMember({ id: 2, username: "bob", activity, listening: song }),
         makeMember({ id: 3, username: "cy", listening: song }),
       ]);
-      list = createMemberList(opts);
-      list.mount(container);
 
       expect(container.querySelector('[data-testid="member-custom-status-1"]')?.textContent).toBe(
         "busy",
@@ -187,9 +181,7 @@ describe("MemberList profile fields", () => {
     });
 
     it("follows a song starting, the game taking over, and the music stopping in place", () => {
-      setTestMembers([makeMember({ id: 1, username: "alice" })]);
-      list = createMemberList(opts);
-      list.mount(container);
+      mountMembers([makeMember({ id: 1, username: "alice" })]);
       expect(container.querySelector('[data-testid="member-activity-1"]')).toBeNull();
 
       setTestMembers([makeMember({ id: 1, username: "alice", listening: song })]);
@@ -280,34 +272,22 @@ describe("MemberList profile fields", () => {
     expect(document.querySelector('[data-testid="user-profile-popup"]')).toBeNull();
 
     // Your own profile has no Call action — you are already in the call.
-    const self = container.querySelector<HTMLElement>('[data-testid="member-2"]')!;
-    self.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
-    await vi.waitFor(() =>
-      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
-    );
+    await openProfileOf(container, 2);
     expect(document.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
   });
 
   it("omits the Call action when no onCallUser handler is wired", async () => {
-    setTestMembers([makeMember({ id: 1, username: "alice" })]);
-    list = createMemberList(opts);
-    list.mount(container);
+    mountMembers([makeMember({ id: 1, username: "alice" })]);
 
-    const row = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
-    row.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: 10, clientY: 10 }));
-    await vi.waitFor(() =>
-      expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
-    );
+    await openProfileOf(container, 1);
     expect(document.querySelector('[data-testid="upp-call-btn"]')).toBeNull();
   });
 
   it("returns focus to the row that opened the profile after an earlier one closed", async () => {
-    setTestMembers([
+    mountMembers([
       makeMember({ id: 1, username: "alice" }),
       makeMember({ id: 3, username: "carol" }),
     ]);
-    list = createMemberList(opts);
-    list.mount(container);
     const rowA = container.querySelector<HTMLElement>('[data-testid="member-1"]')!;
     const rowB = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
     const openFrom = async (row: HTMLElement): Promise<void> => {
@@ -331,12 +311,10 @@ describe("MemberList profile fields", () => {
   });
 
   it("returns focus to the user's rebuilt row when the list re-rendered while the profile was open", async () => {
-    setTestMembers([
+    mountMembers([
       makeMember({ id: 1, username: "alice" }),
       makeMember({ id: 3, username: "carol" }),
     ]);
-    list = createMemberList(opts);
-    list.mount(container);
     const before = container.querySelector<HTMLElement>('[data-testid="member-3"]')!;
     before.focus();
     before.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -354,9 +332,7 @@ describe("MemberList profile fields", () => {
   });
 
   it("leaves a profile popup another component opened open when it is destroyed", async () => {
-    setTestMembers([makeMember({ id: 1, username: "alice" })]);
-    list = createMemberList(opts);
-    list.mount(container);
+    mountMembers([makeMember({ id: 1, username: "alice" })]);
 
     // A message author card, opened by MessageList through the shared opener.
     const closeOther = openUserProfilePopup({ userId: 1, anchorX: 0, anchorY: 0 });
@@ -364,7 +340,7 @@ describe("MemberList profile fields", () => {
       expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
     );
 
-    list.destroy?.();
+    list!.destroy?.();
     list = undefined as never;
 
     expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull();
@@ -372,9 +348,7 @@ describe("MemberList profile fields", () => {
   });
 
   it("closes the profile popup it opened itself when it is destroyed", async () => {
-    setTestMembers([makeMember({ id: 1, username: "alice" })]);
-    list = createMemberList(opts);
-    list.mount(container);
+    mountMembers([makeMember({ id: 1, username: "alice" })]);
     container
       .querySelector<HTMLElement>('[data-testid="member-1"]')!
       .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -382,19 +356,17 @@ describe("MemberList profile fields", () => {
       expect(document.querySelector('[data-testid="user-profile-popup"]')).not.toBeNull(),
     );
 
-    list.destroy?.();
+    list!.destroy?.();
     list = undefined as never;
 
     expect(document.querySelector('[data-testid="user-profile-popup"]')).toBeNull();
   });
 
   it("describes each row by its custom status and presence, kept current", () => {
-    setTestMembers([
+    mountMembers([
       makeMember({ id: 1, username: "alice", customStatus: "shipping" }),
       makeMember({ id: 2, username: "bob", status: "idle" }),
     ]);
-    list = createMemberList(opts);
-    list.mount(container);
 
     const description = (testId: string): string =>
       container
@@ -417,18 +389,14 @@ describe("MemberList profile fields", () => {
   it("renders an invisible member the way it renders an offline one", () => {
     // Only ever the signed-in user's own row — everyone else is mapped to
     // offline server-side — but it has to look like what others see.
-    setTestMembers([makeMember({ id: 1, username: "ghost", status: "invisible" as UserStatus })]);
-    list = createMemberList(opts);
-    list.mount(container);
+    mountMembers([makeMember({ id: 1, username: "ghost", status: "invisible" as UserStatus })]);
 
     const row = container.querySelector('[data-testid="member-1"]');
     expect(row?.classList.contains("offline")).toBe(true);
   });
 
   it("re-renders (not just recolors) when a custom status changes", () => {
-    setTestMembers([makeMember({ id: 1, username: "alice" })]);
-    list = createMemberList(opts);
-    list.mount(container);
+    mountMembers([makeMember({ id: 1, username: "alice" })]);
     expect(container.querySelector('[data-testid="member-custom-status-1"]')).toBeNull();
 
     updatePresence(1, "online", "back in 5");
@@ -462,17 +430,13 @@ describe("MemberList search (3C-4b)", () => {
     box().dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  beforeEach(() => {
-    resetStore();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    list = null;
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    container.remove();
-  });
+  useMemberListSuite(
+    (c) => {
+      container = c;
+      list = null;
+    },
+    () => list,
+  );
 
   function mountWith(members: Member[]): void {
     setTestMembers(members);

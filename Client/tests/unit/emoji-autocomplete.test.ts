@@ -4,7 +4,7 @@
  * how it shares the composer with the @-mention popup).
  */
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
@@ -24,8 +24,13 @@ import {
   MAX_EMOJI_SUGGESTIONS,
   MIN_EMOJI_QUERY,
 } from "../../src/components/EmojiAutocomplete";
-import { createMessageInput } from "../../src/components/MessageInput";
-import type { MessageInputOptions } from "../../src/components/MessageInput";
+import {
+  composerTextarea,
+  pressIn,
+  typeInto,
+  useComposer,
+  type MountedComposer,
+} from "../helpers/composerAutocomplete";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
 import { loadEmojiCatalog, setSkinTone } from "../../src/features/messaging/emojiCatalog";
@@ -387,48 +392,15 @@ describe("createEmojiAutocomplete combobox wiring", () => {
 
 describe("composer :shortcode integration", () => {
   let container: HTMLDivElement;
-  let input: ReturnType<typeof createMessageInput>;
-  let onSend: Mock<MessageInputOptions["onSend"]>;
+  let input: MountedComposer["input"];
+  let onSend: MountedComposer["onSend"];
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onSend = vi.fn<MessageInputOptions["onSend"]>();
-    input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend,
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
-  });
+  useComposer((c) => ({ container, input, onSend } = c));
 
-  afterEach(() => {
-    input.destroy?.();
-    container.remove();
-  });
-
-  function textarea(): HTMLTextAreaElement {
-    return container.querySelector("textarea")!;
-  }
-
-  function type(value: string): void {
-    const ta = textarea();
-    ta.value = value;
-    ta.selectionStart = value.length;
-    ta.selectionEnd = value.length;
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  function popupEl(): HTMLElement | null {
-    return container.querySelector(".emoji-autocomplete");
-  }
-
-  function press(k: string): void {
-    textarea().dispatchEvent(
-      new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }),
-    );
-  }
+  const textarea = (): HTMLTextAreaElement => composerTextarea(container);
+  const type = (value: string): void => typeInto(container, value);
+  const popupEl = (): HTMLElement | null => container.querySelector(".emoji-autocomplete");
+  const press = (k: string): boolean => pressIn(container, k);
 
   it("opens after a colon plus two characters", () => {
     type("hello :w");

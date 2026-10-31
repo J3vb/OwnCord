@@ -35,6 +35,14 @@ describe("EditChannelModal", () => {
     document.querySelectorAll("[data-testid='edit-channel-modal']").forEach((el) => el.remove());
   });
 
+  function saveWithNsfw(): void {
+    (
+      container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
+    ).checked = true;
+
+    (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+  }
+
   function makeModal(overrides?: Partial<EditChannelModalOptions>) {
     const options: EditChannelModalOptions = {
       channelId: 1,
@@ -378,11 +386,7 @@ describe("EditChannelModal", () => {
     it("sends the flag to onSave when set", async () => {
       const onSave = vi.fn(async () => {});
       const { modal } = makeModal({ onSave });
-      (
-        container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
-      ).checked = true;
-
-      (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+      saveWithNsfw();
 
       await vi.waitFor(() => {
         expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ nsfw: true }));
@@ -479,11 +483,7 @@ describe("EditChannelModal", () => {
         payload = data as unknown as Record<string, unknown>;
       });
       const { modal } = makeModal({ onSave });
-      (
-        container.querySelector("[data-testid='edit-channel-nsfw-checkbox']") as HTMLInputElement
-      ).checked = true;
-
-      (container.querySelector("[data-testid='edit-channel-submit']") as HTMLButtonElement).click();
+      saveWithNsfw();
 
       await vi.waitFor(() => {
         expect(payload).not.toBeNull();
@@ -540,6 +540,20 @@ describe("EditChannelModal", () => {
       (q("edit-channel-name-input") as HTMLInputElement).value = "renamed";
     };
 
+    async function expectRenameOmitsPassword(
+      options: Partial<EditChannelModalOptions>,
+      prepare: () => void = () => {},
+    ): Promise<void> {
+      const onSave = vi.fn(async (_data: EditChannelData) => {});
+      const { modal } = makeModal({ onSave, ...options });
+      prepare();
+      rename();
+      click("edit-channel-submit");
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
+      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
+      modal.destroy?.();
+    }
+
     beforeEach(() => {
       setChannels([{ id: 1, name: "general", type: "voice", category: "Chat", position: 0 }]);
     });
@@ -553,24 +567,13 @@ describe("EditChannelModal", () => {
     });
 
     it("is not offered on a text channel, and a text edit sends no password", async () => {
-      const onSave = vi.fn(async (_data: EditChannelData) => {});
-      const { modal } = makeModal({ onSave, channelType: "text" });
-      expect(q("edit-channel-password-group")).toBeNull();
-      rename();
-      click("edit-channel-submit");
-      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
-      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
-      modal.destroy?.();
+      await expectRenameOmitsPassword({ channelType: "text" }, () => {
+        expect(q("edit-channel-password-group")).toBeNull();
+      });
     });
 
     it("sends no password when the user left it empty", async () => {
-      const onSave = vi.fn(async (_data: EditChannelData) => {});
-      const { modal } = makeModal({ onSave, channelType: "voice" });
-      rename();
-      click("edit-channel-submit");
-      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
-      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
-      modal.destroy?.();
+      await expectRenameOmitsPassword({ channelType: "voice" });
     });
 
     it("sets a password on an unprotected channel", async () => {
@@ -609,14 +612,10 @@ describe("EditChannelModal", () => {
     });
 
     it("Change with nothing typed keeps the password", async () => {
-      const onSave = vi.fn(async (_data: EditChannelData) => {});
-      const { modal } = makeModal({ onSave, channelType: "voice", channelPasswordProtected: true });
-      click("edit-channel-password-change");
-      rename();
-      click("edit-channel-submit");
-      await vi.waitFor(() => expect(onSave).toHaveBeenCalled());
-      expect(onSave.mock.calls[0]![0]).not.toHaveProperty("password");
-      modal.destroy?.();
+      await expectRenameOmitsPassword(
+        { channelType: "voice", channelPasswordProtected: true },
+        () => click("edit-channel-password-change"),
+      );
     });
 
     it("Remove sends an empty string, and Keep password takes it back", async () => {

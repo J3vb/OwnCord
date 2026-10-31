@@ -11,12 +11,7 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import {
-  channelsStore,
-  getPointerOnOpen,
-  setActiveChannel,
-  setChannels,
-} from "@stores/channels.store";
+import { channelsStore, getPointerOnOpen } from "@stores/channels.store";
 import {
   acceptReadState,
   failMarkUnread,
@@ -28,10 +23,14 @@ import {
 } from "@lib/readState";
 import { setMarkUnreadSender } from "../../src/components/message-list/markUnread";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
-import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
-import { setMessages } from "../helpers/messageListHarness";
+import {
+  setMessages,
+  setDetached as setChannelDetached,
+  openChannel as openListChannel,
+  stubElementHeights,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 import { resetChannelsState } from "../helpers/storeSeeds";
 
@@ -53,29 +52,11 @@ function msg(id: number): Message {
 }
 
 function setDetached(detached: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Set(prev.detachedChannels);
-    if (detached) next.add(CHANNEL_ID);
-    else next.delete(CHANNEL_ID);
-    return { ...prev, detachedChannels: next };
-  });
+  setChannelDetached(CHANNEL_ID, detached);
 }
 
-/** "Open" the channel the way the app does: seed it, then activate it, which
- *  clears the badge and snapshots both the unread count and the pointer. */
 function openChannel(unread: number, pointer: number | undefined): void {
-  const ch: ReadyChannel = {
-    id: CHANNEL_ID,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unread_count: unread,
-    mention_count: 0,
-    ...(pointer !== undefined ? { last_read_message_id: pointer } : {}),
-  };
-  setChannels([ch]);
-  setActiveChannel(CHANNEL_ID);
+  openListChannel(CHANNEL_ID, unread, pointer);
 }
 
 describe("MessageList: NEW line by read pointer and Mark Unread", () => {
@@ -414,30 +395,20 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
   describe("marking what is seen", () => {
     const SCROLL_HEIGHT = 4000;
     const CLIENT_HEIGHT = 500;
-    const saved = new Map<string, PropertyDescriptor | undefined>();
+    let restoreHeights: () => void;
 
     beforeEach(() => {
       // The mark_read throttle runs on the fake clock; vi.waitFor advances it.
       vi.useFakeTimers();
-      for (const [prop, value] of [
-        ["scrollHeight", SCROLL_HEIGHT],
-        ["clientHeight", CLIENT_HEIGHT],
-      ] as const) {
-        saved.set(prop, Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop));
-        Object.defineProperty(HTMLElement.prototype, prop, {
-          configurable: true,
-          get: () => value,
-        });
-      }
+      restoreHeights = stubElementHeights({
+        scrollHeight: SCROLL_HEIGHT,
+        clientHeight: CLIENT_HEIGHT,
+      });
     });
 
     afterEach(() => {
       vi.useRealTimers();
-      for (const [prop, descriptor] of saved) {
-        if (descriptor) Object.defineProperty(HTMLElement.prototype, prop, descriptor);
-        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
-      }
-      saved.clear();
+      restoreHeights();
     });
 
     const root = (): HTMLDivElement =>

@@ -68,19 +68,30 @@ function setup(withRail = true, withSearch = true): Setup {
   return { sidebar, toggle, rail, drawer, onSearch };
 }
 
+/** Narrow, coarse-pointer viewport with a clean settings and channel state. */
+function stubPhoneViewport(): void {
+  closeSettings();
+  setActiveChannel(null);
+  narrow = new FakeMediaQueryList();
+  narrow.matches = true;
+  phone = { matches: true };
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((q: string) => (q.includes("pointer: coarse") ? phone : narrow)),
+  );
+}
+
+function openOneButtonSheet() {
+  const content = document.createElement("div");
+  content.innerHTML = "<button>One</button>";
+  return openBottomSheet({ label: "Sheet", content });
+}
+
 describe("the drawer on a phone", () => {
   let drawer: SidebarDrawer | null = null;
 
   beforeEach(() => {
-    closeSettings();
-    setActiveChannel(null);
-    narrow = new FakeMediaQueryList();
-    narrow.matches = true;
-    phone = { matches: true };
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn((q: string) => (q.includes("pointer: coarse") ? phone : narrow)),
-    );
+    stubPhoneViewport();
   });
 
   afterEach(async () => {
@@ -196,9 +207,7 @@ describe("the drawer on a phone", () => {
       const s = setup();
       drawer = s.drawer;
       s.toggle.click();
-      const content = document.createElement("div");
-      content.innerHTML = "<button>One</button>";
-      const sheet = openBottomSheet({ label: "Sheet", content });
+      const sheet = openOneButtonSheet();
       await pressBack();
       expect(sheet.signal.aborted).toBe(true);
       expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
@@ -298,15 +307,7 @@ describe("the drawer in the Android app", () => {
   let drawer: SidebarDrawer | null = null;
 
   beforeEach(() => {
-    closeSettings();
-    setActiveChannel(null);
-    narrow = new FakeMediaQueryList();
-    narrow.matches = true;
-    phone = { matches: true };
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn((q: string) => (q.includes("pointer: coarse") ? phone : narrow)),
-    );
+    stubPhoneViewport();
     setAndroid(true);
   });
 
@@ -386,9 +387,7 @@ describe("the drawer in the Android app", () => {
   it("a sheet over the guarded chat closes on Back and the chat keeps its guard", async () => {
     const s = setup();
     drawer = s.drawer;
-    const content = document.createElement("div");
-    content.innerHTML = "<button>One</button>";
-    const sheet = openBottomSheet({ label: "Sheet", content });
+    const sheet = openOneButtonSheet();
     await pressBack();
     expect(sheet.signal.aborted).toBe(true);
     expect(s.sidebar.classList.contains("drawer-open")).toBe(false);

@@ -64,6 +64,8 @@ beforeEach(() => {
   dmStore.setState(() => ({ channels: [] }));
 });
 
+const sixUnread = () => [1, 2, 3, 4, 5, 6].map((id) => channel(id, 1));
+
 describe("hasUnread", () => {
   it("is true for an unread channel and false once it is read", () => {
     setChannels([channel(1, 3), channel(2, 0)]);
@@ -215,14 +217,7 @@ describe("unreadChannelIds / markAllRead", () => {
   it("paces a burst larger than the server's per-second mark_read budget", () => {
     vi.useFakeTimers();
     try {
-      setChannels([
-        channel(1, 1),
-        channel(2, 1),
-        channel(3, 1),
-        channel(4, 1),
-        channel(5, 1),
-        channel(6, 1),
-      ]);
+      setChannels(sixUnread());
 
       expect(markAllRead()).toBe(6);
 
@@ -305,14 +300,7 @@ describe("unreadChannelIds / markAllRead", () => {
   it("does not mark read a channel that got a new message during the pacing window", () => {
     vi.useFakeTimers();
     try {
-      setChannels([
-        channel(1, 1),
-        channel(2, 1),
-        channel(3, 1),
-        channel(4, 1),
-        channel(5, 1),
-        channel(6, 1),
-      ]);
+      setChannels(sixUnread());
 
       expect(markAllRead()).toBe(6);
       const firstBurst = new Set(sent);
@@ -364,18 +352,27 @@ describe("mark_read wiring", () => {
   });
 });
 
-describe("noteLiveMessageSeen", () => {
+/** Fake timers plus a fresh AbortController per test, torn down after it. */
+function useLiveSeenController(bind: (controller: AbortController) => void): void {
   let controller: AbortController;
 
   beforeEach(() => {
     vi.useFakeTimers();
     controller = new AbortController();
+    bind(controller);
   });
 
   afterEach(() => {
     controller.abort();
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+}
+
+describe("noteLiveMessageSeen", () => {
+  let controller: AbortController;
+  useLiveSeenController((created) => {
+    controller = created;
   });
 
   it("sends one trailing mark_read, not one per arrival", () => {
@@ -648,15 +645,8 @@ describe("markChannelsRead counts", () => {
 
 describe("a new connection and live-seen sends", () => {
   let controller: AbortController;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    controller = new AbortController();
-  });
-  afterEach(() => {
-    controller.abort();
-    vi.clearAllTimers();
-    vi.useRealTimers();
+  useLiveSeenController((created) => {
+    controller = created;
   });
 
   it("lets the same channel arm a fresh send on the new connection", () => {

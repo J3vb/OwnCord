@@ -17,7 +17,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { RingState } from "../../src/lib/voice/callRing";
-import { signInAs } from "./storeSeeds";
+import { makeChannelRow, signInAs } from "./storeSeeds";
 
 export const SELF = 1;
 
@@ -160,28 +160,7 @@ beforeEach(() => {
   dmStore.setState(() => ({ channels: [dm()] }));
   channelsStore.setState(() => ({
     categories: [],
-    channels: new Map([
-      [
-        7,
-        {
-          id: 7,
-          name: "Lobby",
-          type: "voice" as const,
-          category: null,
-          topic: "",
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        },
-      ],
-    ]),
+    channels: new Map([[7, makeChannelRow({ id: 7, name: "Lobby", type: "voice" })]]),
     activeChannelId: DM,
     roles: [],
   }));

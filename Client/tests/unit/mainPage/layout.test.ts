@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
 import { savePref } from "../../../src/lib/prefs/preferences";
 import { createMainPage } from "../../../src/pages/MainPage";
@@ -16,9 +16,11 @@ import {
   textChannel,
   dmChannel,
   useMainPageHarness,
+  useMainPageScope,
   mountPage,
   seedChannels,
   mountSettled,
+  oneToOneDm,
 } from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -107,49 +109,39 @@ describe("MainPage — content view wiring", () => {
   const openView = (): OpenView =>
     (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenView: OpenView }).onOpenView;
 
-  beforeEach(() => {
-    resetStores();
-    mockMountChannel.mockClear();
-    mockDestroyChannel.mockClear();
-    mockReturnToChannel.mockClear();
-    mockRememberChannel.mockClear();
-    inertModeration.signals.length = 0;
-    channelsStore.setState((prev) => ({
-      ...prev,
-      channels: new Map([[1, textChannel(1, "general")]]),
-      activeChannelId: 1,
-      roles: [{ id: 3, name: "Moderator", color: null, permissions: Permission.MODERATE_MEMBERS }],
-    }));
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 1, username: "alice", avatar: null, role: "Moderator" },
-    }));
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    page = mountPage(container);
-  });
-
-  afterEach(() => {
-    page.destroy?.();
-    container.remove();
+  useMainPageScope({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
+    arrange: () => {
+      mockMountChannel.mockClear();
+      mockDestroyChannel.mockClear();
+      mockReturnToChannel.mockClear();
+      mockRememberChannel.mockClear();
+      inertModeration.signals.length = 0;
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[1, textChannel(1, "general")]]),
+        activeChannelId: 1,
+        roles: [
+          { id: 3, name: "Moderator", color: null, permissions: Permission.MODERATE_MEMBERS },
+        ],
+      }));
+      authStore.setState((prev) => ({
+        ...prev,
+        user: { id: 1, username: "alice", avatar: null, role: "Moderator" },
+      }));
+    },
+    mount: (c) => mountPage(c),
+    mounted: (p) => {
+      page = p;
+    },
   });
 
   it("saves the server channel for Back before Alt+ArrowDown steps into a DM", () => {
     dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: 60,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
+      channels: [oneToOneDm(60, 10, "bob")],
     }));
     const activeWhenRemembered: Array<number | null> = [];
     mockRememberChannel.mockImplementation(() =>
@@ -224,29 +216,32 @@ describe("MainPage — member list placement (3C-6b)", () => {
   const live = (): number => memberPanels.created - memberPanels.destroyed;
   const flip = (layout: "right" | "left"): void => savePref("memberListLayout", layout);
 
-  beforeEach(async () => {
-    resetStores();
-    uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeView: null }));
-    // These tests flip from the left layout; the default has been right since 3C-6c.
-    localStorage.setItem("owncord:settings:memberListLayout", '"left"');
-    localStorage.removeItem("owncord:settings:memberListOpen");
-    memberPanels.created = 0;
-    memberPanels.destroyed = 0;
-    channelsStore.setState((prev) => ({
-      ...prev,
-      channels: new Map([[1, textChannel(1, "general")]]),
-      activeChannelId: 1,
-    }));
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    page = await mountSettled(container);
-  });
-
-  afterEach(() => {
-    page.destroy?.();
-    container.remove();
-    localStorage.removeItem("owncord:settings:memberListLayout");
-    localStorage.removeItem("owncord:settings:memberListOpen");
+  useMainPageScope({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
+    arrange: () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeView: null }));
+      // These tests flip from the left layout; the default has been right since 3C-6c.
+      localStorage.setItem("owncord:settings:memberListLayout", '"left"');
+      localStorage.removeItem("owncord:settings:memberListOpen");
+      memberPanels.created = 0;
+      memberPanels.destroyed = 0;
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[1, textChannel(1, "general")]]),
+        activeChannelId: 1,
+      }));
+    },
+    mount: (c) => mountSettled(c),
+    mounted: (p) => {
+      page = p;
+    },
+    teardown: () => {
+      localStorage.removeItem("owncord:settings:memberListLayout");
+      localStorage.removeItem("owncord:settings:memberListOpen");
+    },
   });
 
   it("builds an always-present, labelled, hidden member column in the app row", () => {
@@ -326,21 +321,22 @@ describe("MainPage — focus fallback skips hidden sidebar buttons", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    channelsStore.setState((prev) => ({
-      ...prev,
-      channels: new Map([[1, textChannel(1, "general")]]),
-      activeChannelId: 1,
-    }));
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    page = mountPage(container);
-  });
-
-  afterEach(() => {
-    page.destroy?.();
-    container.remove();
+  useMainPageScope({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
+    arrange: () => {
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[1, textChannel(1, "general")]]),
+        activeChannelId: 1,
+      }));
+    },
+    mount: (c) => mountPage(c),
+    mounted: (p) => {
+      page = p;
+    },
   });
 
   // A member without MANAGE_INVITES has the sidebar's Invite button hidden
@@ -374,22 +370,23 @@ describe("MainPage — focus fallback when the channel is declined", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
 
-  beforeEach(() => {
-    resetStores();
-    mockCreateChannelController.mockClear();
-    channelsStore.setState((prev) => ({
-      ...prev,
-      channels: new Map([[1, textChannel(1, "general")]]),
-      activeChannelId: null,
-    }));
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    page = mountPage(container);
-  });
-
-  afterEach(() => {
-    page.destroy?.();
-    container.remove();
+  useMainPageScope({
+    wired: (c) => {
+      container = c;
+    },
+    currentPage: () => page,
+    arrange: () => {
+      mockCreateChannelController.mockClear();
+      channelsStore.setState((prev) => ({
+        ...prev,
+        channels: new Map([[1, textChannel(1, "general")]]),
+        activeChannelId: null,
+      }));
+    },
+    mount: (c) => mountPage(c),
+    mounted: (p) => {
+      page = p;
+    },
   });
 
   // Declining the age-restricted gate leaves the channel and hands focus to

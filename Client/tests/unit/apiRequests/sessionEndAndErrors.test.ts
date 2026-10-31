@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as mocks from "../../helpers/apiRequestsMocks";
 import {
   ApiClientError,
@@ -8,35 +8,30 @@ import {
   httpError,
   serverErrorCopy,
   serverErrorText,
-  type OnUnauthorized,
 } from "../../../src/lib/api";
 import { connectText } from "../../../src/i18n/connect";
 import { messageStatusText } from "../../../src/i18n/messageStatus";
 import { expectConsole } from "../../helpers/console";
-import { Api, okResponse, failResponse } from "../../helpers/apiRequestsHarness";
+import { Api, okResponse, failResponse, useRequestsClient } from "../../helpers/apiRequestsHarness";
 
 vi.mock("@tauri-apps/plugin-http", () => mocks.pluginHttpMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("../../../src/lib/net/httpProxy", () => mocks.netHttpProxyMock());
 
-const { mockFetch, proxy, progressHandlers } = mocks;
+const { mockFetch, proxy } = mocks;
 
 describe("REST client requests", () => {
   let api: Api;
-  let onUnauthorized: Mock<OnUnauthorized>;
 
-  beforeEach(() => {
-    mockFetch.mockReset();
-    proxy.impl = (host) => Promise.resolve(`https://${host}`);
-    progressHandlers.clear();
-    mockFetch.mockImplementation(() => Promise.resolve(okResponse({})));
-    onUnauthorized = vi.fn<OnUnauthorized>();
-    api = createApiClient({ host: "host.test:8443", token: "tok-1" }, onUnauthorized);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  useRequestsClient(
+    mocks,
+    () => {
+      vi.useRealTimers();
+    },
+    (client) => {
+      api = client;
+    },
+  );
 
   describe("probes whose session ends while they complete", () => {
     function endsAfterSettling<T>(value: T, end: () => void): PromiseLike<T> {

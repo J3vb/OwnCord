@@ -1,32 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as mocks from "../helpers/sidebarAreaMocks";
+import { lightSidebarAreaOpts } from "../helpers/sidebarAreaOpts";
 
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    rePinPeerIdentity: vi.fn(),
-  }),
-);
-vi.mock("@lib/net/e2eeCrypto", () => ({
-  importIdentityPublicKey: vi.fn(),
-  computeKeyFingerprint: vi.fn(),
-}));
-vi.mock("@lib/presence/profiles", () => ({
-  createProfileManager: vi.fn().mockReturnValue({
-    loadProfiles: vi.fn().mockResolvedValue(undefined),
-    getAll: vi.fn().mockReturnValue([]),
-    store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
-  }),
-  createTauriBackend: vi.fn().mockReturnValue({}),
-}));
-vi.mock("@components/UserBar", () => ({
-  createUserBar: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/VoiceWidget", () => ({
-  createVoiceWidget: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
-vi.mock("@components/MemberList", () => ({
-  createMemberList: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
-}));
+vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
+vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
+vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
+vi.mock("@components/UserBar", () => mocks.userBarMock());
+vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
+vi.mock("@components/MemberList", () => mocks.memberListMock());
 const { createQuickSwitchOverlay, switchToServer } = vi.hoisted(() => ({
   createQuickSwitchOverlay: vi.fn(),
   switchToServer: vi.fn(),
@@ -41,17 +22,7 @@ import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main
 import { signInAs } from "../helpers/storeSeeds";
 
 function opts(): SidebarAreaOptions {
-  return {
-    ws: { send: vi.fn(), close: vi.fn(), on: vi.fn(), off: vi.fn() } as never,
-    api: { getConfig: vi.fn().mockReturnValue({ host: "a.example" }) } as never,
-    limiters: {
-      voice: { tryConsume: vi.fn().mockReturnValue(true) },
-      voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
-    } as never,
-    presenceSender: { send: vi.fn(), rollbackRefused: vi.fn(), destroy: vi.fn() },
-    getRoot: vi.fn().mockReturnValue(document.createElement("div")),
-    getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-  };
+  return lightSidebarAreaOpts("a.example");
 }
 
 type OnSwitch = (host: string, name: string) => void;

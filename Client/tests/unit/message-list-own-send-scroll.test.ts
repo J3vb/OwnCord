@@ -8,8 +8,9 @@ import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, isWindowDetached } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { buildMessage } from "../helpers/messageFactory";
+import { spacedMessage } from "../helpers/messageFactory";
 import {
+  stubScrollHeight,
   makeListOptions,
   resetStoresAndChannels,
   setMessages,
@@ -19,47 +20,27 @@ import "../helpers/resizeObserverStub";
 const CHANNEL_ID = 1;
 
 function makeMessage(id: number, userId = 1): Message {
-  return buildMessage(
-    { id },
-    {
-      channelId: CHANNEL_ID,
-      user: { id: userId, username: "Alice", avatar: null },
-      // 10 minutes apart, on the same UTC day, and past GROUP_THRESHOLD_MS
-      // (7 minutes) so shouldGroup never merges two of these rows — every
-      // message renders at its full (ungrouped) height.
-      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    },
-  );
+  return spacedMessage({ id }, { user: { id: userId, username: "Alice", avatar: null } });
 }
 
 describe("MessageList: own send scrolls to the bottom (C20)", () => {
   let container: HTMLDivElement;
   let msgList: ReturnType<typeof createMessageList> | null = null;
-  let scrollHeightDescriptor: PropertyDescriptor | undefined;
+  let restoreScrollHeight: () => void;
 
   beforeEach(() => {
     resetStoresAndChannels();
     container = document.createElement("div");
     document.body.appendChild(container);
     // jsdom has no layout: give isNearBottom a real gap to measure.
-    scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get(): number {
-        return 100_000;
-      },
-    });
+    restoreScrollHeight = stubScrollHeight(100_000);
   });
 
   afterEach(() => {
     msgList?.destroy?.();
     msgList = null;
     container.remove();
-    if (scrollHeightDescriptor) {
-      Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
-    } else {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
-    }
+    restoreScrollHeight();
   });
 
   function mount(extra: Partial<MessageListOptions> = {}): HTMLDivElement {

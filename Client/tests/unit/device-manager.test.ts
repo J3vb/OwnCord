@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 // --- Hoisted mocks ---
 
@@ -12,14 +13,7 @@ vi.mock("@lib/prefs/preferences", () => ({
   savePref: (key: string, val: unknown) => mockSavePref(key, val),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 
 const mockGetLocalDevices = vi.fn();
 

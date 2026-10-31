@@ -193,3 +193,13 @@ export function stubPrefs(values: Record<string, unknown> = {}): void {
     key in values ? values[key] : defaultVal,
   );
 }
+
+/** Routes the room's "disconnected" listener to a getter the test fires itself. */
+export function captureDisconnectedHandler(): () => ((reason?: number) => void) | undefined {
+  let handler: ((reason?: number) => void) | undefined;
+  mockRoom.on.mockImplementation((event: string, registered: (reason?: number) => void) => {
+    if (event === "disconnected") handler = registered;
+    return mockRoom;
+  });
+  return () => handler;
+}

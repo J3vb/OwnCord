@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { avatarAttachmentsMock } from "../helpers/avatarAttachmentsMock";
+import { makeDmConversation } from "../helpers/dmSidebarHost";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
@@ -16,17 +17,12 @@ import type { DmConversation, DmSidebar, DmSidebarOptions } from "../../src/comp
 import { resetBlocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 
-const makeConvo = (overrides: Partial<DmConversation> = {}): DmConversation => ({
-  channelId: 100,
-  userId: 1,
-  username: "Alice",
-  avatar: null,
-  status: "online",
-  lastMessage: "Hello!",
-  timestamp: "2025-01-01T00:00:00Z",
-  unread: false,
-  ...overrides,
-});
+const aliceAndBob = (): DmConversation[] => [
+  makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
+  makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
+];
+
+const makeConvo = makeDmConversation;
 
 function mountDmSidebar(
   container: HTMLElement,
@@ -51,6 +47,15 @@ describe("DmSidebar", () => {
     overrides: Partial<DmSidebarOptions> = {},
   ): DmSidebar => mountDmSidebar(container, conversations, overrides);
 
+  const mountCrew = (onCloseDm: () => void): DmSidebar =>
+    mountSidebar([makeConvo({ channelId: 7, isGroup: true, username: "Crew" })], { onCloseDm });
+
+  const typeSearch = (value: string): void => {
+    const input = container.querySelector(".dm-search") as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
   beforeEach(() => {
     fetchImageAsObjectUrl.mockReset();
     container = document.createElement("div");
@@ -73,14 +78,9 @@ describe("DmSidebar", () => {
   });
 
   it("filters the conversation list as the search box is typed into", () => {
-    const sidebar = mountSidebar([
-      makeConvo({ channelId: 1, username: "Alice" }),
-      makeConvo({ channelId: 2, username: "Bob" }),
-    ]);
+    const sidebar = mountSidebar(aliceAndBob());
 
-    const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
-    searchInput.value = "ali";
-    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    typeSearch("ali");
 
     const visibleNames = [...container.querySelectorAll<HTMLElement>(".dm-item")]
       .filter((el) => !el.hidden)
@@ -88,8 +88,7 @@ describe("DmSidebar", () => {
     expect(visibleNames).toEqual(["Alice"]);
 
     // Clearing the query shows every conversation again.
-    searchInput.value = "";
-    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    typeSearch("");
     const allVisible = [...container.querySelectorAll<HTMLElement>(".dm-item")].every(
       (el) => !el.hidden,
     );
@@ -99,14 +98,9 @@ describe("DmSidebar", () => {
   });
 
   it("keeps the list's Tab stop on a row the search filter leaves visible", () => {
-    const sidebar = mountSidebar([
-      makeConvo({ channelId: 1, username: "Alice" }),
-      makeConvo({ channelId: 2, username: "Bob" }),
-    ]);
+    const sidebar = mountSidebar(aliceAndBob());
 
-    const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
-    searchInput.value = "bob";
-    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+    typeSearch("bob");
 
     const stops = [...container.querySelectorAll<HTMLElement>(".dm-item:not([hidden])")].filter(
       (el) => el.tabIndex === 0,
@@ -129,12 +123,7 @@ describe("DmSidebar", () => {
   });
 
   it("renders conversation items", () => {
-    const conversations: DmConversation[] = [
-      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
-      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
-    ];
-
-    const sidebar = mountSidebar(conversations);
+    const sidebar = mountSidebar(aliceAndBob());
 
     const items = container.querySelectorAll(".dm-item");
     expect(items.length).toBe(2);
@@ -144,10 +133,7 @@ describe("DmSidebar", () => {
 
   // ── B9-21: one Tab stop, arrow-key navigation, in-place update ──
   it("exposes one Tab stop and arrow-navigates the conversation list", () => {
-    const sidebar = mountSidebar([
-      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
-      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
-    ]);
+    const sidebar = mountSidebar(aliceAndBob());
 
     const items = container.querySelectorAll(".dm-item");
     expect(container.querySelectorAll(".dm-item[tabindex='0']").length).toBe(1);
@@ -171,10 +157,7 @@ describe("DmSidebar", () => {
     searchInput.dispatchEvent(new Event("input", { bubbles: true }));
     const row = container.querySelector(".dm-item") as HTMLElement;
 
-    sidebar.update([
-      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
-      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
-    ]);
+    sidebar.update(aliceAndBob());
 
     // Same node for the unchanged row; the header/search chrome is untouched.
     expect(container.querySelector(".dm-search")).toBe(searchInput);
@@ -241,9 +224,7 @@ describe("DmSidebar", () => {
   // so the ✕ asks first; a 1:1 hide does not.
   it("asks to confirm leaving a group, and calls onCloseDm only after confirm", () => {
     const onCloseDm = vi.fn();
-    const sidebar = mountSidebar([makeConvo({ channelId: 7, isGroup: true, username: "Crew" })], {
-      onCloseDm,
-    });
+    const sidebar = mountCrew(onCloseDm);
 
     (container.querySelector(".dm-close") as HTMLButtonElement).click();
     expect(onCloseDm).not.toHaveBeenCalled();
@@ -258,9 +239,7 @@ describe("DmSidebar", () => {
 
   it("cancelling the group-leave confirm leaves the conversation alone", () => {
     const onCloseDm = vi.fn();
-    const sidebar = mountSidebar([makeConvo({ channelId: 7, isGroup: true, username: "Crew" })], {
-      onCloseDm,
-    });
+    const sidebar = mountCrew(onCloseDm);
 
     (container.querySelector(".dm-close") as HTMLButtonElement).click();
     (document.querySelector("[data-testid='dm-leave-cancel']") as HTMLButtonElement).click();
@@ -295,9 +274,7 @@ describe("DmSidebar", () => {
 
   it("shift-click skips the group-leave confirm", () => {
     const onCloseDm = vi.fn();
-    const sidebar = mountSidebar([makeConvo({ channelId: 7, isGroup: true, username: "Crew" })], {
-      onCloseDm,
-    });
+    const sidebar = mountCrew(onCloseDm);
 
     (container.querySelector(".dm-close") as HTMLButtonElement).dispatchEvent(
       new MouseEvent("click", { bubbles: true, shiftKey: true }),
@@ -520,10 +497,7 @@ describe("DmSidebar", () => {
   });
 
   it("clicking a DM item marks it active and deactivates siblings", () => {
-    const sidebar = mountSidebar([
-      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
-      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
-    ]);
+    const sidebar = mountSidebar(aliceAndBob());
 
     const items = container.querySelectorAll(".dm-item");
     (items[0] as HTMLElement).click();

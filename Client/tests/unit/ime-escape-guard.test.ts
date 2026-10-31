@@ -7,25 +7,21 @@
 // `closeOnEscape: false` dialog that wires its own Escape listener instead of
 // `createModal`'s `onEscape`. Exceptions are exact (file + function) and
 // shrink-only.
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import {
+  comparedKeyWith,
+  fnName,
+  isFn,
+  listSourceFiles,
+  srcDir,
+  type Exempt,
+  type FnNode,
+} from "../helpers/srcAst";
 
-const srcDir = path.resolve(__dirname, "../../src");
-
-const sourceFiles = readdirSync(srcDir, { recursive: true, encoding: "utf8" })
-  .filter(
-    (entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.endsWith(".d.ts"),
-  )
-  .map((entry) => entry.split(path.sep).join("/"))
-  .toSorted();
-
-interface Exempt {
-  file: string;
-  fn: string;
-  reason: string;
-}
+const sourceFiles = listSourceFiles();
 
 // Key-capture handlers that rebind a shortcut. Focus is on a button, so no
 // input method composes there; letting a composing Escape fall through would
@@ -37,54 +33,19 @@ const EXEMPT: readonly Exempt[] = [
   { file: "features/settings/pttControls.ts", fn: "onKey", reason: CAPTURE },
 ];
 
-type FnNode =
-  ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration;
-
-function isFn(node: ts.Node): node is FnNode {
-  return (
-    ts.isArrowFunction(node) ||
-    ts.isFunctionExpression(node) ||
-    ts.isFunctionDeclaration(node) ||
-    ts.isMethodDeclaration(node)
-  );
-}
-
-function fnName(fn: FnNode): string {
-  if ((ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn)) && fn.name !== undefined) {
-    return fn.name.getText();
-  }
-  if (ts.isVariableDeclaration(fn.parent)) return fn.parent.name.getText();
-  return "(anonymous)";
-}
-
 function isKeyAccess(node: ts.Node): boolean {
   return (
     ts.isPropertyAccessExpression(node) && (node.name.text === "key" || node.name.text === "code")
   );
 }
 
-/** The literal a `.key`/`.code` comparison or `case` checks against, if any. */
-function comparedKey(node: ts.Node): string | undefined {
-  if (ts.isBinaryExpression(node)) {
-    const op = node.operatorToken.kind;
-    if (
-      op !== ts.SyntaxKind.EqualsEqualsEqualsToken &&
-      op !== ts.SyntaxKind.ExclamationEqualsEqualsToken &&
-      op !== ts.SyntaxKind.EqualsEqualsToken &&
-      op !== ts.SyntaxKind.ExclamationEqualsToken
-    ) {
-      return undefined;
-    }
-    if (isKeyAccess(node.left) && ts.isStringLiteral(node.right)) return node.right.text;
-    if (isKeyAccess(node.right) && ts.isStringLiteral(node.left)) return node.left.text;
-    return undefined;
-  }
-  if (ts.isCaseClause(node) && ts.isStringLiteral(node.expression)) {
-    const sw = node.parent.parent;
-    if (ts.isSwitchStatement(sw) && isKeyAccess(sw.expression)) return node.expression.text;
-  }
-  return undefined;
-}
+const comparedKey = (node: ts.Node): string | undefined =>
+  comparedKeyWith(node, isKeyAccess, [
+    ts.SyntaxKind.EqualsEqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsEqualsToken,
+    ts.SyntaxKind.EqualsEqualsToken,
+    ts.SyntaxKind.ExclamationEqualsToken,
+  ]);
 
 function keysIn(node: ts.Node): Set<string> {
   const keys = new Set<string>();

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { Mock } from "vitest";
 import * as mocks from "../../helpers/overlayManagersMocks";
 import { setMembers } from "@stores/members.store";
 import { createPinnedMessages } from "@components/PinnedMessages";
@@ -9,9 +8,12 @@ import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import { mapToPinnedMessage } from "@pages/main-page/OverlayManagers";
 import {
-  openPinnedControllers,
   createPinnedPanelController,
+  firstCallOpts,
+  type JumpToMessageOpts,
   makeMockApi,
+  openPinnedControllers,
+  type UnpinOpts,
 } from "../../helpers/overlayManagersHarness";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -141,9 +143,9 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
+    const opts = firstCallOpts<{
       onUnpin?: (msgId: number) => void;
-    };
+    }>(createPinnedMessages);
     expect(opts.onUnpin).toBeUndefined();
   });
 
@@ -163,9 +165,7 @@ describe("createPinnedPanelController", () => {
     await controller.toggle();
 
     // Extract onUnpin callback passed to PinnedMessages
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onUnpin: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<UnpinOpts>(createPinnedMessages);
 
     // Call onUnpin — it should handle the error internally
     opts.onUnpin(1);
@@ -192,9 +192,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onUnpin: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<UnpinOpts>(createPinnedMessages);
 
     opts.onUnpin(1);
 
@@ -408,9 +406,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onJumpToMessage: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<JumpToMessageOpts>(createPinnedMessages);
 
     opts.onJumpToMessage(1);
 
@@ -435,9 +431,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onJumpToMessage: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<JumpToMessageOpts>(createPinnedMessages);
 
     opts.onJumpToMessage(999);
 
@@ -600,9 +594,7 @@ describe("createPinnedPanelController", () => {
 
     await controller.toggle();
 
-    const opts = (createPinnedMessages as Mock).mock.calls[0]![0] as {
-      onJumpToMessage: (msgId: number) => void;
-    };
+    const opts = firstCallOpts<JumpToMessageOpts>(createPinnedMessages);
 
     opts.onJumpToMessage(1);
 

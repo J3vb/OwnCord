@@ -803,6 +803,17 @@ describe("createChannelController", () => {
   });
 
   describe("MessageList callbacks - additional", () => {
+    function mountWithPinApi(
+      method: "pinMessage" | "unpinMessage",
+      impl: ReturnType<typeof vi.fn>,
+    ) {
+      const opts = makeOpts();
+      (opts.api as unknown as Record<string, ReturnType<typeof vi.fn>>)[method] = impl;
+      const ctrl = createChannelController(opts);
+      ctrl.mountChannel(42, "general");
+      return { opts, ctrl };
+    }
+
     it("onScrollTop delegates to msgCtrl.loadOlderMessages", () => {
       const { opts } = mountController();
 
@@ -887,12 +898,7 @@ describe("createChannelController", () => {
     });
 
     it("onPinClick pins a message and shows toast", async () => {
-      const opts = makeOpts();
-      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
-        .fn()
-        .mockResolvedValue(undefined);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountWithPinApi("pinMessage", vi.fn().mockResolvedValue(undefined));
 
       capturedMessageListOpts!.onPinClick(5, 42, false);
 
@@ -906,12 +912,7 @@ describe("createChannelController", () => {
     });
 
     it("onPinClick unpins a message and shows toast", async () => {
-      const opts = makeOpts();
-      (opts.api as unknown as { unpinMessage: ReturnType<typeof vi.fn> }).unpinMessage = vi
-        .fn()
-        .mockResolvedValue(undefined);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountWithPinApi("unpinMessage", vi.fn().mockResolvedValue(undefined));
 
       capturedMessageListOpts!.onPinClick(5, 42, true);
 
@@ -924,12 +925,10 @@ describe("createChannelController", () => {
     });
 
     it("onPinClick shows error toast on failure", async () => {
-      const opts = makeOpts();
-      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
-        .fn()
-        .mockRejectedValue(new Error("network error"));
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountWithPinApi(
+        "pinMessage",
+        vi.fn().mockRejectedValue(new Error("network error")),
+      );
 
       capturedMessageListOpts!.onPinClick(5, 42, false);
 
@@ -944,13 +943,11 @@ describe("createChannelController", () => {
     });
 
     it("onPinClick: a chat_pinned before the rejection keeps its truth, no revert", async () => {
-      const opts = makeOpts();
       let reject: (e: Error) => void = () => {};
-      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
-        .fn()
-        .mockReturnValue(new Promise<void>((_, r) => (reject = r)));
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountWithPinApi(
+        "pinMessage",
+        vi.fn().mockReturnValue(new Promise<void>((_, r) => (reject = r))),
+      );
       mockPinRevisions.clear();
 
       capturedMessageListOpts!.onPinClick(5, 42, false);
@@ -966,13 +963,11 @@ describe("createChannelController", () => {
     });
 
     it("onPinClick: a pin of another message in the channel still lets the rejection revert", async () => {
-      const opts = makeOpts();
       let reject: (e: Error) => void = () => {};
-      (opts.api as unknown as { pinMessage: ReturnType<typeof vi.fn> }).pinMessage = vi
-        .fn()
-        .mockReturnValue(new Promise<void>((_, r) => (reject = r)));
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountWithPinApi(
+        "pinMessage",
+        vi.fn().mockReturnValue(new Promise<void>((_, r) => (reject = r))),
+      );
       mockPinRevisions.clear();
 
       capturedMessageListOpts!.onPinClick(5, 42, false);
@@ -1011,12 +1006,10 @@ describe("createChannelController", () => {
     });
 
     it("onPinClick failure on an unpin restores the pinned state", async () => {
-      const opts = makeOpts();
-      (opts.api as unknown as { unpinMessage: ReturnType<typeof vi.fn> }).unpinMessage = vi
-        .fn()
-        .mockRejectedValue(new Error("network error"));
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountWithPinApi(
+        "unpinMessage",
+        vi.fn().mockRejectedValue(new Error("network error")),
+      );
 
       capturedMessageListOpts!.onPinClick(5, 42, true);
 

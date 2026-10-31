@@ -56,6 +56,16 @@ vi.mock("../../../src/pages/main-page/ChatArea", () => mocks.pageChatAreaMock())
 
 const { mockSetAudioVolumeHost, mockCreateChatArea } = mocks;
 
+function makeGroupWithDan(status: "online" | "offline"): void {
+  dmStore.setState((prev) => ({
+    channels: prev.channels.map((c) => ({
+      ...c,
+      isGroup: true,
+      participants: [...c.participants, { id: 12, username: "dan", avatar: "", status }],
+    })),
+  }));
+}
+
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   let container: HTMLDivElement;
   let page: ReturnType<typeof createMainPage>;
@@ -97,16 +107,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("a group call is declined once every online callee declined; offline members are not waited on", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    dmStore.setState((prev) => ({
-      channels: prev.channels.map((c) => ({
-        ...c,
-        isGroup: true,
-        participants: [
-          ...c.participants,
-          { id: 12, username: "dan", avatar: "", status: "offline" as const },
-        ],
-      })),
-    }));
+    makeGroupWithDan("offline");
     page = await mountSettled(container, ws);
 
     startCall();
@@ -122,16 +123,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("Ring again in a connected group call with a member missing re-rings the group without a Calling… state (3B-8)", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    dmStore.setState((prev) => ({
-      channels: prev.channels.map((c) => ({
-        ...c,
-        isGroup: true,
-        participants: [
-          ...c.participants,
-          { id: 12, username: "dan", avatar: "", status: "online" as const },
-        ],
-      })),
-    }));
+    makeGroupWithDan("online");
     page = await mountSettled(container, ws);
 
     // Alice and bob are in the room; dan is not.
@@ -195,6 +187,14 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   describe("ringing the callee", () => {
     const rings = (ws: FakeWsClient): unknown[] =>
       vi.mocked(ws.send).mock.calls.filter(([m]) => (m as { type: string }).type === "call_ring");
+
+    function ringTwiceWithinWindow(): void {
+      const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
+      start();
+      finishCallJoin();
+      vi.advanceTimersByTime(1000);
+      start();
+    }
 
     async function mountCaller(): Promise<{ ws: FakeWsClient; panel: HTMLElement }> {
       const ws = fakeWs();
@@ -280,11 +280,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     it("drops a waiting ring when the socket drops before it fires", async () => {
       await withFakeTimers(async () => {
         const { ws } = await mountCaller();
-        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
-        start();
-        finishCallJoin();
-        vi.advanceTimersByTime(1000);
-        start();
+        ringTwiceWithinWindow();
         // An unplanned drop keeps the voice channel, so only the status says so.
         uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
 
@@ -297,11 +293,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     it("drops a waiting ring across a drop that reconnects before it fires", async () => {
       await withFakeTimers(async () => {
         const { ws } = await mountCaller();
-        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
-        start();
-        finishCallJoin();
-        vi.advanceTimersByTime(1000);
-        start();
+        ringTwiceWithinWindow();
         uiStore.setState((prev) => ({ ...prev, connectionStatus: "reconnecting" }));
         uiStore.flush();
         uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -316,11 +308,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     it("keeps a margin over the server's 3 s window for transport jitter", async () => {
       await withFakeTimers(async () => {
         const { ws } = await mountCaller();
-        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
-        start();
-        finishCallJoin();
-        vi.advanceTimersByTime(1000);
-        start();
+        ringTwiceWithinWindow();
 
         vi.advanceTimersByTime(2000);
         expect(rings(ws)).toHaveLength(1);
@@ -349,11 +337,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     it("drops a waiting ring when the caller leaves before it fires", async () => {
       await withFakeTimers(async () => {
         const { ws } = await mountCaller();
-        const start = mockCreateChatArea.mock.calls[0]![0].onStartCall;
-        start();
-        finishCallJoin();
-        vi.advanceTimersByTime(1000);
-        start();
+        ringTwiceWithinWindow();
         leaveVoice();
 
         vi.advanceTimersByTime(5000);

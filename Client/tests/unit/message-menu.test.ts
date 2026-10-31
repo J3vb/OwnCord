@@ -6,7 +6,7 @@ import {
   bindImageMenu,
   closeActiveLightbox,
 } from "../../src/features/messaging/content/attachments";
-import { messagesStore, type Message } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
 import {
@@ -18,22 +18,12 @@ import {
   setChannel,
   setDeveloperMode,
   signInAs,
+  seedMessages as seed,
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 
 const MENU = ".message-context-menu";
-
-function seed(messages: Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, messages]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-}
 
 function mine(over: Partial<Message> = {}): Message {
   return makeMessage({ user: { id: ME, username: "me", avatar: null }, ...over });

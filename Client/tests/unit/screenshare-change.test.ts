@@ -6,6 +6,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import * as shareRig from "../helpers/screenShareRig";
 import { Track } from "livekit-client";
 import type { LocalTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -15,13 +16,13 @@ import { captureLogs } from "../helpers/log-capture";
 const createLocalScreenTracks = vi.fn();
 const savePref = vi.fn();
 
-vi.mock("livekit-client", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("livekit-client")>();
-  return {
-    ...actual,
-    createLocalScreenTracks: (...args: unknown[]) => createLocalScreenTracks(...args) as unknown,
-  };
-});
+vi.mock("livekit-client", (importOriginal) =>
+  shareRig.livekitScreenMock(
+    importOriginal,
+    (...a) => createLocalScreenTracks(...a) as unknown,
+    false,
+  ),
+);
 
 const setH264GpuProfiles = vi.hoisted(() => vi.fn());
 vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
@@ -30,10 +31,7 @@ vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   h264GpuPublish: (codec: string) => codec === "h264",
 }));
 
-vi.mock("@lib/prefs/preferences", () => ({
-  loadPref: (_key: string, fallback: unknown) => fallback,
-  savePref: (...args: unknown[]) => savePref(...args) as unknown,
-}));
+vi.mock("@lib/prefs/preferences", () => shareRig.fallbackPrefsMock(savePref));
 
 const { watchScreenEnded } = await import("@lib/voice/screenShare");
 const { changeScreenshareSource, setScreenshareQuality } =
@@ -96,23 +94,7 @@ function track(kind: Track.Kind, id: string): FakeTrack {
 }
 
 function setup(withAudio: boolean) {
-  const publishTrack = vi.fn().mockResolvedValue(undefined);
-  const unpublishTrack = vi.fn().mockResolvedValue(undefined);
-  const room = {
-    localParticipant: {
-      publishTrack,
-      unpublishTrack,
-      setScreenShareEnabled: vi.fn().mockResolvedValue(undefined),
-    },
-  } as unknown as Room;
-  const wsSend = vi.fn(() => "id");
-  const ws = { send: wsSend } as unknown as WsClient;
-  const deps: Deps & { onError: Mock<(message: string) => void> } = {
-    getRoom: () => room,
-    getWs: () => ws,
-    onError: vi.fn<(message: string) => void>(),
-    reapplyAudioPipeline: vi.fn(),
-  };
+  const { room, publishTrack, unpublishTrack, wsSend, deps } = shareRig.screenShareRig();
   const video = track(Track.Kind.Video, "window-a");
   const audio = track(Track.Kind.Audio, "audio-a");
   const tracks = (withAudio ? [video, audio] : [video]) as unknown as LocalTrack[];
@@ -588,6 +570,8 @@ function openPicker(): { answer: (tracks: FakeTrack[]) => void; fail: (err: unkn
   return { answer, fail };
 }
 
+type Current = ReturnType<typeof movableDeps>["current"];
+
 /** `deps` whose room and ws a test can swap while a change waits. */
 function movableDeps(rig: ReturnType<typeof setup>) {
   const current = { room: rig.deps.getRoom(), ws: rig.deps.getWs() };
@@ -719,26 +703,25 @@ describe("changeScreenshareSource: guards", () => {
     },
   );
 
-  it("drops the new capture when the room changed while the picker was open", async () => {
+  it.each([
+    [
+      "drops the new capture when the room changed while the picker was open",
+      (current: Current) => {
+        current.room = {} as Room;
+      },
+    ],
+    [
+      "drops the new capture when the connection changed while the picker was open",
+      (current: Current) => {
+        current.ws = { send: vi.fn() } as unknown as WsClient;
+      },
+    ],
+  ])("%s", async (_name, swap) => {
     const rig = setup(false);
     const { deps, current } = movableDeps(rig);
     const picker = openPicker();
     const changing = changeScreenshareSource(rig.state, deps);
-    current.room = {} as Room;
-    const fresh = track(Track.Kind.Video, "window-b");
-    picker.answer([fresh]);
-    await changing;
-
-    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
-    expect(fresh.mediaStreamTrack.stop).toHaveBeenCalled();
-  });
-
-  it("drops the new capture when the connection changed while the picker was open", async () => {
-    const rig = setup(false);
-    const { deps, current } = movableDeps(rig);
-    const picker = openPicker();
-    const changing = changeScreenshareSource(rig.state, deps);
-    current.ws = { send: vi.fn() } as unknown as WsClient;
+    swap(current);
     const fresh = track(Track.Kind.Video, "window-b");
     picker.answer([fresh]);
     await changing;
@@ -1178,25 +1161,25 @@ describe("setScreenshareQuality on a share that changes its own quality: guards"
     },
   );
 
-  it("reports nothing when the room changed meanwhile", async () => {
+  it.each([
+    [
+      "reports nothing when the room changed meanwhile",
+      (current: Current) => {
+        current.room = {} as Room;
+      },
+    ],
+    [
+      "reports nothing when the connection changed meanwhile",
+      (current: Current) => {
+        current.ws = { send: vi.fn() } as unknown as WsClient;
+      },
+    ],
+  ])("%s", async (_name, swap) => {
     const host = pendingHostCall();
     const rig = nativeRig(host.fn);
     const { deps, current } = movableDeps(rig);
     const changing = setScreenshareQuality(rig.state, deps, "high");
-    current.room = {} as Room;
-    host.finish();
-    await changing;
-
-    expect(rig.state.quality).toBe("medium");
-    expect(voiceStore.getState().localShareRev).toBe(0);
-  });
-
-  it("reports nothing when the connection changed meanwhile", async () => {
-    const host = pendingHostCall();
-    const rig = nativeRig(host.fn);
-    const { deps, current } = movableDeps(rig);
-    const changing = setScreenshareQuality(rig.state, deps, "high");
-    current.ws = { send: vi.fn() } as unknown as WsClient;
+    swap(current);
     host.finish();
     await changing;
 

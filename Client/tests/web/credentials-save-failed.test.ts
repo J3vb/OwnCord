@@ -10,6 +10,11 @@ import { desktop } from "../../src/platform/desktop";
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
+async function saveUpdate(onSaveFailed?: () => void): Promise<void> {
+  createUserUpdateCredentialSaver("h.example", true, onSaveFailed)({ user_id: 1, username: "a2" });
+  await flush();
+}
+
 beforeEach(() => {
   authStore.setState(() => ({
     token: "sess-token",
@@ -30,12 +35,7 @@ describe("createUserUpdateCredentialSaver on the web portal", () => {
     const save = vi.spyOn(desktop.credentials, "save").mockResolvedValue(true);
     const onSaveFailed = vi.fn();
 
-    createUserUpdateCredentialSaver(
-      "h.example",
-      true,
-      onSaveFailed,
-    )({ user_id: 1, username: "a2" });
-    await flush();
+    await saveUpdate(onSaveFailed);
 
     expect(save).toHaveBeenCalledTimes(1);
     expect(onSaveFailed).not.toHaveBeenCalled();
@@ -45,12 +45,7 @@ describe("createUserUpdateCredentialSaver on the web portal", () => {
     vi.spyOn(desktop.credentials, "save").mockResolvedValue(false);
     const onSaveFailed = vi.fn();
 
-    createUserUpdateCredentialSaver(
-      "h.example",
-      true,
-      onSaveFailed,
-    )({ user_id: 1, username: "a2" });
-    await flush();
+    await saveUpdate(onSaveFailed);
 
     expect(onSaveFailed).toHaveBeenCalledTimes(1);
   });
@@ -59,12 +54,7 @@ describe("createUserUpdateCredentialSaver on the web portal", () => {
     vi.spyOn(desktop.credentials, "save").mockRejectedValue(new Error("storage unavailable"));
     const onSaveFailed = vi.fn();
 
-    createUserUpdateCredentialSaver(
-      "h.example",
-      true,
-      onSaveFailed,
-    )({ user_id: 1, username: "a2" });
-    await flush();
+    await saveUpdate(onSaveFailed);
 
     expect(onSaveFailed).toHaveBeenCalledTimes(1);
   });
@@ -72,8 +62,7 @@ describe("createUserUpdateCredentialSaver on the web portal", () => {
   it("saves without a callback when none is supplied", async () => {
     const save = vi.spyOn(desktop.credentials, "save").mockResolvedValue(false);
 
-    createUserUpdateCredentialSaver("h.example", true)({ user_id: 1, username: "a2" });
-    await flush();
+    await saveUpdate();
 
     expect(save).toHaveBeenCalledTimes(1);
   });

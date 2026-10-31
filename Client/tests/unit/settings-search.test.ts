@@ -88,6 +88,18 @@ const uploadsApi = {
 
 const TAB_SELECTOR = ".settings-sidebar > button.settings-nav-item[role='tab']";
 
+/** Runs `body` with Element.prototype.scrollIntoView replaced by a spy, then restores it. */
+function withScrollSpy(body: (scroll: ReturnType<typeof vi.fn>) => void): void {
+  const scroll = vi.fn();
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = scroll;
+  try {
+    body(scroll);
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
+}
+
 describe("settings search", () => {
   let container: HTMLDivElement;
   let overlay: ReturnType<typeof createSettingsOverlay> | null = null;
@@ -342,10 +354,7 @@ describe("settings search", () => {
     });
 
     it("highlights the already-open tab as the query changes and scrolls to the first hit", () => {
-      const scroll = vi.fn();
-      const original = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = scroll;
-      try {
+      withScrollSpy((scroll) => {
         mountOverlay();
         tabs()
           .find((t) => labelFor(t) === "Appearance")!
@@ -354,9 +363,7 @@ describe("settings search", () => {
         expect(container.querySelector("mark.settings-search-hit")).not.toBeNull();
         expect(scroll).toHaveBeenCalledTimes(1);
         expect(scroll.mock.contexts[0]).toBe(container.querySelector("mark.settings-search-hit"));
-      } finally {
-        Element.prototype.scrollIntoView = original;
-      }
+      });
     });
 
     it("leaves elements with child elements alone and splits repeated hits", () => {
@@ -394,10 +401,7 @@ describe("settings search", () => {
     });
 
     it("scrolls to the first visible hit, skipping hidden rows", () => {
-      const scroll = vi.fn();
-      const original = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = scroll;
-      try {
+      withScrollSpy((scroll) => {
         mountOverlay();
         tabs()
           .find((t) => labelFor(t) === "Appearance")!
@@ -413,9 +417,7 @@ describe("settings search", () => {
         const target = scroll.mock.contexts[0] as HTMLElement;
         expect(scroll).toHaveBeenCalledTimes(1);
         expect(rows[0]!.contains(target)).toBe(false);
-      } finally {
-        Element.prototype.scrollIntoView = original;
-      }
+      });
     });
 
     it("ignores keys that belong to an IME composition", () => {

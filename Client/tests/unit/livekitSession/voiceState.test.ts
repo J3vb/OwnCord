@@ -13,6 +13,7 @@ import {
   startReconnect,
   enterConnected,
   stubPrefs,
+  joinSession,
 } from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
@@ -476,10 +477,7 @@ describe("LiveKitSession", () => {
     it("does not mute at join when a PTT key is bound but the poller is not confirmed live", async () => {
       stubPrefs({ pttVk: 0x41 });
       // setPttPollingLive intentionally not called — defaults to false.
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session, "token");
 
       expect(setLocalMuted).not.toHaveBeenCalledWith(true);
       expect(setPttGated).toHaveBeenCalledWith(false);
@@ -555,10 +553,7 @@ describe("LiveKitSession", () => {
 
     it("does not mute at join when the poller is live but no PTT key is bound", async () => {
       setPttPollingLive(true); // pttVk defaults to 0 (disabled) via mockLoadPref
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-
-      await session.handleVoiceToken("token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session, "token");
 
       expect(setLocalMuted).not.toHaveBeenCalledWith(true);
       expect(setPttGated).toHaveBeenCalledWith(false);

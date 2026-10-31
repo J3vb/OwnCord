@@ -256,17 +256,31 @@ describe("main.ts external invite link asks before leaving the signed-in server 
   });
 });
 
+function failNextMainPageMount(): void {
+  vi.mocked(createMainPage).mockImplementationOnce(
+    () =>
+      ({
+        mount: () => {
+          throw new Error("mount blew up");
+        },
+        destroy: vi.fn(),
+      }) as never,
+  );
+}
+
+function holdVoiceLeave(): () => void {
+  let finishLeave!: () => void;
+  mockLeaveVoice.mockReturnValue(
+    new Promise<void>((resolve) => {
+      finishLeave = resolve;
+    }),
+  );
+  return finishLeave;
+}
+
 describe("main.ts render failure recovery (4.12)", () => {
   it("shows Reload and Sign out when the main page's mount throws", async () => {
-    vi.mocked(createMainPage).mockImplementationOnce(
-      () =>
-        ({
-          mount: () => {
-            throw new Error("mount blew up");
-          },
-          destroy: vi.fn(),
-        }) as never,
-    );
+    failNextMainPageMount();
     await signedInWithDeepLinkHandler("server-a.example:8443", "Server A");
 
     const app = document.getElementById("app")!;
@@ -304,15 +318,7 @@ describe("main.ts render failure recovery (4.12)", () => {
     });
 
     async function failedMainPage(): Promise<HTMLButtonElement> {
-      vi.mocked(createMainPage).mockImplementationOnce(
-        () =>
-          ({
-            mount: () => {
-              throw new Error("mount blew up");
-            },
-            destroy: vi.fn(),
-          }) as never,
-      );
+      failNextMainPageMount();
       await signedInWithDeepLinkHandler("server-a.example:8443", "Server A");
       expectConsole("error", "Component mount failed");
       voiceStore.setState((s) => ({ ...s, currentChannelId: 9 }));
@@ -320,12 +326,7 @@ describe("main.ts render failure recovery (4.12)", () => {
     }
 
     it("waits for the voice leave to finish before reloading", async () => {
-      let finishLeave!: () => void;
-      mockLeaveVoice.mockReturnValue(
-        new Promise<void>((resolve) => {
-          finishLeave = resolve;
-        }),
-      );
+      const finishLeave = holdVoiceLeave();
       const button = await failedMainPage();
       button.click();
       await vi.advanceTimersByTimeAsync(100);
@@ -338,12 +339,7 @@ describe("main.ts render failure recovery (4.12)", () => {
     });
 
     it("a second click while the leave is pending waits for it too", async () => {
-      let finishLeave!: () => void;
-      mockLeaveVoice.mockReturnValue(
-        new Promise<void>((resolve) => {
-          finishLeave = resolve;
-        }),
-      );
+      const finishLeave = holdVoiceLeave();
       const button = await failedMainPage();
       button.click();
       await vi.advanceTimersByTimeAsync(100);

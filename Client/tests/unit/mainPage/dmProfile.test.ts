@@ -18,6 +18,7 @@ import {
   mountSettled,
   incomingCall,
   incomingBannerEl,
+  oneToOneDm,
 } from "../../helpers/mainPageHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -61,18 +62,6 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
         '[data-testid="dps-username"]',
       )?.textContent ?? undefined;
     const pref = (): string | null => localStorage.getItem("owncord:settings:dmProfileOpen");
-    const oneToOne = (channelId: number, userId: number, username: string) => ({
-      channelId,
-      recipient: { id: userId, username, avatar: "", status: "online" },
-      participants: [{ id: userId, username, avatar: "", status: "online" }],
-      name: "",
-      isGroup: false,
-      lastMessageId: null,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    });
     function mountOnTwoDms(): void {
       seedChannels(
         [
@@ -85,9 +74,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       );
       dmStore.setState(() => ({
         channels: [
-          oneToOne(70, 7, "bob"),
-          oneToOne(71, 8, "carol"),
-          { ...oneToOne(72, 9, "dave"), isGroup: true, name: "group" },
+          oneToOneDm(70, 7, "bob"),
+          oneToOneDm(71, 8, "carol"),
+          { ...oneToOneDm(72, 9, "dave"), isGroup: true, name: "group" },
         ],
       }));
       page = mountPage(container);
@@ -442,30 +431,8 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("keeps the open DM profile panel's status and name live, like the chat header does", async () => {
-    seedChannels([dmChannel(70, "dm-bob")], 70);
-    dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: 70,
-          recipient: { id: 7, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
-          name: "bob",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
-    }));
-
-    page = mountPage(container);
-
-    const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];
-    chatAreaOpts.onToggleDmProfile();
-
-    const slot = capturedChatAreaRef.current!.dmProfileSlot;
+    const { toggle, slot } = mountOnDm();
+    toggle();
     // The panel loads on demand; wait for its import to mount it.
     await vi.waitFor(() => {
       expect(slot.querySelector('[data-testid="dps-status"]')).not.toBeNull();
@@ -491,20 +458,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   function mountOnDm(): { toggle: () => void; slot: HTMLElement } {
     seedChannels([dmChannel(70, "dm-bob")], 70);
     dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: 70,
-          recipient: { id: 7, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
-          name: "bob",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
+      channels: [{ ...oneToOneDm(70, 7, "bob"), name: "bob" }],
     }));
     page = mountPage(container);
     const chatAreaOpts = mockCreateChatArea.mock.calls[0]![0];

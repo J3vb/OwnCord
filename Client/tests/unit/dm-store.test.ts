@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
 import {
   dmStore,
   setDmChannels,
@@ -24,26 +25,8 @@ import type { Channel } from "../../src/stores/channels.store";
 import type { DmChannelPayload } from "../../src/lib/types";
 import { resetChannelsState } from "../helpers/storeSeeds";
 
-function makeMirrorChannel(overrides: Partial<Channel> = {}): Channel {
-  return {
-    id: 5,
-    name: "bob",
-    type: "dm",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
+const makeMirrorChannel = (overrides: Partial<Channel> = {}): Channel =>
+  makeChannel({ id: 5, name: "bob", type: "dm", ...overrides });
 
 function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
   return {

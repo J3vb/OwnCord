@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -30,14 +31,7 @@ const {
   mockIsWindowDetached: vi.fn((): boolean => false),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 
 vi.mock("@stores/messages.store", () => ({
   setMessages: mockSetMessages,
@@ -93,10 +87,14 @@ describe("createMessageController", () => {
     mockGetChannelMessages.mockReturnValue([]);
   });
 
+  function makeController(overrides: Partial<MessageControllerOptions["api"]> = {}) {
+    const api = makeApi(overrides);
+    return { api, ctrl: createMessageController({ api, showError }) };
+  }
+
   describe("loadMessages", () => {
     it("loads messages and stores them", async () => {
-      const api = makeApi();
-      const ctrl = createMessageController({ api, showError });
+      const { api, ctrl } = makeController();
       const { signal } = makeAbort();
 
       await ctrl.loadMessages(42, signal);
@@ -106,8 +104,7 @@ describe("createMessageController", () => {
     });
 
     it("marks the channel loading before the fetch resolves", async () => {
-      const api = makeApi();
-      const ctrl = createMessageController({ api, showError });
+      const { ctrl } = makeController();
 
       const pending = ctrl.loadMessages(42, makeAbort().signal);
 
@@ -119,8 +116,7 @@ describe("createMessageController", () => {
 
     it("skips fetch when channel is already loaded", async () => {
       mockIsChannelLoaded.mockReturnValue(true);
-      const api = makeApi();
-      const ctrl = createMessageController({ api, showError });
+      const { api, ctrl } = makeController();
 
       await ctrl.loadMessages(42, makeAbort().signal);
 
@@ -131,13 +127,12 @@ describe("createMessageController", () => {
 
     it("does not store messages after abort", async () => {
       const { signal, abort } = makeAbort();
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockImplementation(async () => {
           abort();
           return { messages: [{ id: 1 }], has_more: false };
         }),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadMessages(42, signal);
 
@@ -145,10 +140,9 @@ describe("createMessageController", () => {
     });
 
     it("marks the channel load-errored on fetch failure (inline error, not a toast)", async () => {
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockRejectedValue(new Error("network error")),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadMessages(42, makeAbort().signal);
 
@@ -162,10 +156,9 @@ describe("createMessageController", () => {
       // history loads; the inline region won't render then, so the failure
       // must surface as a toast instead of silently.
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "live row" }]);
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockRejectedValue(new Error("network error")),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadMessages(42, makeAbort().signal);
 
@@ -176,10 +169,9 @@ describe("createMessageController", () => {
     it("does not mark an error when aborted before failure", async () => {
       const { signal, abort } = makeAbort();
       abort();
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockRejectedValue(new Error("aborted")),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadMessages(42, signal);
 
@@ -192,8 +184,7 @@ describe("createMessageController", () => {
       // time it resolves — simulating MessageJump's setAroundMessages winning
       // the race and installing a window this response must not clobber.
       mockIsChannelLoaded.mockReturnValueOnce(false).mockReturnValueOnce(true);
-      const api = makeApi();
-      const ctrl = createMessageController({ api, showError });
+      const { ctrl } = makeController();
 
       await ctrl.loadMessages(42, makeAbort().signal);
 
@@ -209,10 +200,9 @@ describe("createMessageController", () => {
       // repro where the user already sees a fully-loaded, correct channel.
       mockIsChannelLoaded.mockReturnValueOnce(false).mockReturnValueOnce(true);
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "around window row" }]);
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockRejectedValue(new Error("network error")),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadMessages(42, makeAbort().signal);
 
@@ -233,10 +223,9 @@ describe("createMessageController", () => {
         { id: 0, content: "pending optimistic row" },
       ]);
       const page = [{ id: 21, content: "c" }];
-      const api = makeApi({
+      const { api, ctrl } = makeController({
         getMessages: vi.fn().mockResolvedValue({ messages: page, has_more: true }),
       });
-      const ctrl = createMessageController({ api, showError });
       const { signal } = makeAbort();
 
       await ctrl.loadNewerMessages(42, signal);
@@ -248,10 +237,9 @@ describe("createMessageController", () => {
     it("passes has_more false through so the store can reattach", async () => {
       mockIsWindowDetached.mockReturnValue(true);
       mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
-      const api = makeApi({
+      const { api, ctrl } = makeController({
         getMessages: vi.fn().mockResolvedValue({ messages: [], has_more: false }),
       });
-      const ctrl = createMessageController({ api, showError });
       const { signal } = makeAbort();
 
       await ctrl.loadNewerMessages(42, signal);
@@ -287,10 +275,9 @@ describe("createMessageController", () => {
     it("skips the follow-up when more pages remain", async () => {
       mockIsWindowDetached.mockReturnValue(true);
       mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
-      const api = makeApi({
+      const { api, ctrl } = makeController({
         getMessages: vi.fn().mockResolvedValue({ messages: [{ id: 21 }], has_more: true }),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadNewerMessages(42, makeAbort().signal);
 
@@ -299,8 +286,7 @@ describe("createMessageController", () => {
     });
 
     it("does nothing for an attached window or an empty one", async () => {
-      const api = makeApi();
-      const ctrl = createMessageController({ api, showError });
+      const { api, ctrl } = makeController();
 
       mockIsWindowDetached.mockReturnValue(false);
       mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
@@ -319,10 +305,9 @@ describe("createMessageController", () => {
       mockGetChannelMessages
         .mockReturnValueOnce([{ id: 20 }])
         .mockReturnValueOnce([{ id: 880 }, { id: 900 }]);
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockResolvedValue({ messages: [{ id: 21 }], has_more: true }),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadNewerMessages(42, makeAbort().signal);
 
@@ -332,10 +317,9 @@ describe("createMessageController", () => {
     it("drops the page when the window reattached while the fetch was in flight", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
       mockIsWindowDetached.mockReturnValueOnce(true).mockReturnValueOnce(false);
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockResolvedValue({ messages: [{ id: 21 }], has_more: false }),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadNewerMessages(42, makeAbort().signal);
 
@@ -346,13 +330,12 @@ describe("createMessageController", () => {
       mockIsWindowDetached.mockReturnValue(true);
       mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
       const { signal, abort } = makeAbort();
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockImplementation(async () => {
           abort();
           return { messages: [{ id: 21 }], has_more: true };
         }),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadNewerMessages(42, signal);
 
@@ -362,8 +345,9 @@ describe("createMessageController", () => {
     it("shows an error on failure, but not when aborted", async () => {
       mockIsWindowDetached.mockReturnValue(true);
       mockGetChannelMessages.mockReturnValue([{ id: 20 }]);
-      const api = makeApi({ getMessages: vi.fn().mockRejectedValue(new Error("fail")) });
-      const ctrl = createMessageController({ api, showError });
+      const { ctrl } = makeController({
+        getMessages: vi.fn().mockRejectedValue(new Error("fail")),
+      });
 
       await ctrl.loadNewerMessages(42, makeAbort().signal);
       expect(showError).toHaveBeenCalledWith("Failed to load newer messages");
@@ -382,13 +366,12 @@ describe("createMessageController", () => {
         { id: 10, content: "oldest" },
         { id: 20, content: "newest" },
       ]);
-      const api = makeApi({
+      const { api, ctrl } = makeController({
         getMessages: vi.fn().mockResolvedValue({
           messages: [{ id: 5, content: "older" }],
           has_more: true,
         }),
       });
-      const ctrl = createMessageController({ api, showError });
       const { signal } = makeAbort();
 
       await ctrl.loadOlderMessages(42, signal);
@@ -399,8 +382,7 @@ describe("createMessageController", () => {
 
     it("does nothing when channel has no messages", async () => {
       mockGetChannelMessages.mockReturnValue([]);
-      const api = makeApi();
-      const ctrl = createMessageController({ api, showError });
+      const { api, ctrl } = makeController();
 
       await ctrl.loadOlderMessages(42, makeAbort().signal);
 
@@ -409,10 +391,9 @@ describe("createMessageController", () => {
 
     it("flags the channel's older page as failed on fetch failure, without a toast", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockRejectedValue(new Error("fail")),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadOlderMessages(42, makeAbort().signal);
 
@@ -422,8 +403,7 @@ describe("createMessageController", () => {
 
     it("clears the failed flag when a later older page succeeds (a Retry)", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
-      const api = makeApi();
-      const ctrl = createMessageController({ api, showError });
+      const { ctrl } = makeController();
 
       await ctrl.loadOlderMessages(42, makeAbort().signal);
 
@@ -435,8 +415,9 @@ describe("createMessageController", () => {
       mockGetChannelMessages.mockReturnValueOnce([{ id: 10 }]);
       // The jump swaps in an around-window whose oldest row differs.
       mockGetChannelMessages.mockReturnValue([{ id: 500 }]);
-      const api = makeApi({ getMessages: vi.fn().mockRejectedValue(new Error("fail")) });
-      const ctrl = createMessageController({ api, showError });
+      const { ctrl } = makeController({
+        getMessages: vi.fn().mockRejectedValue(new Error("fail")),
+      });
 
       await ctrl.loadOlderMessages(42, makeAbort().signal);
 
@@ -447,8 +428,9 @@ describe("createMessageController", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
       const { signal, abort } = makeAbort();
       abort();
-      const api = makeApi({ getMessages: vi.fn().mockRejectedValue(new Error("aborted")) });
-      const ctrl = createMessageController({ api, showError });
+      const { ctrl } = makeController({
+        getMessages: vi.fn().mockRejectedValue(new Error("aborted")),
+      });
 
       await ctrl.loadOlderMessages(42, signal);
 
@@ -468,10 +450,9 @@ describe("createMessageController", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
       const { signal, abort } = makeAbort();
       abort();
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockRejectedValue(new Error("aborted")),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadOlderMessages(42, signal);
 
@@ -481,13 +462,12 @@ describe("createMessageController", () => {
     it("does not prepend after abort", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 1 }]);
       const { signal, abort } = makeAbort();
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockImplementation(async () => {
           abort();
           return { messages: [{ id: 0 }], has_more: false };
         }),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadOlderMessages(42, signal);
 
@@ -508,13 +488,12 @@ describe("createMessageController", () => {
           { id: 77, content: "replaced" },
           { id: 78, content: "replaced2" },
         ]);
-      const api = makeApi({
+      const { ctrl } = makeController({
         getMessages: vi.fn().mockResolvedValue({
           messages: [{ id: 5, content: "older" }],
           has_more: true,
         }),
       });
-      const ctrl = createMessageController({ api, showError });
 
       await ctrl.loadOlderMessages(42, makeAbort().signal);
 

@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as codecMocks from "../helpers/voiceCodecTabMocks";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const supportsH265 = vi.hoisted(() => vi.fn(() => true));
@@ -23,70 +23,31 @@ function stubGpu(renderer: string): void {
   );
 }
 
-vi.mock("../../src/features/voice/native/platform", () => ({
-  isLinuxDesktop: () => isLinuxDesktop(),
-  isWindowsDesktop: () => false,
-  isAndroidApp: () => false,
-}));
+vi.mock("../../src/features/voice/native/platform", () =>
+  codecMocks.nativePlatformMock(() => isLinuxDesktop()),
+);
 vi.mock("../../src/features/voice/native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: true, vp9: false, decode: [] }),
 }));
-// The Linux case waits for the codec probe, so the tab outlives the build:
-// keep the native device lists and hot-plug watch off the real desktop host.
-vi.mock("../../src/features/voice/native/devices", () => ({
-  nativeAudioDevices: async () => null,
-  nativeCameraDevices: async () => null,
-  nativeCameraSupport: async () => null,
-  onNativeDevicesChanged: () => null,
-}));
-// The Linux tab starts the meter's capture-only monitor on the host; a call
-// holding the capture stands in for it here.
-vi.mock("../../src/platform/desktop", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../../src/platform/desktop")>();
-  return {
-    ...original,
-    desktop: {
-      ...original.desktop,
-      nativeVoice: {
-        ...original.desktop.nativeVoice,
-        onMicTestEvent: () => () => {},
-        startMicTest: async () => {
-          throw new Error("mic test unavailable during a call");
-        },
-      },
-    },
-  };
-});
+vi.mock("../../src/features/voice/native/devices", () => codecMocks.nativeDevicesMock());
+vi.mock("../../src/platform/desktop", (importOriginal) =>
+  codecMocks.desktopMicTestBusyMock(importOriginal),
+);
 vi.mock("livekit-client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("livekit-client")>()),
   supportsVP9: () => false,
   supportsH265: () => supportsH265(),
 }));
-vi.mock("../../src/platform/desktop/pushToTalk", () => ({
-  pushToTalk: {
-    supported: async () => true,
-    captureKeyPress: async () => 0,
-    stop: async () => {},
-    updateKey: async () => {},
-  },
-}));
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    reapplyAudioProcessing: vi.fn(),
-  }),
-);
+vi.mock("../../src/platform/desktop/pushToTalk", () => codecMocks.inertPushToTalkMock());
+vi.mock("@lib/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
 
-import { createVoiceAudioTab } from "../../src/features/settings/VoiceAudioTab";
 import { installFakeAudio } from "../helpers/fakeAudioContext";
-
-function codecOptions(): string[] {
-  const ac = new AbortController();
-  const el = createVoiceAudioTab(ac.signal).build();
-  const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement | null;
-  const values = select === null ? [] : [...select.options].map((o) => o.value);
-  ac.abort();
-  return values;
-}
+import {
+  buildTab,
+  codecOptions,
+  expectCodecsEventually,
+  shownCodecFor,
+} from "../helpers/voiceCodecTab";
 
 beforeEach(() => {
   localStorage.clear();
@@ -94,14 +55,7 @@ beforeEach(() => {
   supportsH265.mockReturnValue(true);
   stubGpu(NVIDIA);
   installFakeAudio({ worklets: true });
-  vi.stubGlobal("navigator", {
-    mediaDevices: {
-      enumerateDevices: vi.fn().mockResolvedValue([]),
-      getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [], getAudioTracks: () => [] }),
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    },
-  });
+  codecMocks.stubEmptyMediaDevices();
 });
 
 afterEach(() => {
@@ -126,31 +80,19 @@ describe("VoiceAudioTab H.265 entry", () => {
 
   it("never offers H.265 on Linux", async () => {
     isLinuxDesktop.mockReturnValue(true);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    await vi.waitFor(() => {
-      const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
-      expect([...select.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
-    });
-    ac.abort();
+    await expectCodecsEventually(["vp8", "h264", "auto"]);
   });
 
   it("shows a saved H.265 that is no longer offered as VP8", () => {
     supportsH265.mockReturnValue(false);
-    localStorage.setItem("owncord:settings:videoCodec", '"h265"');
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    const select = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
-    expect(select.value).toBe("vp8");
-    ac.abort();
+    expect(shownCodecFor("h265")).toBe("vp8");
   });
 });
 
 describe("VoiceAudioTab screen share fps note", () => {
   it("tells Linux users that Wayland caps a share at 60 fps", () => {
     isLinuxDesktop.mockReturnValue(true);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
+    const { ac, el } = buildTab();
     expect(el.querySelector("[data-testid='screen-fps-wayland-note']")?.textContent).toBe(
       "On a Wayland desktop, screen sharing is limited to 60 FPS.",
     );
@@ -158,8 +100,7 @@ describe("VoiceAudioTab screen share fps note", () => {
   });
 
   it("has no Wayland note off Linux", () => {
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
+    const { ac, el } = buildTab();
     expect(el.querySelector("[data-testid='screen-fps-wayland-note']")).toBeNull();
     ac.abort();
   });

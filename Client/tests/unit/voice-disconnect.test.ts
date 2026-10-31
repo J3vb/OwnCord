@@ -5,13 +5,14 @@
  * - beforeunload sends voice_leave when in voice channel
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as voiceWidget from "../helpers/voiceWidgetHarness";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
-import { uiStore } from "../../src/stores/ui.store";
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { resetMembersState } from "../helpers/storeResets";
 import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
+import { resetUiState } from "../helpers/dmHarness";
 
 // clearAuth (used below to test the real logoutWasInVoice ordering fix)
 // lazily imports livekitSession when a voice session is active — mock it so
@@ -19,39 +20,11 @@ import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
 vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 function resetStores(): void {
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
+  voiceWidget.resetVoiceState();
   resetAuthState();
   resetChannelsState();
   resetMembersState();
-  uiStore.setState(() => ({
-    sidebarCollapsed: false,
-    memberListVisible: true,
-    settingsOpen: false,
-    activeModal: null,
-    theme: "dark" as const,
-    connectionStatus: "disconnected" as const,
-    connectionDialFailed: false,
-    transientError: null,
-    sessionReplaced: false,
-    persistentError: null,
-    updateRequiredHost: null,
-    collapsedCategories: new Set<string>(),
-    sidebarMode: "channels" as const,
-    activeDmUserId: null,
-    activeView: null,
-    settingsTab: null,
-  }));
+  resetUiState();
 }
 
 describe("Voice disconnect — VoiceWidget", () => {

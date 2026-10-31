@@ -95,6 +95,44 @@ function makeEntry(overrides: Record<string, unknown> = {}) {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+/** Makes the next file write stay pending until the returned function is called. */
+function holdNextWrite(): () => void {
+  let release: () => void = () => {};
+  mockWriteTextFile.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  return () => release();
+}
+
+/** Asserts clearPendingPersistedLogs stays pending until `release` lets the held write finish. */
+async function expectClearWaitsFor(
+  clearPendingPersistedLogs: () => Promise<void>,
+  release: () => void,
+): Promise<void> {
+  let settled = false;
+  const clearPromise = clearPendingPersistedLogs().then(() => {
+    settled = true;
+  });
+
+  await Promise.resolve();
+  expect(settled).toBe(false);
+
+  release();
+  await clearPromise;
+  expect(settled).toBe(true);
+}
+
+/** Directory entries for the daily log files 2025-06-<from> through 2025-06-<to>. */
+function jsonlDays(from: number, to: number): Array<{ name: string; isDirectory: boolean }> {
+  return Array.from({ length: to - from + 1 }, (_, i) => ({
+    name: `2025-06-${String(from + i).padStart(2, "0")}.jsonl`,
+    isDirectory: false,
+  }));
+}
+
 describe("log persistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -510,15 +548,7 @@ describe("log persistence", () => {
       vi.setSystemTime(new Date("2025-06-16T08:00:00.000Z"));
 
       // Simulate enough old files to trigger rotation
-      mockReadDir.mockResolvedValueOnce([
-        { name: "2025-06-10.jsonl", isDirectory: false },
-        { name: "2025-06-11.jsonl", isDirectory: false },
-        { name: "2025-06-12.jsonl", isDirectory: false },
-        { name: "2025-06-13.jsonl", isDirectory: false },
-        { name: "2025-06-14.jsonl", isDirectory: false },
-        { name: "2025-06-15.jsonl", isDirectory: false },
-        { name: "2025-06-16.jsonl", isDirectory: false },
-      ]);
+      mockReadDir.mockResolvedValueOnce([...jsonlDays(10, 16)]);
 
       getListener()!(makeEntry({ message: "next-day" }));
       await vi.advanceTimersByTimeAsync(2000);
@@ -606,14 +636,7 @@ describe("log persistence", () => {
     // app) never rotated at all — client-logs/ grew one file per day
     // forever. Rotation must happen at startup too.
     it("rotates old files at startup, even in a session that never crosses midnight", async () => {
-      mockReadDir.mockResolvedValueOnce([
-        { name: "2025-06-10.jsonl", isDirectory: false },
-        { name: "2025-06-11.jsonl", isDirectory: false },
-        { name: "2025-06-12.jsonl", isDirectory: false },
-        { name: "2025-06-13.jsonl", isDirectory: false },
-        { name: "2025-06-14.jsonl", isDirectory: false },
-        { name: "2025-06-15.jsonl", isDirectory: false },
-      ]);
+      mockReadDir.mockResolvedValueOnce([...jsonlDays(10, 15)]);
 
       const { initLogPersistence } = await freshImport();
       captureListener();
@@ -637,12 +660,7 @@ describe("log persistence", () => {
       vi.setSystemTime(new Date("2025-06-16T08:00:00.000Z"));
 
       mockReadDir.mockResolvedValueOnce([
-        { name: "2025-06-10.jsonl", isDirectory: false },
-        { name: "2025-06-11.jsonl", isDirectory: false },
-        { name: "2025-06-12.jsonl", isDirectory: false },
-        { name: "2025-06-13.jsonl", isDirectory: false },
-        { name: "2025-06-14.jsonl", isDirectory: false },
-        { name: "2025-06-15.jsonl", isDirectory: false },
+        ...jsonlDays(10, 15),
         // These should be ignored:
         { name: "some-dir", isDirectory: true },
         { name: "notes.txt", isDirectory: false },
@@ -714,29 +732,13 @@ describe("log persistence", () => {
       // waiting on it. Force a second, slow flush and confirm it's the one
       // actually awaited — proving activeFlush was cleared after the first
       // flush and re-armed for the second.
-      let resolveSecondWrite: (() => void) | null = null;
-      mockWriteTextFile.mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveSecondWrite = resolve;
-          }),
-      );
+      const resolveSecondWrite = holdNextWrite();
 
       getListener()!(makeEntry({ message: "second" }));
       await vi.advanceTimersByTimeAsync(2000);
       expect(mockWriteTextFile).toHaveBeenCalledTimes(2);
 
-      let settled = false;
-      const clearPromise = clearPendingPersistedLogs().then(() => {
-        settled = true;
-      });
-
-      await Promise.resolve();
-      expect(settled).toBe(false);
-
-      resolveSecondWrite!();
-      await clearPromise;
-      expect(settled).toBe(true);
+      await expectClearWaitsFor(clearPendingPersistedLogs, resolveSecondWrite);
     });
 
     it("clears activeFlush after failed flush", async () => {
@@ -754,28 +756,12 @@ describe("log persistence", () => {
 
       // Same proof as the success case: a fresh in-flight flush must be
       // tracked (not swallowed by a stale reference to the failed one).
-      let resolveSecondWrite: (() => void) | null = null;
-      mockWriteTextFile.mockImplementationOnce(
-        () =>
-          new Promise<void>((resolve) => {
-            resolveSecondWrite = resolve;
-          }),
-      );
+      const resolveSecondWrite = holdNextWrite();
 
       getListener()!(makeEntry({ message: "second" }));
       await vi.advanceTimersByTimeAsync(2000);
 
-      let settled = false;
-      const clearPromise = clearPendingPersistedLogs().then(() => {
-        settled = true;
-      });
-
-      await Promise.resolve();
-      expect(settled).toBe(false);
-
-      resolveSecondWrite!();
-      await clearPromise;
-      expect(settled).toBe(true);
+      await expectClearWaitsFor(clearPendingPersistedLogs, resolveSecondWrite);
     });
   });
 
@@ -784,7 +770,7 @@ describe("log persistence", () => {
   // -----------------------------------------------------------------------
   describe("edge cases", () => {
     it("entries are not buffered after cleanup is called", async () => {
-      const { getListener } = captureListener();
+      captureListener();
       const { initLogPersistence } = await freshImport();
       const cleanup = await initLogPersistence();
 

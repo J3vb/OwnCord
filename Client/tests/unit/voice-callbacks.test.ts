@@ -126,6 +126,18 @@ function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub
   };
 }
 
+/** Widget callbacks over a fresh socket; `state` replaces the voice store snapshot when given. */
+function widgetWith(state?: VoiceStateStub, limiters = makeLimiters()) {
+  if (state !== undefined) mockVoiceStoreGetState.mockReturnValue(state);
+  const ws = makeWs();
+  return { ws, cbs: createVoiceWidgetCallbacks(ws, limiters) };
+}
+
+function sidebarCallbacks() {
+  const ws = makeWs();
+  return { ws, cbs: createSidebarVoiceCallbacks(ws) };
+}
+
 // ---------------------------------------------------------------------------
 // Voice Widget Callbacks
 // ---------------------------------------------------------------------------
@@ -139,8 +151,7 @@ describe("createVoiceWidgetCallbacks", () => {
 
   describe("onDisconnect", () => {
     it("sends voice_leave and cleans up", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith();
 
       cbs.onDisconnect();
 
@@ -150,9 +161,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("does nothing when not in a voice channel", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ currentChannelId: null }));
 
       cbs.onDisconnect();
 
@@ -161,8 +170,7 @@ describe("createVoiceWidgetCallbacks", () => {
 
     it("hangs up locally without sending over a down socket while reconnecting", () => {
       mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith();
 
       cbs.onDisconnect();
 
@@ -174,8 +182,7 @@ describe("createVoiceWidgetCallbacks", () => {
 
   describe("onMuteToggle", () => {
     it("mutes when unmuted", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith();
 
       cbs.onMuteToggle();
 
@@ -187,9 +194,7 @@ describe("createVoiceWidgetCallbacks", () => {
     // WP 1D-1: outside a call the toggle changes the local (saved) state only;
     // the next join restates it to the server.
     it("mutes and unmutes outside a call without sending anything", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ currentChannelId: null }));
 
       cbs.onMuteToggle();
       expect(mockSetMuted).toHaveBeenLastCalledWith(true);
@@ -218,11 +223,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("unmutes and undeafens when muted+deafened", () => {
-      mockVoiceStoreGetState.mockReturnValue(
-        makeVoiceState({ localMuted: true, localDeafened: true }),
-      );
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ localMuted: true, localDeafened: true }));
 
       cbs.onMuteToggle();
 
@@ -233,8 +234,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("respects rate limiter", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters(false));
+      const { cbs } = widgetWith(undefined, makeLimiters(false));
 
       cbs.onMuteToggle();
 
@@ -246,11 +246,9 @@ describe("createVoiceWidgetCallbacks", () => {
       // moderator-imposed deafen is not ours to lift, so unmuting must not
       // spend a doomed voice_deafen round-trip that the server will refuse
       // with SERVER_DEAFENED.
-      mockVoiceStoreGetState.mockReturnValue(
+      const { ws, cbs } = widgetWith(
         makeVoiceState({ localMuted: true, localDeafened: true, localServerDeafened: true }),
       );
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
 
       cbs.onMuteToggle();
 
@@ -265,9 +263,7 @@ describe("createVoiceWidgetCallbacks", () => {
     // Rewritten: PTT no longer owns a mute, so a toggle with the key up is an
     // ordinary mute/unmute of the user's own state.
     it("mutes outright when clicked with the push-to-talk key up and the user unmuted", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ localMuted: false, pttGated: true }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ localMuted: false, pttGated: true }));
 
       cbs.onMuteToggle();
 
@@ -277,9 +273,7 @@ describe("createVoiceWidgetCallbacks", () => {
 
     it("unmutes the user's own mute directly while the push-to-talk key is up", () => {
       // The gate inside the mic processor keeps the mic closed until a press.
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ localMuted: true, pttGated: true }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ localMuted: true, pttGated: true }));
 
       cbs.onMuteToggle();
 
@@ -295,8 +289,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("mutes locally and sends nothing", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith();
 
       cbs.onMuteToggle();
 
@@ -305,11 +298,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("unmutes and undeafens locally and sends nothing", () => {
-      mockVoiceStoreGetState.mockReturnValue(
-        makeVoiceState({ localMuted: true, localDeafened: true }),
-      );
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ localMuted: true, localDeafened: true }));
 
       cbs.onMuteToggle();
 
@@ -319,8 +308,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("deafens locally and sends nothing", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith();
 
       cbs.onDeafenToggle();
 
@@ -332,8 +320,7 @@ describe("createVoiceWidgetCallbacks", () => {
 
   describe("onDeafenToggle", () => {
     it("deafens and mutes when undeafened", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { cbs } = widgetWith();
 
       cbs.onDeafenToggle();
 
@@ -343,9 +330,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("deafens outside a call without sending anything", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: null }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ currentChannelId: null }));
 
       cbs.onDeafenToggle();
 
@@ -357,11 +342,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("undeafens and unmutes when deafened", () => {
-      mockVoiceStoreGetState.mockReturnValue(
-        makeVoiceState({ localDeafened: true, localMuted: true }),
-      );
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { cbs } = widgetWith(makeVoiceState({ localDeafened: true, localMuted: true }));
 
       cbs.onDeafenToggle();
 
@@ -370,9 +351,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("deafen then undeafen after a prior mute stays muted", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ localMuted: true }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ localMuted: true }));
 
       cbs.onDeafenToggle();
       expect(mockSetMutedBeforeDeafen).toHaveBeenLastCalledWith(true);
@@ -390,8 +369,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("records that the user was not muted when deafening", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { cbs } = widgetWith();
 
       cbs.onDeafenToggle();
 
@@ -410,9 +388,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("does not double-mute when already muted", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ localMuted: true }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { ws, cbs } = widgetWith(makeVoiceState({ localMuted: true }));
 
       cbs.onDeafenToggle();
 
@@ -427,11 +403,9 @@ describe("createVoiceWidgetCallbacks", () => {
       // Mirrors onMuteToggle's localServerMuted guard: a moderator-imposed
       // mute is not ours to lift, so undeafening must not spend a doomed
       // voice_mute round-trip that the server will refuse with SERVER_MUTED.
-      mockVoiceStoreGetState.mockReturnValue(
+      const { ws, cbs } = widgetWith(
         makeVoiceState({ localDeafened: true, localMuted: true, localServerMuted: true }),
       );
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
 
       cbs.onDeafenToggle();
 
@@ -444,11 +418,9 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("undeafen while the push-to-talk key is up unmutes directly (the gate keeps the mic closed)", () => {
-      mockVoiceStoreGetState.mockReturnValue(
+      const { ws, cbs } = widgetWith(
         makeVoiceState({ localDeafened: true, localMuted: true, pttGated: true }),
       );
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
 
       cbs.onDeafenToggle();
 
@@ -460,8 +432,7 @@ describe("createVoiceWidgetCallbacks", () => {
 
   describe("onCameraToggle", () => {
     it("enables camera when off", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { cbs } = widgetWith();
 
       cbs.onCameraToggle();
 
@@ -469,9 +440,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("disables camera when on", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ localCamera: true }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { cbs } = widgetWith(makeVoiceState({ localCamera: true }));
 
       cbs.onCameraToggle();
 
@@ -479,8 +448,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("respects video rate limiter", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters(true, false));
+      const { cbs } = widgetWith(undefined, makeLimiters(true, false));
 
       cbs.onCameraToggle();
 
@@ -490,8 +458,7 @@ describe("createVoiceWidgetCallbacks", () => {
 
   describe("onScreenshareToggle", () => {
     it("enables screenshare when off", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { cbs } = widgetWith();
 
       cbs.onScreenshareToggle();
 
@@ -500,9 +467,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("disables screenshare when on", () => {
-      mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ localScreenshare: true }));
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters());
+      const { cbs } = widgetWith(makeVoiceState({ localScreenshare: true }));
 
       cbs.onScreenshareToggle();
 
@@ -511,8 +476,7 @@ describe("createVoiceWidgetCallbacks", () => {
     });
 
     it("respects video rate limiter", () => {
-      const ws = makeWs();
-      const cbs = createVoiceWidgetCallbacks(ws, makeLimiters(true, false));
+      const { cbs } = widgetWith(undefined, makeLimiters(true, false));
 
       cbs.onScreenshareToggle();
 
@@ -535,8 +499,7 @@ describe("createSidebarVoiceCallbacks", () => {
   });
 
   it("onVoiceJoin sends voice_join and updates store", () => {
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
 
     cbs.onVoiceJoin(42);
 
@@ -564,8 +527,7 @@ describe("createSidebarVoiceCallbacks", () => {
     // same-channel re-join with ALREADY_JOINED, which the dispatcher's
     // catch-all turns into a user-facing error toast.
     mockVoiceStoreGetState.mockReturnValue(makeVoiceState({ currentChannelId: 42 }));
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
 
     cbs.onVoiceJoin(42);
 
@@ -574,8 +536,7 @@ describe("createSidebarVoiceCallbacks", () => {
   });
 
   it("onVoiceLeave sends voice_leave and cleans up", () => {
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
 
     cbs.onVoiceLeave();
 
@@ -588,8 +549,7 @@ describe("createSidebarVoiceCallbacks", () => {
     // A join that keeps failing must never cycle voice_join/voice_leave
     // several times a second, however fast the row is clicked.
     noteJoinFailed();
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
 
     cbs.onVoiceJoin(42);
 
@@ -601,8 +561,7 @@ describe("createSidebarVoiceCallbacks", () => {
   it("a switch away from a join still in flight backs off the next one", () => {
     // Alternating channels while a join is joining/securing would otherwise
     // cycle pre-SFU voice_join/voice_leave pairs at the server's join limit.
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 10, voiceStatus: "securing" }),
     );
@@ -625,8 +584,7 @@ describe("createSidebarVoiceCallbacks", () => {
   });
 
   it("a switch from a connected call is not backed off", () => {
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
     mockVoiceStoreGetState.mockReturnValue(
       makeVoiceState({ currentChannelId: 10, voiceStatus: "connected" }),
     );
@@ -640,8 +598,7 @@ describe("createSidebarVoiceCallbacks", () => {
 
   it("onVoiceJoin does not send over a down socket", () => {
     mockUiGetState.mockReturnValue({ connectionStatus: "disconnected" });
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
 
     cbs.onVoiceJoin(42);
 
@@ -651,8 +608,7 @@ describe("createSidebarVoiceCallbacks", () => {
 
   it("onVoiceLeave hangs up locally without sending over a down socket", () => {
     mockUiGetState.mockReturnValue({ connectionStatus: "reconnecting" });
-    const ws = makeWs();
-    const cbs = createSidebarVoiceCallbacks(ws);
+    const { ws, cbs } = sidebarCallbacks();
 
     cbs.onVoiceLeave();
 

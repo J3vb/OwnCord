@@ -8,7 +8,12 @@ import {
   FakeAudioWorkletNode,
   installFakeAudio,
 } from "../../helpers/fakeAudioContext";
-import { fakeAudioStream, stubNavigator, useTabEnv } from "../../helpers/voiceAudioTabHarness";
+import {
+  fakeAudioStream,
+  stubNavigator,
+  useTabEnv,
+  stubCameraNavigator,
+} from "../../helpers/voiceAudioTabHarness";
 import { mountTab } from "../../helpers/voiceAudioTabMount";
 
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
@@ -196,21 +201,7 @@ describe("VoiceAudioTab UI structure", () => {
   it("starts camera preview when a video device is saved", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
     const cameraStream = fakeAudioStream();
-    const audioStream = fakeAudioStream();
-
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi
-          .fn()
-          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.resolve(cameraStream);
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
-    });
+    stubCameraNavigator({ camera: () => Promise.resolve(cameraStream) });
 
     const { ac, el } = mountTab();
 
@@ -223,21 +214,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("video select change starts camera preview", async () => {
     const cameraStream = fakeAudioStream();
-    const audioStream = fakeAudioStream();
-
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi
-          .fn()
-          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.resolve(cameraStream);
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
-    });
+    stubCameraNavigator({ camera: () => Promise.resolve(cameraStream) });
 
     const { ac, el } = mountTab();
 
@@ -311,21 +288,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("camera preview shows error when getUserMedia fails", async () => {
     localStorage.setItem("owncord:settings:videoInputDevice", '"cam-1"');
-    const audioStream = fakeAudioStream();
-
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi
-          .fn()
-          .mockResolvedValue([{ kind: "videoinput", deviceId: "cam-1", label: "Camera 1" }]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.reject(new Error("Camera access denied"));
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
-    });
+    stubCameraNavigator({ camera: () => Promise.reject(new Error("Camera access denied")) });
 
     const { ac, el } = mountTab();
 
@@ -339,18 +302,9 @@ describe("VoiceAudioTab UI structure", () => {
   it("camera preview falls back to Camera unavailable when the error has no message", async () => {
     // An unplugged saved camera rejects with OverconstrainedError, whose message is "".
     localStorage.setItem("owncord:settings:videoInputDevice", '"gone-camera-id"');
-    const audioStream = fakeAudioStream();
-
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi.fn().mockResolvedValue([]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return Promise.reject(Object.assign(new Error(""), { name: "OverconstrainedError" }));
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
+    stubCameraNavigator({
+      devices: [],
+      camera: () => Promise.reject(Object.assign(new Error(""), { name: "OverconstrainedError" })),
     });
 
     const { ac, el } = mountTab();

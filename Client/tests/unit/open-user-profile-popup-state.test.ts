@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as profileMocks from "../helpers/profilePopupMocks";
 
 const { createPopupMock } = vi.hoisted(() => ({
   createPopupMock: vi.fn((_opts: unknown) => ({
@@ -11,18 +12,9 @@ vi.mock("@components/UserProfilePopup", () => ({ createUserProfilePopup: createP
 
 // Wraps the real binding so a test can see which card flushed its note.
 const { bindings } = vi.hoisted(() => ({ bindings: [] as { destroy: () => void }[] }));
-vi.mock("../../src/features/profiles/userNotes", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../src/features/profiles/userNotes")>();
-  return {
-    ...actual,
-    createNoteBinding: (...args: Parameters<typeof actual.createNoteBinding>) => {
-      const binding = actual.createNoteBinding(...args);
-      vi.spyOn(binding, "destroy");
-      bindings.push(binding);
-      return binding;
-    },
-  };
-});
+vi.mock("../../src/features/profiles/userNotes", (importOriginal) =>
+  profileMocks.noteBindingSpyMock(importOriginal, bindings),
+);
 
 import {
   closeUserProfilePopup,
@@ -63,7 +55,7 @@ describe("openUserProfilePopup availability and block", () => {
   beforeEach(() => {
     resetBlocksStore();
     setConnectionStatus("connected");
-    authStore.setState((p) => ({ ...p, user: { ...(p.user as object), id: 1 } as never }));
+    signInUserOne();
     membersStore.setState((p) => ({
       ...p,
       members: new Map([
@@ -133,6 +125,8 @@ const flushStores = (): void => {
   channelsStore.flush();
 };
 
+import { signInUserOne, useOfflineNotesContext } from "../helpers/profilePopupFixtures";
+
 const popups = (): Props[] => createPopupMock.mock.calls.map((c) => c[0] as Props);
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -169,7 +163,7 @@ describe("openUserProfilePopup card contents and lifetime", () => {
     bindings.length = 0;
     resetBlocksStore();
     setConnectionStatus("connected");
-    authStore.setState((p) => ({ ...p, user: { ...(p.user as object), id: 1 } as never }));
+    signInUserOne();
     setMembers7();
   });
 
@@ -249,11 +243,7 @@ describe("openUserProfilePopup card contents and lifetime", () => {
         [1, { id: 1, username: "me", avatar: null, role: "member", status: "online" } as never],
       ]),
     }));
-    setNotesContextSource(() => ({
-      api: null,
-      host: "h",
-      sessionSignal: new AbortController().signal,
-    }));
+    useOfflineNotesContext();
     const props = await openFull({
       userId: 1,
       callbacks: { onMessage: vi.fn(), onCall: vi.fn(), onReport: vi.fn() },
@@ -286,11 +276,7 @@ describe("openUserProfilePopup card contents and lifetime", () => {
   });
 
   it("drops a card whose owner went away while it was loading, flushing its note", async () => {
-    setNotesContextSource(() => ({
-      api: null,
-      host: "h",
-      sessionSignal: new AbortController().signal,
-    }));
+    useOfflineNotesContext();
     const owner = new AbortController();
     openUserProfilePopup({ userId: 7, anchorX: 1, anchorY: 1, signal: owner.signal });
     owner.abort();
@@ -301,11 +287,7 @@ describe("openUserProfilePopup card contents and lifetime", () => {
   });
 
   it("gives the card its note and flushes it when the card says so", async () => {
-    setNotesContextSource(() => ({
-      api: null,
-      host: "h",
-      sessionSignal: new AbortController().signal,
-    }));
+    useOfflineNotesContext();
     const props = await openFull();
     expect(props.note).toBe(bindings[0]);
     expect(props.onNoteFlush).toBeTypeOf("function");

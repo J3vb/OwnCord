@@ -102,17 +102,8 @@ const HEALTHY = { version: null, online_users: null };
 const mockGetHealth = vi.fn();
 const mockApiLogout = vi.fn().mockResolvedValue(undefined);
 // UpdateNotifier (mounted on the connect page after a protocol-epoch refusal)
-// calls checkForUpdate; stub the Tauri-backed updater so the test observes the
-// call instead of an invoke() into nothing.
-const mockCheckForUpdate = vi.fn();
-vi.mock("@lib/net/updater", () => ({
-  checkForUpdate: (...args: unknown[]) => mockCheckForUpdate(...args),
-  downloadAndInstallUpdate: vi.fn(),
-  subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
-    listener({ status: "idle" });
-    return vi.fn();
-  }),
-}));
+// calls checkForUpdate; stub the Tauri-backed updater instead of an invoke() into nothing.
+vi.mock("@lib/net/updater", () => mainMocks.netUpdaterMock());
 const mockApiState = { host: "" };
 const apiRef = vi.hoisted(() => ({ client: null as { endSession(): void } | null }));
 vi.mock("@lib/api", async (importOriginal) => {
@@ -171,14 +162,8 @@ vi.mock("@pages/ConnectPage", () => ({
   }),
 }));
 
-// MainPage.ts pulls in the whole chat/voice UI stack. OC-0028 needs a real
-// "main" -> "connect" round trip through the router (the router only navigates
-// away from "connect" via the connected overlay's onReady -> router.navigate
-// ("main") callback), but doesn't care what MainPage renders, so stand in
-// with the same lightweight shape the mainPage/ tests' own mocks return.
-vi.mock("@pages/MainPage", () => ({
-  createMainPage: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-}));
+// MainPage.ts pulls in the whole chat/voice UI stack; the router round trip does not need it.
+vi.mock("@pages/MainPage", () => mainMocks.pagesMainPageMock());
 
 // dispatcher.ts pulls in nearly every store/service in the app. Stand in
 // with a slim replacement that reproduces the one behavior these tests must

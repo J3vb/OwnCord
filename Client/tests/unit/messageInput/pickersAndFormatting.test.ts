@@ -12,6 +12,7 @@ import {
   mountMessageInput,
   selectFiles,
   useMessageInputContainer,
+  pasteFile,
 } from "../../helpers/messageInputHarness";
 import { useMountContainer } from "../../helpers/mountContainer";
 
@@ -282,27 +283,9 @@ describe("MessageInput", () => {
     }));
     const { comp } = mountMessageInput(container, { onUploadFile });
 
-    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     const file = new File(["bytes"], filename, { type });
 
-    // ClipboardEvent is not available in jsdom, so create a plain Event and
-    // attach clipboardData manually
-    const pasteEvent = new Event("paste", { bubbles: true }) as Event & {
-      clipboardData?: { items: Array<{ kind: string; type: string; getAsFile(): File | null }> };
-    };
-    Object.defineProperty(pasteEvent, "clipboardData", {
-      value: {
-        items: [
-          {
-            kind: "file",
-            type,
-            getAsFile: () => file,
-          },
-        ],
-      },
-    });
-
-    textarea.dispatchEvent(pasteEvent);
+    pasteFile(container, file);
 
     await vi.waitFor(() => {
       expect(onUploadFile).toHaveBeenCalledWith(

@@ -103,6 +103,40 @@ function mountPicker(overrides?: Partial<GifPickerOptions>) {
   return made;
 }
 
+type MountedPicker = ReturnType<typeof mountPicker>["picker"];
+
+/** Trending resolves one GIF titled "" (so labels fall back to "GIF"). */
+function mockUntitledGif(): void {
+  const gifNoTitle: GifResult = {
+    id: "no-title",
+    title: "",
+    url: "https://media.klipy.com/preview/no-title.gif",
+    fullUrl: "https://media.klipy.com/full/no-title.gif",
+  };
+  vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
+}
+
+function expectNoGifsFound(picker: MountedPicker): void {
+  const empty = picker.element.querySelector(".gp-empty");
+  expect(empty).not.toBeNull();
+  expect(empty!.textContent).toBe("No GIFs found");
+}
+
+/** First trending page resolves; the second stays pending until the returned function is called. */
+function holdSecondTrendingPage(): (page: GifPage) => void {
+  let resolveMore!: (p: GifPage) => void;
+  vi.mocked(getTrendingGifs)
+    .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
+    .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
+  return (page) => resolveMore(page);
+}
+
+function itemFullUrls(picker: MountedPicker): Array<string | undefined> {
+  return Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
+    (i) => i.dataset.fullUrl,
+  );
+}
+
 async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -330,13 +364,7 @@ describe("GifPicker", () => {
     });
 
     it("img alt falls back to 'GIF' when title is empty", async () => {
-      const gifNoTitle: GifResult = {
-        id: "no-title",
-        title: "",
-        url: "https://media.klipy.com/preview/no-title.gif",
-        fullUrl: "https://media.klipy.com/full/no-title.gif",
-      };
-      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
+      mockUntitledGif();
 
       const { picker } = mountPicker();
 
@@ -480,9 +508,7 @@ describe("GifPicker", () => {
 
       await flush();
 
-      const empty = picker.element.querySelector(".gp-empty");
-      expect(empty).not.toBeNull();
-      expect(empty!.textContent).toBe("No GIFs found");
+      expectNoGifsFound(picker);
       picker.destroy();
     });
 
@@ -501,9 +527,7 @@ describe("GifPicker", () => {
 
       await flush();
 
-      const empty = picker.element.querySelector(".gp-empty");
-      expect(empty).not.toBeNull();
-      expect(empty!.textContent).toBe("No GIFs found");
+      expectNoGifsFound(picker);
       picker.destroy();
     });
 
@@ -745,13 +769,7 @@ describe("GifPicker", () => {
     });
 
     it("aria-label falls back to 'GIF' when the title is empty", async () => {
-      const gifNoTitle: GifResult = {
-        id: "no-title",
-        title: "",
-        url: "https://media.klipy.com/preview/no-title.gif",
-        fullUrl: "https://media.klipy.com/full/no-title.gif",
-      };
-      vi.mocked(getTrendingGifs).mockResolvedValue(lastPage([gifNoTitle]));
+      mockUntitledGif();
 
       const { picker } = mountPicker();
 
@@ -970,10 +988,7 @@ describe("GifPicker", () => {
     });
 
     it("ignores a page that resolves after the query changed", async () => {
-      let resolveMore!: (p: GifPage) => void;
-      vi.mocked(getTrendingGifs)
-        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
-        .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
+      const resolveMore = holdSecondTrendingPage();
       vi.mocked(searchGifs).mockResolvedValue({ gifs: [makeGif("s")], next: "" });
       const { picker } = mountPicker();
       await flush();
@@ -1095,10 +1110,7 @@ describe("GifPicker", () => {
     });
 
     it("leaves the grid alone when the tab changed while a page was in flight", async () => {
-      let resolveMore!: (p: GifPage) => void;
-      vi.mocked(getTrendingGifs)
-        .mockResolvedValueOnce({ gifs: [makeGif("a")], next: "C1" })
-        .mockReturnValueOnce(new Promise<GifPage>((r) => (resolveMore = r)));
+      const resolveMore = holdSecondTrendingPage();
       const { picker } = mountPicker();
       await flush();
       fire();
@@ -1308,10 +1320,7 @@ describe("GifPicker", () => {
         input.dispatchEvent(new Event("input", { bubbles: true }));
         picker.element.querySelectorAll<HTMLButtonElement>(".gp-tab")[1]!.click();
         await vi.advanceTimersByTimeAsync(1000);
-        const urls = Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
-          (i) => i.dataset.fullUrl,
-        );
-        expect(urls).toEqual(favs.map((f) => f.url));
+        expect(itemFullUrls(picker)).toEqual(favs.map((f) => f.url));
         picker.destroy();
       } finally {
         vi.useRealTimers();
@@ -1329,10 +1338,7 @@ describe("GifPicker", () => {
         await settle();
         picker.element.querySelector<HTMLButtonElement>(".gp-consent")!.click();
         await settle();
-        const urls = Array.from(picker.element.querySelectorAll<HTMLElement>(".gp-item")).map(
-          (i) => i.dataset.fullUrl,
-        );
-        expect(urls).toEqual(favs.map((f) => f.url));
+        expect(itemFullUrls(picker)).toEqual(favs.map((f) => f.url));
         const imgs = picker.element.querySelectorAll<HTMLImageElement>(".gp-item .gp-img");
         expect(imgs.length).toBe(favs.length);
         imgs.forEach((img) => expect(img.src).toMatch(/^blob:/));

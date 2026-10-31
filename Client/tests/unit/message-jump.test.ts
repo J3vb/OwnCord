@@ -41,7 +41,7 @@ import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
 import { expectConsole } from "../helpers/console";
-import { buildMessage } from "../helpers/messageFactory";
+import { buildMessage, buildResponse } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { useMountContainer } from "../helpers/mountContainer";
@@ -72,19 +72,7 @@ function makeMessage(overrides: Partial<Message> & { id: number }): Message {
 }
 
 function response(id: number): MessageResponse {
-  return {
-    id,
-    channel_id: 1,
-    user: { id: 1, username: "alice", avatar: null },
-    content: `msg ${id}`,
-    reply_to: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    edited_at: null,
-    deleted: false,
-    timestamp: "2026-01-15T11:00:00Z",
-  };
+  return buildResponse(id, { timestamp: "2026-01-15T11:00:00Z" });
 }
 
 /** A stand-in ChannelController: only what the jumper actually touches. */
@@ -147,12 +135,17 @@ beforeEach(() => {
 
 // ---------------------------------------------------------------------------
 
+/** A jumper over a loaded controller for channel 1 whose around fetch is an untouched spy. */
+function idleJumper() {
+  const { ctrl, scrollToMessage } = fakeCtrl(1);
+  const getMessagesAround = vi.fn();
+  return { jumper: jumperFor(ctrl, getMessagesAround), getMessagesAround, scrollToMessage };
+}
+
 describe("createMessageJumper", () => {
   it("scrolls without fetching when the message is already loaded", async () => {
     setMessages(1, [response(42)], false);
-    const { ctrl, scrollToMessage } = fakeCtrl(1);
-    const getMessagesAround = vi.fn();
-    const jumper = jumperFor(ctrl, getMessagesAround);
+    const { jumper, getMessagesAround, scrollToMessage } = idleJumper();
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(true);
 
@@ -207,9 +200,7 @@ describe("createMessageJumper", () => {
   });
 
   it("refuses a channel this user cannot see, without calling the API", async () => {
-    const { ctrl } = fakeCtrl(1);
-    const getMessagesAround = vi.fn();
-    const jumper = jumperFor(ctrl, getMessagesAround);
+    const { jumper, getMessagesAround } = idleJumper();
 
     await expect(jumper.jumpTo(999, 42)).resolves.toBe(false);
 
@@ -235,9 +226,7 @@ describe("createMessageJumper", () => {
   it("says a message the store knows is deleted is gone, without the around fetch", async () => {
     setMessages(1, [response(41), response(42)], false);
     deleteMessage({ channel_id: 1, message_id: 42 });
-    const { ctrl, scrollToMessage } = fakeCtrl(1);
-    const getMessagesAround = vi.fn();
-    const jumper = jumperFor(ctrl, getMessagesAround);
+    const { jumper, getMessagesAround, scrollToMessage } = idleJumper();
 
     await expect(jumper.jumpTo(1, 42)).resolves.toBe(false);
 
@@ -648,23 +637,6 @@ describe("Jump to Present pill", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList>;
 
-  function baseOptions(overrides: Partial<MessageListOptions> = {}): MessageListOptions {
-    return {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-      ...overrides,
-    } as MessageListOptions;
-  }
-
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -676,7 +648,7 @@ describe("Jump to Present pill", () => {
   });
 
   it("stays hidden while the window is attached to the live tail", () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     const pill = container.querySelector('[data-testid="jump-to-present"]');
@@ -685,7 +657,7 @@ describe("Jump to Present pill", () => {
   });
 
   it("appears when an around-window detaches the channel", async () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     setAroundMessages(1, [response(1), response(2)], true, true);
@@ -698,7 +670,7 @@ describe("Jump to Present pill", () => {
   it("is already visible when mounting into an detached channel", () => {
     setAroundMessages(1, [response(1)], true, true);
 
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     expect(
@@ -707,7 +679,7 @@ describe("Jump to Present pill", () => {
   });
 
   it("hides again once the channel reattaches", async () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
     setAroundMessages(1, [response(1)], true, true);
     await flushStore();
@@ -725,7 +697,7 @@ describe("Jump to Present pill", () => {
 
   it("clicking it asks the controller to reload the tail", async () => {
     const onJumpToPresent = vi.fn();
-    list = createMessageList(baseOptions({ onJumpToPresent }));
+    list = createMessageList(makeListOptions({ onJumpToPresent }));
     list.mount(container);
     setAroundMessages(1, [response(1)], true, true);
     await flushStore();
@@ -736,7 +708,7 @@ describe("Jump to Present pill", () => {
   });
 
   it("tracks only its own channel", async () => {
-    list = createMessageList(baseOptions());
+    list = createMessageList(makeListOptions());
     list.mount(container);
 
     setAroundMessages(2, [response(1)], true, true);

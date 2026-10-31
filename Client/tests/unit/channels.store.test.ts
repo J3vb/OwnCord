@@ -23,8 +23,10 @@ import {
   clearUnread,
   getUnreadOnOpen,
   resetChannelsStore,
+  type Channel,
 } from "../../src/stores/channels.store";
 import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from "../../src/lib/types";
+import { makeChannel } from "../helpers/channelFactory";
 import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStore(): void {
@@ -53,6 +55,32 @@ const readyChannels: ReadyChannel[] = [
   },
 ];
 
+const storedChannel = (overrides: Partial<Channel>) => ({
+  ...makeChannel(),
+  categoryId: 0,
+  categoryPosition: 0,
+  nsfwAcknowledged: false,
+  afk: false,
+  ...overrides,
+});
+
+const expectNoStateChange = (act: () => void): void => {
+  setChannels(readyChannels);
+  const before = channelsStore.getState();
+
+  act();
+
+  expect(channelsStore.getState()).toBe(before);
+};
+
+const denyCanSend = (id: number): void => {
+  channelsStore.setState((prev) => {
+    const next = new Map(prev.channels);
+    next.set(id, { ...prev.channels.get(id)!, canSend: false });
+    return { ...prev, channels: next };
+  });
+};
+
 describe("channels store", () => {
   beforeEach(() => {
     resetStore();
@@ -72,50 +100,28 @@ describe("channels store", () => {
       expect(state.channels.size).toBe(3);
 
       const general = state.channels.get(1);
-      expect(general).toEqual({
-        id: 1,
-        name: "general",
-        type: "text",
-        category: "Text",
-        categoryId: 0,
-        categoryPosition: 0,
-        position: 0,
-        unreadCount: 3,
-        mentionCount: 0,
-        lastMessageId: 100,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        nsfwAcknowledged: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-        afk: false,
-      });
+      expect(general).toEqual(
+        storedChannel({
+          id: 1,
+          name: "general",
+          type: "text",
+          category: "Text",
+          position: 0,
+          unreadCount: 3,
+          lastMessageId: 100,
+        }),
+      );
 
       const voice = state.channels.get(2);
-      expect(voice).toEqual({
-        id: 2,
-        name: "voice-lobby",
-        type: "voice",
-        category: "Voice",
-        categoryId: 0,
-        categoryPosition: 0,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        nsfwAcknowledged: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-        afk: false,
-      });
+      expect(voice).toEqual(
+        storedChannel({
+          id: 2,
+          name: "voice-lobby",
+          type: "voice",
+          category: "Voice",
+          position: 0,
+        }),
+      );
     });
 
     it("defaults unread_count to 0 and last_message_id to null", () => {
@@ -176,27 +182,9 @@ describe("channels store", () => {
       expect(state.channels.size).toBe(4);
 
       const added = state.channels.get(4);
-      expect(added).toEqual({
-        id: 4,
-        name: "new-channel",
-        type: "text",
-        category: "Text",
-        categoryId: 0,
-        categoryPosition: 0,
-        position: 2,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        nsfwAcknowledged: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-        afk: false,
-      });
+      expect(added).toEqual(
+        storedChannel({ id: 4, name: "new-channel", type: "text", category: "Text", position: 2 }),
+      );
     });
 
     it("does not mutate the previous channels map", () => {
@@ -217,11 +205,7 @@ describe("channels store", () => {
       // per-user fields, so a re-add must not reset them.
       setChannels(readyChannels); // channel 1: unreadCount 3, lastMessageId 100
       incrementMention(1);
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, { ...prev.channels.get(1)!, canSend: false });
-        return { ...prev, channels: next };
-      });
+      denyCanSend(1);
 
       addChannel({ id: 1, name: "general-renamed", type: "text", category: "Text", position: 0 });
 
@@ -284,11 +268,7 @@ describe("channels store", () => {
 
     it("re-grants can_send when a permission edit restores posting", () => {
       setChannels(readyChannels);
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, { ...prev.channels.get(1)!, canSend: false });
-        return { ...prev, channels: next };
-      });
+      denyCanSend(1);
 
       addChannel({
         id: 1,
@@ -455,27 +435,16 @@ describe("channels store", () => {
       setActiveChannel(1);
 
       const active = getActiveChannel();
-      expect(active).toEqual({
-        id: 1,
-        name: "general",
-        type: "text",
-        category: "Text",
-        categoryId: 0,
-        categoryPosition: 0,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: 100,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        nsfwAcknowledged: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-        afk: false,
-      });
+      expect(active).toEqual(
+        storedChannel({
+          id: 1,
+          name: "general",
+          type: "text",
+          category: "Text",
+          position: 0,
+          lastMessageId: 100,
+        }),
+      );
     });
 
     it("returns null if activeChannelId refers to a non-existent channel", () => {
@@ -697,12 +666,7 @@ describe("channels store", () => {
     });
 
     it("is a no-op for an unknown channel id", () => {
-      setChannels(readyChannels);
-      const before = channelsStore.getState();
-
-      incrementMention(999);
-
-      expect(channelsStore.getState()).toBe(before);
+      expectNoStateChange(() => incrementMention(999));
     });
 
     it("clears on activation alongside unread", () => {
@@ -759,12 +723,7 @@ describe("channels store", () => {
     });
 
     it("is a no-op for unknown channel id", () => {
-      setChannels(readyChannels);
-      const before = channelsStore.getState();
-
-      incrementUnread(999);
-
-      expect(channelsStore.getState()).toBe(before);
+      expectNoStateChange(() => incrementUnread(999));
     });
   });
 
@@ -820,12 +779,7 @@ describe("channels store", () => {
     });
 
     it("is a no-op for an unknown channel id", () => {
-      setChannels(readyChannels);
-      const before = channelsStore.getState();
-
-      noteChannelMessage(999, 1, false);
-
-      expect(channelsStore.getState()).toBe(before);
+      expectNoStateChange(() => noteChannelMessage(999, 1, false));
     });
   });
 
@@ -864,12 +818,7 @@ describe("channels store", () => {
     });
 
     it("is a no-op for an unknown channel id", () => {
-      setChannels(readyChannels);
-      const before = channelsStore.getState();
-
-      setMentionCount(999, 1);
-
-      expect(channelsStore.getState()).toBe(before);
+      expectNoStateChange(() => setMentionCount(999, 1));
     });
   });
 
@@ -884,12 +833,7 @@ describe("channels store", () => {
     });
 
     it("is a no-op for unknown channel id", () => {
-      setChannels(readyChannels);
-      const before = channelsStore.getState();
-
-      clearUnread(999);
-
-      expect(channelsStore.getState()).toBe(before);
+      expectNoStateChange(() => clearUnread(999));
     });
   });
 
@@ -967,12 +911,7 @@ describe("channels store", () => {
     });
 
     it("is a no-op for unknown channel id", () => {
-      setChannels(readyChannels);
-      const before = channelsStore.getState();
-
-      updateChannelPosition(999, 5);
-
-      expect(channelsStore.getState()).toBe(before);
+      expectNoStateChange(() => updateChannelPosition(999, 5));
     });
 
     it("is a no-op when position is already the same", () => {

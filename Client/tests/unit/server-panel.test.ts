@@ -220,47 +220,46 @@ describe("ServerPanel", () => {
       expect(onServerClick).toHaveBeenCalledWith("localhost:8443", undefined, false, false);
     });
 
-    it("calls onServerClick with host AND username for full profiles", () => {
+    it.each([
+      [
+        "calls onServerClick with host AND username for full profiles",
+        {},
+        "full.example.com:8443",
+        "testuser",
+        false,
+        true,
+      ],
+      [
+        "calls onServerClick with autoConnect true when the profile has it enabled",
+        { autoConnect: true },
+        "full.example.com:8443",
+        "testuser",
+        true,
+        true,
+      ],
+      [
+        "calls onServerClick with autoConnect false when the profile has it disabled",
+        { autoConnect: false },
+        "full.example.com:8443",
+        "testuser",
+        false,
+        true,
+      ],
+      [
+        "passes the profile's rememberPassword so the form never re-opts in",
+        { autoConnect: false, rememberPassword: true },
+        "full.example.com:8443",
+        "testuser",
+        false,
+        true,
+      ],
+    ])("%s", (_name, overrides, host, username, autoConnect, remember) => {
       const onServerClick = vi.fn();
-      const fp = fullProfile();
-      mountPanel(makeOpts({ onServerClick }), [fp]);
-
-      const item = container.querySelector(".server-item") as HTMLElement;
-      item.click();
-
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false, true);
-    });
-
-    it("calls onServerClick with autoConnect true when the profile has it enabled", () => {
-      const onServerClick = vi.fn();
-      const fp = fullProfile({ autoConnect: true });
-      mountPanel(makeOpts({ onServerClick }), [fp]);
-
-      const item = container.querySelector(".server-item") as HTMLElement;
-      item.click();
-
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", true, true);
-    });
-
-    it("calls onServerClick with autoConnect false when the profile has it disabled", () => {
-      const onServerClick = vi.fn();
-      const fp = fullProfile({ autoConnect: false });
-      mountPanel(makeOpts({ onServerClick }), [fp]);
-
-      const item = container.querySelector(".server-item") as HTMLElement;
-      item.click();
-
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false, true);
-    });
-
-    it("passes the profile's rememberPassword so the form never re-opts in", () => {
-      const onServerClick = vi.fn();
-      const fp = fullProfile({ autoConnect: false, rememberPassword: true });
-      mountPanel(makeOpts({ onServerClick }), [fp]);
+      mountPanel(makeOpts({ onServerClick }), [fullProfile(overrides)]);
 
       (container.querySelector(".server-item") as HTMLElement).click();
 
-      expect(onServerClick).toHaveBeenCalledWith("full.example.com:8443", "testuser", false, true);
+      expect(onServerClick).toHaveBeenCalledWith(host, username, autoConnect, remember);
     });
 
     it("does not read the credential store for a profile that opted out of remembering", () => {

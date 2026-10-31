@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import { E2EEManager } from "../../src/lib/voice/livekitE2EE";
-import { importPublicKey, exportPublicKey } from "@lib/net/e2eeCrypto";
+import { importPublicKey, exportPublicKey, wrapRoomKey } from "@lib/net/e2eeCrypto";
+import { getIdentityPin } from "@lib/net/identity";
 
 export const PEER_ID = 42;
 
@@ -41,4 +42,26 @@ export function restorePeerKeyMocks(): void {
     async () => ({ type: "public" }) as unknown as CryptoKey,
   );
   vi.mocked(exportPublicKey).mockImplementation(async () => "bW9ja2VwaGVtZXJhbA==");
+}
+
+/** Makes the next identity-pin lookup hang until the returned release is called. */
+export function stallNextIdentityPin(): (value: { status: "unpinned" }) => void {
+  let release!: (value: { status: "unpinned" }) => void;
+  vi.mocked(getIdentityPin).mockReturnValueOnce(
+    new Promise((resolve) => {
+      release = resolve;
+    }),
+  );
+  return release;
+}
+
+/** Makes the next room-key wrap hang until the returned release is called. */
+export function stallNextWrap(): (value: { encryptedKey: string; iv: string }) => void {
+  let release!: (value: { encryptedKey: string; iv: string }) => void;
+  vi.mocked(wrapRoomKey).mockReturnValueOnce(
+    new Promise<{ encryptedKey: string; iv: string }>((resolve) => {
+      release = resolve;
+    }),
+  );
+  return release;
 }

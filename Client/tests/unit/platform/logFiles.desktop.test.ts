@@ -68,6 +68,18 @@ describeLogFilesSuite(async () => {
 // The `clearAll` half: no exported seam until this milestone, so its coverage
 // lands with the move. The old path (the Clear Log Files button in
 // AdvancedTab) keeps its own test in tests/unit/advanced-tab.test.ts.
+/** Initialises the module on /logs and buffers one entry that has not been flushed yet. */
+async function initWithBufferedEntry(mod: Awaited<ReturnType<typeof freshModule>>): Promise<void> {
+  appLogDir.mockResolvedValue("/logs");
+  await mod.logFiles.init();
+  capturedListener?.({
+    timestamp: new Date().toISOString(),
+    level: "info",
+    component: "test",
+    message: "a log entry",
+  });
+}
+
 describe("LogFiles.clearAll", () => {
   test("removes every persisted log file, and leaves other files alone", async () => {
     const mod = await freshModule();
@@ -106,14 +118,7 @@ describe("LogFiles.clearAll", () => {
 
   test("discards buffered entries rather than writing them out after a clear", async () => {
     const mod = await freshModule();
-    appLogDir.mockResolvedValue("/logs");
-    await mod.logFiles.init();
-    capturedListener?.({
-      timestamp: new Date().toISOString(),
-      level: "info",
-      component: "test",
-      message: "a log entry",
-    });
+    await initWithBufferedEntry(mod);
 
     await mod.logFiles.clearAll();
     await mod.logFiles.flush();
@@ -143,14 +148,7 @@ describe("LogFiles.readAll", () => {
 
   test("flushes buffered entries before reading, so the bundle has the latest lines", async () => {
     const mod = await freshModule();
-    appLogDir.mockResolvedValue("/logs");
-    await mod.logFiles.init();
-    capturedListener?.({
-      timestamp: new Date().toISOString(),
-      level: "info",
-      component: "test",
-      message: "a log entry",
-    });
+    await initWithBufferedEntry(mod);
 
     await mod.logFiles.readAll();
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 
 // ---------------------------------------------------------------------------
 // Mocks — must be set up before the module under test is imported
@@ -34,14 +35,7 @@ vi.mock("@lib/icons", () => ({
   createIcon: () => document.createElement("span"),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 
 vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),

@@ -16,31 +16,25 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, addMessage } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
-import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
-import type { ReadyChannel } from "@lib/types";
-import { makeListOptions, nextFrame, setMessages } from "../helpers/messageListHarness";
+import { setActiveChannel } from "@stores/channels.store";
+import {
+  makeListOptions,
+  nextFrame,
+  setMessages,
+  setDetached as setChannelDetached,
+  openChannel,
+} from "../helpers/messageListHarness";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetMessagesState();
+  resetMembersState();
+  resetChannelsState();
 }
 
 function makeMessage(id: number): Message {
@@ -55,28 +49,13 @@ function makeMessage(id: number): Message {
 }
 
 function setDetached(detached: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Set(prev.detachedChannels);
-    if (detached) next.add(CHANNEL_ID);
-    else next.delete(CHANNEL_ID);
-    return { ...prev, detachedChannels: next };
-  });
+  setChannelDetached(CHANNEL_ID, detached);
 }
 
 /** Seed the channel list with `unread` unread messages, then "open" the channel
  *  the way the app does — which clears the badge and snapshots the count. */
 function openChannelWithUnread(unread: number): void {
-  const ch: ReadyChannel = {
-    id: CHANNEL_ID,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unread_count: unread,
-    mention_count: 0,
-  };
-  setChannels([ch]);
-  setActiveChannel(CHANNEL_ID);
+  openChannel(CHANNEL_ID, unread);
 }
 
 describe("MessageList — new-messages divider", () => {
@@ -102,6 +81,9 @@ describe("MessageList — new-messages divider", () => {
     msgList.mount(container);
   }
 
+  const dividerEl = (): Element | null =>
+    container.querySelector('[data-testid="new-messages-divider"]');
+
   /** The rendered row node for each message id, to check node identity. */
   function rowNodes(ids: readonly number[]): (Element | null)[] {
     return ids.map((id) => container.querySelector(`[data-testid="message-${id}"]`));
@@ -117,7 +99,7 @@ describe("MessageList — new-messages divider", () => {
     openChannelWithUnread(0);
     mount();
 
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    expect(dividerEl()).toBeNull();
   });
 
   it("places the divider above the first unread message", () => {
@@ -125,7 +107,7 @@ describe("MessageList — new-messages divider", () => {
     openChannelWithUnread(2);
     mount();
 
-    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    const divider = dividerEl();
     expect(divider).not.toBeNull();
     expect(divider?.textContent).toContain("NEW");
 
@@ -161,7 +143,7 @@ describe("MessageList — new-messages divider", () => {
     openChannelWithUnread(5);
     mount();
 
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    expect(dividerEl()).toBeNull();
   });
 
   // A detached window is a slice around some old message, so "the last N
@@ -172,7 +154,7 @@ describe("MessageList — new-messages divider", () => {
     setDetached(true);
     mount();
 
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    expect(dividerEl()).toBeNull();
   });
 
   // A jump into another channel mounts the list first (not yet detached) and
@@ -186,7 +168,7 @@ describe("MessageList — new-messages divider", () => {
     setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6].map(makeMessage));
     await nextFrame();
 
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    expect(dividerEl()).toBeNull();
   });
 
   it("restores the divider at the right place when the reader returns to the tail", async () => {
@@ -197,12 +179,12 @@ describe("MessageList — new-messages divider", () => {
     setDetached(true);
     setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6].map(makeMessage));
     await nextFrame();
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    expect(dividerEl()).toBeNull();
 
     setDetached(false);
     setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(makeMessage));
     await nextFrame();
-    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    const divider = dividerEl();
     expect(divider).not.toBeNull();
     expect((divider!.nextElementSibling as HTMLElement).dataset.testid).toBe("message-8");
   });
@@ -211,7 +193,7 @@ describe("MessageList — new-messages divider", () => {
     setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(makeMessage));
     openChannelWithUnread(2);
     mount();
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).not.toBeNull();
+    expect(dividerEl()).not.toBeNull();
 
     // Leave and come back: the badge is gone now, so no divider.
     msgList?.destroy?.();
@@ -222,7 +204,7 @@ describe("MessageList — new-messages divider", () => {
     setActiveChannel(CHANNEL_ID);
     mount();
 
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    expect(dividerEl()).toBeNull();
   });
 
   // Regression: firstUnreadIndex is messages.length - unreadOnOpen, an offset
@@ -234,8 +216,7 @@ describe("MessageList — new-messages divider", () => {
     openChannelWithUnread(2);
     mount();
 
-    const before = container.querySelector('[data-testid="new-messages-divider"]')
-      ?.nextElementSibling as HTMLElement;
+    const before = dividerEl()?.nextElementSibling as HTMLElement;
     expect(before.dataset.testid).toBe("message-4");
 
     // Three more messages arrive while the reader is on the channel, via the
@@ -257,8 +238,7 @@ describe("MessageList — new-messages divider", () => {
     }
     messagesStore.flush();
     expect(container.querySelector('[data-testid="message-8"]')).not.toBeNull();
-    const afterAppend = container.querySelector('[data-testid="new-messages-divider"]')
-      ?.nextElementSibling as HTMLElement;
+    const afterAppend = dividerEl()?.nextElementSibling as HTMLElement;
     expect(afterAppend.dataset.testid).toBe("message-4");
 
     // A non-append change (an edit) forces a full rebuild instead of the
@@ -272,8 +252,7 @@ describe("MessageList — new-messages divider", () => {
     });
     messagesStore.flush();
 
-    const after = container.querySelector('[data-testid="new-messages-divider"]')
-      ?.nextElementSibling as HTMLElement;
+    const after = dividerEl()?.nextElementSibling as HTMLElement;
     expect(after.dataset.testid).toBe("message-4");
   });
 
@@ -286,7 +265,7 @@ describe("MessageList — new-messages divider", () => {
   it("does not latch the divider onto a message that arrives before the history page loads", () => {
     openChannelWithUnread(3);
     mount(); // 0 rows: the async history fetch has not resolved yet.
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
+    expect(dividerEl()).toBeNull();
 
     // A live message lands first, via the real append path — exactly what
     // dispatcher.ts's chat_message handler does while a history fetch for
@@ -315,7 +294,7 @@ describe("MessageList — new-messages divider", () => {
     // The divider must separate the actual tail of the now-51-message window
     // (999/1000/1001) from history, not sit directly above message 1001 —
     // which would render 999 and 1000 as indistinguishable from read history.
-    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    const divider = dividerEl();
     expect(divider).not.toBeNull();
     const next = divider?.nextElementSibling as HTMLElement;
     expect(next.dataset.testid).toBe("message-999");
@@ -359,7 +338,8 @@ describe("MessageList — new-messages divider", () => {
   // DP-10: a revisit mounts on the cached window while the refetch is in
   // flight. Those rows predate what arrived while away, so counting the unread
   // messages back from their end would mark rows the reader already saw.
-  it("places the divider on a revisit only once the refetched tail lands", () => {
+  /** Mounts a revisit on five cached rows while the refetch is still loading; returns those row nodes. */
+  function mountRevisitOnCachedWindow(): (Element | null)[] {
     setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(makeMessage));
     messagesStore.setState((prev) => ({
       ...prev,
@@ -367,8 +347,12 @@ describe("MessageList — new-messages divider", () => {
     }));
     openChannelWithUnread(1);
     mount();
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
-    const cachedRows = rowNodes([1, 2, 3, 4, 5]);
+    expect(dividerEl()).toBeNull();
+    return rowNodes([1, 2, 3, 4, 5]);
+  }
+
+  it("places the divider on a revisit only once the refetched tail lands", () => {
+    const cachedRows = mountRevisitOnCachedWindow();
 
     // The refetch lands: the cached rows unchanged plus the one posted while away.
     messagesStore.setState((prev) => {
@@ -378,7 +362,7 @@ describe("MessageList — new-messages divider", () => {
     });
     messagesStore.flush();
 
-    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    const divider = dividerEl();
     expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
       "message-6",
     );
@@ -389,20 +373,12 @@ describe("MessageList — new-messages divider", () => {
   // A DM's messages reach the cached window live while it is not open, so the
   // refetch can land with nothing to change; the divider must still appear.
   it("places a deferred divider when the revisit refetch lands unchanged", () => {
-    setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(makeMessage));
-    messagesStore.setState((prev) => ({
-      ...prev,
-      historyLoadState: new Map([[CHANNEL_ID, "loading" as const]]),
-    }));
-    openChannelWithUnread(1);
-    mount();
-    expect(container.querySelector('[data-testid="new-messages-divider"]')).toBeNull();
-    const cachedRows = rowNodes([1, 2, 3, 4, 5]);
+    const cachedRows = mountRevisitOnCachedWindow();
 
     messagesStore.setState((prev) => ({ ...prev, historyLoadState: new Map() }));
     messagesStore.flush();
 
-    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    const divider = dividerEl();
     expect((divider?.nextElementSibling as HTMLElement | undefined)?.dataset.testid).toBe(
       "message-5",
     );
@@ -420,7 +396,7 @@ describe("MessageList — new-messages divider", () => {
     openChannelWithUnread(1);
     mount();
 
-    const divider = container.querySelector('[data-testid="new-messages-divider"]');
+    const divider = dividerEl();
     const first = divider?.nextElementSibling as HTMLElement;
     expect(first.dataset.testid).toBe("message-3");
     expect(first.classList.contains("grouped")).toBe(false);

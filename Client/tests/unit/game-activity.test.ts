@@ -9,6 +9,7 @@ import { applyGameActivityPolicy, resetServerCapabilities } from "@lib/net/serve
 import { savePref } from "@lib/prefs/preferences";
 import { addLogListener, setLogLevel, type LogEntry } from "@lib/logger";
 import { expectConsole } from "../helpers/console";
+import { fakeActivityWs } from "../helpers/fakeActivityWs";
 import {
   GAME_PREFS_KEY,
   GAME_SEEN_KEY,
@@ -42,43 +43,7 @@ interface Sent {
 }
 
 function fakeWs(initial: ConnectionState = "connected") {
-  let state: ConnectionState = initial;
-  let nextId = 1;
-  const sent: Sent[] = [];
-  const stateListeners = new Set<(s: ConnectionState) => void>();
-  const readyListeners = new Set<() => void>();
-  const ws = {
-    getState: () => state,
-    send: vi.fn((msg: { type: string; payload: { activity: Sent["activity"] } }) => {
-      expect(msg.type).toBe("activity_update");
-      const id = `id-${nextId++}`;
-      sent.push({ id, activity: msg.payload.activity });
-      return id;
-    }),
-    onStateChange: (fn: (s: ConnectionState) => void) => {
-      stateListeners.add(fn);
-      return () => stateListeners.delete(fn);
-    },
-    on: (type: string, fn: () => void) => {
-      expect(type).toBe("ready");
-      readyListeners.add(fn);
-      return () => readyListeners.delete(fn);
-    },
-  };
-  return {
-    ws: ws as never,
-    sent,
-    setState(next: ConnectionState): void {
-      state = next;
-      for (const fn of stateListeners) fn(next);
-    },
-    ready(): void {
-      for (const fn of readyListeners) fn();
-    },
-    listenerCounts(): { state: number; ready: number } {
-      return { state: stateListeners.size, ready: readyListeners.size };
-    },
-  };
+  return fakeActivityWs<Sent["activity"]>("activity_update", "activity", initial);
 }
 
 /** Let promise continuations run. */
@@ -125,6 +90,16 @@ describe("game activity loop", () => {
       supported: () => supported,
     });
     return loop;
+  }
+
+  async function expectNoScanWhen(turnOff: () => void): Promise<void> {
+    const fake = fakeWs();
+    turnOff();
+    current = factorio;
+    start(fake);
+    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
+    expect(detect).not.toHaveBeenCalled();
+    expect(fake.sent).toHaveLength(0);
   }
 
   async function begin(game?: DetectedGame | null) {
@@ -187,23 +162,15 @@ describe("game activity loop", () => {
   });
 
   it("sends nothing and scans nothing when the server lacks game_activity", async () => {
-    const fake = fakeWs();
-    supported = false;
-    current = factorio;
-    start(fake);
-    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
-    expect(detect).not.toHaveBeenCalled();
-    expect(fake.sent).toHaveLength(0);
+    await expectNoScanWhen(() => {
+      supported = false;
+    });
   });
 
   it("sends nothing and scans nothing while the setting is off", async () => {
-    const fake = fakeWs();
-    enabled = false;
-    current = factorio;
-    start(fake);
-    await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
-    expect(detect).not.toHaveBeenCalled();
-    expect(fake.sent).toHaveLength(0);
+    await expectNoScanWhen(() => {
+      enabled = false;
+    });
   });
 
   it("learns the capability from ready on a first connect", async () => {
@@ -685,6 +652,15 @@ describe("game activity loop: the user's own game choices", () => {
     return loop;
   }
 
+  async function startWithHeldScan() {
+    const fake = fakeWs();
+    let release: (g: DetectedGame | null) => void = () => {};
+    detect.mockImplementation(() => new Promise((resolve) => (release = resolve)));
+    start(fake);
+    await flush();
+    return { fake, release: (g: DetectedGame | null) => release(g) };
+  }
+
   async function begin(game?: DetectedGame | null) {
     if (game !== undefined) current = game;
     return startWith(start);
@@ -788,11 +764,7 @@ describe("game activity loop: the user's own game choices", () => {
   });
 
   it("drops an answer for a game hidden while the scan ran", async () => {
-    const fake = fakeWs();
-    let release: (g: DetectedGame | null) => void = () => {};
-    detect.mockImplementation(() => new Promise((resolve) => (release = resolve)));
-    start(fake);
-    await flush();
+    const { fake, release } = await startWithHeldScan();
     saveGamePrefs(withHidden(EMPTY_GAME_PREFS, "Factorio", true));
     release(factorio);
     await flush();
@@ -810,11 +782,7 @@ describe("game activity loop: the user's own game choices", () => {
   });
 
   it("a hide while a scan is running drops that scan's answer and sends one frame from the next", async () => {
-    const fake = fakeWs();
-    let release: (g: DetectedGame | null) => void = () => {};
-    detect.mockImplementation(() => new Promise((resolve) => (release = resolve)));
-    start(fake);
-    await flush();
+    const { fake, release } = await startWithHeldScan();
     saveGamePrefs(withHidden(EMPTY_GAME_PREFS, "Factorio", true));
     detect.mockImplementation(async () => valorant);
     release(factorio);

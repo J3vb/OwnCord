@@ -21,6 +21,9 @@ import {
   setTestMembers,
   testMembers,
   defaultOpts,
+  useMemberListSuite,
+  rightClickMember,
+  topMenuLabels,
 } from "../../helpers/memberListHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -247,9 +250,7 @@ describe("MemberList", () => {
     setTestMembers(testMembers);
     memberList.mount(container);
 
-    const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
-    memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    await vi.dynamicImportSettled();
+    await rightClickMember(container, 3);
 
     const submenu = document.body.querySelector(".context-menu__submenu");
     expect(submenu).not.toBeNull();
@@ -332,20 +333,12 @@ describe("MemberList", () => {
 
   it("non-admin context menu shows only Block, no admin actions", async () => {
     setTestMembers(testMembers);
-    const opts: MemberListOptions = {
-      currentUserRole: "member",
-      onKick: vi.fn().mockResolvedValue(undefined),
-      onBan: vi.fn().mockResolvedValue(undefined),
-      onChangeRole: vi.fn().mockResolvedValue(undefined),
-      onToggleBlock: vi.fn().mockResolvedValue(undefined),
-    };
+    const opts = defaultOpts("member");
     memberList.destroy?.();
     memberList = createMemberList(opts);
     memberList.mount(container);
 
-    const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
-    memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    await vi.dynamicImportSettled();
+    await rightClickMember(container, 3);
 
     const contextMenu = document.body.querySelector(".context-menu");
     expect(contextMenu).not.toBeNull();
@@ -463,15 +456,11 @@ describe("MemberList", () => {
       memberList = createMemberList(opts);
       memberList.mount(container);
 
-      const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
-      memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-      await vi.dynamicImportSettled();
+      await rightClickMember(container, 3);
       const menu = document.body.querySelector(".context-menu");
       expect(menu).not.toBeNull();
       // Submenu role options share the item class; only top-level items count.
-      return Array.from(menu!.children)
-        .filter((el) => el.classList.contains("context-menu__item"))
-        .map((el) => el.firstChild?.textContent ?? "");
+      return topMenuLabels(menu as HTMLElement);
     }
 
     afterEach(() => {
@@ -545,16 +534,8 @@ describe("MemberList", () => {
       );
       setTestMembers(testMembers);
       memberList.mount(container);
-      const item = container.querySelector(`[data-testid="member-${targetId}"]`) as HTMLElement;
-      item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-      await vi.dynamicImportSettled();
+      await rightClickMember(container, targetId);
       return document.body.querySelector<HTMLElement>(".context-menu");
-    }
-
-    function topLabels(menu: HTMLElement): string[] {
-      return Array.from(menu.children)
-        .filter((el) => el.classList.contains("context-menu__item"))
-        .map((el) => el.firstChild?.textContent ?? "");
     }
 
     afterEach(() => {
@@ -573,7 +554,7 @@ describe("MemberList", () => {
       for (const targetId of [1, 2]) {
         const menu = await openMenuOn("Admin", targetId);
         expect(menu).not.toBeNull();
-        expect(topLabels(menu!)).toEqual(["Profile", "Mention", "Block"]);
+        expect(topMenuLabels(menu!)).toEqual(["Profile", "Mention", "Block"]);
         document.body.querySelector(".context-menu")?.remove();
         memberList.destroy?.();
         memberList = createMemberList(defaultOpts());
@@ -582,7 +563,7 @@ describe("MemberList", () => {
 
     it("keeps every action for a member ranked below the actor", async () => {
       const menu = await openMenuOn("Admin", 3);
-      expect(topLabels(menu!)).toEqual(
+      expect(topMenuLabels(menu!)).toEqual(
         expect.arrayContaining(["Change Role", "Force Logout", "Ban", "Block"]),
       );
     });
@@ -593,21 +574,13 @@ describe("MemberList", () => {
     signInAs({ id: 1, username: "Alice", avatar: null, role: "owner" }, { serverName: "Test" });
 
     setTestMembers(testMembers);
-    const opts: MemberListOptions = {
-      currentUserRole: "owner",
-      onKick: vi.fn().mockResolvedValue(undefined),
-      onBan: vi.fn().mockResolvedValue(undefined),
-      onChangeRole: vi.fn().mockResolvedValue(undefined),
-      onToggleBlock: vi.fn().mockResolvedValue(undefined),
-    };
+    const opts = defaultOpts("owner");
     memberList.destroy?.();
     memberList = createMemberList(opts);
     memberList.mount(container);
 
     // Right-click on Alice (user id 1 = self)
-    const selfItem = container.querySelector('[data-testid="member-1"]') as HTMLDivElement;
-    selfItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    await vi.dynamicImportSettled();
+    await rightClickMember(container, 1);
 
     // Yourself: no moderation, Message, Call or Block.
     const contextMenu = document.body.querySelector(".context-menu");
@@ -637,9 +610,7 @@ describe("MemberList", () => {
     // ever read once, but authStore now says admin.
     authStore.setState((prev) => ({ ...prev, user: { ...prev.user!, role: "admin" } }));
 
-    const memberItem = container.querySelector('[data-testid="member-3"]') as HTMLDivElement;
-    memberItem.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
-    await vi.dynamicImportSettled();
+    await rightClickMember(container, 3);
     const menu = document.body.querySelector(".context-menu");
     expect(menu).not.toBeNull();
     const labels = Array.from(menu!.children)
@@ -900,17 +871,13 @@ describe("MemberList arrow navigation", () => {
     list.mount(container);
   }
 
-  beforeEach(() => {
-    resetStore();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    list = null;
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    container.remove();
-  });
+  useMemberListSuite(
+    (c) => {
+      container = c;
+      list = null;
+    },
+    () => list,
+  );
 
   it("ArrowDown and ArrowUp move between member rows, skipping headers", () => {
     mountWith(roster());

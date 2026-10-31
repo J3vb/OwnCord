@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
 import {
   hiddenByMute,
   isHideMutedChannels,
@@ -6,28 +7,8 @@ import {
   setHideMutedChannels,
 } from "../../src/lib/prefs/hideMutedChannels";
 import { invalidateMuteCache, muteChannel } from "../../src/lib/prefs/channelMutes";
-import type { Channel } from "../../src/stores/channels.store";
 
-function ch(overrides: Partial<Channel> = {}): Channel {
-  return {
-    id: 1,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
+const ch = makeChannel;
 
 describe("hide-muted-channels", () => {
   beforeEach(() => {

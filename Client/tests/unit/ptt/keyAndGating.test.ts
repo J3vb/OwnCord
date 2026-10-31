@@ -44,6 +44,24 @@ const { init: initPtt, stop: stopPtt, updateKey: updatePttKey, captureKeyPress }
 // Helpers
 // ---------------------------------------------------------------------------
 
+async function bindKeyAndExpectNoGate(opts: {
+  channelId: number | null;
+  gated: boolean;
+  pollingSupported: boolean;
+}): Promise<void> {
+  pttState.currentChannelId = opts.channelId;
+  pttState.pttGated = opts.gated;
+  mockInvoke.mockImplementation((cmd: string) =>
+    Promise.resolve(cmd === "ptt_polling_supported" ? opts.pollingSupported : undefined),
+  );
+
+  await updatePttKey(0x20);
+
+  await new Promise((r) => setTimeout(r, 0));
+  expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
+  expect(mockSetMuted).not.toHaveBeenCalled();
+}
+
 // ---------------------------------------------------------------------------
 // Tests: vkName
 // ---------------------------------------------------------------------------
@@ -498,48 +516,19 @@ describe("updatePttKey gates the mic when binding a key mid-call", () => {
   });
 
   it("does not gate the mic when binding a key while not in a voice call", async () => {
-    pttState.currentChannelId = null; // not in a call
-    pttState.pttGated = false;
-    mockInvoke.mockImplementation((cmd: string) =>
-      Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
-    );
-
-    await updatePttKey(0x20);
-
-    await new Promise((r) => setTimeout(r, 0));
-    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
-    expect(mockSetMuted).not.toHaveBeenCalled();
+    await bindKeyAndExpectNoGate({ channelId: null, gated: false, pollingSupported: true });
   });
 
   it("does not gate the mic when the backend cannot actually observe key state", async () => {
-    pttState.currentChannelId = 7; // in a call
-    pttState.pttGated = false;
     // ptt_polling_supported === false: macOS is_key_down stub / Wayland — no
     // ptt-state event can ever arrive, so gating here would strand the mic
     // muted forever with no press able to lift it.
-    mockInvoke.mockImplementation((cmd: string) =>
-      Promise.resolve(cmd === "ptt_polling_supported" ? false : undefined),
-    );
-
-    await updatePttKey(0x20);
-
-    await new Promise((r) => setTimeout(r, 0));
-    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
-    expect(mockSetMuted).not.toHaveBeenCalled();
+    await bindKeyAndExpectNoGate({ channelId: 7, gated: false, pollingSupported: false });
   });
 
   it("does not re-gate when the mic is already PTT-gated", async () => {
-    pttState.currentChannelId = 7;
-    pttState.pttGated = true; // already gated (e.g. join-time gate already armed)
-    mockInvoke.mockImplementation((cmd: string) =>
-      Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
-    );
-
-    await updatePttKey(0x20);
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
-    expect(mockSetMuted).not.toHaveBeenCalled();
+    // Already gated, e.g. the join-time gate is armed.
+    await bindKeyAndExpectNoGate({ channelId: 7, gated: true, pollingSupported: true });
   });
 });
 

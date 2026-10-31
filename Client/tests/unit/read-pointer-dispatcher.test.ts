@@ -29,6 +29,7 @@ import {
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
+import type { WsErrorCodeValue } from "../../src/lib/protocolTypes";
 import { expectConsole } from "../helpers/console";
 import { resetMessagesState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
@@ -102,6 +103,33 @@ describe("read pointer through the dispatcher", () => {
   let mock: ReturnType<typeof createMockWsClient>;
   /** The mock as the dispatcher's WsClient (it lacks only the debug socket accessor). */
   const ws = (): WsClient => mock as unknown as WsClient;
+  /** The server refuses the frame `id`; the dispatcher logs it. */
+  function refuse(code: WsErrorCodeValue, message: string, id: string): void {
+    mock.simulateMessage("error", { code, message }, id);
+    expectConsole("error", /Server error/);
+  }
+  /** Authenticates, views channel 1 and returns the channel_focus frames both senders sent. */
+  function focusFrames() {
+    mock.simulateMessage("auth_ok", {
+      user: { id: 1, username: "alex", avatar: null, role: "admin" },
+      server_name: "S",
+      motd: "",
+    });
+    viewChannel(1, "text", ws());
+    return mock.getSentMessages().filter((m) => m.type === "channel_focus");
+  }
+  /** Marks message 10 unread on a read-pointer channel, leaving the request pending. */
+  function markUnreadPending(): void {
+    mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
+    setActiveChannel(1);
+    seedLoadedMessages(1, [
+      pointerMessage(8),
+      pointerMessage(9),
+      pointerMessage(10),
+      pointerMessage(11),
+    ]);
+    expect(markMessageUnread(1, 10)).toBe(9);
+  }
   let cleanup: () => void;
   let hasFocus: ReturnType<typeof vi.spyOn>;
   let unreads: Array<[number, number]>;
@@ -179,13 +207,7 @@ describe("read pointer through the dispatcher", () => {
     it("is false at both senders with the capability", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0)], { read_pointer: true }));
       channelsStore.setState((p) => ({ ...p, activeChannelId: 1 }));
-      mock.simulateMessage("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "S",
-        motd: "",
-      });
-      viewChannel(1, "text", ws());
-      const focus = mock.getSentMessages().filter((m) => m.type === "channel_focus");
+      const focus = focusFrames();
       expect(focus.map((f) => f.payload)).toEqual([
         { channel_id: 1, read: false },
         { channel_id: 1, read: false },
@@ -195,13 +217,7 @@ describe("read pointer through the dispatcher", () => {
     it("is absent without it", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0)]));
       channelsStore.setState((p) => ({ ...p, activeChannelId: 1 }));
-      mock.simulateMessage("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "S",
-        motd: "",
-      });
-      viewChannel(1, "text", ws());
-      const focus = mock.getSentMessages().filter((m) => m.type === "channel_focus");
+      const focus = focusFrames();
       expect(focus.map((f) => f.payload)).toEqual([{ channel_id: 1 }, { channel_id: 1 }]);
     });
   });
@@ -305,15 +321,7 @@ describe("read pointer through the dispatcher", () => {
 
   describe("a refused mark_unread", () => {
     function pending(): void {
-      mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
-      setActiveChannel(1);
-      seedLoadedMessages(1, [
-        pointerMessage(8),
-        pointerMessage(9),
-        pointerMessage(10),
-        pointerMessage(11),
-      ]);
-      expect(markMessageUnread(1, 10)).toBe(9);
+      markUnreadPending();
       expect(chan(1)?.lastReadMessageId).toBe(9);
     }
 
@@ -332,16 +340,14 @@ describe("read pointer through the dispatcher", () => {
 
     it("restores the pointer and says so on NOT_FOUND", () => {
       pending();
-      mock.simulateMessage("error", { code: "NOT_FOUND", message: "message not found" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("NOT_FOUND", "message not found", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(10);
       expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Couldn't mark it unread/);
     });
 
     it("leaves the pointer alone for an error on some other frame", () => {
       pending();
-      mock.simulateMessage("error", { code: "RATE_LIMITED", message: "slow" }, "other-frame");
-      expectConsole("error", /Server error/);
+      refuse("RATE_LIMITED", "slow", "other-frame");
       expect(chan(1)?.lastReadMessageId).toBe(9);
       expect(mockShowToast.mock.calls.map((c) => String(c[0]))).not.toContain(
         expect.stringMatching(/Mark Unread/),
@@ -350,8 +356,7 @@ describe("read pointer through the dispatcher", () => {
 
     it("ends the request on any other code too, with the general notice", () => {
       pending();
-      mock.simulateMessage("error", { code: "FORBIDDEN", message: "access denied" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("FORBIDDEN", "access denied", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(10);
       expect(mockShowToast.mock.calls[0]?.[0]).toMatch(/Couldn't mark it unread/);
     });
@@ -359,8 +364,7 @@ describe("read pointer through the dispatcher", () => {
     it("does nothing against a new ready: its pointer wins and no restore or toast fires", () => {
       pending();
       mock.simulateMessage("ready", ready([ch(1, 3, 0, 7)], { read_pointer: true }));
-      mock.simulateMessage("error", { code: "RATE_LIMITED", message: "slow" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("RATE_LIMITED", "slow", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(7);
       expect(mockShowToast.mock.calls.map((c) => String(c[0])).join("|")).not.toMatch(
         /Mark Unread|mark it unread/,
@@ -371,24 +375,13 @@ describe("read pointer through the dispatcher", () => {
       pending();
       mock.simulateStateChange("connected");
       mock.simulateStateChange("reconnecting");
-      mock.simulateMessage("error", { code: "NOT_FOUND", message: "gone" }, "req-1");
-      expectConsole("error", /Server error/);
+      refuse("NOT_FOUND", "gone", "req-1");
       expect(chan(1)?.lastReadMessageId).toBe(9);
     });
   });
 
   describe("Mark Unread on the channel being read", () => {
-    function pending(): void {
-      mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
-      setActiveChannel(1);
-      seedLoadedMessages(1, [
-        pointerMessage(8),
-        pointerMessage(9),
-        pointerMessage(10),
-        pointerMessage(11),
-      ]);
-      expect(markMessageUnread(1, 10)).toBe(9);
-    }
+    const pending = markUnreadPending;
     const answer = { channel_id: 1, last_read_message_id: 9, unread_count: 2, mention_count: 1 };
 
     it("keeps the counts the server answers with, so a badge is left when the reader leaves", () => {

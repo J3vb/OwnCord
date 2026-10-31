@@ -1,11 +1,11 @@
 /** Category header right-click menu (N13) and text-before-voice order (N23). */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as mocks from "../helpers/sidebarStubMocks";
+import * as stubs from "../helpers/sidebarStubs";
+import { resetChannelsState, signInAs } from "../helpers/storeSeeds";
 
-vi.mock("@lib/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
-vi.mock("@lib/net/e2eeCrypto", () => ({
-  importIdentityPublicKey: vi.fn(),
-  computeKeyFingerprint: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () => mocks.rePinOnlySessionMock());
+vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import { attachChannelContextMenu } from "../../src/components/channel-sidebar/contextMenu";
@@ -15,13 +15,9 @@ import {
   getChannelsByCategory,
   type Channel,
 } from "../../src/stores/channels.store";
-import { dmStore } from "../../src/stores/dm.store";
-import { uiStore, isCategoryCollapsed } from "../../src/stores/ui.store";
-import { voiceStore } from "../../src/stores/voice.store";
+import { isCategoryCollapsed } from "../../src/stores/ui.store";
 import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "../../src/lib/types";
-import { resetMembersState } from "../helpers/storeResets";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "a1", type: "text", category: "Alpha", position: 0, unread_count: 2 },
@@ -39,15 +35,10 @@ describe("category context menu", () => {
     vi.useFakeTimers();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    resetChannelsState();
-    dmStore.setState(() => ({ channels: [] }));
-    resetMembersState();
-    uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
-    voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
-    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
+    stubs.resetSidebarStoresAsMember();
     container = document.createElement("div");
     document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    sidebar = stubs.createPlainChannelSidebar();
     setChannels(CHANNELS);
     sidebar.mount(container);
   });
@@ -64,7 +55,7 @@ describe("category context menu", () => {
     sidebar.destroy?.();
     container.replaceChildren();
     setChannels(channels);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
+    sidebar = stubs.createPlainChannelSidebar();
     sidebar.mount(container);
   }
 

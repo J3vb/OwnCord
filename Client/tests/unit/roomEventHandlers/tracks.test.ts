@@ -11,7 +11,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/roomEventHandlersMocks";
 import { Track } from "livekit-client";
-import type { LocalTrackPublication, RemoteTrackPublication, Room } from "livekit-client";
+import type { LocalTrackPublication, RemoteTrackPublication } from "livekit-client";
 import { voiceStore } from "@stores/voice.store";
 import { expectConsole } from "../../helpers/console";
 import {
@@ -23,6 +23,7 @@ import {
   remotePub,
   unknownTrack,
   useRoomEventHandlersHarness,
+  roomWithRemotePubs,
 } from "../../helpers/roomEventHandlersHarness";
 
 vi.mock("@stores/voice.store", (importOriginal) => mocks.voiceStoreMock(importOriginal));
@@ -361,20 +362,7 @@ describe("handleTrackPublished (opt-in watching)", () => {
     const h = build();
     const camera = remotePub(Track.Source.Camera);
     const mic = remotePub(Track.Source.Microphone);
-    const room = {
-      remoteParticipants: new Map([
-        [
-          "user-7:tok",
-          {
-            identity: "user-7:tok",
-            trackPublications: new Map([
-              ["c", camera],
-              ["m", mic],
-            ]),
-          },
-        ],
-      ]),
-    } as unknown as Room;
+    const room = roomWithRemotePubs({ c: camera, m: mic });
 
     h.handlers.handleConnected(room);
 

@@ -12,6 +12,7 @@
 //   - screen share captures natively through the shared enable/disable
 //     path, and a capture the desktop ends stops the share.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as logMock from "../helpers/loggerMock";
 import type { NativeVoiceEnvelope } from "../../src/platform/contracts/nativeVoice";
 
 const mockVoiceState = vi.hoisted(() => ({
@@ -237,9 +238,7 @@ vi.mock("@lib/prefs/preferences", async (importOriginal) => ({
   loadPref: (key: string, defaultVal: unknown) => (prefs.has(key) ? prefs.get(key) : defaultVal),
   savePref: (key: string, value: unknown) => prefs.set(key, value),
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => logMock.loggerMock());
 vi.mock("@lib/voice/noiseSuppression", () => ({ createRNNoiseProcessor: vi.fn() }));
 vi.mock("@lib/net/e2eeCrypto", () => ({
   generateECDHKeyPair: vi.fn(async () => ({ publicKey: {}, privateKey: {} })),

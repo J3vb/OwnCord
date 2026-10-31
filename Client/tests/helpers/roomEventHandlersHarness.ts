@@ -200,3 +200,12 @@ export function useRoomEventHandlersHarness(): void {
     );
   });
 }
+
+/** A room whose one remote participant, user 7, holds the given publications. */
+export function roomWithRemotePubs(pubs: Record<string, RemoteTrackPublication>): Room {
+  return {
+    remoteParticipants: new Map([
+      ["user-7:tok", { identity: "user-7:tok", trackPublications: new Map(Object.entries(pubs)) }],
+    ]),
+  } as unknown as Room;
+}

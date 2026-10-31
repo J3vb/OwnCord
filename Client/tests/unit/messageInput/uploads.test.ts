@@ -8,6 +8,7 @@ import {
   mountMessageInput,
   selectFiles,
   useMessageInputContainer,
+  pasteFile,
 } from "../../helpers/messageInputHarness";
 
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
@@ -249,20 +250,7 @@ describe("MessageInput", () => {
         writable: true,
       });
       fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-      const pasteEvent = new Event("paste", { bubbles: true });
-      Object.defineProperty(pasteEvent, "clipboardData", {
-        value: {
-          items: [
-            {
-              kind: "file",
-              type: "image/png",
-              getAsFile: () => new File(["img"], "p.png", { type: "image/png" }),
-            },
-          ],
-        },
-      });
-      textarea.dispatchEvent(pasteEvent);
+      pasteFile(container, new File(["img"], "p.png", { type: "image/png" }));
       await new Promise((r) => setTimeout(r, 10));
 
       expect(onUploadFile).not.toHaveBeenCalled();

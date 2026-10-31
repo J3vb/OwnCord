@@ -34,6 +34,9 @@ import {
   makeChatPayload,
   makeMessageResponse,
   resetStore,
+  addPendingAndFailedRows,
+  expectOnlySentMessage,
+  expectLoadedPendingFailed,
 } from "../../helpers/messagesStoreHarness";
 
 // ---------------------------------------------------------------------------
@@ -180,30 +183,11 @@ describe("messages store", () => {
     });
 
     it("keeps pending and failed optimistic rows across setMessages", () => {
-      addOptimisticMessage({
-        correlationId: "c1",
-        channelId: 1,
-        user: TEST_USER,
-        content: "in flight",
-        replyTo: null,
-        timestamp: "2026-03-15T10:00:00Z",
-      });
-      addOptimisticMessage({
-        correlationId: "c2",
-        channelId: 1,
-        user: TEST_USER,
-        content: "refused",
-        replyTo: null,
-        timestamp: "2026-03-15T10:00:01Z",
-      });
-      markSendFailed("c2", "SLOW_MODE");
+      addPendingAndFailedRows("SLOW_MODE");
 
       setMessages(1, [makeMessageResponse({ id: 200 })], false);
 
-      const msgs = getChannelMessages(1);
-      expect(msgs.map((m) => m.correlationId)).toEqual([null, "c1", "c2"]);
-      expect(msgs[1]!.status).toBe("pending");
-      expect(msgs[2]!.status).toBe("failed");
+      expectLoadedPendingFailed();
     });
 
     it("dedupes an optimistic row against its own real message after a lost ack + resync", () => {
@@ -227,10 +211,7 @@ describe("messages store", () => {
       // id 500 is the real echo of the lost ack.
       setMessages(1, [makeMessageResponse({ id: 500, content: "ok", user: TEST_USER })], false);
 
-      const msgs = getChannelMessages(1);
-      expect(msgs).toHaveLength(1);
-      expect(msgs[0]!.id).toBe(500);
-      expect(msgs[0]!.status).toBe("sent");
+      expectOnlySentMessage(500);
     });
 
     it("dedupes an optimistic row against its own real message when the server sanitized the content", () => {
@@ -253,10 +234,7 @@ describe("messages store", () => {
 
       setMessages(1, [makeMessageResponse({ id: 500, content: "<", user: TEST_USER })], false);
 
-      const msgs = getChannelMessages(1);
-      expect(msgs).toHaveLength(1);
-      expect(msgs[0]!.id).toBe(500);
-      expect(msgs[0]!.status).toBe("sent");
+      expectOnlySentMessage(500);
     });
 
     it("keeps two genuinely distinct same-author, same-text sends distinct across the same resync", () => {

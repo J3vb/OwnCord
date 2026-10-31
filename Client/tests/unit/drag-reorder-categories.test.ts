@@ -17,6 +17,7 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, setCategories, setRoles } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import { Permission } from "@lib/types";
+import { makeChannel } from "../helpers/channelFactory";
 import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
 
 const ROW = 20;
@@ -27,26 +28,15 @@ function ch(
   over: Partial<Channel> & { catId?: number; cat?: string; catPos?: number } = {},
 ): Channel {
   const { catId, cat, catPos, ...rest } = over;
-  return {
+  return makeChannel({
     id,
     name: `ch-${id}`,
-    type: "text",
     category: cat ?? null,
     ...(catId !== undefined ? { categoryId: catId } : {}),
     ...(catPos !== undefined ? { categoryPosition: catPos } : {}),
     position,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    topic: "",
-    slowMode: 0,
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
     ...rest,
-  };
+  });
 }
 
 function signIn(role: string): void {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
 import {
@@ -8,7 +8,7 @@ import {
   updateChannel,
 } from "../../../src/stores/channels.store";
 import { voiceStore } from "../../../src/stores/voice.store";
-import { resetStores, addVoiceUser, testChannels } from "../../helpers/channelSidebarHarness";
+import { addVoiceUser, testChannels, useSidebarScope } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -31,21 +31,17 @@ describe("ChannelSidebar channel feature flags", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
   let onVoiceJoin: Mock<(channelId: number) => void>;
-  let onOpenCall: Mock<() => void>;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    onVoiceJoin = vi.fn<(channelId: number) => void>();
-    onOpenCall = vi.fn<() => void>();
-    sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+  useSidebarScope({
+    build: true,
+    bind: ({ container: c, sidebar: s, onVoiceJoin: v }) => {
+      container = c;
+      sidebar = s!;
+      onVoiceJoin = v!;
+    },
+    current: () => sidebar,
   });
 
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-  });
   describe("NSFW indicator", () => {
     it("marks a flagged text channel", () => {
       setChannels([
@@ -348,17 +344,14 @@ describe("ChannelSidebar row listeners across re-renders", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
+  useSidebarScope({
+    build: true,
+    bind: ({ container: c, sidebar: s }) => {
+      container = c;
+      sidebar = s!;
+    },
+    current: () => sidebar,
+    strayElements: ".channel-ctx-menu",
   });
 
   it("reuses an unchanged row's node across a re-render (no detach, no relisten)", () => {
@@ -447,17 +440,14 @@ describe("ChannelSidebar popovers survive unrelated re-renders", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createChannelSidebar>;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".channel-ctx-menu, .user-vol-menu").forEach((el) => el.remove());
+  useSidebarScope({
+    build: true,
+    bind: ({ container: c, sidebar: s }) => {
+      container = c;
+      sidebar = s!;
+    },
+    current: () => sidebar,
+    strayElements: ".channel-ctx-menu, .user-vol-menu",
   });
 
   it("keeps the channel context menu open across a re-render unrelated to the menu", () => {

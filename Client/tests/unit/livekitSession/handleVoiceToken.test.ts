@@ -8,12 +8,14 @@ import {
   setVoiceStatus,
 } from "@stores/voice.store";
 import {
+  captureDisconnectedHandler,
   createDeferred,
   useLiveKitSessionHarness,
   enterReconnecting,
   runReconnect,
   joinWithWs,
   enterConnected,
+  joinSession,
 } from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
@@ -40,10 +42,7 @@ describe("LiveKitSession", () => {
 
   describe("handleVoiceToken", () => {
     it("connects to LiveKit and sets up voice session", async () => {
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
 
       expect(mockRoom.connect).toHaveBeenCalledWith("ws://localhost:7880", "test-token", {
         autoSubscribe: false,
@@ -53,10 +52,7 @@ describe("LiveKitSession", () => {
 
     it("publishes no microphone in the AFK channel and keeps the session up", async () => {
       mockVoiceState.inAfkChannel = true;
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
 
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
       expect(mockRoom.disconnect).not.toHaveBeenCalled();
@@ -67,9 +63,7 @@ describe("LiveKitSession", () => {
     it("refuses to unmute in the AFK channel", async () => {
       mockVoiceState.inAfkChannel = true;
       mockVoiceState.localMuted = true;
-      session.setServerHost("localhost:7880");
-      session.setWsClient({ send: vi.fn() } as any);
-      await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
+      await joinSession(session);
       vi.mocked(setLocalMuted).mockClear();
 
       session.setMuted(false);
@@ -524,15 +518,10 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
 
-      // Capture the Disconnected handler registered during room creation.
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
-      expect(disconnectedHandler).toBeDefined();
+      expect(disconnected()).toBeDefined();
       expect((session as any)._state.type).toBe("connected");
 
       // Isolate the write triggered purely by the unexpected room drop.
@@ -540,7 +529,7 @@ describe("LiveKitSession", () => {
 
       // Fire an unexpected disconnect (non-CLIENT_INITIATED) — this is the primary
       // reconnecting write, from setReconnectAc via handleDisconnected.
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
 
       expect((session as any)._state.type).toBe("reconnecting");
       expect(setVoiceStatus).toHaveBeenCalledWith("reconnecting");
@@ -615,11 +604,7 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
 
-      let disconnectedHandler: ((reason?: number) => void) | undefined;
-      mockRoom.on.mockImplementation((event: string, handler: any) => {
-        if (event === "disconnected") disconnectedHandler = handler;
-        return mockRoom;
-      });
+      const disconnected = captureDisconnectedHandler();
 
       // Join channel 1 as key holder.
       await session.handleVoiceToken("test-token", "/livekit", 1, "ws://localhost:7880", true);
@@ -628,7 +613,7 @@ describe("LiveKitSession", () => {
       // The SFU connection drops — auto-reconnect starts, but the WS socket
       // (and thus the sidebar) is unaffected, so the user can still switch
       // voice channels while this is in flight.
-      disconnectedHandler!(/* SERVER_SHUTDOWN */ 1);
+      disconnected()!(/* SERVER_SHUTDOWN */ 1);
       expect((session as any)._state.type).toBe("reconnecting");
 
       // The user switches to channel 2, which already has a lower-uid

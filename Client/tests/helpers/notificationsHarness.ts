@@ -7,6 +7,7 @@ import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 import { mockOscillator, testPrefs } from "./notificationsMocks";
 import { signInAs } from "./storeSeeds";
+import { dmRecipient, makeDm } from "./dmHarness";
 
 export function makePayload(overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload {
   return {
@@ -19,6 +20,37 @@ export function makePayload(overrides: Partial<ChatMessagePayload> = {}): ChatMe
     timestamp: new Date().toISOString(),
     ...overrides,
   } as ChatMessagePayload;
+}
+
+/** One text channel, "general" (id 1), as the only channel; `activeChannelId` is the one being viewed. */
+export function seedGeneralChannel(activeChannelId: number | null): void {
+  channelsStore.setState(() => ({
+    categories: [],
+    channels: new Map([
+      [
+        1,
+        {
+          id: 1,
+          name: "general",
+          type: "text" as const,
+          category: null,
+          position: 0,
+          unreadCount: 0,
+          mentionCount: 0,
+          lastMessageId: null,
+          canSend: true,
+          topic: "",
+          slowMode: 0,
+          nsfw: false,
+          isPrivate: false,
+          voiceMaxUsers: 0,
+          voiceMaxVideo: 0,
+        },
+      ],
+    ]),
+    activeChannelId,
+    roles: [],
+  }));
 }
 
 /** Registers the shared beforeEach for the "notifyIncomingMessage" describe. */
@@ -40,34 +72,7 @@ export function useNotificationsHarness(): void {
       { token: "test", serverName: null },
     );
 
-    // Set up channels store
-    channelsStore.setState(() => ({
-      categories: [],
-      channels: new Map([
-        [
-          1,
-          {
-            id: 1,
-            name: "general",
-            type: "text" as const,
-            category: null,
-            position: 0,
-            unreadCount: 0,
-            mentionCount: 0,
-            lastMessageId: null,
-            canSend: true,
-            topic: "",
-            slowMode: 0,
-            nsfw: false,
-            isPrivate: false,
-            voiceMaxUsers: 0,
-            voiceMaxVideo: 0,
-          },
-        ],
-      ]),
-      activeChannelId: 1,
-      roles: [],
-    }));
+    seedGeneralChannel(1);
 
     // DM ids are absent from channelsStore until the conversation is opened
     // (see dispatcher.ts) -- reset so a DM seeded by one test cannot leak
@@ -120,21 +125,30 @@ export async function armDesktopNotifications(): Promise<SendNotificationMock> {
 
 /** Opens a one-to-one DM with bob on channel 55, which channelsStore does not know. */
 export function seedBobDm(): void {
+  const bob = dmRecipient(2, "bob");
   dmStore.setState(() => ({
-    channels: [
-      {
-        channelId: 55,
-        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-        participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-        name: "",
-        isGroup: false,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-        mentionCount: 0,
-      },
-    ],
+    channels: [makeDm({ channelId: 55, recipient: bob, participants: [bob] })],
+  }));
+}
+
+/** Seeds member 2, "a_martinez", whose nickname is Alice. */
+export function seedNicknamedMember(roleRevision: number): void {
+  membersStore.setState(() => ({
+    members: new Map([
+      [
+        2,
+        {
+          id: 2,
+          username: "a_martinez",
+          avatar: null,
+          role: "member",
+          status: "online" as const,
+          displayName: "Alice",
+        },
+      ],
+    ]),
+    typingUsers: new Map(),
+    roleRevision,
   }));
 }
 

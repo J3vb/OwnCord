@@ -7,149 +7,81 @@ vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, setActiveChannelProvider } from "../../src/lib/ws";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
+import {
+  openSocket,
+  emitAuthOk,
+  dropAndClear,
+  lastAuthPayload as getAuthPayload,
+} from "../helpers/wsSuiteHarness";
 
-/** Parses the payload of the most recent `auth` frame sent via ws_send. */
-function getAuthPayload(): Record<string, unknown> {
-  const authCall = mockInvoke.mock.calls.find(
-    (c) =>
-      c[0] === "ws_send" &&
-      typeof c[1]?.message === "string" &&
-      (c[1].message as string).includes('"type":"auth"'),
-  );
-  expect(authCall).toBeDefined();
-  const parsed = JSON.parse((authCall![1] as { message: string }).message) as {
-    payload: Record<string, unknown>;
-  };
-  return parsed.payload;
+/** activeChannelProvider is a module-level singleton (registered once at app
+ *  bootstrap in dispatcher.ts); reset it so state does not leak across tests. */
+function resetProvider(): void {
+  beforeEach(() => setActiveChannelProvider(null));
+  afterEach(() => setActiveChannelProvider(null));
 }
+
+const hasActiveChannelKey = (payload: Record<string, unknown>): boolean =>
+  Object.prototype.hasOwnProperty.call(payload, "active_channel_id");
 
 describe("auth frame: active_channel_id", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    // activeChannelProvider is a module-level singleton (registered once at
-    // app bootstrap in dispatcher.ts) — reset it so state doesn't leak across
-    // tests/files.
-    setActiveChannelProvider(null);
-    client = createWsClient();
+  useWsClientFixture((created) => {
+    client = created;
   });
+  resetProvider();
 
-  afterEach(() => {
-    client.disconnect();
-    setActiveChannelProvider(null);
-    vi.useRealTimers();
-  });
+  /** Connects, authenticates at `seq`, drops, and lets the reconnect's auth go out. */
+  async function reconnectAfterAuth(seq: number): Promise<void> {
+    await openSocket(client);
+    emitAuthOk({ seq });
+    dropAndClear();
+    await vi.advanceTimersByTimeAsync(1100);
+    emitTauriEvent("ws-state", "open");
+  }
 
   it("fresh connect (reconnectAttempt=0, lastSeq=0): no active_channel_id key even with a provider registered", async () => {
     setActiveChannelProvider(() => 99);
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     const payload = getAuthPayload();
     expect(payload.last_seq).toBe(0);
-    expect(Object.prototype.hasOwnProperty.call(payload, "active_channel_id")).toBe(false);
+    expect(hasActiveChannelKey(payload)).toBe(false);
   });
 
-  it("reconnect with lastSeq > 0 and a registered provider: active_channel_id carries the provider's id", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 7,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
-
-    setActiveChannelProvider(() => 42);
-
-    emitTauriEvent("ws-state", "closed");
-    mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(1100);
-    emitTauriEvent("ws-state", "open");
+  it.each([
+    [
+      "reconnect with lastSeq > 0 and a registered provider: active_channel_id carries the provider's id",
+      7,
+      () => 42,
+      42,
+    ],
+    [
+      "reconnect with lastSeq > 0 and NO provider registered: no active_channel_id key",
+      3,
+      null,
+      undefined,
+    ],
+    [
+      "reconnect with lastSeq > 0 and a provider that returns null: no active_channel_id key",
+      4,
+      () => null,
+      undefined,
+    ],
+  ])("%s", async (_name, seq, provider, expected) => {
+    setActiveChannelProvider(provider);
+    await reconnectAfterAuth(seq);
 
     const payload = getAuthPayload();
-    expect(payload.last_seq).toBe(7);
-    expect(payload.active_channel_id).toBe(42);
-  });
-
-  it("reconnect with lastSeq > 0 and NO provider registered: no active_channel_id key", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 3,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
-
-    // No setActiveChannelProvider call — stays null from beforeEach reset.
-    emitTauriEvent("ws-state", "closed");
-    mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(1100);
-    emitTauriEvent("ws-state", "open");
-
-    const payload = getAuthPayload();
-    expect(payload.last_seq).toBe(3);
-    expect(Object.prototype.hasOwnProperty.call(payload, "active_channel_id")).toBe(false);
-  });
-
-  it("reconnect with lastSeq > 0 and a provider that returns null: no active_channel_id key", async () => {
-    setActiveChannelProvider(() => null);
-
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 4,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
-
-    emitTauriEvent("ws-state", "closed");
-    mockInvoke.mockClear();
-    await vi.advanceTimersByTimeAsync(1100);
-    emitTauriEvent("ws-state", "open");
-
-    const payload = getAuthPayload();
-    expect(payload.last_seq).toBe(4);
-    expect(Object.prototype.hasOwnProperty.call(payload, "active_channel_id")).toBe(false);
+    expect(payload.last_seq).toBe(seq);
+    if (expected === undefined) expect(hasActiveChannelKey(payload)).toBe(false);
+    else expect(payload.active_channel_id).toBe(expected);
   });
 
   it("lastSeq > 0 but reconnectAttempt === 0: the provider is still consulted (gated on lastSeq, not reconnect count)", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
     // First "open": reconnectAttempt=0, lastSeq=0 — irrelevant, just gets us started.
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     // Bump lastSeq WITHOUT ever going through a "closed"/scheduleReconnect
     // cycle, so reconnectAttempt never increments off 0.
@@ -176,54 +108,41 @@ describe("auth frame: active_channel_id", () => {
   it("reconnectAttempt > 0 but lastSeq === 0: no active_channel_id key", async () => {
     setActiveChannelProvider(() => 5);
 
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
     // No message ever arrives — lastSeq stays 0.
 
-    emitTauriEvent("ws-state", "closed");
-    mockInvoke.mockClear();
+    dropAndClear();
     await vi.advanceTimersByTimeAsync(1100);
     emitTauriEvent("ws-state", "open"); // reconnectAttempt is now 1, lastSeq is still 0
 
     const payload = getAuthPayload();
     expect(payload.last_seq).toBe(0);
-    expect(Object.prototype.hasOwnProperty.call(payload, "active_channel_id")).toBe(false);
+    expect(hasActiveChannelKey(payload)).toBe(false);
   });
 });
 
 describe("auth frame: features", () => {
-  it("declares the forums feature on every auth, so the server sends forum channels", async () => {
-    vi.useFakeTimers();
+  useWsClientFixture(() => {});
+  resetProvider();
+
+  /** Dials a fresh client and returns the features its auth frame declared. */
+  async function dial(): Promise<unknown> {
     mockInvoke.mockReset();
     mockInvoke.mockResolvedValue(undefined);
+    mockListen.mockClear();
     eventHandlers.clear();
-    setActiveChannelProvider(null);
     const client = createWsClient();
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    expect(getAuthPayload().features).toEqual(["forums"]);
+    await openSocket(client);
+    const features = getAuthPayload().features;
     client.disconnect();
-    vi.useRealTimers();
+    return features;
+  }
+
+  it("declares the forums feature on every auth, so the server sends forum channels", async () => {
+    expect(await dial()).toEqual(["forums"]);
   });
 
   it("adds mobile only in the Android app, not in a phone browser", async () => {
-    vi.useFakeTimers();
-    const dial = async (): Promise<unknown> => {
-      mockInvoke.mockReset();
-      mockInvoke.mockResolvedValue(undefined);
-      eventHandlers.clear();
-      setActiveChannelProvider(null);
-      const client = createWsClient();
-      client.connect({ host: "localhost:8443", token: "t" });
-      await vi.advanceTimersByTimeAsync(10);
-      emitTauriEvent("ws-state", "open");
-      const features = getAuthPayload().features;
-      client.disconnect();
-      return features;
-    };
-
     // A phone browser: Android user agent, no native host.
     vi.stubGlobal("navigator", { ...navigator, userAgent: "Mozilla/5.0 (Linux; Android 14)" });
     expect(await dial()).toEqual(["forums"]);
@@ -233,6 +152,5 @@ describe("auth frame: features", () => {
     expect(await dial()).toEqual(["forums", "mobile"]);
 
     vi.unstubAllGlobals();
-    vi.useRealTimers();
   });
 });

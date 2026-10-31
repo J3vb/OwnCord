@@ -58,20 +58,7 @@ function makeMessage(
 function newList(
   overrides: Partial<MessageListOptions> = {},
 ): ReturnType<typeof createMessageList> {
-  return createMessageList({
-    channelId: 1,
-    channelName: "general",
-    currentUserId: 1,
-    onScrollTop: vi.fn(),
-    onReplyClick: vi.fn(),
-    onEditClick: vi.fn(),
-    onEditSave: vi.fn(() => true),
-    onEmptyEdit: vi.fn(),
-    onDeleteClick: vi.fn(),
-    onReactionClick: vi.fn(),
-    onPinClick: vi.fn(),
-    ...overrides,
-  });
+  return createMessageList(makeListOptions(overrides));
 }
 
 describe("MessageList", () => {
@@ -449,6 +436,8 @@ describe("TypingIndicator", () => {
 // ---------------------------------------------------------------------------
 
 import { createMessageInput } from "../../src/components/MessageInput";
+import { makeListOptions } from "../helpers/messageListHarness";
+import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { useMountContainer } from "../helpers/mountContainer";
@@ -459,14 +448,21 @@ describe("MessageInput", () => {
     container = mounted;
   });
 
-  it("mounts with textarea and send button", () => {
+  function mountInput(
+    callbacks: { onSend?: MessageInputOptions["onSend"]; onTyping?: () => void } = {},
+  ) {
     const input = createMessageInput({
       channelId: 1,
       channelName: "general",
-      onSend: vi.fn(),
-      onTyping: vi.fn(),
+      onSend: callbacks.onSend ?? vi.fn(),
+      onTyping: callbacks.onTyping ?? vi.fn(),
     });
     input.mount(container);
+    return input;
+  }
+
+  it("mounts with textarea and send button", () => {
+    const input = mountInput();
 
     expect(container.querySelector(".msg-textarea")).not.toBeNull();
     expect(container.querySelector("[aria-label='Send message']")).not.toBeNull();
@@ -475,13 +471,7 @@ describe("MessageInput", () => {
 
   it("sends message on Enter key", () => {
     const onSend = vi.fn();
-    const input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend,
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
+    const input = mountInput({ onSend });
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Hello world";
@@ -492,13 +482,7 @@ describe("MessageInput", () => {
 
   it("does not send on Shift+Enter", () => {
     const onSend = vi.fn();
-    const input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend,
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
+    const input = mountInput({ onSend });
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Hello";
@@ -508,13 +492,7 @@ describe("MessageInput", () => {
   });
 
   it("clears input after sending", () => {
-    const input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend: vi.fn(),
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
+    const input = mountInput();
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     textarea.value = "Hello";
@@ -524,13 +502,7 @@ describe("MessageInput", () => {
   });
 
   it("shows reply bar when setReplyTo is called", () => {
-    const input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend: vi.fn(),
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
+    const input = mountInput();
 
     input.setReplyTo(5, "Alice");
     const replyBar = container.querySelector(".reply-bar");
@@ -540,13 +512,7 @@ describe("MessageInput", () => {
   });
 
   it("hides reply bar when clearReply is called", () => {
-    const input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend: vi.fn(),
-      onTyping: vi.fn(),
-    });
-    input.mount(container);
+    const input = mountInput();
 
     input.setReplyTo(5, "Alice");
     input.clearReply();
@@ -558,13 +524,7 @@ describe("MessageInput", () => {
   it("throttles typing events to 3 seconds", () => {
     vi.useFakeTimers();
     const onTyping = vi.fn();
-    const input = createMessageInput({
-      channelId: 1,
-      channelName: "general",
-      onSend: vi.fn(),
-      onTyping,
-    });
-    input.mount(container);
+    const input = mountInput({ onTyping });
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
 

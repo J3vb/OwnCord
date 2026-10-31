@@ -1,4 +1,14 @@
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, onTestFinished } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  onTestFinished,
+  type Mock,
+} from "vitest";
 import { createEmojiPicker } from "@components/EmojiPicker";
 import { quickReactionEmoji } from "@components/message-list/quickReactions";
 import type { EmojiPickerOptions } from "@components/EmojiPicker";
@@ -12,6 +22,17 @@ function emojiCell(root: HTMLElement, char: string): HTMLElement | undefined {
   return Array.from(root.querySelectorAll<HTMLElement>(".ep-emoji")).find(
     (c) => c.dataset.emoji === char,
   );
+}
+
+/** Replaces Element.prototype.scrollIntoView with a spy until the test ends. */
+function stubScrollIntoView(): Mock {
+  const original = Element.prototype.scrollIntoView;
+  const scrollIntoView = vi.fn();
+  Element.prototype.scrollIntoView = scrollIntoView;
+  onTestFinished(() => {
+    Element.prototype.scrollIntoView = original;
+  });
+  return scrollIntoView;
 }
 
 describe("EmojiPicker", () => {
@@ -456,12 +477,7 @@ describe("EmojiPicker", () => {
   });
 
   it("clicking a category button scrolls its label into view", () => {
-    const original = Element.prototype.scrollIntoView;
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    onTestFinished(() => {
-      Element.prototype.scrollIntoView = original;
-    });
+    const scrollIntoView = stubScrollIntoView();
     const { picker } = makePicker();
 
     const foodBtn = Array.from(
@@ -498,12 +514,7 @@ describe("EmojiPicker", () => {
   });
 
   it("ArrowDown steps the category rail and Enter jumps to that category", () => {
-    const original = Element.prototype.scrollIntoView;
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    onTestFinished(() => {
-      Element.prototype.scrollIntoView = original;
-    });
+    const scrollIntoView = stubScrollIntoView();
     const { picker } = makePicker();
     const buttons = Array.from(
       picker.element.querySelectorAll<HTMLButtonElement>(".ep-category-btn"),

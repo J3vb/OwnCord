@@ -1,5 +1,8 @@
 import { pruneExpiredMutes } from "@lib/prefs/channelMuteExpiry";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeChannel } from "../helpers/channelFactory";
+import { openChannelMenu, useChannelMenuHost } from "../helpers/channelMenuHost";
+import { withMeasuredSize } from "../helpers/measuredSize";
 import {
   attachChannelContextMenu,
   CHANNEL_MUTE_CHANGED,
@@ -16,55 +19,21 @@ import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import type { Channel } from "@stores/channels.store";
 
-function channel(overrides: Partial<Channel> = {}): Channel {
-  return {
-    id: 5,
-    name: "general",
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    slowMode: 0,
-    topic: "",
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
+const channel = (overrides: Partial<Channel> = {}): Channel => makeChannel({ id: 5, ...overrides });
 
 let container: HTMLDivElement;
 let ac: AbortController;
+useChannelMenuHost((c, a) => {
+  container = c;
+  ac = a;
+});
 
 beforeEach(() => {
   localStorage.clear();
   invalidateMuteCache();
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  ac = new AbortController();
 });
 
-afterEach(() => {
-  ac.abort();
-  container.remove();
-  document.querySelectorAll(".channel-ctx-menu").forEach((el) => el.remove());
-});
-
-function openMenu(ch: Channel): HTMLElement {
-  const el = document.createElement("div");
-  container.appendChild(el);
-  // Same signal for both the row-level listener and the menu's own lifetime
-  // here — this suite doesn't exercise the render-vs-sidebar distinction
-  // (see ChannelSidebar.test.ts's OC-0282 coverage for that), and `ac.abort()`
-  // below still needs to close the menu.
-  attachChannelContextMenu(el, ch, ac.signal, ac.signal);
-  el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
-  return el;
-}
+const openMenu = (ch: Channel): HTMLElement => openChannelMenu(container, ch, ac.signal);
 
 describe("channel context menu — mute", () => {
   it("offers Mute Channel for a text channel", () => {
@@ -106,15 +75,7 @@ describe("channel context menu — mute", () => {
   it("keeps the menu inside the viewport when opened near the bottom edge (F9)", () => {
     const innerWidth = window.innerWidth;
     const innerHeight = window.innerHeight;
-    Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
-      configurable: true,
-      value: 220,
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      value: 260,
-    });
-    try {
+    withMeasuredSize(220, 260, () => {
       const el = document.createElement("div");
       container.appendChild(el);
       attachChannelContextMenu(el, channel(), ac.signal, ac.signal);
@@ -129,10 +90,7 @@ describe("channel context menu — mute", () => {
       const menu = document.querySelector(".channel-ctx-menu") as HTMLElement;
       expect(parseInt(menu.style.left, 10)).toBeLessThanOrEqual(innerWidth - 220);
       expect(menu.style.bottom).not.toBe("");
-    } finally {
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetWidth"];
-      delete (HTMLElement.prototype as unknown as Record<string, unknown>)["offsetHeight"];
-    }
+    });
   });
 
   // A voice channel produces no notifications, so a mute there would be an

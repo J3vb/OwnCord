@@ -15,7 +15,7 @@ import { channelsStore, type Channel, type ChannelsState } from "../../src/store
 import { membersStore, type Member } from "../../src/stores/members.store";
 import { getLazyVoiceImportsInFlight } from "./dispatcherMocks";
 import { resetMessagesState, resetMembersState } from "./storeResets";
-import { resetChannelsState } from "./storeSeeds";
+import { makeChannelRow, resetChannelsState, resetVoiceState } from "./storeSeeds";
 
 // Suppress console output from every dispatcher test file that loads the harness.
 vi.spyOn(console, "info").mockImplementation(() => {});
@@ -111,18 +111,7 @@ export function resetDispatcherStores(): void {
   resetChannelsState();
   resetMessagesState();
   resetMembersState();
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-  }));
+  resetVoiceState();
   dmStore.setState(() => ({ channels: [] }));
   blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set() }));
   uiStore.setState((prev) => ({ ...prev, transientError: null }));
@@ -235,24 +224,7 @@ export function setActiveChannel(id: number | null): void {
 }
 
 /** A channel row as channelsStore holds it: an empty text channel the user can send in. */
-export function channelRow(overrides: Pick<Channel, "id" | "name"> & Partial<Channel>): Channel {
-  return {
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    topic: "",
-    slowMode: 0,
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
-}
+export const channelRow = makeChannelRow;
 
 /** Add `rows` to channelsStore; `extra` overrides other fields of the state. */
 export function seedChannels(rows: readonly Channel[], extra: Partial<ChannelsState> = {}): void {

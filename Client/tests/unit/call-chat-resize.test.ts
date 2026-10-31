@@ -31,6 +31,16 @@ describe("createCallChatResize", () => {
     handle()?.dispatchEvent(e);
   }
 
+  function attachWithPointerCapture(): HTMLElement {
+    resize = createCallChatResize(column);
+    resize.attach();
+    const h = handle();
+    if (h === null) throw new Error("no handle");
+    h.setPointerCapture = vi.fn();
+    h.releasePointerCapture = vi.fn();
+    return h;
+  }
+
   beforeEach(() => {
     localStorage.clear();
     column = document.createElement("div");
@@ -56,12 +66,7 @@ describe("createCallChatResize", () => {
   });
 
   it("drag left widens, saves once on pointerup, and capture loss ends the drag", () => {
-    resize = createCallChatResize(column);
-    resize.attach();
-    const h = handle();
-    if (h === null) throw new Error("no handle");
-    h.setPointerCapture = vi.fn();
-    h.releasePointerCapture = vi.fn();
+    attachWithPointerCapture();
     const spy = vi.spyOn(Storage.prototype, "setItem");
 
     pointer("pointerdown", 700);
@@ -78,12 +83,7 @@ describe("createCallChatResize", () => {
   });
 
   it("detach mid-drag ends the drag and saves, so the next split's drag works", () => {
-    resize = createCallChatResize(column);
-    resize.attach();
-    const h = handle();
-    if (h === null) throw new Error("no handle");
-    h.setPointerCapture = vi.fn();
-    h.releasePointerCapture = vi.fn();
+    attachWithPointerCapture();
     pointer("pointerdown", 700);
     pointer("pointermove", 620);
     resize.detach();
@@ -145,12 +145,7 @@ describe("createCallChatResize", () => {
   });
 
   it("a drag is capped by the column width measured when it starts", () => {
-    resize = createCallChatResize(column);
-    resize.attach();
-    const h = handle();
-    if (h === null) throw new Error("no handle");
-    h.setPointerCapture = vi.fn();
-    h.releasePointerCapture = vi.fn();
+    attachWithPointerCapture();
     // The column shrank since attach and no refit has been reported.
     column.getBoundingClientRect = () => ({ width: 800 }) as DOMRect;
     pointer("pointerdown", 700);
@@ -181,12 +176,7 @@ describe("createCallChatResize", () => {
   });
 
   it("destroy mid-drag saves where the drag ended", () => {
-    resize = createCallChatResize(column);
-    resize.attach();
-    const h = handle();
-    if (h === null) throw new Error("no handle");
-    h.setPointerCapture = vi.fn();
-    h.releasePointerCapture = vi.fn();
+    attachWithPointerCapture();
     pointer("pointerdown", 700);
     pointer("pointermove", 650);
     resize.destroy();

@@ -2,6 +2,29 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRingController, createOutgoingCall, RING_TIMEOUT_MS } from "@lib/voice/callRing";
 import type { RingEndReason, RingState, OutgoingCallState } from "@lib/voice/callRing";
 
+/** An injected timer a test fires by hand, recording the delay it was armed with. */
+function manualTimer() {
+  let pending: (() => void) | null = null;
+  let pendingMs = 0;
+  let cleared = 0;
+  return {
+    setTimer: (fn: () => void, ms: number): ReturnType<typeof setTimeout> => {
+      pending = fn;
+      pendingMs = ms;
+      return 1 as unknown as ReturnType<typeof setTimeout>;
+    },
+    clearTimer: (): void => {
+      cleared += 1;
+      pending = null;
+    },
+    fireTimeout: () => pending?.(),
+    timerFn: () => pending,
+    timerMs: () => pendingMs,
+    armed: () => pending !== null,
+    clearedCount: () => cleared,
+  };
+}
+
 /**
  * Statechart harness. The timer is injected rather than faked globally so a
  * test can fire the 30s timeout without also advancing every other timer in
@@ -16,9 +39,7 @@ function harness() {
   const missed: RingState[] = [];
   const ended: RingState[] = [];
   const endReasons: Array<RingEndReason | undefined> = [];
-  let pending: (() => void) | null = null;
-  let pendingMs = 0;
-  let cleared = 0;
+  const timer = manualTimer();
 
   const ctrl = createRingController({
     onRingStateChange: (s) => states.push(s),
@@ -31,15 +52,8 @@ function harness() {
       ended.push(s);
       endReasons.push(reason);
     },
-    setTimer: (fn, ms) => {
-      pending = fn;
-      pendingMs = ms;
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    },
-    clearTimer: () => {
-      cleared += 1;
-      pending = null;
-    },
+    setTimer: timer.setTimer,
+    clearTimer: timer.clearTimer,
   });
 
   return {
@@ -52,9 +66,9 @@ function harness() {
     missed,
     ended,
     endReasons,
-    fireTimeout: () => pending?.(),
-    timerMs: () => pendingMs,
-    clearedCount: () => cleared,
+    fireTimeout: timer.fireTimeout,
+    timerMs: timer.timerMs,
+    clearedCount: timer.clearedCount,
   };
 }
 
@@ -355,32 +369,29 @@ describe("ring controller — destroy", () => {
 function outgoingHarness() {
   const states: Array<OutgoingCallState | null> = [];
   const ringbacks: boolean[] = [];
-  let pending: (() => void) | null = null;
-  let pendingMs = 0;
-  let cleared = 0;
+  const timer = manualTimer();
   const call = createOutgoingCall({
     onChange: (s) => states.push(s),
     onRingback: (playing) => ringbacks.push(playing),
-    setTimer: (fn, ms) => {
-      pending = fn;
-      pendingMs = ms;
-      return 1 as unknown as ReturnType<typeof setTimeout>;
-    },
-    clearTimer: () => {
-      cleared += 1;
-      pending = null;
-    },
+    setTimer: timer.setTimer,
+    clearTimer: timer.clearTimer,
   });
-  return {
-    call,
-    states,
-    ringbacks,
-    fireTimeout: () => pending?.(),
-    timerFn: () => pending,
-    timerMs: () => pendingMs,
-    armed: () => pending !== null,
-    clearedCount: () => cleared,
-  };
+  return { call, states, ringbacks, ...timer };
+}
+
+function redialAfterDecline() {
+  const h = outgoingHarness();
+  h.call.start(5, [9]);
+  h.call.declined(5, 9);
+  h.call.start(5, [9]);
+  return h;
+}
+
+function outgoingTimedOut() {
+  const h = outgoingHarness();
+  h.call.start(5, [9]);
+  h.fireTimeout();
+  return h;
 }
 
 describe("outgoing call", () => {
@@ -393,9 +404,7 @@ describe("outgoing call", () => {
   });
 
   it("moves to no-answer when the window runs out", () => {
-    const h = outgoingHarness();
-    h.call.start(5, [9]);
-    h.fireTimeout();
+    const h = outgoingTimedOut();
 
     expect(h.call.current()?.phase).toBe("no-answer");
   });
@@ -442,10 +451,7 @@ describe("outgoing call", () => {
   });
 
   it("Ring again restarts the window from a declined call", () => {
-    const h = outgoingHarness();
-    h.call.start(5, [9]);
-    h.call.declined(5, 9);
-    h.call.start(5, [9]);
+    const h = redialAfterDecline();
 
     expect(h.call.current()).toEqual({ channelId: 5, phase: "ringing", pending: [9] });
     expect(h.armed()).toBe(true);
@@ -499,9 +505,7 @@ describe("outgoing call — ringback", () => {
   });
 
   it("stops on no-answer when the window runs out", () => {
-    const h = outgoingHarness();
-    h.call.start(5, [9]);
-    h.fireTimeout();
+    const h = outgoingTimedOut();
 
     expect(h.call.current()?.phase).toBe("no-answer");
     expect(h.ringbacks).toEqual([true, false]);
@@ -534,10 +538,7 @@ describe("outgoing call — ringback", () => {
   });
 
   it("a redial restarts the ringback", () => {
-    const h = outgoingHarness();
-    h.call.start(5, [9]);
-    h.call.declined(5, 9);
-    h.call.start(5, [9]);
+    const h = redialAfterDecline();
 
     expect(h.ringbacks).toEqual([true, false, true]);
   });

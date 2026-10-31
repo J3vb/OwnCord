@@ -173,6 +173,18 @@ describe("createConnectionStatsPoller", () => {
   // --- Polling with mock room ---
 
   /** A room whose stats are rebuilt from `entries()` on every poll. */
+  /** A room whose engine has just one peer connection, reporting a single candidate pair. */
+  function roomWithOnly(
+    side: "publisher" | "subscriber",
+    currentRoundTripTime: number,
+    bytesSent: number,
+    bytesReceived: number,
+  ): unknown {
+    const report = new Map();
+    report.set("cp1", { type: "candidate-pair", currentRoundTripTime, bytesSent, bytesReceived });
+    return { engine: { pcManager: { [side]: { getStats: vi.fn().mockResolvedValue(report) } } } };
+  }
+
   function createLiveRoom(entries: () => Array<Record<string, unknown>>): unknown {
     return {
       engine: {
@@ -187,6 +199,20 @@ describe("createConnectionStatsPoller", () => {
         },
       },
     };
+  }
+
+  /** A live room whose only audio stream is one inbound track reporting the current counts. */
+  function inboundOnlyRoom(read: () => { lost: number; received: number }): unknown {
+    return createLiveRoom(() => [
+      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.04 },
+      {
+        id: "in1",
+        type: "inbound-rtp",
+        kind: "audio",
+        packetsLost: read().lost,
+        packetsReceived: read().received,
+      },
+    ]);
   }
 
   type PollerRoom = NonNullable<ReturnType<Parameters<typeof createConnectionStatsPoller>[0]>>;
@@ -388,16 +414,7 @@ describe("createConnectionStatsPoller", () => {
   it("keeps 0.5% random loss excellent while someone talks", async () => {
     let lost = 0;
     let received = 0;
-    const room = createLiveRoom(() => [
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.04 },
-      {
-        id: "in1",
-        type: "inbound-rtp",
-        kind: "audio",
-        packetsLost: lost,
-        packetsReceived: received,
-      },
-    ]);
+    const room = inboundOnlyRoom(() => ({ lost, received }));
     const cb = startPolling(room);
 
     // About 100 packets a poll, one of every 200 lost.
@@ -486,16 +503,7 @@ describe("createConnectionStatsPoller", () => {
   it("measures inbound loss over recent packets, not the whole call", async () => {
     let lost = 0;
     let received = 90_000;
-    const room = createLiveRoom(() => [
-      { id: "cp1", type: "candidate-pair", currentRoundTripTime: 0.04 },
-      {
-        id: "in1",
-        type: "inbound-rtp",
-        kind: "audio",
-        packetsLost: lost,
-        packetsReceived: received,
-      },
-    ]);
+    const room = inboundOnlyRoom(() => ({ lost, received }));
     const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100); // a long clean call so far
     expect(cb.mock.lastCall![0].quality).toBe("excellent");
@@ -713,24 +721,7 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("handles room with only publisher PC", async () => {
-    const report = new Map();
-    report.set("cp1", {
-      type: "candidate-pair",
-      currentRoundTripTime: 0.05,
-      bytesSent: 1000,
-      bytesReceived: 2000,
-    });
-
-    const room = {
-      engine: {
-        pcManager: {
-          publisher: {
-            getStats: vi.fn().mockResolvedValue(report),
-          },
-          // No subscriber
-        },
-      },
-    };
+    const room = roomWithOnly("publisher", 0.05, 1000, 2000);
 
     const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);
@@ -739,23 +730,7 @@ describe("createConnectionStatsPoller", () => {
   });
 
   it("handles room with only subscriber PC", async () => {
-    const report = new Map();
-    report.set("cp1", {
-      type: "candidate-pair",
-      currentRoundTripTime: 0.12,
-      bytesSent: 0,
-      bytesReceived: 0,
-    });
-
-    const room = {
-      engine: {
-        pcManager: {
-          subscriber: {
-            getStats: vi.fn().mockResolvedValue(report),
-          },
-        },
-      },
-    };
+    const room = roomWithOnly("subscriber", 0.12, 0, 0);
 
     const cb = startPolling(room);
     await vi.advanceTimersByTimeAsync(2100);

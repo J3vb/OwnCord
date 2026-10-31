@@ -6,6 +6,7 @@ import {
   mountMessageInput,
   selectFiles,
   useMessageInputContainer,
+  pasteFile,
 } from "../../helpers/messageInputHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
@@ -796,21 +797,7 @@ describe("MessageInput", () => {
       const comp = createMessageInput(makeOptions({ onUploadFile }));
       comp.mount(container);
       comp.setDisabled("Not connected");
-      const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
-      const pasteEvent = new Event("paste", { bubbles: true });
-      Object.defineProperty(pasteEvent, "clipboardData", {
-        value: {
-          items: [
-            {
-              kind: "file",
-              type: "image/png",
-              getAsFile: () => new File(["img"], "p.png", { type: "image/png" }),
-            },
-          ],
-        },
-      });
-
-      textarea.dispatchEvent(pasteEvent);
+      pasteFile(container, new File(["img"], "p.png", { type: "image/png" }));
       await Promise.resolve();
 
       expect(onUploadFile).not.toHaveBeenCalled();

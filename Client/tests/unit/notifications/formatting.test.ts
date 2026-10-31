@@ -2,9 +2,6 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
 import { notifyIncomingMessage } from "../../../src/lib/notifications";
 import { channelsStore } from "../../../src/stores/channels.store";
-import { dmStore } from "../../../src/stores/dm.store";
-import type { DmChannel } from "../../../src/stores/dm.store";
-import { membersStore } from "../../../src/stores/members.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { setLogLevel } from "../../../src/lib/logger";
 import {
@@ -15,6 +12,8 @@ import {
   setAlertPrefs,
   notifyAs,
   useNotificationsHarness,
+  seedNicknamedMember,
+  seedBobDm,
 } from "../../helpers/notificationsHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
 
@@ -66,19 +65,7 @@ describe("notifyIncomingMessage", () => {
     it("titles a DM notification from dmDisplayName, not the channelsStore fallback", async () => {
       const sendNotification = await freshSendNotification();
 
-      const dm: DmChannel = {
-        channelId: 55,
-        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-        participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-        name: "",
-        isGroup: false,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-        mentionCount: 0,
-      };
-      dmStore.setState(() => ({ channels: [dm] }));
+      seedBobDm();
 
       armDesktopPrefs();
 
@@ -99,23 +86,7 @@ describe("notifyIncomingMessage", () => {
     it("titles the notification with the member store's nickname, not the raw username", async () => {
       const sendNotification = await freshSendNotification();
 
-      membersStore.setState(() => ({
-        members: new Map([
-          [
-            2,
-            {
-              id: 2,
-              username: "a_martinez",
-              avatar: null,
-              role: "member",
-              status: "online" as const,
-              displayName: "Alice",
-            },
-          ],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 1,
-      }));
+      seedNicknamedMember(1);
 
       armDesktopPrefs();
 

@@ -13,7 +13,7 @@ import { shouldGroup } from "@lib/text/formatting";
 import { isServerRowKind } from "@lib/text/messageKind";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
-import { messagesStore, type Message } from "@stores/messages.store";
+import type { Message } from "@stores/messages.store";
 import {
   ME,
   OTHER,
@@ -26,6 +26,13 @@ import {
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import {
+  expectNoRowMenu,
+  messageMenuNames,
+  openRowMenu,
+  seedChannelOneRows,
+  shownActions,
+} from "../helpers/readOnlyRowMenu";
 
 const CAROL = 12;
 
@@ -202,68 +209,39 @@ describe("group row gates", () => {
   });
 
   function mount(rows: readonly Message[]): void {
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map([[1, [...rows]]]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    seedChannelOneRows(rows);
     list = createMessageList(makeOpts({ channelType: "dm" }));
     list.mount(container);
   }
   const rowEl = (id: number): HTMLElement =>
     container.querySelector<HTMLElement>(`[data-testid="message-${id}"]`)!;
-  const menuNames = (): string[] =>
-    [...document.querySelectorAll<HTMLElement>('.message-context-menu [role="menuitem"]')].map(
-      (el) => el.getAttribute("aria-label") ?? el.textContent ?? "",
-    );
+  const menuNames = messageMenuNames;
 
   it("action gates: only Copy ID can show, and only in developer mode", () => {
     const msg = groupRow("group_leave", {}, { user: { id: ME, username: "me", avatar: null } });
     expect(messageActionGates(msg, makeOpts()).copyId.shown).toBe(false);
     setDeveloperMode(true);
     const g = messageActionGates(msg, makeOpts({ onReportClick: vi.fn() }));
-    expect([g.react, g.edit, g.pin, g.delete, g.report].map((x) => x.shown)).toEqual([
-      false,
-      false,
-      false,
-      false,
-      false,
-    ]);
+    expect(shownActions(g)).toEqual([false, false, false, false, false]);
     expect(g.copyId.shown).toBe(true);
   });
 
   it("an unknown future kind is read-only too", () => {
     const g = messageActionGates(groupRow("group_future"), makeOpts());
-    expect([g.react, g.edit, g.pin, g.delete, g.report].map((x) => x.shown)).toEqual([
-      false,
-      false,
-      false,
-      false,
-      false,
-    ]);
+    expect(shownActions(g)).toEqual([false, false, false, false, false]);
   });
 
   it("no hover bar, and the right-click menu offers only Copy Message ID", async () => {
     setDeveloperMode(true);
     mount([groupRow("group_add", { target_user_id: CAROL })]);
     expect(rowEl(7).querySelector(".msg-actions-bar")).toBeNull();
-    rowEl(7).dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
-    );
+    openRowMenu(rowEl(7));
     await vi.waitFor(() => expect(menuNames()).toEqual(["Copy Message ID"]));
   });
 
   it("without developer mode there is no menu at all", async () => {
     mount([groupRow("group_add", { target_user_id: CAROL })]);
-    rowEl(7).dispatchEvent(
-      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 4, clientY: 4 }),
-    );
-    await import("@components/message-list/messageMenu");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(document.querySelector(".message-context-menu")).toBeNull();
+    await expectNoRowMenu(rowEl(7));
   });
 
   it("is never grouped with a neighbour from the same author", () => {
