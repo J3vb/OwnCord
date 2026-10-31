@@ -1,83 +1,25 @@
 // Push-to-Talk service tests, continued from keyAndGating.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as voiceSession from "../../helpers/voiceSessionMock";
+import * as ptt from "../../helpers/pttHarness";
+import { loggerMock } from "../../helpers/loggerMock";
 
-// ---------------------------------------------------------------------------
-// Shared mock state
-// ---------------------------------------------------------------------------
+vi.mock("@tauri-apps/api/core", () => ptt.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => ptt.tauriEventMock());
+vi.mock("@lib/prefs/preferences", () => ptt.preferencesMock());
+vi.mock("@stores/voice.store", () => ptt.voiceStoreMock());
+vi.mock("@lib/logger", () => loggerMock());
+vi.mock("../../../src/lib/voice/livekitSession", () => ptt.livekitSessionMock());
 
-const mockInvoke = vi.fn();
-const mockListen = vi.fn();
-
-// Prefs storage
-const testPrefs = new Map<string, unknown>();
-
-// voiceStore state
-let mockCurrentChannelId: number | null = null;
-let mockLocalMuted = false;
-let mockLocalDeafened = false;
-let mockPttGated = false;
-let mockPttPollingLive = false;
-/** livekitSession.setPttGated: closes/opens the mic processor's gate and writes
- *  the store's pttGated (the real session does both; the mock mirrors the store
- *  write so later reads of pttGated see it). */
-const mockSetPttGated = vi.fn((gated: boolean) => {
-  mockPttGated = gated;
-});
-const mockSetMuted = vi.fn();
-const mockSetPttPollingLive = vi.fn((live: boolean) => {
-  mockPttPollingLive = live;
-});
-
-// ---------------------------------------------------------------------------
-// Module mocks (must be declared before importing the module under test)
-// ---------------------------------------------------------------------------
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (...args: unknown[]) => mockInvoke(...args),
-}));
-
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
-}));
-
-vi.mock("@lib/prefs/preferences", () => ({
-  loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
-  savePref: (key: string, value: unknown) => {
-    testPrefs.set(key, value);
-  },
-}));
-
-vi.mock("@stores/voice.store", () => ({
-  voiceStore: {
-    getState: () => ({
-      currentChannelId: mockCurrentChannelId,
-      localMuted: mockLocalMuted,
-      localDeafened: mockLocalDeafened,
-      pttGated: mockPttGated,
-    }),
-  },
-  setPttPollingLive: (live: boolean) => mockSetPttPollingLive(live),
-  isPttPollingLive: () => mockPttPollingLive,
-}));
-
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  }),
-}));
-
-// PTT only ever calls setPttGated; setMuted is mocked so tests can assert it is
-// never touched (PTT no longer uses mute).
-vi.mock("../../../src/lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    setPttGated: (gated: boolean) => mockSetPttGated(gated),
-    setMuted: (muted: boolean) => mockSetMuted(muted),
-  }),
-);
+const {
+  mockInvoke,
+  mockListen,
+  testPrefs,
+  pttState,
+  mockSetPttGated,
+  mockSetMuted,
+  mockSetPttPollingLive,
+  resetAll,
+} = ptt;
 
 // ---------------------------------------------------------------------------
 // Import module under test (AFTER mocks)
@@ -90,33 +32,6 @@ const { init: initPtt, stop: stopPtt, updateKey: updatePttKey } = pushToTalk;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Reset all mock state between tests. */
-function resetAll(): void {
-  testPrefs.clear();
-  mockCurrentChannelId = null;
-  mockLocalMuted = false;
-  mockLocalDeafened = false;
-  mockPttGated = false;
-  mockPttPollingLive = false;
-  mockSetPttGated.mockReset();
-  mockSetPttGated.mockImplementation((gated: boolean) => {
-    mockPttGated = gated;
-  });
-  mockSetMuted.mockReset();
-  mockSetPttPollingLive.mockReset();
-  mockSetPttPollingLive.mockImplementation((live: boolean) => {
-    mockPttPollingLive = live;
-  });
-  mockInvoke.mockReset();
-  mockListen.mockReset();
-  // Default: key polling is supported and every other command resolves with
-  // undefined; listen resolves with a no-op unlistener
-  mockInvoke.mockImplementation((cmd: string) =>
-    Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
-  );
-  mockListen.mockResolvedValue(() => {});
-}
 
 // ---------------------------------------------------------------------------
 // Tests: ptt-state event handler (integration via initPtt + listen callback)
@@ -143,7 +58,7 @@ describe("ptt-state event listener", () => {
   }
 
   it("opens the gate via setPttGated(false) and never calls setMuted when PTT is pressed in a voice channel", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     const press = await bind();
 
     press({ payload: true });
@@ -156,7 +71,7 @@ describe("ptt-state event listener", () => {
   });
 
   it("ignores key events where key polling is unsupported (a Wayland session)", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     testPrefs.set("pttVk", 0x20);
     mockInvoke.mockImplementation((cmd: string) =>
       Promise.resolve(cmd === "ptt_polling_supported" ? false : undefined),
@@ -180,7 +95,7 @@ describe("ptt-state event listener", () => {
   });
 
   it("closes the gate via setPttGated(true) and never calls setMuted when PTT is released in a voice channel", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     const press = await bind();
 
     press({ payload: false }); // key released
@@ -192,7 +107,7 @@ describe("ptt-state event listener", () => {
   });
 
   it("does not touch the gate when not in a voice channel", async () => {
-    mockCurrentChannelId = null; // not in a channel
+    pttState.currentChannelId = null; // not in a channel
     const press = await bind();
 
     press({ payload: true });
@@ -207,8 +122,8 @@ describe("ptt-state event listener", () => {
   // Rewritten (v006): a press while self-muted or deafened only sets the gate;
   // the user's mute is untouched and keeps the capture stopped.
   it("a press while the user is self-muted still only sets the gate (mute untouched)", async () => {
-    mockCurrentChannelId = 7;
-    mockLocalMuted = true; // user explicitly muted themselves via the widget
+    pttState.currentChannelId = 7;
+    pttState.localMuted = true; // user explicitly muted themselves via the widget
     const press = await bind();
 
     press({ payload: true });
@@ -217,12 +132,12 @@ describe("ptt-state event listener", () => {
       expect(mockSetPttGated).toHaveBeenCalledWith(false);
     });
     expect(mockSetMuted).not.toHaveBeenCalled();
-    expect(mockLocalMuted).toBe(true);
+    expect(pttState.localMuted).toBe(true);
   });
 
   it("a press while the user is deafened still only sets the gate (mute untouched)", async () => {
-    mockCurrentChannelId = 7;
-    mockLocalDeafened = true;
+    pttState.currentChannelId = 7;
+    pttState.localDeafened = true;
     const press = await bind();
 
     press({ payload: true });
@@ -238,7 +153,7 @@ describe("ptt-state event listener", () => {
   // mid-hold" (PTT no longer owns or reads a mute, so there is nothing to stay).
 
   it("opens the gate on every press and closes it on every release", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     const press = await bind();
     mockSetPttGated.mockClear();
 
@@ -290,7 +205,7 @@ describe("ptt-error event listener", () => {
     });
 
     await initPtt();
-    mockPttGated = true;
+    pttState.pttGated = true;
 
     capturedHandlers["ptt-error"]!({ payload: "PTT thread panicked" });
 
@@ -310,9 +225,9 @@ describe("ptt-error event listener", () => {
     });
 
     await initPtt();
-    mockPttGated = true;
-    mockLocalMuted = true;
-    mockLocalDeafened = true;
+    pttState.pttGated = true;
+    pttState.localMuted = true;
+    pttState.localDeafened = true;
 
     capturedHandlers["ptt-error"]!({ payload: "PTT thread panicked" });
 
@@ -320,7 +235,7 @@ describe("ptt-error event listener", () => {
       expect(mockSetPttGated).toHaveBeenCalledWith(false);
     });
     expect(mockSetMuted).not.toHaveBeenCalled();
-    expect(mockLocalMuted).toBe(true);
+    expect(pttState.localMuted).toBe(true);
   });
 
   // Deleted the "after a PTT release applied the mute" and "deafened, even if a
@@ -332,7 +247,7 @@ describe("PTT binding lifecycle races", () => {
     resetAll();
     await stopPtt();
     resetAll();
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
   });
 
   afterEach(async () => {
@@ -355,7 +270,7 @@ describe("PTT binding lifecycle races", () => {
     await vi.waitFor(() => expect(finishSupport).toBeTypeOf("function"));
     // Clearing an unfinished binding must also release an existing PTT gate.
     // Start closed so the assertion proves a transition rather than false → false.
-    mockPttGated = true;
+    pttState.pttGated = true;
     await updatePttKey(0);
     expect(nativeKey).toBe(0);
     expect(testPrefs.get("pttVk")).toBe(0);
@@ -365,8 +280,8 @@ describe("PTT binding lifecycle races", () => {
     // every unresolved import in the worker, including unrelated module work.
     await vi.waitFor(() => expect(mockSetPttGated).toHaveBeenCalledWith(false));
 
-    expect(mockPttPollingLive).toBe(false);
-    expect(mockPttGated).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
+    expect(pttState.pttGated).toBe(false);
     expect(mockSetMuted).not.toHaveBeenCalled();
     expect(mockInvoke).not.toHaveBeenCalledWith("ptt_start");
   });
@@ -394,7 +309,7 @@ describe("PTT binding lifecycle races", () => {
     expect(removeError).toHaveBeenCalledTimes(1);
     expect(removeState).toHaveBeenCalledTimes(1);
     expect(mockInvoke).not.toHaveBeenCalledWith("ptt_start");
-    expect(mockPttPollingLive).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
   });
 
   it("keeps the newest binding when an earlier readiness call finishes late", async () => {
@@ -417,7 +332,7 @@ describe("PTT binding lifecycle races", () => {
     await first;
 
     expect(testPrefs.get("pttVk")).toBe(0x70);
-    expect(mockPttPollingLive).toBe(true);
+    expect(pttState.pollingLive).toBe(true);
     expect(mockInvoke.mock.calls.filter(([name]) => name === "ptt_start")).toHaveLength(1);
     expect(mockListen).toHaveBeenCalledTimes(2);
   });
@@ -438,9 +353,9 @@ describe("PTT binding lifecycle races", () => {
     finishStart();
     await pending;
 
-    expect(mockPttPollingLive).toBe(false);
-    expect(mockPttGated).toBe(false);
-    expect(mockLocalMuted).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
+    expect(pttState.pttGated).toBe(false);
+    expect(pttState.localMuted).toBe(false);
   });
 
   it("a repeated Clear cannot hide an earlier stop from the next start", async () => {
@@ -480,12 +395,12 @@ describe("PTT binding lifecycle races", () => {
     await initPtt();
     const onError = mockListen.mock.calls.find(([name]) => name === "ptt-error")![1];
     onError({ payload: "PTT thread panicked" });
-    expect(mockPttPollingLive).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
     mockInvoke.mockClear();
     await updatePttKey(0x70);
 
     expect(mockInvoke).toHaveBeenCalledWith("ptt_start");
-    expect(mockPttPollingLive).toBe(true);
+    expect(pttState.pollingLive).toBe(true);
   });
 
   it.each(["clear", "error"])(
@@ -501,8 +416,8 @@ describe("PTT binding lifecycle races", () => {
       const oldStateHandler = mockListen.mock.calls.find(([name]) => name === "ptt-state")![1];
       oldStateHandler({ payload: false });
       await vi.dynamicImportSettled();
-      expect(mockLocalMuted).toBe(false);
-      expect(mockPttGated).toBe(true);
+      expect(pttState.localMuted).toBe(false);
+      expect(pttState.pttGated).toBe(true);
 
       let clearing: Promise<void> | undefined;
       if (reason === "clear") clearing = updatePttKey(0);
@@ -519,8 +434,8 @@ describe("PTT binding lifecycle races", () => {
       newStateHandler({ payload: true });
       await vi.dynamicImportSettled();
 
-      expect(mockPttGated).toBe(false);
-      expect(mockLocalMuted).toBe(false);
+      expect(pttState.pttGated).toBe(false);
+      expect(pttState.localMuted).toBe(false);
       expect(mockSetMuted).not.toHaveBeenCalled();
     },
   );
@@ -531,8 +446,8 @@ describe("PTT binding lifecycle races", () => {
     );
     testPrefs.set("pttVk", 0x20);
     await initPtt();
-    mockLocalMuted = true;
-    mockPttGated = true;
+    pttState.localMuted = true;
+    pttState.pttGated = true;
     const clearing = updatePttKey(0);
     const rebound = updatePttKey(0x70);
     await clearing;
@@ -541,7 +456,7 @@ describe("PTT binding lifecycle races", () => {
     onState({ payload: true });
     await vi.dynamicImportSettled();
 
-    expect(mockLocalMuted).toBe(true);
+    expect(pttState.localMuted).toBe(true);
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
@@ -562,13 +477,13 @@ describe("PTT binding lifecycle races", () => {
     finishStart();
     await pending;
 
-    expect(mockPttGated).toBe(false);
+    expect(pttState.pttGated).toBe(false);
     expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
   it("gates an idle key when a call joins during startup readiness", async () => {
-    mockCurrentChannelId = null;
+    pttState.currentChannelId = null;
     testPrefs.set("pttVk", 0x20);
     let finishSupport!: (supported: boolean) => void;
     mockInvoke.mockImplementation((command: string) =>
@@ -580,13 +495,13 @@ describe("PTT binding lifecycle races", () => {
     );
     const pending = initPtt();
     await vi.waitFor(() => expect(finishSupport).toBeTypeOf("function"));
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     finishSupport(true);
     await pending;
 
-    expect(mockPttPollingLive).toBe(true);
-    expect(mockPttGated).toBe(true);
-    expect(mockLocalMuted).toBe(false);
+    expect(pttState.pollingLive).toBe(true);
+    expect(pttState.pttGated).toBe(true);
+    expect(pttState.localMuted).toBe(false);
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
@@ -598,7 +513,7 @@ describe("PTT binding lifecycle races", () => {
     await initPtt();
     const onState = mockListen.mock.calls.find(([name]) => name === "ptt-state")![1];
     onState({ payload: false });
-    mockCurrentChannelId = 8;
+    pttState.currentChannelId = 8;
     await vi.dynamicImportSettled();
     expect(mockSetPttGated).not.toHaveBeenCalled();
 
@@ -647,7 +562,7 @@ describe("ptt release delay", () => {
   const gateCalls = () => mockSetPttGated.mock.calls.map((c) => c[0]);
 
   it("a press after a release only toggles the gate and never touches mute", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     const key = await bind();
 
     await edgeOf(key, true);
@@ -660,7 +575,7 @@ describe("ptt release delay", () => {
   });
 
   it("release then press within the delay transmits continuously; release past the delay gates once", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     const key = await bind();
 
     await edgeOf(key, true);
@@ -679,7 +594,7 @@ describe("ptt release delay", () => {
   });
 
   it("follows the saved delay, and a delay of 0 closes on the release itself", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     testPrefs.set("pttReleaseDelayMs", 300);
     const key = await bind();
     await edgeOf(key, true);
@@ -696,7 +611,7 @@ describe("ptt release delay", () => {
   });
 
   it("caps a saved delay at 2000 ms", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     testPrefs.set("pttReleaseDelayMs", 60_000);
     const key = await bind();
     await edgeOf(key, true);
@@ -706,11 +621,11 @@ describe("ptt release delay", () => {
   });
 
   it("a pending close is dropped when the call ends or the binding is cleared", async () => {
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     const key = await bind();
     await edgeOf(key, true);
     await edgeOf(key, false);
-    mockCurrentChannelId = null;
+    pttState.currentChannelId = null;
     await vi.advanceTimersByTimeAsync(100);
     expect(gateCalls()).toEqual([false]);
   });
@@ -737,12 +652,12 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
 
     expect(commands()).not.toContain("ptt_start");
     expect(mockListen).not.toHaveBeenCalled();
-    expect(mockPttPollingLive).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
   });
 
   it("binding a key mid-call in Voice Activity mode saves it but does not gate the mic", async () => {
     testPrefs.set("inputMode", "vad");
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
 
     await updatePttKey(0x41);
 
@@ -762,13 +677,13 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
     await updatePttKey(0x42);
 
     expect(commands()).toContain("ptt_stop");
-    expect(mockPttPollingLive).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
   });
 
   it("re-arming the saved key after switching to Push to Talk gates the mic mid-call", async () => {
     testPrefs.set("pttVk", 0x41);
     testPrefs.set("inputMode", "vad");
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
     await initPtt();
     expect(commands()).not.toContain("ptt_start");
 
@@ -823,7 +738,7 @@ describe("PTT on the portal backend", () => {
     });
     testPrefs.set("pttVk", 0x77); // F8
     testPrefs.set("inputMode", "ptt");
-    mockCurrentChannelId = 7;
+    pttState.currentChannelId = 7;
   });
 
   afterEach(() => {
@@ -842,13 +757,13 @@ describe("PTT on the portal backend", () => {
     // Start before the desktop has bound the key: armed, but nothing can gate.
     await ptt.init();
     expect(starts()).toBe(1);
-    expect(mockPttPollingLive).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
     expect(mockSetPttGated).not.toHaveBeenCalled();
 
     // The bind finishes: one new start, and the gate closes mid-call.
     supported = true;
     emit("global-keys-changed", portalStatus("F8"));
-    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    await vi.waitFor(() => expect(pttState.pollingLive).toBe(true));
     expect(starts()).toBe(2);
     expect(mockSetPttGated.mock.calls.map((c) => c[0])).toEqual([true]);
 
@@ -856,11 +771,11 @@ describe("PTT on the portal backend", () => {
     // opens and PTT is not live, so the mic is never stranded closed.
     emit("ptt-error", "portal_lost");
     await vi.waitFor(() => expect(mockSetPttGated).toHaveBeenLastCalledWith(false));
-    expect(mockPttPollingLive).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
 
     // A rebind re-arms exactly once; a repeated event while live starts nothing.
     emit("global-keys-changed", portalStatus("F8"));
-    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    await vi.waitFor(() => expect(pttState.pollingLive).toBe(true));
     expect(starts()).toBe(3);
     emit("global-keys-changed", portalStatus("F8"));
     // Long enough for a start (several awaited imports and invokes) to have run.
@@ -878,18 +793,18 @@ describe("PTT on the portal backend", () => {
     await ptt.init();
     supported = true;
     emit("global-keys-changed", portalStatus("F8"));
-    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    await vi.waitFor(() => expect(pttState.pollingLive).toBe(true));
     expect(mockSetPttGated).toHaveBeenLastCalledWith(true);
 
     // The user cleared the key in system settings: no release can ever arrive.
     emit("global-keys-changed", portalStatus(null));
     await vi.waitFor(() => expect(mockSetPttGated).toHaveBeenLastCalledWith(false));
-    expect(mockPttPollingLive).toBe(false);
+    expect(pttState.pollingLive).toBe(false);
     expect(unlistened.filter((id) => id.startsWith("ptt-state"))).toHaveLength(2);
 
     // Binding it again re-arms.
     emit("global-keys-changed", portalStatus("F9"));
-    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    await vi.waitFor(() => expect(pttState.pollingLive).toBe(true));
     expect(starts()).toBe(3);
   });
 
@@ -899,15 +814,15 @@ describe("PTT on the portal backend", () => {
     await ptt.init();
     supported = true;
     emit("global-keys-changed", unnamed);
-    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    await vi.waitFor(() => expect(pttState.pollingLive).toBe(true));
     expect(starts()).toBe(2);
 
     // The portal restarts: the host reports ptt-error, then the rebind lands
     // with the same unnamed status, which re-arms instead of tearing down.
     emit("ptt-error", "portal_lost");
-    await vi.waitFor(() => expect(mockPttPollingLive).toBe(false));
+    await vi.waitFor(() => expect(pttState.pollingLive).toBe(false));
     emit("global-keys-changed", unnamed);
-    await vi.waitFor(() => expect(mockPttPollingLive).toBe(true));
+    await vi.waitFor(() => expect(pttState.pollingLive).toBe(true));
     expect(starts()).toBe(3);
     expect(mockSetPttGated).toHaveBeenLastCalledWith(true);
   });
