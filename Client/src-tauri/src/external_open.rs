@@ -33,12 +33,35 @@ fn checked_url(url: &str) -> Result<String, String> {
 /// renderer's way to open a link: it reaches the same environment cleaning as
 /// the tray's folder opener.
 #[tauri::command(async)]
-pub fn open_external_url(url: String) -> Result<(), String> {
+pub fn open_external_url<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    url: String,
+) -> Result<(), String> {
     let url = checked_url(&url)?;
-    open_url(&url)
+    open_checked_url(&app, &url)
+}
+
+/// On a phone the plugin's free `open_url` has no program to launch (it is the
+/// desktop `open` crate); only the plugin's Kotlin/Swift side can hand a URL
+/// to the system, and it is reached through the app handle.
+#[cfg(mobile)]
+fn open_checked_url<R: tauri::Runtime>(app: &tauri::AppHandle<R>, url: &str) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(desktop)]
+fn open_checked_url<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    url: &str,
+) -> Result<(), String> {
+    open_url(url)
 }
 
 /// Open `url` in the default browser or mail client.
+#[cfg(desktop)]
 pub(crate) fn open_url(url: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if let Some(appdir) = appimage::appimage_dir() {
