@@ -13,6 +13,7 @@ import { buildUpdateCheckRow, installInProgressText } from "../../features/updat
 import { subscribeAvailableUpdate } from "../../features/updates/availableUpdate";
 import type { AvailableUpdate } from "../../features/updates/availableUpdate";
 import { desktop } from "../../platform/desktop";
+import { platformText } from "./helpers";
 import { downloadAndInstallUpdate, subscribeToUpdateInstall } from "@lib/net/updater";
 import type { UpdateInstallState } from "@lib/net/updater";
 import {
@@ -165,7 +166,11 @@ export function buildAboutTab(signal: AbortSignal): HTMLDivElement {
   appendChildren(
     header,
     name,
-    createElement("div", { class: "setting-desc" }, t("about.desktop")),
+    createElement(
+      "div",
+      { class: "setting-desc" },
+      platformText(t("about.desktop"), t("about.android")),
+    ),
     externalLink(REPO_URL, t("about.github"), "about-repo-link"),
   );
   section.appendChild(header);

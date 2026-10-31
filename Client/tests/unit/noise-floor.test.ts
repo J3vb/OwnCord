@@ -41,9 +41,9 @@ describe("NoiseFloorTracker", () => {
     const tracker = new NoiseFloorTracker();
     let t = feed(tracker, () => rmsAt(-55), 0, 3000);
     expect(db(tracker.threshold)).toBeCloseTo(-45, 5);
-    // A fan starts: 15 dB louder. Within the 8 s window plus one sub-window
+    // A fan starts: 15 dB louder. Within the 3 s window plus one sub-window
     // the old quiet ages out and the gate rises above the fan.
-    t = feed(tracker, () => rmsAt(-40), t, 9500);
+    t = feed(tracker, () => rmsAt(-40), t, 4500);
     expect(db(tracker.threshold)).toBeCloseTo(-30, 5);
     expect(rmsAt(-40)).toBeLessThan(tracker.threshold);
   });
@@ -59,9 +59,84 @@ describe("NoiseFloorTracker", () => {
     const tracker = new NoiseFloorTracker();
     let t = feed(tracker, () => rmsAt(-55), 0, 3000);
     // 20 s of talking at -20 dBFS with a 100 ms pause back to the room's
-    // level every 1.5 s.
+    // level every 1.5 s: the floor stays at the room, so the threshold sits
+    // halfway between the floor margin (-45) and the voice margin (-35).
     t = feed(tracker, (now) => (now % 1500 < 100 ? rmsAt(-55) : rmsAt(-20)), t, 20000);
+    expect(db(tracker.threshold)).toBeCloseTo(-40, 1);
+    expect(db(tracker.speechLevel!)).toBeCloseTo(-20, 1);
+  });
+
+  it("the voice lifts the threshold halfway toward itself over suppressed silence", () => {
+    // Noise suppression leaves the room below the lowest threshold.
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-80), 0, 3000);
+    expect(db(tracker.threshold)).toBeCloseTo(db(AUTO_MIN_THRESHOLD), 5);
+    t = feed(tracker, () => rmsAt(-20), t, 2000);
+    t = feed(tracker, () => rmsAt(-80), t, 500);
+    // Halfway between -55 (the floor margin) and -35 (15 dB under the voice).
+    expect(db(tracker.threshold)).toBeCloseTo(-45, 1);
+    // A breath or a keyboard at -50 dBFS stays below the gate; the voice clears it.
+    expect(rmsAt(-50)).toBeLessThan(tracker.threshold);
+    expect(rmsAt(-20)).toBeGreaterThan(tracker.threshold);
+  });
+
+  it("a quiet voice over a loud room keeps the floor margin", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-50), 0, 3000);
+    t = feed(tracker, () => rmsAt(-32), t, 2000);
+    feed(tracker, () => rmsAt(-50), t, 500);
+    // 15 dB under the voice would be -47, below the floor margin: the margin wins.
+    expect(db(tracker.threshold)).toBeCloseTo(-40, 5);
+    expect(rmsAt(-32)).toBeGreaterThan(tracker.threshold);
+  });
+
+  it("learns the voice only from levels well above the gate", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-55), 0, 3000);
+    // Levels 3 dB over the threshold are the room's own peaks, not the voice.
+    t = feed(tracker, () => rmsAt(-42), t, 2000);
+    expect(tracker.speechLevel).toBeNull();
+    feed(tracker, () => rmsAt(-55), t, 500);
     expect(db(tracker.threshold)).toBeCloseTo(-45, 5);
+  });
+
+  it("one thump does not set the voice level, so a voice under it still clears the gate", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-50), 0, 3000);
+    // A desk thump: 150 ms at -6 dBFS.
+    t = feed(tracker, () => rmsAt(-6), t, 150);
+    feed(tracker, () => rmsAt(-50), t, 500);
+    expect(tracker.speechLevel).toBeNull();
+    expect(db(tracker.threshold)).toBeCloseTo(-40, 5);
+    expect(rmsAt(-30)).toBeGreaterThan(tracker.threshold);
+  });
+
+  it("a voice that turns quieter brings the gate back down", () => {
+    const tracker = new NoiseFloorTracker();
+    // Talking with a 100 ms pause back to the room every 1.5 s.
+    const talk = (level: number) => (now: number) => (now % 1500 < 100 ? rmsAt(-55) : rmsAt(level));
+    let t = feed(tracker, () => rmsAt(-55), 0, 3000);
+    t = feed(tracker, talk(-10), t, 3000);
+    // Halfway between -45 (the floor margin) and -25 (15 dB under the voice).
+    expect(db(tracker.threshold)).toBeCloseTo(-35, 0);
+    // The next sentences are 22 dB softer and never clear the gate by the
+    // 6 dB the estimate wants. Two seconds on, the estimate sinks 1.5 dB/s,
+    // and the gate with it, until the soft voice is well over it again.
+    t = feed(tracker, talk(-32), t, 2000);
+    expect(rmsAt(-32)).toBeGreaterThan(tracker.threshold);
+    feed(tracker, talk(-32), t, 8000);
+    expect(db(tracker.speechLevel!)).toBeLessThan(-20);
+    expect(db(tracker.threshold)).toBeLessThan(-38);
+    expect(rmsAt(-32)).toBeGreaterThan(tracker.threshold);
+  });
+
+  it("an input-volume change forgets the voice level with the floor", () => {
+    const tracker = new NoiseFloorTracker();
+    let t = feed(tracker, () => rmsAt(-55), 0, 3000);
+    t = feed(tracker, () => rmsAt(-20), t, 2000);
+    expect(tracker.speechLevel).not.toBeNull();
+    tracker.reset(t);
+    expect(tracker.speechLevel).toBeNull();
   });
 
   it("digital silence (a muted capture) does not drag the floor down", () => {

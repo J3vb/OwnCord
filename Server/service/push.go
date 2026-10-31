@@ -54,11 +54,21 @@ type PushSubscribeInput struct {
 	DeviceName string
 }
 
+// pushStore is what PushService reads and writes. *db.DB satisfies it.
+type pushStore interface {
+	// UpsertPushSubscription's keep is the per-user device cap; upsert, eviction
+	// ranking and eviction delete run in one transaction.
+	UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
+	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
+	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
+	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
+}
+
 // PushService stores Web Push subscriptions; dispatching is PushDispatcher's job.
 // VAPID rotation is an operator action (replace the key file or env var, restart),
 // not a method: SetVAPIDKey is called once, at start-up.
 type PushService struct {
-	st Store
+	st pushStore
 
 	mu      syncutil.Mutex
 	priv    *ecdh.PrivateKey
@@ -70,7 +80,7 @@ type PushService struct {
 
 // NewPushService constructs a PushService with no key installed (PublicKey
 // reports ok=false) and the default 90-day staleness window.
-func NewPushService(st Store) *PushService {
+func NewPushService(st pushStore) *PushService {
 	return &PushService{st: st, ttl: pushDefaultTTL}
 }
 

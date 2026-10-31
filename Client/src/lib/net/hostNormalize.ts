@@ -16,12 +16,16 @@ export function normalizeHostForCertCompare(host: string): string {
 
 /**
  * The form of a typed server address the client saves and compares: trimmed,
- * and lowercased because host names are case-insensitive. A saved host that
- * differs only in case keeps its own spelling, since its stored sign-in is
- * keyed by that exact string.
+ * stripped of a pasted link's scheme and path, and lowercased because host
+ * names are case-insensitive. A saved host that differs only in case keeps
+ * its own spelling, since its stored sign-in is keyed by that exact string.
  */
 export function canonicalServerHost(typed: string, savedHosts: Iterable<string> = []): string {
-  const lower = typed.trim().toLowerCase();
+  const lower = typed
+    .trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+    .replace(/[/?#].*$/, "")
+    .toLowerCase();
   if (lower === "") return lower;
   for (const saved of savedHosts) {
     if (saved.toLowerCase() === lower) return saved;

@@ -14,6 +14,7 @@ import { voiceStore } from "@stores/voice.store";
 import { Disposable } from "@lib/disposable";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { navigateToChannel } from "@lib/nav/channelNavigation";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { VideoModeController } from "./VideoModeController";
 
 /** What the header toggle shows: whether it applies, and the user's choice. */
@@ -53,7 +54,9 @@ function callVoiceChannelId(): number | null {
 export function createCallChat(opts: CallChatOptions): CallChat {
   const owner = new Disposable();
   let lastCallChannel = callVoiceChannelId();
-  let chatOpen = loadPref<boolean>(CALL_CHAT_PREF, true);
+  // Never chosen: open beside the grid, except on a phone, where the call view
+  // gets the whole screen and the header's chat button opens the chat.
+  let chatOpen = loadPref<boolean>(CALL_CHAT_PREF, !isPhoneLayout());
   let reported: CallChatState | null = null;
   let syncing = false;
 

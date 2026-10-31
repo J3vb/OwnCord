@@ -114,15 +114,16 @@ test.describe("Profile switch", () => {
     const { defaultBrowserType: _pixelBrowser, ...pixel7 } = devices["Pixel 7"];
     test.use(pixel7);
 
-    test("the switch list asks first; Cancel stays and Switch leaves", async ({ page }) => {
+    test("the drawer's server list asks first; Cancel stays and Switch leaves", async ({
+      page,
+    }) => {
       await login(page, A);
       await page.locator("[data-testid='sidebar-toggle']").tap();
+      // The rail on the drawer's left replaces the user bar's Switch server button.
+      await expect(page.getByTestId("server-rail")).toBeVisible();
+      await expect(page.getByTestId("disconnect-btn")).toBeHidden();
       const pickB = async () => {
-        await page.getByTestId("disconnect-btn").tap();
-        await page
-          .getByTestId("quick-switch-overlay")
-          .locator("[data-testid='server-item']", { hasText: "Server B" })
-          .tap();
+        await page.locator(`[data-testid='server-rail-server'][data-host='${B}']`).tap();
       };
 
       await pickB();

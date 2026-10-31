@@ -167,17 +167,36 @@ fn route(path: &str, token: &str) -> Option<Route> {
     }
 }
 
-async fn accept_loop(listener: TcpListener, token: String, shared: Arc<Shared>) {
+/// Where the accept loop gets connections from; the listener in production,
+/// a scripted source in tests.
+trait Accept {
+    async fn accept(&mut self) -> std::io::Result<tokio::net::TcpStream>;
+}
+
+impl Accept for TcpListener {
+    async fn accept(&mut self) -> std::io::Result<tokio::net::TcpStream> {
+        TcpListener::accept(self).await.map(|(stream, _)| stream)
+    }
+}
+
+/// How long to wait after a failed accept before trying again, so a
+/// persistent error (for example out of file descriptors) does not spin.
+const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(75);
+
+/// Serves connections until the owner aborts the task. An accept error is
+/// logged and retried: ending here would drop the connection set and cut
+/// every preview for the rest of the call.
+async fn accept_loop<A: Accept>(mut source: A, token: String, shared: Arc<Shared>) {
     let mut connections = JoinSet::new();
     loop {
         tokio::select! {
-            accepted = listener.accept() => match accepted {
-                Ok((stream, _)) => {
+            accepted = source.accept() => match accepted {
+                Ok(stream) => {
                     connections.spawn(serve(stream, token.clone(), shared.clone()));
                 }
                 Err(e) => {
                     log::warn!("[native_voice] frame socket accept: {e}");
-                    return;
+                    tokio::time::sleep(ACCEPT_RETRY_DELAY).await;
                 }
             },
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
@@ -355,6 +374,51 @@ mod tests {
             Ok(Some(Ok(Message::Binary(data)))) => Some(data.to_vec()),
             _ => None,
         }
+    }
+
+    /// Fails the first accept, then hands out the real listener's connections.
+    struct FlakyAccept {
+        listener: TcpListener,
+        failed: bool,
+    }
+
+    impl Accept for FlakyAccept {
+        async fn accept(&mut self) -> std::io::Result<tokio::net::TcpStream> {
+            if !self.failed {
+                self.failed = true;
+                return Err(std::io::Error::other("injected accept failure"));
+            }
+            self.listener.accept().await.map(|(stream, _)| stream)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_accept_does_not_end_the_frame_socket() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let token = "cd".repeat(32);
+        let source = FlakyAccept {
+            listener,
+            failed: false,
+        };
+        let task = tokio::spawn(accept_loop(
+            source,
+            token.clone(),
+            Arc::new(Shared::default()),
+        ));
+
+        let url = format!("ws://127.0.0.1:{port}/{token}/camera");
+        let connected = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tokio_tungstenite::connect_async(url),
+        )
+        .await;
+        assert!(
+            matches!(connected, Ok(Ok(_))),
+            "a connection after the failed accept is served"
+        );
+        assert!(!task.is_finished(), "the accept loop is still running");
+        task.abort();
     }
 
     #[tokio::test]

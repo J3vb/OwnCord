@@ -172,7 +172,9 @@
   min-height: 2.75rem;
   margin-top: var(--message-group-spacing);
   contain: layout style;
-  transition: background 0.1s ease;
+  transition:
+    background 0.1s ease,
+    transform 0.15s ease;
   border-left: 2px solid transparent;
 }
 /* The list is virtualized: its first child is whichever row the window
@@ -183,6 +185,37 @@
 }
 .message:hover {
   background: var(--bg-modifier-hover);
+}
+/* Swipe to reply (phoneGestures.ts): the row follows the finger without easing
+   and eases back on release; the icon sits in the frame around the list, in
+   the space the row slides off. */
+.message.msg-swiping {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .message {
+    transition: background 0.1s ease;
+  }
+}
+.msg-swipe-reply {
+  position: absolute;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-top: -16px;
+  border-radius: var(--radius-circle);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(calc(0.6 + 0.4 * var(--swipe-progress, 0)));
+}
+.msg-swipe-reply.armed {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 .message.grouped {
   min-height: 1.375rem;
@@ -954,6 +987,16 @@
 .reaction-chip.add-reaction:hover {
   border-color: var(--text-muted);
   color: var(--text-muted);
+}
+/* Phones: a chip and the "+" are 44 px to hit, the chip's look otherwise as before. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .reaction-chip {
+    min-height: 44px;
+    justify-content: center;
+  }
+  .reaction-chip.add-reaction {
+    min-width: 44px;
+  }
 }
 /* Timed out (B9-15, Q4): reacting is disabled inline. */
 .reaction-chip[aria-disabled="true"],

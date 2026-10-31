@@ -16,6 +16,9 @@ export interface RNNoiseNode {
   destroy(): void;
 }
 
+/** The node's output that carries the speech probability. */
+export const RNNOISE_SPEECH_OUTPUT = 1;
+
 let rnnoiseBytes: Promise<ArrayBuffer> | null = null;
 
 /** Fetch rnnoise.wasm once; later joins reuse the bytes (each node gets its own copy). */
@@ -40,10 +43,12 @@ export async function createRNNoiseNode(audioContext: AudioContext): Promise<RNN
   const bytesPromise = loadRNNoiseBytes();
   const cachedBytes = await bytesPromise;
 
+  // Output 0 is the denoised audio; output 1 carries the speech probability
+  // of the latest frame for the voice detector (vad-worklet.js).
   const node = new AudioWorkletNode(audioContext, "rnnoise-processor", {
     numberOfInputs: 1,
-    numberOfOutputs: 1,
-    outputChannelCount: [1],
+    numberOfOutputs: 2,
+    outputChannelCount: [1, 1],
   });
 
   const initPromise = new Promise<void>((resolve, reject) => {

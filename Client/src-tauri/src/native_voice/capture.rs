@@ -200,16 +200,29 @@ impl Reference {
     }
 }
 
-/// The voice gate's timing, in 10 ms frames: vad-worklet.js's ~320 ms hold
-/// below the threshold before closing, ~32 ms attack above it before
-/// opening, and ~500 ms start-up grace.
-const GATE_HOLD_FRAMES: u32 = 32;
+/// The voice gate's timing, in 10 ms frames: vad-worklet.js's ~500 ms hold
+/// below the close level before closing, ~32 ms attack at the threshold
+/// before opening, and ~500 ms start-up grace.
+const GATE_HOLD_FRAMES: u32 = 50;
 const GATE_ATTACK_FRAMES: u32 = 3;
 const GATE_GRACE_FRAMES: u32 = 50;
+/// Hysteresis, as vad-worklet.js's: the gate opens at the threshold and
+/// closes only this far below it, so the quieter stretches of a word do not
+/// count as silence and a voice at the line does not chatter.
+const GATE_HYSTERESIS_DB: f32 = 6.0;
 /// How far the voice runs behind the detector while the gate is on, so the
 /// attack does not clip the start of a word (micProcessor's
 /// GATE_LOOKAHEAD_S).
 const GATE_LOOKAHEAD_FRAMES: usize = 5;
+/// RNNoise's probability that a frame is a voice, as vad-worklet.js reads
+/// it: at or above the first a frame counts toward opening, under the
+/// second toward closing (automatic sensitivity's speech rule).
+const SPEECH_OPEN_PROBABILITY: f32 = 0.5;
+const SPEECH_CLOSE_PROBABILITY: f32 = 0.15;
+/// Frames after RNNoise starts whose probability is not trusted: its state
+/// settles in its first ~100 ms and reads as a voice (rnnoise-worklet.js
+/// SPEECH_WARMUP_FRAMES).
+const SPEECH_WARMUP_FRAMES: u32 = 15;
 
 /// Told whether the voice gate is open after each change.
 pub type GateSink = Arc<dyn Fn(bool) + Send + Sync>;
@@ -271,8 +284,13 @@ fn apply_gain(frame: &mut [i16], from: f32, to: f32) {
 pub struct VoiceGate {
     /// The level that counts as speech; 0 runs no gate (sensitivity 100).
     threshold: f32,
+    /// Automatic sensitivity's speech rule: a frame also needs RNNoise's
+    /// verdict to count toward opening, and loses it toward closing.
+    speech_gate: bool,
     grace: u32,
     silent: u32,
+    /// Counts up on a frame at the threshold and down on one below it, so a
+    /// single dip inside an onset does not start the attack over.
     speech: u32,
     closed: bool,
     on_change: Option<GateSink>,
@@ -291,10 +309,12 @@ impl VoiceGate {
     }
 
     /// Restart the detector open at `threshold`, as the web path restarts its
-    /// worklet on a slider move. Turning it off reopens without a report.
-    pub fn set_threshold(&mut self, threshold: f32) {
+    /// worklet on a slider move; `speech_gate` adds RNNoise's verdict
+    /// (automatic sensitivity). Turning it off reopens without a report.
+    pub fn set_threshold(&mut self, threshold: f32, speech_gate: bool) {
         *self = Self {
             threshold: threshold.max(0.0),
+            speech_gate,
             closed: self.closed,
             on_change: self.on_change.take(),
             on_level: self.on_level.take(),
@@ -322,6 +342,12 @@ impl VoiceGate {
         self.threshold > 0.0
     }
 
+    /// Whether the gate reads RNNoise's verdict, so the processor runs
+    /// RNNoise for it even with Enhanced Noise Suppression off.
+    pub fn wants_speech(&self) -> bool {
+        self.on() && self.speech_gate
+    }
+
     fn set_closed(&mut self, closed: bool) {
         if self.closed == closed {
             return;
@@ -332,31 +358,48 @@ impl VoiceGate {
         }
     }
 
-    /// Take one frame's level; returns whether the gate is now closed.
-    fn update(&mut self, rms: f32) -> bool {
+    /// The level below which an open gate counts a frame as quiet.
+    fn close_level(&self) -> f32 {
+        self.threshold * 10f32.powf(-GATE_HYSTERESIS_DB / 20.0)
+    }
+
+    /// Take one frame's level and RNNoise's verdict on it (0 while RNNoise
+    /// is not running, which only matters with the speech rule on); returns
+    /// whether the gate is now closed.
+    fn update(&mut self, rms: f32, probability: f32) -> bool {
+        let voiced = !self.speech_gate || probability >= SPEECH_OPEN_PROBABILITY;
+        let unvoiced = self.speech_gate && probability < SPEECH_CLOSE_PROBABILITY;
         if self.grace < GATE_GRACE_FRAMES {
             self.grace += 1;
-        } else if rms < self.threshold {
-            self.speech = 0;
+        } else if self.closed {
+            if rms >= self.threshold && voiced {
+                self.speech = self.speech.saturating_add(1);
+            } else {
+                self.speech = self.speech.saturating_sub(1);
+            }
+            if self.speech >= GATE_ATTACK_FRAMES {
+                self.speech = 0;
+                self.silent = 0;
+                self.set_closed(false);
+            }
+        } else if rms < self.close_level() || unvoiced {
             self.silent = self.silent.saturating_add(1);
             if self.silent >= GATE_HOLD_FRAMES {
+                self.silent = 0;
+                self.speech = 0;
                 self.set_closed(true);
             }
         } else {
             self.silent = 0;
-            self.speech = self.speech.saturating_add(1);
-            if self.speech >= GATE_ATTACK_FRAMES {
-                self.set_closed(false);
-            }
         }
         self.closed
     }
 
-    /// Take one frame's level: the gate runs on it while on, and every
-    /// `LEVEL_REPORT_FRAMES` the loudest one goes to the level sink. Returns
-    /// whether the gate is now closed.
-    fn observe(&mut self, rms: f32) -> bool {
-        let closed = self.on() && self.update(rms);
+    /// Take one frame's level and RNNoise's verdict: the gate runs on them
+    /// while on, and every `LEVEL_REPORT_FRAMES` the loudest level goes to
+    /// the level sink. Returns whether the gate is now closed.
+    fn observe(&mut self, rms: f32, probability: f32) -> bool {
+        let closed = self.on() && self.update(rms, probability);
         if let Some(sink) = &self.on_level {
             self.level_peak = self.level_peak.max(rms);
             self.level_frames += 1;
@@ -375,10 +418,40 @@ fn rms(frame: &[i16]) -> f32 {
     (power.sqrt() / 32768.0) as f32
 }
 
-/// The capture side: APM, then RNNoise when Enhanced Noise Suppression is on.
+/// RNNoise over the capture, and how many frames it has seen: its verdict is
+/// trusted only past the warm-up.
+struct Denoiser {
+    state: Box<DenoiseState<'static>>,
+    frames: u32,
+}
+
+impl Denoiser {
+    fn new() -> Self {
+        Self {
+            state: DenoiseState::new(),
+            frames: 0,
+        }
+    }
+
+    /// Denoise `input` into `output`; returns RNNoise's speech probability,
+    /// 0 while it warms up.
+    fn process(&mut self, output: &mut [f32], input: &[f32]) -> f32 {
+        let probability = self.state.process_frame(output, input);
+        self.frames = self.frames.saturating_add(1);
+        if self.frames > SPEECH_WARMUP_FRAMES {
+            probability
+        } else {
+            0.0
+        }
+    }
+}
+
+/// The capture side: APM, then RNNoise when Enhanced Noise Suppression is on
+/// or the voice gate wants its verdict (then the audio goes around it).
 pub struct Processor {
     apm: Arc<Apm>,
-    denoise: Option<Box<DenoiseState<'static>>>,
+    enhanced: bool,
+    denoise: Option<Denoiser>,
     /// Where a live change of the processing arrives, and the generation
     /// `apm` and `denoise` came from.
     follow: Option<Processing>,
@@ -402,7 +475,8 @@ impl Processor {
     pub fn new(apm: Arc<Apm>, enhanced_noise_suppression: bool) -> Self {
         Self {
             apm,
-            denoise: enhanced_noise_suppression.then(DenoiseState::new),
+            enhanced: enhanced_noise_suppression,
+            denoise: enhanced_noise_suppression.then(Denoiser::new),
             follow: None,
             seen: 0,
             gated: Arc::default(),
@@ -454,6 +528,7 @@ impl Processor {
     pub fn push(&mut self, samples: impl IntoIterator<Item = f32>, mut out: impl FnMut(&[i16])) {
         let Self {
             apm,
+            enhanced,
             denoise,
             follow,
             seen,
@@ -468,32 +543,40 @@ impl Processor {
         } = self;
         framer.push(samples.into_iter().map(to_i16), |frame| {
             if let Some(follow) = follow {
-                if let Some(Some((next, enhanced))) = follow.poll(seen) {
+                if let Some(Some((next, next_enhanced))) = follow.poll(seen) {
                     *apm = next;
-                    if enhanced != denoise.is_some() {
-                        *denoise = enhanced.then(DenoiseState::new);
-                    }
+                    *enhanced = next_enhanced;
                 }
             }
+            // RNNoise runs for the suppression, for the gate's verdict, or
+            // both; it is dropped once neither wants it.
+            let detect = lock(voice).wants_speech();
+            let wanted = *enhanced || detect;
+            if wanted != denoise.is_some() {
+                *denoise = wanted.then(Denoiser::new);
+            }
             let _ = apm.lock().process_stream(frame, SAMPLE_RATE as i32, 1);
+            let mut probability = 0.0;
             if let Some(d) = denoise {
                 // RNNoise takes 16-bit-range floats.
                 input
                     .iter_mut()
                     .zip(frame.iter())
                     .for_each(|(i, s)| *i = f32::from(*s));
-                d.process_frame(&mut output[..], &input[..]);
-                frame
-                    .iter_mut()
-                    .zip(output.iter())
-                    .for_each(|(s, o)| *s = o.clamp(-32768.0, 32767.0) as i16);
+                probability = d.process(&mut output[..], &input[..]);
+                if *enhanced {
+                    frame
+                        .iter_mut()
+                        .zip(output.iter())
+                        .for_each(|(s, o)| *s = o.clamp(-32768.0, 32767.0) as i16);
+                }
             }
             let target = gain.get();
             apply_gain(frame, *applied_gain, target);
             *applied_gain = target;
             let (voiced, closed) = {
                 let mut voice = lock(voice);
-                (voice.on(), voice.observe(rms(frame)))
+                (voice.on(), voice.observe(rms(frame), probability))
             };
             if voiced {
                 if lookahead.is_empty() {
@@ -668,13 +751,14 @@ impl Capture {
 
     /// Set the input-sensitivity gate's threshold (0: no gate), on the web
     /// path's scale (`vadThreshold`). `retune` moves it without restarting
-    /// the detector (automatic sensitivity's steps).
-    pub fn set_voice_gate(&self, threshold: f32, retune: bool) {
+    /// the detector (automatic sensitivity's steps); `speech` adds RNNoise's
+    /// verdict to the rule (automatic sensitivity) on a restart.
+    pub fn set_voice_gate(&self, threshold: f32, retune: bool, speech: bool) {
         let mut voice = lock(&self.feed.voice);
         if retune {
             voice.retune(threshold);
         } else {
-            voice.set_threshold(threshold);
+            voice.set_threshold(threshold, speech);
         }
     }
 
@@ -1097,15 +1181,16 @@ mod tests {
         let sink = reports.clone();
         let gate = Arc::new(Mutex::new(VoiceGate::default()));
         lock(&gate).report_to(Arc::new(move |open| lock(&sink).push(open)));
-        lock(&gate).set_threshold(threshold);
+        lock(&gate).set_threshold(threshold, false);
         (gate, reports)
     }
 
     /// The input-sensitivity gate on the web path's scale (vad-worklet.js):
-    /// a level below the threshold closes it after the ~320 ms hold, one
-    /// above opens it after the ~32 ms attack, and the voice runs 50 ms
-    /// behind so that attack does not clip the start of the word. Each change
-    /// is reported for the local speaking ring.
+    /// a level under the close level (6 dB below the threshold) closes it
+    /// after the ~500 ms hold, one at the threshold opens it after the
+    /// ~32 ms attack, and the voice runs 50 ms behind so that attack does not
+    /// clip the start of the word. Each change is reported for the local
+    /// speaking ring.
     #[test]
     fn the_voice_gate_closes_below_the_threshold_and_opens_above_it() {
         let (gate, reports) = reporting_gate(0.02);
@@ -1120,15 +1205,15 @@ mod tests {
         }
         assert!(lock(&reports).is_empty(), "no verdict during the grace");
 
-        let held: Vec<bool> = (0..45)
+        let held: Vec<bool> = (0..65)
             .flat_map(|_| silent_frames(&mut p, &quiet))
             .collect();
         assert!(
-            !held[..31].contains(&true),
+            !held[..49].contains(&true),
             "the hold keeps it open: {held:?}"
         );
         assert!(
-            held[33..].iter().all(|&s| s),
+            held[51..].iter().all(|&s| s),
             "then it sends silence: {held:?}"
         );
         assert_eq!(*lock(&reports), [false]);
@@ -1142,6 +1227,119 @@ mod tests {
             !spoke[5..].contains(&true),
             "the whole word goes out: {spoke:?}"
         );
+    }
+
+    /// A level between the close level and the threshold is neither quiet
+    /// nor speech: it keeps an open gate open and a closed gate closed.
+    #[test]
+    fn the_voice_gate_has_hysteresis_between_closing_and_opening() {
+        let (gate, reports) = reporting_gate(0.02);
+        // 0.014 is 3 dB under the threshold, inside the 6 dB hysteresis.
+        for _ in 0..GATE_GRACE_FRAMES + 200 {
+            lock(&gate).observe(0.014, 0.0);
+        }
+        assert!(lock(&reports).is_empty(), "the gate stays open");
+        for _ in 0..GATE_HOLD_FRAMES {
+            lock(&gate).observe(0.005, 0.0);
+        }
+        assert_eq!(*lock(&reports), [false], "8 dB under closes it");
+        for _ in 0..200 {
+            lock(&gate).observe(0.014, 0.0);
+        }
+        assert_eq!(
+            *lock(&reports),
+            [false],
+            "and 3 dB under does not reopen it"
+        );
+        for _ in 0..GATE_ATTACK_FRAMES {
+            lock(&gate).observe(0.02, 0.0);
+        }
+        assert_eq!(*lock(&reports), [false, true], "the threshold itself does");
+    }
+
+    /// Automatic sensitivity's speech rule: a loud frame RNNoise does not
+    /// call a voice does not count toward opening, and an open gate closes
+    /// after the hold once the verdict goes away, loud or not.
+    #[test]
+    fn the_speech_rule_opens_only_on_rnnoises_verdict_and_closes_without_it() {
+        let (gate, reports) = reporting_gate(0.02);
+        lock(&gate).set_threshold(0.02, true);
+        for _ in 0..GATE_GRACE_FRAMES + GATE_HOLD_FRAMES {
+            lock(&gate).observe(0.005, 0.0);
+        }
+        assert_eq!(*lock(&reports), [false], "quiet closes it");
+        for _ in 0..200 {
+            lock(&gate).observe(0.2, 0.3);
+        }
+        assert_eq!(
+            *lock(&reports),
+            [false],
+            "loud but not a voice stays closed"
+        );
+        for _ in 0..GATE_ATTACK_FRAMES {
+            lock(&gate).observe(0.2, 0.9);
+        }
+        assert_eq!(*lock(&reports), [false, true], "a loud voice opens it");
+        for _ in 0..GATE_HOLD_FRAMES - 1 {
+            lock(&gate).observe(0.2, 0.1);
+        }
+        assert_eq!(*lock(&reports), [false, true], "the hold covers a pause");
+        lock(&gate).observe(0.2, 0.1);
+        assert_eq!(
+            *lock(&reports),
+            [false, true, false],
+            "loud without the verdict closes it after the hold"
+        );
+        // A retune keeps the rule; a restart without it drops it.
+        lock(&gate).retune(0.03);
+        assert!(lock(&gate).wants_speech());
+        lock(&gate).set_threshold(0.03, false);
+        assert!(!lock(&gate).wants_speech());
+    }
+
+    /// With the speech rule on and Enhanced Noise Suppression off, RNNoise
+    /// runs for its verdict only: the audio goes out as a level-only gate's
+    /// (same lookahead delay, no denoising), and RNNoise is dropped once the
+    /// gate no longer wants it.
+    #[test]
+    fn rnnoise_runs_for_the_verdict_alone_and_leaves_the_audio_as_it_is() {
+        let input = noise(FRAME * 20, 0.1, 7);
+        let (level_only, _) = reporting_gate(0.02);
+        let (gate, _) = reporting_gate(0.02);
+        lock(&gate).set_threshold(0.02, true);
+        let mut plain =
+            Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(level_only);
+        let mut detecting =
+            Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(gate.clone());
+        let expected = run(&mut plain, &input);
+        let out = run(&mut detecting, &input);
+        assert!(plain.denoise.is_none(), "a level-only gate runs no RNNoise");
+        assert!(detecting.denoise.is_some(), "RNNoise runs for the verdict");
+        assert!(!detecting.enhanced);
+        assert!(expected.iter().any(|&s| s != 0), "the gate is open");
+        assert_eq!(out, expected, "the audio is not denoised");
+
+        lock(&gate).set_threshold(0.02, false);
+        run(&mut detecting, &input[..FRAME]);
+        assert!(detecting.denoise.is_none(), "and is dropped with the rule");
+    }
+
+    /// One quiet frame inside an onset costs the attack one count, not the
+    /// whole count, as the worklet's attack does.
+    #[test]
+    fn a_dip_inside_an_onset_does_not_restart_the_attack() {
+        let (gate, reports) = reporting_gate(0.02);
+        for _ in 0..GATE_GRACE_FRAMES + GATE_HOLD_FRAMES {
+            lock(&gate).observe(0.005, 0.0);
+        }
+        assert_eq!(*lock(&reports), [false]);
+        lock(&gate).observe(0.2, 0.0);
+        lock(&gate).observe(0.2, 0.0);
+        lock(&gate).observe(0.005, 0.0);
+        assert_eq!(*lock(&reports), [false], "two loud and a dip: not yet");
+        lock(&gate).observe(0.2, 0.0);
+        lock(&gate).observe(0.2, 0.0);
+        assert_eq!(*lock(&reports), [false, true], "two more open it");
     }
 
     /// Sensitivity 100 is threshold 0: no gate, no delay, nothing reported,
@@ -1166,11 +1364,11 @@ mod tests {
             Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(gate.clone());
         run(&mut p, &noise(FRAME * 100, 0.005, 9));
         assert_eq!(*lock(&reports), [false]);
-        lock(&gate).set_threshold(0.01);
+        lock(&gate).set_threshold(0.01, false);
         assert_eq!(*lock(&reports), [false, true]);
         // Turning it off reopens silently: the webview drops the verdict.
         run(&mut p, &noise(FRAME * 100, 0.001, 9));
-        lock(&gate).set_threshold(0.0);
+        lock(&gate).set_threshold(0.0, false);
         assert_eq!(*lock(&reports), [false, true, false]);
     }
 
@@ -1179,7 +1377,7 @@ mod tests {
     fn the_voice_gate_is_shared_with_the_watchers_feed() {
         let capture = Capture::default();
         let watchers = capture.feed.clone();
-        capture.set_voice_gate(0.03, false);
+        capture.set_voice_gate(0.03, false, false);
         assert_eq!(lock(&watchers.voice).threshold, 0.03);
     }
 
@@ -1201,7 +1399,7 @@ mod tests {
         lock(&gate).retune(0.0);
         assert_eq!(lock(&gate).threshold, 0.03, "a retune never turns it off");
         // A late retune after the gate was turned off leaves it off.
-        lock(&gate).set_threshold(0.0);
+        lock(&gate).set_threshold(0.0, false);
         lock(&gate).retune(0.02);
         assert!(!lock(&gate).on(), "a retune never turns it on");
     }
@@ -1221,10 +1419,10 @@ mod tests {
         let gate = Arc::new(Mutex::new(VoiceGate::default()));
         let levels = reported_levels(&gate);
         for rms in [0.01, 0.04, 0.02, 0.0, 0.01, 0.03, 0.0, 0.0, 0.0] {
-            lock(&gate).observe(rms);
+            lock(&gate).observe(rms, 0.0);
         }
         assert_eq!(*lock(&levels), [(0.04, true)], "one report so far");
-        lock(&gate).observe(0.0);
+        lock(&gate).observe(0.0, 0.0);
         assert_eq!(*lock(&levels), [(0.04, true), (0.03, true)]);
     }
 

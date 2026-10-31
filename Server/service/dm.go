@@ -11,9 +11,29 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
+// dmStore is what DMService reads and writes. *db.DB satisfies it.
+type dmStore interface {
+	dmReachStore
+	GroupDMStore
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	GetOrCreateDMChannelGated(ctx context.Context, callerID, recipientID int64) (ch *db.Channel, created, recipientOpened bool, accepted *db.MessageRequest, err error)
+	FindDMChannelIDBetween(ctx context.Context, user1ID, user2ID int64) (int64, bool, error)
+	GetUserDMChannels(ctx context.Context, userID int64) ([]db.DMChannelInfo, error)
+	OpenDMIfParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	CloseDM(ctx context.Context, userID, channelID int64) error
+	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	GetDMParticipantIDs(ctx context.Context, channelID int64) ([]int64, error)
+	CreateGroupDMChannel(ctx context.Context, name string, ownerID int64, participantIDs []int64) (*db.Channel, error)
+	GetGroupDMMeta(ctx context.Context, channelID int64) (ownerID int64, iconID string, err error)
+	GetDMParticipants(ctx context.Context, channelID, viewerID int64) ([]db.DMUser, error)
+	IsTrustedSender(ctx context.Context, recipientID, senderID int64) (bool, error)
+}
+
 // DMService handles direct-message channel operations.
 type DMService struct {
-	st    Store
+	st    dmStore
 	perms *PermissionService
 	// liveStatus returns userID's live status (what their connection last stamped or
 	// chose), "" with no connection or no stamp. The ws layer wires it
@@ -26,7 +46,7 @@ type DMService struct {
 
 // NewDMService creates a DMService. perms answers whether an actor is timed out,
 // which refuses the writes that publish to other participants.
-func NewDMService(st Store, perms *PermissionService) *DMService {
+func NewDMService(st dmStore, perms *PermissionService) *DMService {
 	return &DMService{st: st, perms: perms}
 }
 

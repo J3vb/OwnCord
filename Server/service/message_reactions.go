@@ -27,7 +27,7 @@ func (s *MessageService) RemoveReaction(ctx context.Context, userID, msgID int64
 // leaks membership of a channel the caller cannot read. The message must live in
 // channelID (the channel the permission check ran against); a mismatch is
 // not-found, not a broader lookup.
-func (s *MessageService) GetReactionUsers(ctx context.Context, userID, channelID, msgID int64, emoji string) ([]db.ReactionUser, error) {
+func (s *messageReads) GetReactionUsers(ctx context.Context, userID, channelID, msgID int64, emoji string) ([]db.ReactionUser, error) {
 	if msgID <= 0 {
 		return nil, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
 	}

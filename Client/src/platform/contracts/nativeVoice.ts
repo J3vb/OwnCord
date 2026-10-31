@@ -276,6 +276,8 @@ export interface NativeMicTestOptions {
   outputGain: number;
   /** The voice gate's threshold on the web path's scale; 0 is no gate. */
   threshold: number;
+  /** The voice gate also asks RNNoise's verdict (automatic sensitivity). */
+  speech?: boolean;
   /** Capture and report levels only: no output is opened or played. */
   monitor?: boolean;
 }
@@ -284,7 +286,7 @@ export interface NativeMicTestOptions {
 export type NativeMicTestUpdate =
   | { kind: "processing"; audio: NativeVoiceAudioOptions }
   | { kind: "inputGain"; percent: number }
-  | { kind: "voiceGate"; threshold: number; retune: boolean }
+  | { kind: "voiceGate"; threshold: number; retune: boolean; speech?: boolean }
   | { kind: "outputGain"; gain: number }
   | { kind: "inputDevice"; deviceId: string }
   | { kind: "outputDevice"; deviceId: string };
@@ -392,8 +394,15 @@ export interface NativeVoice {
   /** The input-sensitivity gate: the level (`vadThreshold`'s scale) the
    *  capture must reach to send, 0 for no gate. Its verdicts arrive as
    *  `voiceGate` events. `retune` moves the level without restarting the
-   *  detector (automatic sensitivity's steps). */
-  setVoiceGate(session: number, threshold: number, retune?: boolean): Promise<void>;
+   *  detector (automatic sensitivity's steps); `speech` makes the gate also
+   *  ask RNNoise whether a frame is a voice (automatic sensitivity's rule),
+   *  on a restart. */
+  setVoiceGate(
+    session: number,
+    threshold: number,
+    retune?: boolean,
+    speech?: boolean,
+  ): Promise<void>;
   /** The input volume, 0-200 % as the `inputVolume` pref: a gain on the
    *  processed microphone, ahead of the voice gate and the level reports. */
   setInputGain(session: number, percent: number): Promise<void>;

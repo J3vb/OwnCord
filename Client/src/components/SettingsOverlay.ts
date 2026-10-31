@@ -7,6 +7,7 @@
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { isDisplayed } from "@lib/ui/dialogOpen";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
 import { createElement, appendChildren, clearChildren } from "@lib/dom";
 import { closeOnBackdropClick } from "@lib/ui/modalFactory";
@@ -38,10 +39,15 @@ import { highlightMatches, normalizeQuery, tabMatches } from "./settings/setting
 import { confirmLogout } from "../features/settings/logoutConfirm";
 import { readAppVersion } from "../features/whats-new/appVersion";
 import { subscribeAvailableUpdate } from "../features/updates/availableUpdate";
+import { isAndroidApp } from "../features/voice/native/platform";
 
 const log = createLogger("SettingsOverlay");
 
-/** Matches the phone rules in settings.css: the list and a section take turns. */
+/**
+ * With `isPhoneLayout()`, this matches the phone rules in settings.css: the
+ * list and a section take turns on a narrow window, and on a phone of any
+ * orientation.
+ */
 const PHONE_QUERY = "(max-width: 600px)";
 
 // ---------------------------------------------------------------------------
@@ -150,6 +156,8 @@ const TAB_ICONS: Record<TabName, IconName> = {
 const SAFETY = "Safety" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.myUploads")
 const MY_UPLOADS = "My uploads" satisfies TabName;
+// i18n-exempt: TabName key; its label is settingsText("tabs.keybinds")
+const KEYBINDS = "Keybinds" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.account")
 const ACCOUNT = "Account" satisfies TabName;
 // i18n-exempt: TabName key; its label is settingsText("tabs.about")
@@ -229,7 +237,10 @@ export function createSettingsOverlay(
   /** On a phone the panel shows either the section list or one open section. */
   let sectionOpen = false;
   let backBtn: HTMLButtonElement | null = null;
-  const phone = typeof window.matchMedia === "function" ? window.matchMedia(PHONE_QUERY) : null;
+  const narrowWindow =
+    typeof window.matchMedia === "function" ? window.matchMedia(PHONE_QUERY) : null;
+  /** The panel is laid out as pages: a narrow window, or a phone in any orientation. */
+  const pagedLayout = (): boolean => narrowWindow?.matches === true || isPhoneLayout();
 
   // Stateful tabs — create via factory for proper cleanup on tab switch
   const logsTab = createLogsTab(() => activeTab, disposable.signal);
@@ -424,7 +435,7 @@ export function createSettingsOverlay(
     setActiveTab(tab);
     if (activeTab !== tab) return;
     setSectionOpen(true);
-    if (phone?.matches !== true) return;
+    if (!pagedLayout()) return;
     contentArea?.scrollTo?.({ top: 0 });
     // The list (and the tab that had focus) is hidden now: focus moves to Back.
     backBtn?.focus();
@@ -717,7 +728,7 @@ export function createSettingsOverlay(
         });
         uploadsBtn.prepend(createIcon(TAB_ICONS[MY_UPLOADS], 18));
         uploadsBtn.appendChild(document.createTextNode(tabLabel(MY_UPLOADS)));
-        uploadsBtn.addEventListener("click", () => setActiveTab(MY_UPLOADS), {
+        uploadsBtn.addEventListener("click", () => openSection(MY_UPLOADS), {
           signal: disposable.signal,
         });
         tabButtons.set(MY_UPLOADS, uploadsBtn);
@@ -733,8 +744,13 @@ export function createSettingsOverlay(
     );
     sidebar.appendChild(appSettingsCat);
 
+    // The Android app has no keyboard shortcuts or push-to-talk key to set.
     const appTabs = (Object.keys(TAB_LABEL_KEYS) as TabName[]).filter(
-      (name) => name !== ACCOUNT && name !== SAFETY && name !== MY_UPLOADS,
+      (name) =>
+        name !== ACCOUNT &&
+        name !== SAFETY &&
+        name !== MY_UPLOADS &&
+        !(name === KEYBINDS && isAndroidApp()),
     );
     for (const name of appTabs) {
       const btn = createElement("button", {
@@ -844,7 +860,7 @@ export function createSettingsOverlay(
           root?.classList.contains("open")
         ) {
           // On a phone, Back leaves the open section before it closes Settings.
-          if (sectionOpen && phone?.matches === true) backToList();
+          if (sectionOpen && pagedLayout()) backToList();
           else requestClose();
         } else if (
           !promptOpen() &&

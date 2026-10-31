@@ -10,7 +10,7 @@ import (
 )
 
 // GetAccessibleChannelIDs returns all channel IDs the user can read.
-func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
+func (s *messageReads) GetAccessibleChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list channels: %w", ErrInternal, err)
@@ -60,7 +60,7 @@ func (s *MessageService) GetAccessibleChannelIDs(ctx context.Context, userID int
 // SearchMessages' global branch, so a hit in an unacknowledged labelled channel is
 // absent rather than returned. The acknowledgement lookup runs only per labelled
 // channel in the visible set.
-func (s *MessageService) ReadableChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
+func (s *messageReads) ReadableChannelIDs(ctx context.Context, userID int64) ([]int64, error) {
 	ids, err := s.GetAccessibleChannelIDs(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func (s *MessageService) CanPost(ctx context.Context, userID, channelID int64) e
 // (ws/handlers_command.go) uses it to pick the sender-aware DM audience: a slash
 // command's broadcast is a DM interaction and must not bypass the first-contact
 // gate via channel fan-out.
-func (s *MessageService) ChannelIsDM(ctx context.Context, channelID int64) (bool, error) {
+func (s *messageReads) ChannelIsDM(ctx context.Context, channelID int64) (bool, error) {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil {
 		return false, err
@@ -152,6 +152,13 @@ func (s *MessageService) checkSendVerdict(ctx context.Context, userID int64, ch 
 	return denial(permissions.CanSendMessage(sub))
 }
 
+// subjectStore is what channelSubject and readSubject read beyond the permission service.
+type subjectStore interface {
+	dmReachStore
+	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+}
+
 // channelSubject resolves what the channel predicates need for userID in ch: role
 // bits, both override layers, the channel's flags, and for a DM its membership
 // and, when withBlock is set, the block state. A perms.Subject failure (timeout
@@ -160,7 +167,7 @@ func (s *MessageService) checkSendVerdict(ctx context.Context, userID int64, ch 
 // DMParticipant/DMBlocked/TimedOut, not RolePerms, so a substituted
 // TimedOut=false would let a DM message or reaction through while the timeout
 // state was unknown. Every caller fails closed on this error.
-func channelSubject(ctx context.Context, st Store, perms *PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
+func channelSubject(ctx context.Context, st subjectStore, perms *PermissionService, userID int64, ch *db.Channel, withBlock bool) (permissions.Subject, error) {
 	sub, err := perms.Subject(ctx, userID, ch.ID)
 	if err != nil {
 		return permissions.Subject{}, fmt.Errorf("%w: failed to resolve permissions: %w", ErrInternal, err)
@@ -228,7 +235,7 @@ func requireNotTimedOut(ctx context.Context, perms *PermissionService, userID in
 //
 // The NSFW acknowledgement is resolved live (never cached), only for a labelled
 // channel.
-func readSubject(ctx context.Context, st Store, perms *PermissionService, userID int64, ch *db.Channel) permissions.Subject {
+func readSubject(ctx context.Context, st subjectStore, perms *PermissionService, userID int64, ch *db.Channel) permissions.Subject {
 	sub, err := perms.Subject(ctx, userID, ch.ID)
 	if err != nil {
 		sub = permissions.Subject{}
@@ -294,18 +301,25 @@ type DMBlockReader interface {
 }
 
 // DMPrivacyReader is the privacy read the check adds. It is deliberately not part
-// of Store (the Store method ratchet); storeDMReader reaches it from a Store.
+// of Store (the Store method ratchet); storeDMReader reaches it from a store.
 type DMPrivacyReader interface {
 	DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error)
 }
 
-// storeDMReader lets a Store stand in as a DMBlockReader. A Store without
+// dmReachStore is the part of DMBlockReader a store serves directly.
+type dmReachStore interface {
+	IsGroupDM(ctx context.Context, channelID int64) (bool, error)
+	GetDMRecipient(ctx context.Context, channelID, userID int64) (*db.User, error)
+	IsEitherBlocked(ctx context.Context, a, b int64) (bool, error)
+}
+
+// storeDMReader lets a store stand in as a DMBlockReader. A store without
 // DMPrivacyReader (a test double) fails closed with an error rather than skipping
 // the check.
-type storeDMReader struct{ Store }
+type storeDMReader struct{ dmReachStore }
 
 func (r storeDMReader) DMRefusesSender(ctx context.Context, recipientID, senderID int64) (bool, error) {
-	p, ok := r.Store.(DMPrivacyReader)
+	p, ok := r.dmReachStore.(DMPrivacyReader)
 	if !ok {
 		return false, errors.New("store has no DM privacy read")
 	}

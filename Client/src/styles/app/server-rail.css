@@ -13,8 +13,7 @@
   flex: none;
   width: 58px;
   box-sizing: border-box;
-  padding: 10px 0;
-  gap: 6px;
+  padding: 4px 0 10px;
   background: var(--bg-tertiary);
   min-height: 0;
 }
@@ -25,6 +24,9 @@
   gap: 6px;
   flex: 1;
   min-height: 0;
+  /* The scroll box clips, so this padding is the room the active ring and
+     the hover lift need at the first and last icon. */
+  padding: 6px 0;
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -237,10 +239,62 @@
     gap: 6px;
   }
 }
-/* The portal serves one server, and the drawer layouts have no room for a rail. */
-@media (max-width: 800px) {
+/* The portal serves one server, and a narrow window has no room for a rail
+   beside the chat. */
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .server-rail-slot,
   .server-rail {
+    display: none;
+  }
+}
+/* On a phone the rail is part of the drawer: the same rail, shown on the
+   drawer's left in the drawer's layer while the drawer is open (SidebarDrawer
+   marks the slot), with the channel list to its right (responsive.css). It
+   replaces the user bar's Switch server button. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .app.has-server-rail {
+    --drawer-rail-width: calc(72px + env(safe-area-inset-left));
+  }
+  .server-rail-slot.drawer-open {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    box-sizing: border-box;
+    width: var(--drawer-rail-width);
+    padding: env(safe-area-inset-top) 0 var(--safe-bottom) env(safe-area-inset-left);
+  }
+  .server-rail-slot.drawer-open .server-rail {
+    display: flex;
+    flex: 1;
+    width: auto;
+    padding: 14px 0 10px;
+    gap: 10px;
+  }
+  .server-rail-slot.drawer-open .server-rail-item {
+    width: 100%;
+  }
+  .server-rail-slot.drawer-open .server-rail-btn {
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+    font-size: 14px;
+  }
+  .server-rail-slot.drawer-open .server-rail-badge {
+    right: 10px;
+    bottom: -4px;
+  }
+  .server-rail-slot.drawer-open .server-rail-sep {
+    width: 32px;
+  }
+  .server-rail-slot.drawer-open .server-rail-folder {
+    width: 56px;
+  }
+  .app.has-server-rail .user-bar [data-testid="disconnect-btn"] {
     display: none;
   }
 }

@@ -219,6 +219,14 @@
   gap: 6px;
 }
 
+/* Phones: every row of a menu that is still a popover is 44 px to hit. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .context-menu-item,
+  .context-menu__item {
+    min-height: 44px;
+  }
+}
+
 /* ── Toast Notification ── */
 /* Anchored at the top centre of the chat column, just below its 48px header,
    so a toast that waits to be dismissed never sits over the composer. The

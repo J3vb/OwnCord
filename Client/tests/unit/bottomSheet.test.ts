@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  PHONE_LAYOUT_QUERY,
   closeBottomSheet,
   isPhoneLayout,
+  onPhoneLayoutChange,
   openBottomSheet,
+  watchNextBottomSheet,
   type BottomSheetOptions,
 } from "../../src/lib/ui/bottomSheet";
 import { runSessionResets } from "../../src/lib/net/sessionRegistry";
@@ -46,12 +49,126 @@ afterEach(async () => {
 });
 
 describe("isPhoneLayout", () => {
-  it("is false where matchMedia is missing, and follows the drawer's query otherwise", () => {
+  it("is false where matchMedia is missing, and follows the phone query otherwise", () => {
     expect(isPhoneLayout()).toBe(false);
     const matchMedia = vi.fn((q: string) => ({ matches: q.includes("pointer: coarse") }));
     vi.stubGlobal("matchMedia", matchMedia);
     expect(isPhoneLayout()).toBe(true);
-    expect(matchMedia).toHaveBeenCalledWith("(max-width: 800px) and (pointer: coarse)");
+    expect(matchMedia).toHaveBeenCalledWith(PHONE_LAYOUT_QUERY);
+  });
+});
+
+/**
+ * Evaluates the one grammar the phone query uses: comma-separated queries of
+ * `and`-joined `(pointer: ...)`, `(max-width: Npx)` and `(max-height: Npx)`.
+ * jsdom has no media engine, so the shape of the query is tested here.
+ */
+function matches(query: string, screen: { w: number; h: number; coarse: boolean }): boolean {
+  return query.split(",").some((one) =>
+    one.split(" and ").every((cond) => {
+      const m = /^\((pointer|max-width|max-height): ?(\w+?)(px)?\)$/.exec(cond.trim());
+      if (m === null) throw new Error(`unexpected condition ${cond}`);
+      const value = m[2]!;
+      switch (m[1]) {
+        case "pointer":
+          return (value === "coarse") === screen.coarse;
+        case "max-width":
+          return screen.w <= Number(value);
+        default:
+          return screen.h <= Number(value);
+      }
+    }),
+  );
+}
+
+describe("PHONE_LAYOUT_QUERY", () => {
+  const phone = (w: number, h: number, coarse = true): boolean =>
+    matches(PHONE_LAYOUT_QUERY, { w, h, coarse });
+
+  it("holds for a phone upright", () => {
+    expect(phone(393, 852)).toBe(true);
+    expect(phone(412, 915)).toBe(true);
+  });
+
+  it("holds for a phone on its side, which is wider than a tablet's breakpoint", () => {
+    expect(phone(915, 412)).toBe(true);
+    expect(phone(852, 393)).toBe(true);
+  });
+
+  it("leaves a tablet in portrait or landscape, and a desktop window, on the desktop layout", () => {
+    expect(phone(1024, 1366)).toBe(false);
+    expect(phone(1366, 1024)).toBe(false);
+    expect(phone(900, 1200)).toBe(false);
+    // A narrow or short window driven by a mouse is not a phone.
+    expect(phone(393, 852, false)).toBe(false);
+    expect(phone(915, 412, false)).toBe(false);
+  });
+
+  it("switches at 900 px wide and 500 px tall", () => {
+    expect(phone(899, 900)).toBe(true);
+    expect(phone(900, 900)).toBe(false);
+    expect(phone(1200, 499)).toBe(true);
+    expect(phone(1200, 500)).toBe(false);
+  });
+});
+
+describe("onPhoneLayoutChange", () => {
+  it("fires on a resize that crosses the phone layout, once per crossing, until aborted", () => {
+    let phone = false;
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: phone })),
+    );
+    const seen: boolean[] = [];
+    const owner = new AbortController();
+    onPhoneLayoutChange((now) => seen.push(now), owner.signal);
+
+    window.dispatchEvent(new Event("resize"));
+    expect(seen).toEqual([]);
+    phone = true;
+    window.dispatchEvent(new Event("resize"));
+    window.dispatchEvent(new Event("resize"));
+    expect(seen).toEqual([true]);
+    phone = false;
+    window.dispatchEvent(new Event("resize"));
+    expect(seen).toEqual([true, false]);
+
+    owner.abort();
+    phone = true;
+    window.dispatchEvent(new Event("resize"));
+    expect(seen).toEqual([true, false]);
+  });
+});
+
+describe("watchNextBottomSheet", () => {
+  it("runs once for the next sheet to open, and not for a later one", () => {
+    const fn = vi.fn();
+    const owner = new AbortController();
+    watchNextBottomSheet(fn, owner.signal);
+    expect(fn).not.toHaveBeenCalled();
+    open();
+    expect(fn).toHaveBeenCalledTimes(1);
+    open();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("is dropped when its signal aborts first", () => {
+    const fn = vi.fn();
+    const owner = new AbortController();
+    watchNextBottomSheet(fn, owner.signal);
+    owner.abort();
+    open();
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("does not fire for an owner that was already gone (nothing opened)", () => {
+    const fn = vi.fn();
+    const watch = new AbortController();
+    watchNextBottomSheet(fn, watch.signal);
+    const gone = new AbortController();
+    gone.abort();
+    open({ signal: gone.signal });
+    expect(fn).not.toHaveBeenCalled();
   });
 });
 

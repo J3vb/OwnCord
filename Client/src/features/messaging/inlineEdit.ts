@@ -22,6 +22,10 @@ export interface InlineEditOptions {
   readonly text: string;
   /** The cleaned, non-empty, within-limit text to save. */
   readonly onSave: (content: string) => void;
+  /** What the server will store for the box's text (picked mentions turned
+   *  into their longer id tokens); the limit is checked on this. Defaults to
+   *  the text as typed. */
+  readonly expand?: (content: string) => string;
   readonly onCancel: () => void;
   /** Save with the text cleared: the host offers to delete the message. */
   readonly onEmpty: () => void;
@@ -115,7 +119,7 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
       return;
     }
     // Code points, which is what the server counts (as the composer does).
-    if ([...content].length > MAX_MESSAGE_LEN) {
+    if ([...(o.expand?.(content) ?? content)].length > MAX_MESSAGE_LEN) {
       setError(inlineEditText("error.tooLong", { max: String(MAX_MESSAGE_LEN) }));
       return;
     }

@@ -106,7 +106,7 @@ func (m mentionSet) pings() bool {
 // resolved. Failures are logged and mean "no mentions": a message must not be
 // rejected for a failed lookup. UserIDs may hold one id past the cap for a
 // reply-ping target; withReplyPing applies the cap.
-func (s *MessageService) resolveMentions(ctx context.Context, content string, authorID, channelID int64, isDM bool) mentionSet {
+func (s *mentionState) resolveMentions(ctx context.Context, content string, authorID, channelID int64, isDM bool) mentionSet {
 	set := mentionSet{UserIDs: []int64{}, RoleIDs: []int64{}}
 
 	parsed := parseMentionTokens(content)
@@ -135,7 +135,7 @@ func (s *MessageService) resolveMentions(ctx context.Context, content string, au
 
 // addNameMentions resolves legacy @username tokens, in order, through add; a
 // lookup failure is logged and leaves them as text.
-func (s *MessageService) addNameMentions(ctx context.Context, tokens []mentionCandidate, channelID int64, add func(int64)) {
+func (s *mentionState) addNameMentions(ctx context.Context, tokens []mentionCandidate, channelID int64, add func(int64)) {
 	if len(tokens) == 0 {
 		return
 	}
@@ -195,7 +195,7 @@ func MentionReachSet(ids map[int64]struct{}, everyone, hereOnly bool, uid int64,
 // call this: only the original insert raises a badge, which guarantees a counted
 // mention is not counted twice. The message is already committed, so failures are
 // logged, not surfaced.
-func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) []db.MentionBatchEntry {
+func (s *mentionState) mentionEntries(ctx context.Context, channelID, msgID, authorID int64, set mentionSet, isDM bool, participantIDs []int64) []db.MentionBatchEntry {
 	if !set.pings() {
 		return nil
 	}
@@ -254,7 +254,7 @@ func (s *MessageService) mentionEntries(ctx context.Context, channelID, msgID, a
 // permissions.MemberChannelPerms does; ListMentionTargetsByRoles joins user_roles
 // so a multi-role holder is listed once). DM participation is membership, so DMs
 // skip the role walk.
-func (s *MessageService) mentionReaders(ctx context.Context, channelID int64, isDM bool, participantIDs []int64) ([]db.MentionTarget, error) {
+func (s *mentionState) mentionReaders(ctx context.Context, channelID int64, isDM bool, participantIDs []int64) ([]db.MentionTarget, error) {
 	if isDM {
 		targets := make([]db.MentionTarget, 0, len(participantIDs))
 		for _, pid := range participantIDs {
@@ -311,7 +311,7 @@ func holdsAdminRole(t db.MentionTarget, adminRoles map[int64]bool) bool {
 //   - a user ALLOW adds a member their role excluded.
 //
 // A user allow beats a user deny on the same bit, as permissions.EffectiveChannelPerms.
-func (s *MessageService) applyUserOverridesToReaders(
+func (s *mentionState) applyUserOverridesToReaders(
 	ctx context.Context, channelID int64, targets []db.MentionTarget, adminRoles map[int64]bool,
 ) ([]db.MentionTarget, error) {
 	userOv, err := s.st.GetChannelUserOverrides(ctx, channelID)

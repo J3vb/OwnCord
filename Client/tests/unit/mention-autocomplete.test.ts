@@ -802,6 +802,58 @@ describe("composer id tokens", () => {
     expect(onSend).toHaveBeenCalledWith("hey <@2>  and <@&2>", null, [], [], false);
   });
 
+  /** A member whose id token (`<@id>`) is far longer than the `@Zed` typed. */
+  function pickLongIdMember(): void {
+    membersStore.setState((prev) => {
+      const members = new Map(prev.members);
+      members.set(123456789012, {
+        id: 123456789012,
+        username: "Zed",
+        avatar: null,
+        role: "member" as const,
+        status: "online" as const,
+      });
+      return { ...prev, members };
+    });
+    type("@ze");
+    press("Enter");
+    expect(ta().value).toBe("@Zed ");
+  }
+
+  it("refuses a draft that is within the limit as typed but over it once mentions expand, and keeps it", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    pickLongIdMember();
+    const draft = `@Zed @Zed ${"a".repeat(3989)}`;
+    expect([...draft].length).toBe(3999);
+    type(draft);
+    press("Enter");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(ta().value).toBe(draft);
+    expect(container.querySelector(".attachment-upload-error")?.textContent).toContain("4000");
+  });
+
+  it("counts the expanded content in the character counter", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    pickLongIdMember();
+    type(`@Zed @Zed ${"a".repeat(3989)}`);
+    const counter = container.querySelector<HTMLElement>("[data-testid='char-counter']")!;
+    expect(counter.hidden).toBe(false);
+    expect(counter.textContent).toBe(String(4000 - 4021));
+    expect(counter.classList.contains("over")).toBe(true);
+  });
+
+  it("sends a draft whose expanded content is exactly the limit", () => {
+    applyReadyCapabilities({ id_mentions: true });
+    seedRoleRoster(Permission.SEND_MESSAGES);
+    pickLongIdMember();
+    // 15 + 1 + 3984 = 4000 once `@Zed` is `<@123456789012>`.
+    type(`@Zed ${"a".repeat(3984)}`);
+    press("Enter");
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
   it("sends plain @name without the capability", () => {
     seedRoleRoster(Permission.SEND_MESSAGES);
     type("hey @al");

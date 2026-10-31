@@ -28,7 +28,7 @@ func loggedRequestThroughProxy(t *testing.T, req *http.Request, proxyNets []*net
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
-	h := boundRequestID(middleware.RequestID(setRequestIDHeader(requestLogger(proxyNets)(
+	h := boundRequestID(middleware.RequestID(setRequestIDHeader(requestLogger(proxyNets, nil)(
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})))))

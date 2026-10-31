@@ -63,4 +63,7 @@ type SetupOptions struct {
 	// LogHistoryDir is where the saved log files are (cfg.LogHistoryDir()).
 	// Empty means history is off: GET /logs/history answers enabled:false.
 	LogHistoryDir string
+	// System feeds the Dashboard health row. The zero value serves uptime-less
+	// answers with every CPU, memory and disk figure null.
+	System SystemSources
 }

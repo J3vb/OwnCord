@@ -90,6 +90,7 @@ export const accountText = defineCatalog("account", {
   "status.sectionTitle": "Status",
   "status.showMeAs": "Show me as",
   "status.hint": "Do Not Disturb also silences desktop notifications",
+  "status.hint.android": "Do Not Disturb also silences notifications",
 
   "devices.thisDevice": "This device",
   "devices.detail": "{ip} · Last used {time}",

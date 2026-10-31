@@ -16,6 +16,21 @@ import (
 // stands between it and anyone on the network.
 var ErrSetupAlreadyDone = errors.New("setup has already been completed")
 
+// setupStore is what SetupService reads and writes. *db.DB satisfies it.
+type setupStore interface {
+	db.Auditor
+	CreateChannel(ctx context.Context, name, chanType, category, topic string, position int) (int64, error)
+	CreateOwnerIfEmpty(ctx context.Context, username, passwordHash string, roleID int) (int64, error)
+	UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error
+	CreateFirstSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
+	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
+	UserCount(ctx context.Context) (int64, error)
+	GetSetting(ctx context.Context, key string) (string, error)
+	// ApplySettings upserts every pair in one transaction, so the settings PATCH is
+	// atomic.
+	ApplySettings(ctx context.Context, updates map[string]string) error
+}
+
 // SetupService owns first-run bootstrap: the owner account and the minimum a fresh
 // server needs. The ordering is a contract. CreateOwnerIfEmpty is the atomic gate
 // (checks "no users" and inserts in one statement, closing the TOCTOU window a
@@ -25,14 +40,14 @@ var ErrSetupAlreadyDone = errors.New("setup has already been completed")
 // invite). Those steps become warnings and run detached from the request context
 // so a disconnect after the commit cannot take them down.
 type SetupService struct {
-	st      Store
+	st      setupStore
 	limiter *auth.RateLimiter
 }
 
 // NewSetupService creates a SetupService. limiter is the process-wide one whose
 // admission budget Bootstrap's hash queues on; nil skips it (the admin mux's
 // standalone fallback has none).
-func NewSetupService(st Store, limiter *auth.RateLimiter) *SetupService {
+func NewSetupService(st setupStore, limiter *auth.RateLimiter) *SetupService {
 	return &SetupService{st: st, limiter: limiter}
 }
 

@@ -17,6 +17,7 @@ vi.mock("@stores/ui.store", () => ({
 }));
 
 import { buildAccountTab } from "@components/settings/AccountTab";
+import { clearHost, hostAndroidApp } from "../helpers/androidHost";
 
 function session(id: number, current: boolean) {
   return {
@@ -351,6 +352,18 @@ describe("Account tab: status and danger zone", () => {
     expect(opts.onStatusChange).toHaveBeenCalledWith("dnd");
     expect(localStorage.getItem("owncord:settings:userStatus")).toBe(JSON.stringify("dnd"));
     expect(pane.textContent).toContain("Do Not Disturb also silences desktop notifications");
+  });
+
+  it('words the Do Not Disturb hint without "desktop" in the Android app', () => {
+    hostAndroidApp();
+    try {
+      pane = buildAccountTab(options(), ac.signal);
+      document.body.appendChild(pane);
+      expect(pane.textContent).toContain("Do Not Disturb also silences notifications");
+      expect(pane.textContent).not.toContain("desktop notifications");
+    } finally {
+      clearHost();
+    }
   });
 
   it("keeps account deletion behind a closed disclosure", () => {

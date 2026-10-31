@@ -98,6 +98,26 @@ input,select,textarea{font-family:inherit;border:none}
 .stat-card:hover{border-color:var(--border-strong)}
 .stat-card-label{font-size:11px;font-weight:700;color:var(--text-muted);letter-spacing:.04em;text-transform:uppercase}
 .stat-card-value{font-size:28px;font-weight:700;color:var(--header-primary);font-family:var(--font-mono);line-height:1.1}
+/* Dashboard health row (js/health.js): CPU, RAM, disk free and uptime, each
+   with a one-hour line or a disk meter. A warn or crit tile tints its border;
+   the badge beside the label carries the meaning in words. */
+.health-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:24px}
+.health-tile{background:var(--bg-card);border-radius:var(--radius-md);padding:14px 16px;border:1px solid var(--border);display:flex;flex-direction:column;gap:4px;min-width:0}
+.health-tile.warn{border-color:var(--text-warning)}.health-tile.crit{border-color:var(--text-danger)}
+.health-tile .stat-card-label{display:flex;align-items:center;gap:6px}
+.health-value{font-size:24px;font-weight:700;color:var(--header-primary);font-family:var(--font-mono);font-variant-numeric:tabular-nums;line-height:1.15}
+.health-sub{font-size:12px;color:var(--text-muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.health-spark,.health-spark-empty{display:block;width:100%;height:36px;margin-top:4px}
+.health-spark-line{fill:none;stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.health-spark-area{fill:var(--accent-glow);stroke:none}
+.health-tile.warn .health-spark-line{stroke:var(--text-warning)}.health-tile.crit .health-spark-line{stroke:var(--text-danger)}
+.health-meter{display:flex;height:6px;margin-top:auto;background:var(--bg-input);border-radius:var(--radius-pill);overflow:hidden}
+.health-meter span{display:block;height:100%}
+.health-meter .m-other{background:var(--border-control)}.health-meter .m-uploads{background:var(--accent)}
+#slowRequests:has(.tbl){padding:0}
+.slow-tbl th.num,.slow-tbl td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.slow-tbl .slow-route{overflow-wrap:anywhere}.slow-tbl .slow-route .badge{min-width:44px;text-align:center}.slow-tbl .slow-route code{font-family:var(--font-mono);font-size:12px}
+.slow-tbl td.slow-warn{color:var(--text-warning)}.slow-tbl td.slow-crit{color:var(--text-danger);font-weight:600}
 
 .section-card{background:var(--bg-card);border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:20px;overflow:hidden}
 .section-card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
@@ -637,7 +657,7 @@ code.hash{font-family:var(--font-mono);font-size:12px;overflow-wrap:anywhere;wor
   .content{padding:24px 20px}
   .stat-grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
 }
-@media(max-width:600px){.user-menu-who{display:none}.content{padding:16px 12px}.stat-grid{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
+@media(max-width:600px){.user-menu-who{display:none}.content{padding:16px 12px}.stat-grid,.health-row{grid-template-columns:1fr 1fr}.filter-bar{flex-direction:column}.modal{width:95vw;max-height:90vh}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
 .notice-dismiss{flex-shrink:0;align-self:flex-start;width:28px;height:28px;border:0;border-radius:var(--radius-sm);background:transparent;color:var(--text-muted);font-size:20px;line-height:1;cursor:pointer}
 .notice-dismiss:hover{color:var(--header-primary);background:var(--bg-card-hover,rgba(255,255,255,.06))}

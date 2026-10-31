@@ -9,8 +9,9 @@
  * ignores it, so a block written for a pinned zone silently measures the
  * host's zone instead. Both blocks used to answer that with a bare
  * `describe.skipIf`, which meant the pool could evaporate a regression test
- * and tell nobody. `vitest.config.ts` now pins `pool: "forks"`, and this
- * throws when the pin is not honored anyway.
+ * and tell nobody. `vitest.config.ts` now pins process pools (`vmForks`,
+ * and `forks` for a few files), and this throws when the pin is not honored
+ * anyway.
  *
  * The one sanctioned exception is `OC_ALLOW_UNPINNED_TZ=1`, set by
  * `stryker.config.mjs`: Stryker's vitest runner hard-codes `pool: 'threads'`
@@ -91,7 +92,7 @@ export function tzPinHonored(zone: string, verify: () => boolean): boolean {
     `TZ pin "${zone}" was not honored: Date still reports the host zone, so the ` +
       `regression block guarded by this probe would measure nothing. This means ` +
       `the suite is running in a worker-thread pool — vitest.config.ts pins ` +
-      `pool: "forks" for exactly this reason, so something overrode it. Set ` +
+      `process pools (vmForks/forks) for exactly this reason, so something overrode it. Set ` +
       `OC_ALLOW_UNPINNED_TZ=1 only if that override is deliberate and the block ` +
       `is genuinely unrunnable there (Stryker does).`,
   );

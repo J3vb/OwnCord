@@ -33,7 +33,7 @@ func (s *audienceTimeoutSpyStore) ListActiveTimeoutExpiries(ctx context.Context)
 // mirror — so a voice join with 2,000 connected members issues no timeout
 // query at all (before the mirror: one HasActiveTimeout per connected user).
 func TestChannelReadAudience_2000Connected_NoTimeoutQueries(t *testing.T) {
-	const connected = 2000
+	connected := raceScaled(2000)
 	database, voiceChID := applyTimeoutMuteTestDB(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `

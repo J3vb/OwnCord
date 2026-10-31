@@ -399,7 +399,8 @@ describe("NativeRoom room surface", () => {
         seed: 0.03,
         onThreshold: (next) => steps.push(next),
       });
-      expect(host.calls).toEqual([["setVoiceGate", [1, 0.03]]]);
+      // Automatic sensitivity also asks RNNoise's verdict of the native gate.
+      expect(host.calls).toEqual([["setVoiceGate", [1, 0.03, false, true]]]);
       expect(verdicts).toEqual([true]);
       host.calls.length = 0;
 
@@ -410,7 +411,7 @@ describe("NativeRoom room surface", () => {
       }
       expect(steps).toHaveLength(1);
       expect(steps[0]).toBeCloseTo(0.002 * 10 ** 0.5, 5);
-      expect(host.calls).toEqual([["setVoiceGate", [1, steps[0], true]]]);
+      expect(host.calls).toEqual([["setVoiceGate", [1, steps[0], true, true]]]);
       // Its verdicts still reach the speaking ring.
       emit({ session: 1, event: { type: "voiceGate", open: false } });
       expect(verdicts).toEqual([true, false]);

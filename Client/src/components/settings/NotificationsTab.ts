@@ -3,7 +3,8 @@
  */
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
-import { appendToggleRows, savePref } from "./helpers";
+import { appendToggleRows, platformText, savePref } from "./helpers";
+import { isAndroidApp } from "../../features/voice/native/platform";
 import { playNotificationSound } from "@lib/media/notificationSound";
 import {
   APP_SOUNDS_VOLUME_KEY,
@@ -281,8 +282,11 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
       key: "desktopNotifications",
-      label: t("notifications.desktop.label"),
-      desc: t("notifications.desktop.desc"),
+      label: platformText(
+        t("notifications.desktop.label"),
+        t("notifications.desktop.label.android"),
+      ),
+      desc: platformText(t("notifications.desktop.desc"), t("notifications.desktop.desc.android")),
       fallback: true,
     },
     {
@@ -305,7 +309,11 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  const [desktopRow] = appendToggleRows(section, toggles, signal) as [HTMLDivElement];
+  // The taskbar flash and the unread badge are desktop features.
+  const shownToggles = toggles.filter(
+    ({ key }) => !isAndroidApp() || (key !== "flashTaskbar" && key !== "unreadBadge"),
+  );
+  const [desktopRow] = appendToggleRows(section, shownToggles, signal) as [HTMLDivElement];
 
   section.appendChild(buildSoundsVolumeRow(signal));
 

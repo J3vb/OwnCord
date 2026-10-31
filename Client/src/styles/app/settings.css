@@ -1444,7 +1444,9 @@ details.disclose[open] > summary .icon {
 
 /* Phone: Settings fills the screen. The section list is one page and an open
    section is another, with a back arrow between them. */
-@media (max-width: 600px) {
+@media (max-width: 600px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .settings-panel {
     width: 100%;
     max-width: none;

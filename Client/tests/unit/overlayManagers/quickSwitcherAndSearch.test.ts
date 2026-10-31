@@ -333,6 +333,56 @@ describe("createQuickSwitcherManager", () => {
   });
 });
 
+describe("createQuickSwitcherManager.open (the phone drawer's search button)", () => {
+  let root: HTMLDivElement;
+
+  beforeEach(() => {
+    root = document.createElement("div");
+    document.body.appendChild(root);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    root.remove();
+  });
+
+  it("opens the switcher without the keyboard, once, and not twice while it is up", async () => {
+    const manager = createQuickSwitcherManager(() => root);
+    const cleanup = manager.attach();
+
+    manager.open();
+    manager.open();
+    await vi.dynamicImportSettled();
+    manager.open();
+    await vi.dynamicImportSettled();
+
+    expect(createQuickSwitcher).toHaveBeenCalledOnce();
+    expect(mockQuickSwitcherMount).toHaveBeenCalledWith(root);
+
+    cleanup();
+  });
+
+  it("does not open while the shortcut is suspended, or behind a dialog", async () => {
+    let suspended = true;
+    const manager = createQuickSwitcherManager(
+      () => root,
+      () => suspended,
+    );
+    manager.open();
+    await vi.dynamicImportSettled();
+    expect(createQuickSwitcher).not.toHaveBeenCalled();
+
+    suspended = false;
+    const dialog = document.createElement("div");
+    dialog.setAttribute("aria-modal", "true");
+    document.body.appendChild(dialog);
+    manager.open();
+    await vi.dynamicImportSettled();
+    expect(createQuickSwitcher).not.toHaveBeenCalled();
+    dialog.remove();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // createSearchOverlayController
 // ---------------------------------------------------------------------------

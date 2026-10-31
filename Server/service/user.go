@@ -13,9 +13,35 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
+// userStore is what UserService reads and writes. *db.DB satisfies it.
+type userStore interface {
+	connWritesStore
+	db.Auditor
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
+	ListPendingUsers(ctx context.Context, limit, offset int) ([]db.PendingUser, error)
+	ApprovePendingUser(ctx context.Context, userID int64) error
+	DenyPendingUser(ctx context.Context, userID int64) error
+	UpdateUserProfile(ctx context.Context, userID int64, username string, avatar, displayName, about, bannerID, bannerColor *string) error
+	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
+	UpdateUserPassword(ctx context.Context, userID int64, newPasswordHash string) error
+	UpdateUserIdentityKey(ctx context.Context, id int64, key *string) error
+	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
+	SignOutEverywhere(ctx context.Context, userID int64) (sessions, tokens int64, err error)
+	DeleteSessionByID(ctx context.Context, sessionID, userID int64) error
+	ListUserSessions(ctx context.Context, userID int64) ([]db.Session, error)
+	MarkSessionsSeen(ctx context.Context, userID, exceptSessionID int64) (int64, error)
+	GetRoleByID(ctx context.Context, id int64) (*db.Role, error)
+	// HasActiveTimeout is the indexed per-user lookup (FinalizeTimeoutLift;
+	// PermissionService.Subject reads its mirror).
+	HasActiveTimeout(ctx context.Context, userID int64) (bool, error)
+	GetServerStats(ctx context.Context) (*db.ServerStats, error)
+	ListAllUsers(ctx context.Context, f db.UserListFilter, limit, offset int) ([]db.UserWithRole, error)
+}
+
 // UserService handles user profile and session operations.
 type UserService struct {
-	st           Store
+	st           userStore
 	profileLocks keyedMutex
 	// batch, when set, queues the connection stamps instead of writing them; nil
 	// writes each at once (tests, the admin panel's instance).
@@ -25,7 +51,7 @@ type UserService struct {
 }
 
 // NewUserService creates a UserService.
-func NewUserService(st Store) *UserService {
+func NewUserService(st userStore) *UserService {
 	return &UserService{st: st}
 }
 

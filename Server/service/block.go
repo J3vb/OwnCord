@@ -5,16 +5,25 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
+// blockStore is what BlockService reads and writes. *db.DB satisfies it.
+type blockStore interface {
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	BlockUser(ctx context.Context, blockerID, blockedID int64) error
+	UnblockUser(ctx context.Context, blockerID, blockedID int64) error
+	ListBlockedUsers(ctx context.Context, blockerID int64) ([]int64, error)
+}
+
 // BlockService handles user block/unblock operations.
 type BlockService struct {
-	st Store
+	st blockStore
 }
 
 // NewBlockService creates a BlockService.
-func NewBlockService(st Store) *BlockService {
+func NewBlockService(st blockStore) *BlockService {
 	return &BlockService{st: st}
 }
 
