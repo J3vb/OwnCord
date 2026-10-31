@@ -381,7 +381,7 @@ describe("video codec", () => {
 
     await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
 
-    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(video.mediaStreamTrack);
+    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(video);
     expect(fitGpuH264Share.mock.invocationCallOrder[0]!).toBeLessThan(
       rig.publishTrack.mock.invocationCallOrder[0]!,
     );

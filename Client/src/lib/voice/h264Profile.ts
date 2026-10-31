@@ -18,6 +18,7 @@
  * not narrowed.
  */
 
+import type { LocalTrack } from "livekit-client";
 import { createLogger } from "../logger";
 
 const log = createLogger("h264Profile");
@@ -40,10 +41,13 @@ export function setH264GpuProfiles(track: MediaStreamTrack, gpuProfiles: boolean
   markedTracks.add(track);
 }
 
-/** The largest frame WebView2's graphics-card H.264 encoder takes: edge://gpu
- *  lists hardware H.264 encode up to 3840x2160. A larger frame, such as a
- *  5120x1440 screen shared at Source, makes WebRTC fall back to OpenH264, and
- *  the live check in `codecSwitch` then turns the share into VP8. */
+/** The largest frame WebView2's graphics-card H.264 encoder takes. These are
+ *  the figures edge://gpu lists on an RTX 4080 (hardware H.264 encode up to
+ *  3840x2160); other GPUs report their own limits, so a share there may shrink
+ *  when it did not need to, or still fall back. A larger frame, such as a
+ *  5120x1440 screen shared at Source 60 fps, makes WebRTC fall back to
+ *  OpenH264, and the live check in `codecSwitch` then turns the share into
+ *  VP8. */
 export const GPU_H264_MAX_WIDTH = 3840;
 export const GPU_H264_MAX_HEIGHT = 2160;
 
@@ -61,16 +65,30 @@ export function gpuH264SizeCap(cap?: FrameSize): FrameSize {
   };
 }
 
+/** The part of a livekit `LocalVideoTrack` the fit needs. */
+export type FittableShare = Pick<LocalTrack, "mediaStreamTrack" | "waitForDimensions">;
+
 /** Shrink a GPU H.264 share's capture to fit the encoder before it reaches
- *  the sender, keeping its aspect ratio and frame rate. A capture that
- *  already fits is left alone. `applyConstraints` replaces every constraint
- *  the capture was opened with, so the frame rate is passed again. A refusal
+ *  the sender, keeping its aspect ratio and frame rate. Chromium reports a
+ *  display capture's size only once its first frame arrives, which can be
+ *  after getDisplayMedia resolves, so the size is waited for as livekit does
+ *  before every publish. A capture that already fits is left alone.
+ *  `applyConstraints` replaces every constraint the capture was opened with,
+ *  so the frame rate is passed again. A size that never arrives or a refusal
  *  is only logged: the share then runs at full size and the live check still
- *  catches a software fallback. */
-export async function fitGpuH264Share(track: MediaStreamTrack): Promise<void> {
-  const { width, height, frameRate } = track.getSettings();
-  if (width === undefined || height === undefined) return;
+ *  catches a software fallback on a first publish. */
+export async function fitGpuH264Share(share: FittableShare): Promise<void> {
+  let size: { width: number; height: number };
+  try {
+    size = await share.waitForDimensions();
+  } catch (err) {
+    log.warn("Screen share size unknown, not fitted to the GPU H.264 encoder", err);
+    return;
+  }
+  const { width, height } = size;
   if (width <= GPU_H264_MAX_WIDTH && height <= GPU_H264_MAX_HEIGHT) return;
+  const track = share.mediaStreamTrack;
+  const { frameRate } = track.getSettings();
   try {
     await track.applyConstraints({
       width: { max: GPU_H264_MAX_WIDTH },

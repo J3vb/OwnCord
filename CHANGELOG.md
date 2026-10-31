@@ -57,7 +57,7 @@ and only when it changes something a contributor or fork holder must do
 - Android: calls stopped (no mic, then no sound) once the app went to the background or the screen turned off. A call now shows an "In a call" notification and keeps your mic, sound and camera running in the background until you leave.
 - In a call, turning your camera on and back off no longer leaves your tile showing the first letter of your name instead of your profile picture. This happened in DM calls and, in some cases, in voice channels.
 - On Linux, dragging files from the file manager into a channel, or pasting files you copied there (Ctrl+V), attached nothing. Both now attach the files, as on Windows.
-- Windows: sharing a screen wider than 3840 pixels (such as a 5120x1440 monitor) at Source switched the share to the software encoder and then to VP8. It now goes out slightly smaller (3840x1080 for a 5120x1440 screen) and stays on the graphics card's H.264 encoder.
+- Windows: sharing a screen wider than 3840 pixels (such as a 5120x1440 monitor) at Source with 60 fps, or switching a live share to Source, switched the share to the software encoder and then to VP8. It now goes out slightly smaller (3840x1080 for a 5120x1440 screen) and stays on the graphics card's H.264 encoder.
 - Voice Activity with the sensitivity slider set by hand let typing, a fan or breathing through, and after you spoke it stayed open through them. The slider now also asks the noise filter whether it hears a voice, as automatic sensitivity already did.
 
 ## v2.7.0

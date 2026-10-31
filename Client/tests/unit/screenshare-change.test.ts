@@ -180,7 +180,7 @@ describe("changeScreenshareSource", () => {
 
     await changeScreenshareSource(rig.state, rig.deps);
 
-    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(freshVideo!.mediaStreamTrack);
+    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(freshVideo);
     expect(fitGpuH264Share.mock.invocationCallOrder[0]!).toBeLessThan(
       rig.video.replaceTrack.mock.invocationCallOrder[0]!,
     );

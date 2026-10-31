@@ -22,7 +22,9 @@
  * One more switch is not about viewers: MediaCapabilities can say hardware for
  * H.264 while WebRTC falls back to OpenH264 when the encoder starts (a
  * frame the GPU refuses). A share wider than the encoder's limit is shrunk to
- * fit before it is published (`fitGpuH264Share`), so this is the last resort.
+ * fit before it is published or its source changes (`fitGpuH264Share`), so on
+ * a first publish this is the last resort; after a Change source or Quality
+ * change no new check runs.
  * OpenH264 is single-threaded, so the
  * share either drops to a few fps or shrinks to a blur to keep up. So a few seconds after an H.264 screen share goes live off Linux,
  * a sender sample names the encoder (once more if it has no name yet); an

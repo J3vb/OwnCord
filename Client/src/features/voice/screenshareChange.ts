@@ -137,7 +137,7 @@ export async function changeScreenshareSource(
     }
     // A window swapped for a wide screen must still fit the GPU encoder.
     if (h264GpuPublish(state.published ?? "vp8")) {
-      await fitGpuH264Share(freshVideo.mediaStreamTrack);
+      await fitGpuH264Share(freshVideo);
       if (superseded(state, deps, live)) {
         for (const t of fresh) t.stop();
         return;

@@ -626,7 +626,7 @@ export async function enableScreenshare(
           );
     const videoCodec = choice.codec;
     if (videoTrack !== undefined && h264GpuPublish(videoCodec)) {
-      await fitGpuH264Share(videoTrack.mediaStreamTrack);
+      await fitGpuH264Share(videoTrack);
     }
     if ((state.generation ?? 0) !== generation || state.manualScreenTracks !== screenTracks) {
       // A disableScreenshare (or the OS stop-sharing button) ran to
