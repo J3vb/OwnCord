@@ -262,6 +262,22 @@ describe("SettingsOverlay", () => {
       overlay.destroy?.();
     });
 
+    it("is laid out as pages on a phone turned sideways, past the 600 px width", () => {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn(
+          (query: string) => ({ matches: query.includes("pointer: coarse") }) as MediaQueryList,
+        ),
+      );
+      const overlay = createSettingsOverlay(defaultOptions);
+      overlay.mount(container);
+      overlay.open();
+      getTab(container, 1).click();
+      expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
+      expect(document.activeElement).toBe(container.querySelector("[data-testid='settings-back']"));
+      overlay.destroy?.();
+    });
+
     it("Back returns to the list with focus on the section it left, without closing", () => {
       stubPhone(true);
       const overlay = createSettingsOverlay(defaultOptions);

@@ -34,7 +34,9 @@
 }
 /* Below 900px the column is an overlay on the drawer's layer, opened by the
    header toggle (MemberColumn tracks the same query). */
-@media (max-width: 899px) {
+@media (max-width: 899px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .member-column {
     position: fixed;
     /* Below the chat header, so its Member List toggle stays clickable. */
@@ -315,7 +317,9 @@
   filter: saturate(0.3);
 }
 
-@media (max-width: 899px) {
+@media (max-width: 899px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .member-column {
     padding: 0 env(safe-area-inset-right) var(--safe-bottom) 0;
   }

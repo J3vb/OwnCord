@@ -33,13 +33,17 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { focusDialog } from "@lib/ui/a11y";
 import { claimBack, holdBackGuard, type BackClaim, type BackGuard } from "@lib/ui/backHistory";
-import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { isAndroidApp } from "../../features/voice/native/platform";
 import { shellText } from "../../i18n/shell";
 
-/** The media query `responsive.css` collapses the sidebar under. Keep in step. */
+/**
+ * The width `responsive.css` collapses the sidebar under. A phone on its side
+ * is wider than this but collapses it too (the phone layout's own media
+ * query), so the drawer asks `isPhoneLayout()` as well. Keep in step.
+ */
 const NARROW_QUERY = "(max-width: 800px)";
 
 export interface SidebarDrawerOptions {
@@ -71,6 +75,8 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   const rail = opts.rail ?? null;
   const owner = new Disposable();
   const narrow = window.matchMedia(NARROW_QUERY);
+  /** Whether the sidebar is collapsed into the drawer right now. */
+  const collapsed = (): boolean => narrow.matches || isPhoneLayout();
   let open = false;
   let restoreFocusRef: (() => void) | null = null;
   let backClaim: BackClaim | null = null;
@@ -114,11 +120,11 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
     rail?.classList.toggle("drawer-open", open);
     backdrop.classList.toggle("open", open);
     // With the drawer shut, Back from a chat has an entry to pop (Android).
-    backGuard?.setActive(!open && narrow.matches && isPhoneLayout());
+    backGuard?.setActive(!open && collapsed() && isPhoneLayout());
     // Below the breakpoint the closed sidebar is off-screen, so its controls
     // must not stay tabbable off-screen; above it, the sidebar is in flow and
     // must stay fully interactive.
-    sidebar.inert = narrow.matches && !open;
+    sidebar.inert = collapsed() && !open;
     toggle.setAttribute("aria-expanded", String(open));
     const label = open ? shellText("sidebar.close") : shellText("sidebar.open");
     toggle.setAttribute("aria-label", label);
@@ -207,22 +213,21 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   // Crossing the breakpoint changes whether the closed sidebar is off-screen
   // (and so inert), and a drawer left open while the window widens would linger
   // and re-appear on the next shrink.
-  narrow.addEventListener(
-    "change",
-    () => {
-      if (!narrow.matches) {
-        // Widening puts the sidebar back in flow and hides the toggle. Focus
-        // that was inside the drawer stays on the now-visible sidebar, so drop
-        // the restore rather than yank it to a hidden button.
-        open = false;
-        restoreFocusRef = null;
-        backClaim?.release();
-        backClaim = null;
-      }
-      sync();
-    },
-    { signal: owner.signal },
-  );
+  const onBreakpoint = (): void => {
+    if (!collapsed()) {
+      // Widening puts the sidebar back in flow and hides the toggle. Focus
+      // that was inside the drawer stays on the now-visible sidebar, so drop
+      // the restore rather than yank it to a hidden button.
+      open = false;
+      restoreFocusRef = null;
+      backClaim?.release();
+      backClaim = null;
+    }
+    sync();
+  };
+  narrow.addEventListener("change", onBreakpoint, { signal: owner.signal });
+  // A rotation moves a phone across the other breakpoint (its height).
+  onPhoneLayoutChange(onBreakpoint, owner.signal);
 
   return {
     open: () => openDrawer(true),

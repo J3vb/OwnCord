@@ -3,7 +3,7 @@
 .phone-call-bar {
   display: none;
 }
-@media (max-width: 800px) and (pointer: coarse) {
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
   .phone-call-bar {
     display: flex;
     align-items: center;

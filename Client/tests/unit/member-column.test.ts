@@ -650,6 +650,29 @@ describe("MemberColumn", () => {
         back.mockRestore();
       });
 
+      it("is an overlay on a phone turned sideways, past the narrow width", async () => {
+        const wide = new FakeMediaQueryList();
+        const sideways = { matches: true };
+        vi.stubGlobal(
+          "matchMedia",
+          vi.fn((q: string) => (q.includes("pointer: coarse") ? sideways : wide)),
+        );
+        ctrl = make();
+        expect(ctrl.openOverlay()).toBe(true);
+        expect(ctrl.isOverlayOpen()).toBe(true);
+        expect(column.hidden).toBe(false);
+        expect(guarded()).toBe(true);
+        history.back();
+        await settle();
+        expect(ctrl.isOverlayOpen()).toBe(false);
+
+        // Turned upright into a wide window: back in flow, no overlay.
+        sideways.matches = false;
+        window.dispatchEvent(new Event("resize"));
+        expect(ctrl.openOverlay()).toBe(false);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+      });
+
       it("a window that is not a phone leaves Back alone", () => {
         vi.stubGlobal(
           "matchMedia",

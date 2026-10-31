@@ -66,6 +66,7 @@ and only when it changes something a contributor or fork holder must do
 - Message actions, the emoji/GIF/sticker picker and member profiles open as bottom sheets on phones: big reaction buttons, full-width picker, large Message and Call buttons. Swipe down, tap outside or press Back to close. The header search box is a search icon.
 - On phones, a call bar under the header shows the call you are in with mute and leave, and tapping a voice channel asks before joining. The call view's chat now starts closed on a phone
 - On phones, the channel drawer has your server list on its left (Direct Messages, your servers, Add a server) and a "Find or start a conversation" search under the server name. Swipe right on the chat for the channels, left for the member list, and a message left to reply; swipe the drawer or member list away to close it. In the Android app, Back closes sheets and dialogs, then the drawer or member list, then opens the channel list, and one more Back leaves the app.
+- Phone polish: message times show just the clock (the full date stays in the tooltip), reactions and menu rows are 44 px to tap, the channel menu (long-press), the server menu and the status picker open as bottom sheets (Mute Channel and Notification Settings open a second page), a failed send's "delivery not confirmed" line wraps, the call bar hides while you are in your own DM call, the phone layout now holds when the phone is turned sideways, and the Android app gives a short buzz when a long-press opens a sheet.
 
 **Desktop UI**
 

@@ -28,7 +28,7 @@ export function installGlobalGuards(): void {
     window.matchMedia("(any-pointer: coarse)").matches
   ) {
     import("@lib/ui/touchInput").then(
-      (m) => m.installTouchInput(new Disposable().signal),
+      (m) => m.installTouchInput(new Disposable().signal, { haptics: isAndroidApp() }),
       (err: unknown) => log.warn("touch input failed to load", err),
     );
   }

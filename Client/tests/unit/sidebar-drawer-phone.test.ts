@@ -237,6 +237,48 @@ describe("the drawer on a phone", () => {
       expect(guarded()).toBe(false);
     });
 
+    describe("turned sideways, where the width is past the narrow breakpoint", () => {
+      beforeEach(() => {
+        // 915 x 412: not under 800 px wide, but a phone all the same.
+        narrow.matches = false;
+      });
+
+      it("still collapses the sidebar into the drawer: inert while closed, a toggle that opens it", () => {
+        const s = setup();
+        drawer = s.drawer;
+        expect(s.sidebar.inert).toBe(true);
+        expect(s.toggle.getAttribute("aria-expanded")).toBe("false");
+        s.toggle.click();
+        expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+        expect(s.sidebar.inert).toBe(false);
+        expect(s.rail.classList.contains("drawer-open")).toBe(true);
+        s.toggle.click();
+        expect(s.sidebar.inert).toBe(true);
+      });
+
+      it("puts the sidebar back in flow when the phone is turned upright to a wide window, and drops the drawer", () => {
+        const s = setup();
+        drawer = s.drawer;
+        s.toggle.click();
+        expect(s.drawer.isOpen()).toBe(true);
+        phone.matches = false;
+        window.dispatchEvent(new Event("resize"));
+        expect(s.drawer.isOpen()).toBe(false);
+        expect(s.sidebar.inert).toBe(false);
+        expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+      });
+
+      it("collapses when a wide window turns into the sideways phone", () => {
+        phone.matches = false;
+        const s = setup();
+        drawer = s.drawer;
+        expect(s.sidebar.inert).toBe(false);
+        phone.matches = true;
+        window.dispatchEvent(new Event("resize"));
+        expect(s.sidebar.inert).toBe(true);
+      });
+    });
+
     it("opens through open() and closes through close() like the menu does", async () => {
       const s = setup();
       drawer = s.drawer;

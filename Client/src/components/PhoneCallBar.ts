@@ -4,7 +4,8 @@
  * Joining a call closes the drawer, which holds the voice widget, so nothing
  * else on screen would say you are still in it. The bar shows who is there,
  * how long, and Mute and Leave; the rest of it opens the call. It steps aside
- * while the call view is up (that has its own controls) and off a phone.
+ * while the call view is up and while you are looking at your own DM call (both
+ * have their own controls), and off a phone.
  *
  * Mute and Leave are the voice widget's own callbacks, so the rate limits and
  * the moderator guards are the same. The timer runs only while the bar shows.
@@ -87,7 +88,16 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     if (root === null) return;
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
-    const show = channelId !== null && isPhoneLayout() && !options.isGridUp();
+    // A DM call resolves through the DM store, as the voice widget does: the
+    // channels-store row for a DM only exists once the conversation was opened.
+    const dm =
+      channelId === null
+        ? undefined
+        : dmStore.getState().channels.find((c) => c.channelId === channelId);
+    // The DM's call panel (its own mute, camera and leave controls) is on
+    // screen whenever that DM is the open channel and you are in its call.
+    const dmPanelUp = dm !== undefined && channelsStore.getState().activeChannelId === channelId;
+    const show = channelId !== null && isPhoneLayout() && !options.isGridUp() && !dmPanelUp;
     root.hidden = !show;
     if (!show || channelId === null) {
       stopTimer();
@@ -97,9 +107,6 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     startTimer();
     openChannelId = channelId;
 
-    // A DM call resolves through the DM store, as the voice widget does: the
-    // channels-store row for a DM only exists once the conversation was opened.
-    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
     const channel = channelsStore.getState().channels.get(channelId);
     const name =
       dm !== undefined ? dmDisplayName(dm) : (channel?.name ?? t("widget.channelFallback"));
@@ -195,6 +202,8 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
     disposable.onStoreChange(membersStore, (s) => s.members, update);
     disposable.onStoreChange(dmStore, (s) => s.channels, update);
     disposable.onStoreChange(channelsStore, (s) => s.channels, update);
+    // Opening or leaving the DM of your call brings its panel up or down.
+    disposable.onStoreChange(channelsStore, (s) => s.activeChannelId, update);
     // Rotation and resizing move the window across the phone breakpoint.
     disposable.onEvent(window, "resize", update);
     disposable.addCleanup(stopTimer);
