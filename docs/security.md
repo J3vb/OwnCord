@@ -369,7 +369,7 @@ connection the server makes is one of these:
 - the data rules the support bundle follows.
 
 How an administrator makes a support bundle, and what it holds, is in the
-Deployment Guide's [Support bundle](deployment.md#support-bundle) section.
+Deployment Guide's [Support bundle](hosting/monitoring.md#support-bundle) section.
 
 ## Audit Logging
 
@@ -538,7 +538,7 @@ The Tauri desktop client uses the following security measures.
   interception. The same rule applies when a certificate changes and every
   client shows the mismatch prompt again. (A routine public-CA renewal is
   re-pinned without a prompt.) See [trust-model.md](trust-model.md) and
-  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
+  [Replacing the self-signed certificate](hosting/tls-and-proxy.md#replacing-the-self-signed-certificate).
 - Update downloads check that `server_url` uses `https://`, and reject URLs
   that contain a username or password (userinfo).
 
@@ -599,9 +599,9 @@ Windows installers. This section lists only the security-relevant items.
       recommended for production.
 - [ ] Capture stdout (journald, the Docker log driver, or NSSM `AppStdout`), so
       a crash leaves something to send. See
-      [deployment.md — Logs](deployment.md#logs).
+      [Monitoring — logs](hosting/monitoring.md#logs).
 - [ ] Back up the whole set of files, not just the database. See
-      [deployment.md — Backup Strategy](deployment.md#backup-strategy).
+      [Backups and restore](hosting/backups.md).
 - [ ] Keep registration invite-only (the default) or closed. `approval` holds
       new accounts until you approve them in the admin panel. `open` lets
       anyone in.

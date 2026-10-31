@@ -5684,7 +5684,7 @@ is full; nothing restarts. `409 DATABASE_BUSY` is no longer returned.
 
 Download the full archive: a `VACUUM INTO` snapshot of the database, the data
 directory and `config.yaml` in one zip. What it carries and leaves out is in
-[deployment.md](deployment.md#the-full-archive).
+[Backups and restore](hosting/backups.md#the-full-archive).
 
 The admin panel does not call this route; it asks for a single-use link
 (`POST /admin/api/archive/link`) and opens that, so a large archive streams to

@@ -131,7 +131,7 @@ hard limit at start-up** and logs the result, so the number that matters is the
 few hundred online will reach, and which cannot hold 2,000 online (about 2,100
 descriptors with the process's own files). How to set the hard limit under
 systemd, Docker Compose or a bare binary, and the boot warning's budget, are
-in [Open-file limit](deployment.md#open-file-limit-file-descriptors).
+in [Open-file limit](hosting/reference.md#open-file-limit-file-descriptors).
 
 ## Configuration
 

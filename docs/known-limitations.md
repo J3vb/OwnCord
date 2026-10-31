@@ -20,7 +20,7 @@ says exactly what the beta does and does not claim about who can read what.
     server.
 
   For a public domain, we recommend a reverse proxy you trust to handle
-  renewal. See [TLS Setup](deployment.md#tls-setup) and
+  renewal. See [TLS and reverse proxies](hosting/tls-and-proxy.md) and
   [What this build does not do](port-forwarding.md#what-this-build-does-not-do).
 
 - **Most certificate changes look like an attack to the desktop app.** Every
@@ -35,9 +35,9 @@ says exactly what the beta does and does not claim about who can read what.
   Ask your users to compare the new fingerprint, through another channel,
   before they accept. If they accept a mismatch, they cannot tell it apart
   from accepting an attack. See
-  [Publishing the fingerprint after a renewal](deployment.md#publishing-the-fingerprint-after-a-renewal)
+  [How the apps trust your server](hosting/tls-and-proxy.md#how-the-apps-trust-your-server)
   and
-  [Rotating the self-signed certificate](deployment.md#rotating-the-self-signed-certificate).
+  [Replacing the self-signed certificate](hosting/tls-and-proxy.md#replacing-the-self-signed-certificate).
 
 ## First-run defaults we chose to keep (for beta)
 
@@ -51,7 +51,7 @@ says exactly what the beta does and does not claim about who can read what.
   server blocks known dangerous file signatures, rather than allowing only a
   fixed list of types.
 - **The web application firewall (WAF) is off by default.** Review
-  [Capacity limits](deployment.md#capacity-limits) and
+  [Limits you can set](hosting/monitoring.md#limits-you-can-set) and
   [Server Configuration](server-configuration.md) for your community.
 - **Account recovery signs you in without the second factor.** This is by
   design. A recovery kit, or a credential from the owner, is a complete login.
@@ -66,36 +66,36 @@ says exactly what the beta does and does not claim about who can read what.
   - The setup wizard offers to make a recovery kit for the owner. You can
     also set one up at any time in the desktop app.
   - Without a kit, the only fix is to restore `data/` from your backup and run
-    setup again. See [Backup Strategy](deployment.md#backup-strategy) and
-    [Restore](deployment.md#restore).
+    setup again. See [Backups and restore](hosting/backups.md) and
+    [Restore](hosting/backups.md#restore).
 - **Restoring needs a running server, or the command line.**
   - In the product, restore uses `POST /admin/api/backups/{name}/restore`. The
     server and admin panel must be running.
   - If the server will not start, `chatserver restore [--force] <file>` puts
     a database backup back while the server is stopped.
   - To roll back everything, a full archive is still the supported way. See
-    [Restoring without a running server](deployment.md#restoring-without-a-running-server).
+    [When the server will not start](hosting/backups.md#when-the-server-will-not-start).
 - **Health checks are poll-only.** `/health` answers, but the server never
   sends an alert. Docker only _shows_ `unhealthy`; it does not restart the
   container. Point your own uptime monitor at `/health`, and for voice at
   `/api/v1/livekit/health`. See
-  [Monitor voice as well as liveness](deployment.md#monitor-voice-as-well-as-liveness).
+  [Health checks](hosting/monitoring.md#health-checks).
 - **ARM64 server upgrades are not rehearsed.** ARM64 builds are checked for
   boot, migrate, drain and restart. But there is no published ARM64 alpha to
   upgrade _from_ yet. See
-  [How this procedure is checked](deployment.md#how-this-procedure-is-checked).
+  [How this procedure is checked](hosting/reference.md#how-this-procedure-is-checked).
 - **In Docker, `config.yaml` is read-only.** The compose file mounts it
   read-only. So the admin panel and setup wizard save start-up settings into
   `config-overrides.json` in the data volume, and the setup wizard cannot
   change the port. To change anything else from the file, edit it on the host
   and recreate the container. See
-  [config.yaml for Docker](deployment.md#configyaml-for-docker).
+  [config.yaml for Docker](hosting/docker.md#settings-in-a-container).
 
 ## Client
 
 - **The Windows installers are not code-signed.** SmartScreen warns on first
   install and on Update Now. This is expected for an unsigned app. See
-  [Windows: "Windows protected your PC"](quick-start.md#windows-windows-protected-your-pc).
+  [Windows: "Windows protected your PC"](quick-start.md#windows-protected-your-pc).
   We have decided not to code-sign during the beta.
 - **There is no browser version yet.** The desktop app is the only supported
   client. A browser version is planned for after the beta.
@@ -165,14 +165,14 @@ says exactly what the beta does and does not claim about who can read what.
   - They cannot join voice on a `1.2.0-alpha.*` server. The Linux app sends
     its room credential as an HTTP header, and those servers drop it and
     refuse the join. Update the client or the server. See
-    [Linux desktop voice](deployment.md#linux-desktop-voice).
+    [Linux app cannot join voice](hosting/troubleshooting.md#the-linux-app-cannot-join-voice).
   - They cannot join voice on a Docker Compose server of v2.0.0-beta.1 or
     older on the same machine, reached as `localhost`. Those servers give the
     app LiveKit's address inside the container network (`ws://livekit:7880`).
     That name does not work outside the containers. Update the server or the
     client. Or connect using the host's LAN address or hostname, so voice goes
     through the server's `/livekit` tunnel. See
-    [Linux desktop voice](deployment.md#linux-desktop-voice).
+    [Linux app cannot join voice](hosting/troubleshooting.md#the-linux-app-cannot-join-voice).
 - **On Linux with Wayland, screen shares go up to 60 fps.** The PipeWire
   capture runs at 60 fps. So the screen-share picker turns off 120 fps there,
   and a saved 120 fps setting falls back to 60.
@@ -202,14 +202,14 @@ says exactly what the beta does and does not claim about who can read what.
 There is no self-service reset for an owner. Restore `data/` and
 `config.yaml` from your backup. Or recover with a recovery kit, if the owner
 set one up. See [Operating limits](#operating-limits) above and
-[Backup Strategy](deployment.md#backup-strategy).
+[Backups and restore](hosting/backups.md).
 
 **My app says the certificate changed.**
 Either the certificate was replaced or renewed, or someone restored a
 `config.yaml` with a different `tls.mode` from the one the app pinned. Publish
 the new fingerprint through another channel. Ask each user to compare it
 before they accept. See
-[Clients see a certificate mismatch](deployment.md#clients-see-a-certificate-mismatch).
+[Clients see a certificate warning](hosting/troubleshooting.md#clients-see-a-certificate-warning).
 
 **People can join voice but nobody hears anything.**
 Either the UDP media port is not forwarded, or `voice.node_ip` is set to an
@@ -223,7 +223,7 @@ The admin panel, and the first-run wizard, only accept visitors from the
 networks in `server.admin_allowed_cidrs`. By default that is this machine and
 private networks. On a VPS, use an SSH tunnel or add your address to that
 setting. See
-[Reaching `/admin` on a headless server](quick-start.md#reaching-admin-on-a-headless-server-vps).
+[Reaching `/admin` on a headless server](deployment.md#first-run).
 
 **Voice works on Windows but not on Linux.**
 Check the Linux app's version. If it is v2.0.0-beta.1 or older, see

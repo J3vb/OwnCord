@@ -9,7 +9,7 @@ rehearsal that tests them.
 never undoes them. Undoing one is something you do yourself, with these files,
 against a stopped server, after taking a backup. For a normal rollback after a
 bad upgrade, use the archive procedure in
-[Rolling back](../../docs/deployment.md#rolling-back) instead.
+[Rolling back](../../docs/hosting/upgrades.md#going-back-a-version) instead.
 
 The scripts were written together with their migrations, not made up during
 an incident. `TestMigrationRollbackRehearsalOnAlphaSnapshot`

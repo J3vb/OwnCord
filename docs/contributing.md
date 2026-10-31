@@ -558,7 +558,7 @@ release notes say so.
    published until both pass.
 
 9. **Verify the published files from another machine.** Run the
-   [Verifying a Download](deployment.md#verifying-a-download) commands from a
+   [Verifying a download](hosting/reference.md#verifying-a-download) commands from a
    machine that is not the CI runner: checksums, minisign on the server
    files, and `gh attestation verify` for the files and the container image.
    - The Windows client installers are **unsigned**. Code signing was declined

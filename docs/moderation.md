@@ -23,7 +23,7 @@ You moderate from two places.
   list (with pending registrations and bans), Roles & permissions, Channels,
   Invites, Settings, Message retention and the Audit log. By default it only
   opens from this machine and private networks; see
-  [Reaching `/admin` on a headless server](quick-start.md#reaching-admin-on-a-headless-server-vps).
+  [Reaching `/admin` on a headless server](deployment.md#first-run).
 
 Each item in a menu or the admin panel only shows when your role has the
 permission it needs.
@@ -154,7 +154,7 @@ Some details worth knowing:
 - **Erase is not a ban.** Erasing deletes the account, its messages and DMs,
   uploads, reactions, sessions and invites. Its audit-log entries stay without
   its name. You must type the username to confirm. Take a
-  [backup](deployment.md#backup-strategy) first if you might need the content.
+  [backup](hosting/backups.md) first if you might need the content.
 
 ### Voice
 
@@ -295,7 +295,7 @@ Both moderation settings are in [server-configuration.md](server-configuration.m
   one moderator, or one a moderator sent, can still be reviewed.
 - Check the Moderator role's permissions after every upgrade (see above).
 - Tell members how to contact you outside OwnCord, for ban appeals.
-- Take a [backup](deployment.md#backup-strategy) before erasing an account or
+- Take a [backup](hosting/backups.md) before erasing an account or
   shortening message retention. Both delete data for good.
 
 ## See also
