@@ -16,7 +16,12 @@ import type { GridState, GridApi } from "./gridState";
 import type { VideoGridCallbacks } from "../VideoGrid";
 
 export function createGridCallBar(st: GridState, api: GridApi) {
-  function buildCallControls(cc: NonNullable<VideoGridCallbacks["callControls"]>): HTMLElement {
+  /** `inCallView` is the call view's own bar (not a full-screen tile's): on a
+   *  phone it also holds Chat, the way back to the text channel. */
+  function buildCallControls(
+    cc: NonNullable<VideoGridCallbacks["callControls"]>,
+    inCallView = false,
+  ): HTMLElement {
     const bar = createElement("div", {
       class: "video-fs-calls",
       role: "toolbar",
@@ -79,6 +84,22 @@ export function createGridCallBar(st: GridState, api: GridApi) {
       };
       bar.appendChild(
         callButton(voiceText("widget.control.shareStart"), "monitor", "share", onShare),
+      );
+    }
+    const showChat = st.callbacks.onExitGrid;
+    if (inCallView && showChat !== undefined) {
+      // Hidden off a phone, where the view bar's own chat control does this.
+      bar.appendChild(
+        callButton(
+          voiceText("grid.showChat"),
+          "message-square",
+          "chat",
+          () => {
+            api.setFocusedTile(null);
+            showChat();
+          },
+          " video-fs-btn--chat",
+        ),
       );
     }
     appendChildren(
@@ -351,7 +372,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     }
     const cc = st.callbacks.callControls;
     if (on && st.callBar === null && cc !== undefined) {
-      st.callBar = buildCallControls(cc);
+      st.callBar = buildCallControls(cc, true);
       st.callBar.classList.add("video-grid__controls");
     }
     if (!on && st.callBar !== null) {

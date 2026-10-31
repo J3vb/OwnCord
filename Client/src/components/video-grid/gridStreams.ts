@@ -9,6 +9,7 @@ import { createIcon } from "@lib/icons";
 import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import { bindVideoZoom } from "@lib/ui/zoomPan";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../i18n/voice";
 import { viewersLabel } from "./viewers";
 import type { ShareSenderSample } from "../../features/voice/shareSenderStats";
@@ -350,10 +351,20 @@ export function createGridStreams(st: GridState, api: GridApi) {
     syncVideoSurface(video);
     if (viewers !== null) cell.appendChild(viewers);
     // A click anywhere on a filmstrip thumb (not on one of its controls)
-    // swaps it into focus, as the tile button does.
+    // swaps it into focus, as the tile button does. On a phone a tap on the
+    // focused tile itself gives the focus back (a tile is focused by a tap on
+    // it, so it is unfocused the same way); an open tile menu or a pinch-zoomed
+    // picture takes the tap for itself.
     cell.addEventListener("click", (e) => {
-      if ((e.target as Element).closest("button, input") !== null) return;
-      if (st.focusedTileId !== null && st.focusedTileId !== userId) api.setFocusedTile(userId);
+      if ((e.target as Element).closest("button, input, .context-menu") !== null) return;
+      if (st.focusedTileId !== null && st.focusedTileId !== userId) {
+        api.setFocusedTile(userId);
+        return;
+      }
+      if (st.focusedTileId !== userId || !isPhoneLayout()) return;
+      if (api.isFullscreen(userId) || cell.classList.contains("video-zoomed")) return;
+      if (api.doc().querySelector(".video-tile-menu") !== null) return;
+      api.setFocusedTile(null);
     });
 
     const entry: CellEntry = { el: cell, video, config, listeners: new Disposable(), name: "" };

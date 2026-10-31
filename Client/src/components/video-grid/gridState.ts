@@ -24,6 +24,8 @@ export interface GridState {
   /** The tile in HTML full screen, or in the theatre fallback. */
   fullscreenTile: number | null;
   theatreTile: number | null;
+  /** Back and the landscape request held for a full-screen tile on a phone. */
+  phoneFullscreen: { end(): void } | null;
   callState: CallState;
   /** Whether the flip button may show: asked once per camera-on. */
   flipCheck: "idle" | "checking" | "yes" | "no";
@@ -88,7 +90,10 @@ export interface GridApi {
   observeGrid(): void;
   windowFullscreen(on: boolean): void;
   dropFullscreen(): void;
-  buildCallControls(cc: NonNullable<VideoGridCallbacks["callControls"]>): HTMLElement;
+  buildCallControls(
+    cc: NonNullable<VideoGridCallbacks["callControls"]>,
+    inCallView?: boolean,
+  ): HTMLElement;
   drawCallState(bar: Element): void;
   redrawCallBars(): void;
   syncFlipCheck(): void;

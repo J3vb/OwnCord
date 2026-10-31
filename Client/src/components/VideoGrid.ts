@@ -204,6 +204,7 @@ export function createVideoGrid(): VideoGridComponent {
     streamViewers: new Map(),
     fullscreenTile: null,
     theatreTile: null,
+    phoneFullscreen: null,
     callState: { muted: false, deafened: false, listenOnly: false },
     flipCheck: "idle",
     flipCheckGen: 0,
@@ -313,6 +314,8 @@ export function createVideoGrid(): VideoGridComponent {
       api.leaveFullscreen();
       void st.callbacks.setWindowFullscreen?.(false).catch(() => {});
     }
+    st.phoneFullscreen?.end();
+    st.phoneFullscreen = null;
     st.gridListeners.destroy();
     if (st.statsTimer !== null) {
       clearInterval(st.statsTimer);
