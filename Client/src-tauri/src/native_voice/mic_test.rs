@@ -48,7 +48,7 @@ pub struct MicTestOptions {
     pub output_gain: f32,
     /// The voice gate's threshold (0: no gate).
     pub threshold: f32,
-    /// The voice gate also asks RNNoise's verdict (automatic sensitivity).
+    /// The voice gate also asks RNNoise's verdict.
     #[serde(default)]
     pub speech: bool,
     /// Capture and report levels only: no output is opened or played.

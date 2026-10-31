@@ -264,6 +264,7 @@ globalThis.Worker = vi.fn(function () {
 }) as unknown as typeof Worker;
 
 import { LiveKitSession } from "../../src/lib/voice/livekitSession";
+import { vadThreshold } from "../../src/lib/voice/gateScale";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { nativeCounters } from "../../src/features/voice/native/counters";
@@ -353,7 +354,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       ],
     ]);
     expect(host.commands[2]).toEqual(["setPttGated", [1, false]]);
-    // Automatic sensitivity (the default) also asks RNNoise's verdict.
+    // The gate (automatic sensitivity, the default) also asks RNNoise's verdict.
     expect(host.commands[3]).toEqual(["setVoiceGate", [1, 0.05, false, true]]);
     expect(host.commands[4]).toEqual(["setMicrophone", [1, true]]);
     expect(webKeyProvider.setKey).not.toHaveBeenCalled();
@@ -368,6 +369,14 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(session.getSessionDebugInfo()).toMatchObject({
       native: { rust: { rooms: 1, localTracks: 1, threads: 41 } },
     });
+  });
+
+  it("a sensitivity set by hand also asks RNNoise's verdict", async () => {
+    prefs.set("autoInputSensitivity", false);
+    prefs.set("voiceSensitivity", 40);
+    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    const gate = host.commands.find(([name]) => name === "setVoiceGate");
+    expect(gate).toEqual(["setVoiceGate", [1, vadThreshold(40), false, true]]);
   });
 
   it("publishes no microphone when joining the AFK channel and keeps the session up", async () => {

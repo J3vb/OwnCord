@@ -95,8 +95,8 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   setLookahead(seconds: number): void;
   /** Route through RNNoise or around it; a load failure leaves it off. */
   setEnhanced(on: boolean): Promise<void>;
-  /** Run RNNoise for its speech probability (automatic sensitivity), with
-   *  or without Enhanced Noise Suppression. Resolves whether it runs: a
+  /** Run RNNoise for its speech probability (the sensitivity gate's speech
+   *  rule), with or without Enhanced Noise Suppression. Resolves whether it runs: a
    *  load failure leaves the detector on its level alone. */
   setSpeechDetection(on: boolean): Promise<boolean>;
 }

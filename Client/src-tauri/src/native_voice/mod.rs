@@ -538,7 +538,7 @@ pub async fn native_voice_set_ptt_gated(
 /// (web path's `vadThreshold` scale) that counts as speech, 0 for no gate.
 /// `retune` moves the level without restarting the detector, for automatic
 /// sensitivity's steps; `speech` makes the gate also ask RNNoise whether a
-/// frame is a voice (automatic sensitivity's rule).
+/// frame is a voice (the client sends it whenever a gate runs).
 #[tauri::command]
 pub async fn native_voice_set_voice_gate(
     state: tauri::State<'_, NativeVoiceState>,

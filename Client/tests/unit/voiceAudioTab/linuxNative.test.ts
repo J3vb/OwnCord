@@ -603,6 +603,8 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       // The output volume caps at 100 %, as the web test does.
       outputGain: 1,
       threshold: vadThreshold(40),
+      // The slider's gate asks RNNoise's verdict too.
+      speech: true,
     });
     const { button } = micTestRow(tab.element);
     expect(button.textContent).toBe("Stop Testing");
@@ -888,7 +890,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         [
           "mode switch to Push to Talk",
           () => el.querySelector<HTMLElement>("[data-testid='input-mode-ptt']")!.click(),
-          { kind: "voiceGate", threshold: 0, retune: false },
+          { kind: "voiceGate", threshold: 0, retune: false, speech: true },
         ],
       ];
       for (const [name, act, expected] of table) {

@@ -276,7 +276,7 @@ export interface NativeMicTestOptions {
   outputGain: number;
   /** The voice gate's threshold on the web path's scale; 0 is no gate. */
   threshold: number;
-  /** The voice gate also asks RNNoise's verdict (automatic sensitivity). */
+  /** The voice gate also asks RNNoise's verdict (whenever a gate runs). */
   speech?: boolean;
   /** Capture and report levels only: no output is opened or played. */
   monitor?: boolean;
@@ -395,8 +395,8 @@ export interface NativeVoice {
    *  capture must reach to send, 0 for no gate. Its verdicts arrive as
    *  `voiceGate` events. `retune` moves the level without restarting the
    *  detector (automatic sensitivity's steps); `speech` makes the gate also
-   *  ask RNNoise whether a frame is a voice (automatic sensitivity's rule),
-   *  on a restart. */
+   *  ask RNNoise whether a frame is a voice (at the slider's threshold and
+   *  the automatic one alike), on a restart. */
   setVoiceGate(
     session: number,
     threshold: number,

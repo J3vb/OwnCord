@@ -7,8 +7,7 @@
 // Output 0 is the denoised audio. Output 1 carries RNNoise's own verdict on
 // the latest frame, its speech probability (0 to 1), as a constant sample
 // value, for the voice detector (vad-worklet.js) to read on its second
-// input: automatic sensitivity opens the gate only on what RNNoise calls a
-// voice.
+// input: the sensitivity gate opens only on what RNNoise calls a voice.
 // =============================================================================
 
 const FRAME_SIZE = 480;

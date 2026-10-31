@@ -10,8 +10,9 @@
 // (rnnoise-worklet.js output 1): with `speechGate` on, a quantum counts as
 // speech only when its level clears the threshold AND the probability says
 // voice, and as quiet when the level drops under the close level OR the
-// probability drops away. Automatic sensitivity runs with it; the manual
-// slider stays a pure level gate.
+// probability drops away. The gate runs with it at the automatic threshold
+// and at the slider's alike, so typing, a fan or breath above the slider's
+// level neither opens the gate nor holds it open after speech.
 //
 // Protocol:
 //   Main → Worklet:  { type: "config", threshold: number, gateOnFrames: number, gateOffFrames: number, speechGate?: boolean }
@@ -148,7 +149,9 @@ class VadProcessor extends AudioWorkletProcessor {
 
     // Gate logic (the setTimeout fallback in audioPipeline.ts mirrors the
     // level rule; it has no RNNoise and so no speech rule)
-    const speechRuled = this._speechGate && probability > 0;
+    // A threshold of 0 is no gate (sensitivity 100): the verdict alone
+    // never closes it, as capture.rs's gate is off at 0.
+    const speechRuled = this._speechGate && this._threshold > 0 && probability > 0;
     const voiced = !speechRuled || probability >= SPEECH_OPEN_PROBABILITY;
     const unvoiced = speechRuled && probability < SPEECH_CLOSE_PROBABILITY;
     if (this._gated) {
