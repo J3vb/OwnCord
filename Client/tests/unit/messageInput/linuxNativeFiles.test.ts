@@ -162,24 +162,52 @@ describe("Linux native files", () => {
     expect(native.handlers).toHaveLength(0);
   });
 
-  it("attaches files copied in the file manager", async () => {
+  it("attaches files copied in the file manager and takes the pasted paths back out", async () => {
     const { comp, onUploadFile, textarea } = mount();
     native.clipboard.mockResolvedValue([nativeFile("photo.txt")]);
+    textarea.value = "see ";
+    textarea.setSelectionRange(4, 4);
     const e = paste(textarea, "/home/me/photo.txt", ["text/plain", "text/uri-list"]);
-    expect(e.defaultPrevented).toBe(true);
+    expect(e.defaultPrevented).toBe(false);
+    // The webview inserts the pasted text itself.
+    textarea.value = "see /home/me/photo.txt";
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(1));
-    expect(textarea.value).toBe("");
+    expect(textarea.value).toBe("see ");
     comp.destroy?.();
   });
 
-  it("puts a pasted path back as text when the clipboard holds no files", async () => {
+  it("keeps a pasted path as text when the clipboard holds no files", async () => {
     const { comp, onUploadFile, textarea } = mount();
     textarea.value = "see ";
     textarea.setSelectionRange(4, 4);
     const e = paste(textarea, "/home/me/notes.txt");
-    expect(e.defaultPrevented).toBe(true);
-    await vi.waitFor(() => expect(textarea.value).toBe("see /home/me/notes.txt"));
+    expect(e.defaultPrevented).toBe(false);
+    textarea.value = "see /home/me/notes.txt";
+    await vi.waitFor(() => expect(native.clipboard).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(textarea.value).toBe("see /home/me/notes.txt");
     expect(onUploadFile).not.toHaveBeenCalled();
+    comp.destroy?.();
+  });
+
+  it("leaves the text alone when it was edited before the files arrived", async () => {
+    const { comp, onUploadFile, textarea } = mount();
+    native.clipboard.mockResolvedValue([nativeFile("a.txt")]);
+    paste(textarea, "/home/me/a.txt");
+    textarea.value = "/home/me/X.txt";
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(1));
+    expect(textarea.value).toBe("/home/me/X.txt");
+    comp.destroy?.();
+  });
+
+  it("reads only as many dropped files as the queue has room for", async () => {
+    const { comp, onUploadFile, messages } = mount();
+    pointAt(messages);
+    const files = Array.from({ length: 12 }, (_, i) => nativeFile(`f${i}.txt`));
+    emit({ kind: "drop", x: 1, y: 1, files });
+    await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(10));
+    expect(files.filter((f) => f.reads > 0)).toHaveLength(10);
+    expect(container.querySelector(".attachment-upload-error")?.textContent).toContain("10");
     comp.destroy?.();
   });
 

@@ -390,38 +390,43 @@ export function createInputAttachments(st: InputState, api: InputApi) {
   }
 
   /** Attach files the host read from the OS (a Linux drop or paste). Each is
-   *  checked by name and size before its bytes are read. */
+   *  checked by name and size before its bytes are read, only as many as the
+   *  queue has room for are read, and one at a time, in drop order. */
   async function handleNativeFiles(files: readonly NativeFile[]): Promise<void> {
     if (st.options.onUploadFile === undefined || st.attachmentPreviewBar === null) return;
     if (st.disabledReason !== null) return;
     const accepted = files.filter((f) => !refuseFile(f.name, f.size));
-    // Read together, attached in the order they were dropped.
-    const reads = await Promise.all(
-      accepted.map((f) =>
-        f.read().then(
-          (file) => ({ ok: true as const, file }),
-          (err: unknown) => ({ ok: false as const, err }),
-        ),
-      ),
-    );
-    if (st.signal.aborted) return;
-    for (const read of reads) {
-      if (read.ok) {
-        void handlePasteFile(read.file);
-        continue;
-      }
+    const room = Math.max(0, MAX_ATTACHMENTS - st.pendingAttachments.length);
+    await attachInOrder(accepted.slice(0, room));
+    // After the attached ones, whose arrival clears an earlier error.
+    if (accepted.length > room && !st.signal.aborted) {
       api.showUploadError(
-        messagingText("error.uploadFailedDetail", {
-          detail: errorText(read.err, messagingText("error.uploadFailed")),
-        }),
+        messagingText("error.tooManyAttachments", { max: String(MAX_ATTACHMENTS) }),
       );
     }
   }
 
+  async function attachInOrder(files: readonly NativeFile[]): Promise<void> {
+    const [next, ...rest] = files;
+    if (next === undefined || st.signal.aborted) return;
+    try {
+      const file = await next.read();
+      if (st.signal.aborted) return;
+      void handlePasteFile(file);
+    } catch (err) {
+      api.showUploadError(
+        messagingText("error.uploadFailedDetail", {
+          detail: errorText(err, messagingText("error.uploadFailed")),
+        }),
+      );
+    }
+    await attachInOrder(rest);
+  }
+
   /** A Ctrl+V of files copied in the Linux file manager: the webview sees
    *  only their paths as text (or nothing), so the host reads the clipboard.
-   *  Takes the paste when its text could be a file list, and puts the text
-   *  back when the clipboard held no files after all. */
+   *  The text pastes as usual meanwhile; when the clipboard did hold files,
+   *  they are attached and the pasted paths taken back out, if still there. */
   function pasteNativeFiles(e: ClipboardEvent): boolean {
     if (!desktop.nativeFiles.available || st.textarea === null) return false;
     if (st.options.onUploadFile === undefined) return false;
@@ -429,17 +434,16 @@ export function createInputAttachments(st: InputState, api: InputApi) {
     if (data === null) return false;
     const text = data.getData("text/plain");
     if (!data.types.includes("text/uri-list") && !looksLikeFileList(text)) return false;
-    e.preventDefault();
     const textarea = st.textarea;
+    const at = textarea.selectionStart;
+    const pasted = text.replace(/\r\n?/g, "\n");
     void desktop.nativeFiles.clipboardFiles().then((files) => {
-      if (st.signal.aborted) return;
-      if (files.length > 0) {
-        void handleNativeFiles(files);
-        return;
+      if (st.signal.aborted || files.length === 0) return;
+      if (pasted !== "" && textarea.value.slice(at, at + pasted.length) === pasted) {
+        textarea.setRangeText("", at, at + pasted.length, "start");
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
       }
-      if (text === "") return;
-      textarea.setRangeText(text, textarea.selectionStart, textarea.selectionEnd, "end");
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      void handleNativeFiles(files);
     });
     return true;
   }
