@@ -1298,20 +1298,25 @@ mod tests {
     }
 
     /// With the speech rule on and Enhanced Noise Suppression off, RNNoise
-    /// runs for its verdict only: the audio goes out as the plain chain's,
-    /// and RNNoise is dropped once the gate no longer wants it.
+    /// runs for its verdict only: the audio goes out as a level-only gate's
+    /// (same lookahead delay, no denoising), and RNNoise is dropped once the
+    /// gate no longer wants it.
     #[test]
     fn rnnoise_runs_for_the_verdict_alone_and_leaves_the_audio_as_it_is() {
         let input = noise(FRAME * 20, 0.1, 7);
+        let (level_only, _) = reporting_gate(0.02);
         let (gate, _) = reporting_gate(0.02);
         lock(&gate).set_threshold(0.02, true);
-        let mut plain = Processor::new(Apm::new(&opts(false, false)), false);
+        let mut plain =
+            Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(level_only);
         let mut detecting =
             Processor::new(Apm::new(&opts(false, false)), false).with_voice_gate(gate.clone());
         let expected = run(&mut plain, &input);
         let out = run(&mut detecting, &input);
+        assert!(plain.denoise.is_none(), "a level-only gate runs no RNNoise");
         assert!(detecting.denoise.is_some(), "RNNoise runs for the verdict");
         assert!(!detecting.enhanced);
+        assert!(expected.iter().any(|&s| s != 0), "the gate is open");
         assert_eq!(out, expected, "the audio is not denoised");
 
         lock(&gate).set_threshold(0.02, false);
