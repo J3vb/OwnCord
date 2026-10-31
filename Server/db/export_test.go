@@ -119,3 +119,7 @@ func SetNicknamePreCheckHookForTest(fn func()) {
 // ManageNicknamesOrAdminForTest exposes the literal SetDisplayNameAsModerator
 // masks role permissions with, so db_test can pin it to the permissions package.
 const ManageNicknamesOrAdminForTest = manageNicknamesOrAdmin
+
+// ChannelUnreadCountsSQLForTest is the unread-counts query, so db_test can
+// check its query plan.
+const ChannelUnreadCountsSQLForTest = channelUnreadCountsSQL
