@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { type VideoGridComponent, type TileConfig } from "../../../src/components/VideoGrid";
 import { fakeStream, useVideoGridHarness } from "../../helpers/videoGridHarness";
+import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -116,6 +117,43 @@ describe("VideoGrid on a phone", () => {
       cell(SHARE).querySelector<HTMLButtonElement>("[data-tile-control='fullscreen']")!.click();
       await vi.waitFor(() => expect(cell(SHARE).querySelector(".video-fs-calls")).not.toBeNull());
       expect(callControls(cell(SHARE).querySelector(".video-fs-calls")!)).not.toContain("chat");
+    });
+  });
+
+  describe("the talk button", () => {
+    afterEach(() => clearHost());
+
+    it("the Android app's call view and a full-screen tile's controls each hold one", async () => {
+      hostAndroidApp();
+      usePhone(true);
+      grid.setCallbacks({
+        callControls: { onMuteToggle: vi.fn(), onDeafenToggle: vi.fn(), onLeave: vi.fn() },
+        onExitGrid: vi.fn(),
+      });
+      grid.setExitVisible(true);
+      await vi.waitFor(() =>
+        expect(callBar().querySelector("[data-testid='talk-button-call']")).not.toBeNull(),
+      );
+      expect(callBar().firstElementChild?.getAttribute("data-testid")).toBe("talk-button-call");
+
+      grid.addStream(SHARE, "Otto (Screen)", fakeStream(), shareCfg);
+      cell(SHARE).querySelector<HTMLButtonElement>("[data-tile-control='fullscreen']")!.click();
+      await vi.waitFor(() =>
+        expect(
+          cell(SHARE).querySelector(".video-fs-calls [data-testid='talk-button-call']"),
+        ).not.toBeNull(),
+      );
+    });
+
+    it("is left out off the Android app", async () => {
+      hostDesktopApp();
+      usePhone(true);
+      grid.setCallbacks({
+        callControls: { onMuteToggle: vi.fn(), onDeafenToggle: vi.fn(), onLeave: vi.fn() },
+      });
+      grid.setExitVisible(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(callBar().querySelector("[data-testid='talk-button-call']")).toBeNull();
     });
   });
 

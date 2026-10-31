@@ -124,7 +124,7 @@
   opacity: 0.5;
 }
 .talk-btn.talking {
-  background: var(--green);
+  background: var(--success-fill);
   color: var(--on-fill);
 }
 .talk-btn--bar {
@@ -149,6 +149,6 @@
   display: none;
 }
 .user-bar .ub-controls .talk-btn.talking {
-  background: var(--green);
+  background: var(--success-fill);
   color: var(--on-fill);
 }

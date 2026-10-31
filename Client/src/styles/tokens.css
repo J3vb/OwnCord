@@ -78,6 +78,9 @@
   /* Destructive button fill: white text needs >= 4.5:1, which --red misses */
   --danger-fill: #d0302f;
   --danger-fill-hover: #b3272a;
+  /* "On" button fill (a held talk button): white text needs >= 4.5:1, which
+     --green misses */
+  --success-fill: #1a7f45;
 
   /* Borders. --border-control is the edge of an input or other control:
      >= 3:1 against --bg-primary and --bg-secondary (WCAG 1.4.11, B9 Q13).

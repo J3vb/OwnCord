@@ -1059,10 +1059,16 @@ for (const profile of PROFILES) {
       expect(box.height).toBeGreaterThanOrEqual(56);
       expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
       await expect(call).toHaveAttribute("aria-pressed", "false");
+      const label = call.locator(".talk-btn__label");
+      expect((await textContrast(label)).ratio).toBeGreaterThanOrEqual(Q1.text);
+      expect(
+        await findUnnamedControls(page.locator("[data-testid='video-grid'] .video-grid__controls")),
+      ).toEqual([]);
 
       await call.dispatchEvent("pointerdown", { pointerId: 1, pointerType: "touch", button: 0 });
       await expect(call).toHaveAttribute("aria-pressed", "true");
       await expect(call).toHaveClass(/talking/);
+      expect((await textContrast(label)).ratio).toBeGreaterThanOrEqual(Q1.text);
       await call.dispatchEvent("pointerup", { pointerId: 1, pointerType: "touch", button: 0 });
       await expect(call).toHaveAttribute("aria-pressed", "false");
       await expect(call).not.toHaveClass(/talking/);

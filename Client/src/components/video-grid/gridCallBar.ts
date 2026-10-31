@@ -18,9 +18,14 @@ import type { VideoGridCallbacks } from "../VideoGrid";
 
 export function createGridCallBar(st: GridState, api: GridApi) {
   /** The call view's hold-to-talk button (Android app only), above the round
-   *  controls; it lives as long as the bar. */
+   *  controls. */
   const talkSlot = createTalkSlot("call");
-  st.gridListeners.addCleanup(() => talkSlot.clear());
+  /** The same for a full-screen tile's bar, which covers the call view's. */
+  const fullscreenTalkSlot = createTalkSlot("call");
+  st.gridListeners.addCleanup(() => {
+    talkSlot.clear();
+    fullscreenTalkSlot.clear();
+  });
 
   /** `inCallView` is the call view's own bar (not a full-screen tile's): on a
    *  phone it also holds Chat, the way back to the text channel. */
@@ -118,8 +123,9 @@ export function createGridCallBar(st: GridState, api: GridApi) {
         " video-fs-btn--leave",
       ),
     );
-    if (inCallView)
-      talkSlot.attach(bar, bar.firstChild, () => bar.classList.add("video-fs-calls--talk"));
+    (inCallView ? talkSlot : fullscreenTalkSlot).attach(bar, bar.firstChild, () =>
+      bar.classList.add("video-fs-calls--talk"),
+    );
     drawCallState(bar);
     return bar;
   }
