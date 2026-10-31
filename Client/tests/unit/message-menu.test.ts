@@ -52,6 +52,8 @@ function rightClick(target: Element, init: MouseEventInit = {}): MouseEvent {
 }
 
 const menu = (): HTMLElement | null => document.querySelector<HTMLElement>(MENU);
+const sheet = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[data-testid="message-sheet"]');
 
 function items(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>(`${MENU} [role="menuitem"]`)];
@@ -331,8 +333,6 @@ describe("message right-click menu", () => {
   });
 
   describe("on a phone", () => {
-    const sheet = (): HTMLElement | null =>
-      document.querySelector<HTMLElement>('[data-testid="message-sheet"]');
     const sheetItem = (testId: string): HTMLElement | null =>
       sheet()?.querySelector<HTMLElement>(`[data-testid="${testId}"]`) ?? null;
     async function press(target: Element): Promise<void> {
