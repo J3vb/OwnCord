@@ -14,7 +14,7 @@ forwarding cannot work at all.
 **You do not need a reverse proxy.** OwnCord handles its own HTTPS. It also
 passes voice signalling through its own port. If you want nginx or Caddy in
 front anyway, see
-[Reverse Proxy Topology](deployment.md#reverse-proxy-topology). Nothing on this
+[Behind a reverse proxy](hosting/tls-and-proxy.md#behind-a-reverse-proxy-off). Nothing on this
 page needs one.
 
 ## What the server can and cannot tell you
@@ -67,7 +67,7 @@ anything on the network.
 ## Required Ports
 
 The full list is the main port table in
-[deployment.md](deployment.md#firewall-and-ports). These are the rows this
+[Server reference](hosting/reference.md#ports-in-detail). These are the rows this
 guide uses.
 
 ### Always required
@@ -91,7 +91,7 @@ guide uses.
 
 **Do not forward `7880/TCP`.** Clients reach LiveKit's signalling through
 OwnCord's own `:8443/livekit` path (see
-[deployment.md](deployment.md#reverse-proxy-topology)). Forwarding 7880 only
+[TLS and reverse proxies](hosting/tls-and-proxy.md#behind-a-reverse-proxy-off)). Forwarding 7880 only
 exposes LiveKit's API for no reason.
 
 ### The voice port is where things go wrong

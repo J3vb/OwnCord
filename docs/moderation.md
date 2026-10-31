@@ -154,7 +154,7 @@ Some details worth knowing:
 - **Erase is not a ban.** Erasing deletes the account, its messages and DMs,
   uploads, reactions, sessions and invites. Its audit-log entries stay without
   its name. You must type the username to confirm. Take a
-  [backup](deployment.md#backup-strategy) first if you might need the content.
+  [backup](hosting/backups.md) first if you might need the content.
 
 ### Voice
 
@@ -295,7 +295,7 @@ Both moderation settings are in [server-configuration.md](server-configuration.m
   one moderator, or one a moderator sent, can still be reviewed.
 - Check the Moderator role's permissions after every upgrade (see above).
 - Tell members how to contact you outside OwnCord, for ban appeals.
-- Take a [backup](deployment.md#backup-strategy) before erasing an account or
+- Take a [backup](hosting/backups.md) before erasing an account or
   shortening message retention. Both delete data for good.
 
 ## See also

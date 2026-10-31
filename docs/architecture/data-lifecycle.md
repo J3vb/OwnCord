@@ -768,7 +768,7 @@ The other rows whose behaviour is _not_ fixed are decided behaviour, not finding
 held back: a missing marker file leaving an install with no erasure history is
 what the plan's question 1 settles on (boot, and log an error naming it), and it
 is written out for the operator in
-[deployment.md](../deployment.md#restore) because that is the page a backup
+[Backups and restore](../hosting/backups.md#restore) because that is the page a backup
 procedure is read from.
 
 ## The private half

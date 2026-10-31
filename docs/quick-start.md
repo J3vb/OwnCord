@@ -22,7 +22,7 @@ server running in as few steps as possible. For a longer-term setup, read the
 
 Every server download comes in `amd64` and `arm64` versions. The Docker image
 is one tag that covers both `linux/amd64` and `linux/arm64`. The file names are
-in the table in [Deployment](deployment.md#building-from-source).
+in the table in [Deployment](deployment.md#download).
 
 ## What you need
 
@@ -100,7 +100,7 @@ docker compose logs owncord
 ```
 
 You can also run chat and voice in one container, without compose. See
-[LiveKit in Docker](deployment.md#livekit-in-docker). All Docker details are
+[LiveKit in Docker](hosting/docker.md#voice-in-docker). All Docker details are
 in the [Deployment Guide](deployment.md#docker-linux).
 
 ### Reaching `/admin` on a headless server (VPS)
@@ -175,7 +175,7 @@ You will see the warning:
 
 If you would rather not click through, check the download first. Each release
 publishes a checksum, a signature and a provenance record. See
-[Verifying a Download](deployment.md#verifying-a-download). Windows code
+[Verifying a download](hosting/reference.md#verifying-a-download). Windows code
 signing is separate work. See
 [Known Limitations](security.md#known-limitations).
 

@@ -26,7 +26,7 @@ There are two ways to run LiveKit with OwnCord:
 
 **Single container.** The `ghcr.io/j3vb/owncord-server` image already includes
 LiveKit and starts it itself. You need nothing from this section. See
-[Deployment — LiveKit in Docker](deployment.md#livekit-in-docker).
+[Docker — voice](hosting/docker.md#voice-in-docker).
 
 **Two-container compose stack.** The rest of this section is for
 `docker compose`. There, LiveKit runs as its own container on the same
@@ -96,7 +96,7 @@ name. You do not need to forward any port between the two containers.
    `config.yaml.example`. The compose file already points the server at
    `ws://livekit:7880` and turns auto-download off. Leave
    `voice.livekit_binary` unset. See
-   [Deployment — config.yaml for Docker](deployment.md#configyaml-for-docker).
+   [Docker — settings in a container](hosting/docker.md#settings-in-a-container).
 
 4. **Open these ports** on your host firewall:
 
@@ -211,7 +211,7 @@ same machine or Docker network, and passes client signalling through
 
 These two rows are the ones voice needs. The full list, including the chat
 port and the ACME port, is the main table in
-[deployment.md](deployment.md#firewall-and-ports).
+[Server reference](hosting/reference.md#ports-in-detail).
 
 - **LAN only:** open these ports in Windows Firewall (or your host firewall).
 - **Remote access:** forward them on your router, or use
@@ -298,7 +298,7 @@ Client                     OwnCord Server              LiveKit Server
   ([security.md](security.md#tauri-capabilities-least-privilege)).
   - Linux clients up to 2.0.0-beta.1 used any `direct_url` as-is for a
     `localhost` server. See
-    [Linux desktop voice](deployment.md#linux-desktop-voice).
+    [Linux app cannot join voice](hosting/troubleshooting.md#the-linux-app-cannot-join-voice).
 
 ---
 
