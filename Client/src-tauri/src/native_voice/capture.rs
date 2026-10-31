@@ -200,12 +200,16 @@ impl Reference {
     }
 }
 
-/// The voice gate's timing, in 10 ms frames: vad-worklet.js's ~320 ms hold
-/// below the threshold before closing, ~32 ms attack above it before
-/// opening, and ~500 ms start-up grace.
-const GATE_HOLD_FRAMES: u32 = 32;
+/// The voice gate's timing, in 10 ms frames: vad-worklet.js's ~500 ms hold
+/// below the close level before closing, ~32 ms attack at the threshold
+/// before opening, and ~500 ms start-up grace.
+const GATE_HOLD_FRAMES: u32 = 50;
 const GATE_ATTACK_FRAMES: u32 = 3;
 const GATE_GRACE_FRAMES: u32 = 50;
+/// Hysteresis, as vad-worklet.js's: the gate opens at the threshold and
+/// closes only this far below it, so the quieter stretches of a word do not
+/// count as silence and a voice at the line does not chatter.
+const GATE_HYSTERESIS_DB: f32 = 6.0;
 /// How far the voice runs behind the detector while the gate is on, so the
 /// attack does not clip the start of a word (micProcessor's
 /// GATE_LOOKAHEAD_S).
@@ -273,6 +277,8 @@ pub struct VoiceGate {
     threshold: f32,
     grace: u32,
     silent: u32,
+    /// Counts up on a frame at the threshold and down on one below it, so a
+    /// single dip inside an onset does not start the attack over.
     speech: u32,
     closed: bool,
     on_change: Option<GateSink>,
@@ -332,22 +338,35 @@ impl VoiceGate {
         }
     }
 
+    /// The level below which an open gate counts a frame as quiet.
+    fn close_level(&self) -> f32 {
+        self.threshold * 10f32.powf(-GATE_HYSTERESIS_DB / 20.0)
+    }
+
     /// Take one frame's level; returns whether the gate is now closed.
     fn update(&mut self, rms: f32) -> bool {
         if self.grace < GATE_GRACE_FRAMES {
             self.grace += 1;
-        } else if rms < self.threshold {
-            self.speech = 0;
+        } else if self.closed {
+            if rms >= self.threshold {
+                self.speech = self.speech.saturating_add(1);
+            } else {
+                self.speech = self.speech.saturating_sub(1);
+            }
+            if self.speech >= GATE_ATTACK_FRAMES {
+                self.speech = 0;
+                self.silent = 0;
+                self.set_closed(false);
+            }
+        } else if rms < self.close_level() {
             self.silent = self.silent.saturating_add(1);
             if self.silent >= GATE_HOLD_FRAMES {
+                self.silent = 0;
+                self.speech = 0;
                 self.set_closed(true);
             }
         } else {
             self.silent = 0;
-            self.speech = self.speech.saturating_add(1);
-            if self.speech >= GATE_ATTACK_FRAMES {
-                self.set_closed(false);
-            }
         }
         self.closed
     }
@@ -1102,10 +1121,11 @@ mod tests {
     }
 
     /// The input-sensitivity gate on the web path's scale (vad-worklet.js):
-    /// a level below the threshold closes it after the ~320 ms hold, one
-    /// above opens it after the ~32 ms attack, and the voice runs 50 ms
-    /// behind so that attack does not clip the start of the word. Each change
-    /// is reported for the local speaking ring.
+    /// a level under the close level (6 dB below the threshold) closes it
+    /// after the ~500 ms hold, one at the threshold opens it after the
+    /// ~32 ms attack, and the voice runs 50 ms behind so that attack does not
+    /// clip the start of the word. Each change is reported for the local
+    /// speaking ring.
     #[test]
     fn the_voice_gate_closes_below_the_threshold_and_opens_above_it() {
         let (gate, reports) = reporting_gate(0.02);
@@ -1120,15 +1140,15 @@ mod tests {
         }
         assert!(lock(&reports).is_empty(), "no verdict during the grace");
 
-        let held: Vec<bool> = (0..45)
+        let held: Vec<bool> = (0..65)
             .flat_map(|_| silent_frames(&mut p, &quiet))
             .collect();
         assert!(
-            !held[..31].contains(&true),
+            !held[..49].contains(&true),
             "the hold keeps it open: {held:?}"
         );
         assert!(
-            held[33..].iter().all(|&s| s),
+            held[51..].iter().all(|&s| s),
             "then it sends silence: {held:?}"
         );
         assert_eq!(*lock(&reports), [false]);
@@ -1142,6 +1162,52 @@ mod tests {
             !spoke[5..].contains(&true),
             "the whole word goes out: {spoke:?}"
         );
+    }
+
+    /// A level between the close level and the threshold is neither quiet
+    /// nor speech: it keeps an open gate open and a closed gate closed.
+    #[test]
+    fn the_voice_gate_has_hysteresis_between_closing_and_opening() {
+        let (gate, reports) = reporting_gate(0.02);
+        // 0.014 is 3 dB under the threshold, inside the 6 dB hysteresis.
+        for _ in 0..GATE_GRACE_FRAMES + 200 {
+            lock(&gate).observe(0.014);
+        }
+        assert!(lock(&reports).is_empty(), "the gate stays open");
+        for _ in 0..GATE_HOLD_FRAMES {
+            lock(&gate).observe(0.005);
+        }
+        assert_eq!(*lock(&reports), [false], "8 dB under closes it");
+        for _ in 0..200 {
+            lock(&gate).observe(0.014);
+        }
+        assert_eq!(
+            *lock(&reports),
+            [false],
+            "and 3 dB under does not reopen it"
+        );
+        for _ in 0..GATE_ATTACK_FRAMES {
+            lock(&gate).observe(0.02);
+        }
+        assert_eq!(*lock(&reports), [false, true], "the threshold itself does");
+    }
+
+    /// One quiet frame inside an onset costs the attack one count, not the
+    /// whole count, as the worklet's attack does.
+    #[test]
+    fn a_dip_inside_an_onset_does_not_restart_the_attack() {
+        let (gate, reports) = reporting_gate(0.02);
+        for _ in 0..GATE_GRACE_FRAMES + GATE_HOLD_FRAMES {
+            lock(&gate).observe(0.005);
+        }
+        assert_eq!(*lock(&reports), [false]);
+        lock(&gate).observe(0.2);
+        lock(&gate).observe(0.2);
+        lock(&gate).observe(0.005);
+        assert_eq!(*lock(&reports), [false], "two loud and a dip: not yet");
+        lock(&gate).observe(0.2);
+        lock(&gate).observe(0.2);
+        assert_eq!(*lock(&reports), [false, true], "two more open it");
     }
 
     /// Sensitivity 100 is threshold 0: no gate, no delay, nothing reported,
