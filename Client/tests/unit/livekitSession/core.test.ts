@@ -17,7 +17,7 @@ import {
   setDeafened as boundSetDeafened,
   cleanupAll as boundCleanupAll,
 } from "../../../src/lib/voice/livekitSession";
-import { useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import { useLiveKitSessionHarness, stubPrefs } from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -29,7 +29,7 @@ vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
-const { mockRoom, mockLoadPref, mockSavePref } = mocks;
+const { mockRoom, mockSavePref } = mocks;
 
 describe("getRoomForStats (pre-refactor lock)", () => {
   it("returns null when no session is active", () => {
@@ -400,9 +400,7 @@ describe("LiveKitSession", () => {
     });
 
     it("records the share timeline while enabled and keeps it after leaving (plan 2b)", async () => {
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "shareDiagnosticsV2" ? true : defaultVal,
-      );
+      stubPrefs({ shareDiagnosticsV2: true });
       try {
         session.setServerHost("localhost:7880");
         session.setWsClient({ send: vi.fn() } as any);
@@ -428,7 +426,7 @@ describe("LiveKitSession", () => {
         // Polling stopped, but the timeline is still there for the bundle.
         expect(session.getShareDiagnostics()?.samples).toHaveLength(1);
       } finally {
-        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+        stubPrefs();
       }
     });
 

@@ -2,7 +2,14 @@ import { describe, it, expect, vi, onTestFinished } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
 import { leaveVoiceChannel, setVoiceStatus } from "@stores/voice.store";
-import { useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import {
+  useLiveKitSessionHarness,
+  enterReconnecting,
+  runReconnect,
+  startReconnect,
+  enterConnected,
+  stubPrefs,
+} from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -14,7 +21,7 @@ vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
-const { mockVoiceState, mockRoom, mockLoadPref } = mocks;
+const { mockVoiceState, mockRoom } = mocks;
 
 describe("LiveKitSession", () => {
   let session: LiveKitSession;
@@ -30,26 +37,10 @@ describe("LiveKitSession", () => {
     it("preserves local mute state on reconnect", async () => {
       mockVoiceState.localMuted = true;
       mockVoiceState.localDeafened = false;
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 7,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 7);
 
       const ac = new AbortController();
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        7,
-        "ws://localhost:7880",
-        ac.signal,
-      );
-
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 7, { signal: ac.signal });
 
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(false);
     });
@@ -57,10 +48,7 @@ describe("LiveKitSession", () => {
     it("applies the saved input device before the reconnect re-captures the mic", async () => {
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "audioInputDevice") return "usb-mic";
-        return defaultVal;
-      });
+      stubPrefs({ audioInputDevice: "usb-mic" });
       const order: string[] = [];
       mockRoom.switchActiveDevice.mockImplementation(async (kind: string) => {
         order.push(kind);
@@ -69,24 +57,9 @@ describe("LiveKitSession", () => {
       mockRoom.localParticipant.setMicrophoneEnabled.mockImplementation(async (on: boolean) => {
         order.push(`mic:${on}`);
       });
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 7,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 7);
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        7,
-        "ws://localhost:7880",
-        new AbortController().signal,
-      );
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 7);
 
       expect(mockRoom.switchActiveDevice).toHaveBeenCalledWith("audioinput", "usb-mic", false);
       expect(order.indexOf("audioinput")).toBeGreaterThanOrEqual(0);
@@ -97,14 +70,7 @@ describe("LiveKitSession", () => {
     it("re-applies deafened remote subscriptions on reconnect", async () => {
       mockVoiceState.localMuted = true;
       mockVoiceState.localDeafened = true;
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 9,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 9);
 
       const setSubscribed = vi.fn();
       mockRoom.remoteParticipants = new Map([
@@ -118,16 +84,7 @@ describe("LiveKitSession", () => {
       ]);
 
       const ac = new AbortController();
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        9,
-        "ws://localhost:7880",
-        ac.signal,
-      );
-
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 9, { signal: ac.signal });
 
       expect(setSubscribed).toHaveBeenCalledWith(false);
     });
@@ -135,21 +92,12 @@ describe("LiveKitSession", () => {
     it("sweeps the existing participants' publications into the new room on reconnect", async () => {
       // Cameras opt-in, as before WP 1B-3.
       onTestFinished(() => {
-        mockLoadPref.mockImplementation((_key: string, defaultVal: unknown) => defaultVal);
+        stubPrefs();
       });
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) =>
-        key === "autoPlayCameras" ? false : defaultVal,
-      );
+      stubPrefs({ autoPlayCameras: false });
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 9,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 9);
 
       const setSubscribed = vi.fn();
       const publication = { kind: "audio", source: "microphone", setSubscribed };
@@ -172,15 +120,7 @@ describe("LiveKitSession", () => {
         ],
       ]);
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        9,
-        "ws://localhost:7880",
-        new AbortController().signal,
-      );
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 9);
 
       expect(setSubscribed).toHaveBeenCalledWith(true);
       expect(setCameraSubscribed).toHaveBeenCalledWith(false);
@@ -190,14 +130,7 @@ describe("LiveKitSession", () => {
     it("sweeps an auto-played camera into the new room subscribed, with no Watch card", async () => {
       mockVoiceState.localMuted = false;
       mockVoiceState.localDeafened = false;
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 9,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 9);
 
       const setSubscribed = vi.fn();
       const publication = { kind: "audio", source: "microphone", setSubscribed };
@@ -220,15 +153,7 @@ describe("LiveKitSession", () => {
         ],
       ]);
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        9,
-        "ws://localhost:7880",
-        new AbortController().signal,
-      );
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 9);
 
       expect(setSubscribed).toHaveBeenCalledWith(true);
       expect(setCameraSubscribed).toHaveBeenCalledWith(true);
@@ -241,14 +166,7 @@ describe("LiveKitSession", () => {
     // device-error and toast routes were never re-established on the path that
     // replaces the room.
     it("re-installs the device-manager error and toast callbacks on a successful reconnect", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 11,
-        latestToken: "reconnect-token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 11);
       const errorCb = vi.fn();
       session.setOnError(errorCb);
 
@@ -259,16 +177,7 @@ describe("LiveKitSession", () => {
       const setOnToastSpy = vi.spyOn(deviceManager, "setOnToast");
 
       const ac = new AbortController();
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "reconnect-token",
-        "/livekit",
-        11,
-        "ws://localhost:7880",
-        ac.signal,
-      );
-
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 11, { signal: ac.signal });
 
       expect((session as any)._state.type).toBe("connected");
       expect(setOnErrorSpy).toHaveBeenCalledWith(errorCb);
@@ -283,14 +192,7 @@ describe("LiveKitSession", () => {
     // retrying with backoff, so an SFU that returns on the third attempt
     // still resumes the call.
     it("keeps retrying with backoff so a companion LiveKit restart can land", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const errorCb = vi.fn();
       session.setOnError(errorCb);
@@ -301,13 +203,7 @@ describe("LiveKitSession", () => {
         .mockRejectedValueOnce(new Error("sfu restarting"))
         .mockResolvedValueOnce(undefined);
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       await vi.advanceTimersByTimeAsync(3000); // attempt 1 fails
       await vi.advanceTimersByTimeAsync(6000); // attempt 2 fails — the old budget gave up here
@@ -320,23 +216,10 @@ describe("LiveKitSession", () => {
     });
 
     it("returns without reconnecting when signal is aborted during delay", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       const ac = new AbortController();
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       ac.abort();
       await vi.advanceTimersByTimeAsync(3100);
@@ -346,23 +229,10 @@ describe("LiveKitSession", () => {
     });
 
     it("aborts when currentChannelId changes during delay", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       const ac = new AbortController();
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       (session as any)._state = { type: "idle" };
       await vi.advanceTimersByTimeAsync(3100);
@@ -372,14 +242,7 @@ describe("LiveKitSession", () => {
     });
 
     it("succeeds on second attempt after first fails", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const ac = new AbortController();
 
@@ -387,13 +250,7 @@ describe("LiveKitSession", () => {
         .mockRejectedValueOnce(new Error("first attempt failed"))
         .mockResolvedValueOnce(undefined);
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       await vi.advanceTimersByTimeAsync(3000);
       await vi.advanceTimersByTimeAsync(6000);
@@ -403,14 +260,7 @@ describe("LiveKitSession", () => {
     });
 
     it("disconnects the failed attempt's room instead of leaking it", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const ac = new AbortController();
 
@@ -418,13 +268,7 @@ describe("LiveKitSession", () => {
         .mockRejectedValueOnce(new Error("first attempt failed"))
         .mockResolvedValueOnce(undefined);
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       await vi.advanceTimersByTimeAsync(3000);
       await vi.advanceTimersByTimeAsync(6000);
@@ -440,14 +284,7 @@ describe("LiveKitSession", () => {
     });
 
     it("calls leaveVoice, leaveVoiceChannel, and error callback after all attempts fail", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const sendSpy = vi.fn();
       // The chat socket is closed for good, so the D-4 slow phase does not run
@@ -460,13 +297,7 @@ describe("LiveKitSession", () => {
 
       mockRoom.connect.mockRejectedValue(new Error("always fails"));
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       // Exhaust the whole RT-9 budget: 3 s, then 6 s per attempt.
       await vi.advanceTimersByTimeAsync(27_000);
@@ -492,14 +323,7 @@ describe("LiveKitSession", () => {
     // whatever live session replaced this stale reconnect loop (CLAUDE.md:
     // voice sessions are superseded, not cancelled).
     it("skips give-up cleanup when superseded before the final attempt resolves", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const errorCb = vi.fn();
       session.setOnError(errorCb);
@@ -513,14 +337,10 @@ describe("LiveKitSession", () => {
       mockRoom.connect.mockImplementation(() => {
         connectCalls++;
         if (connectCalls >= 5) {
-          (session as any)._state = {
-            type: "connected",
-            room: mockRoom,
-            channelId: 9,
+          enterConnected(session, 9, {
             latestToken: "other-token",
-            lastUrl: "/livekit",
             lastDirectUrl: "ws://localhost:7880",
-          };
+          });
           // ...and the chat socket closes for good, so the loop breaks straight
           // into the post-loop give-up check instead of an in-loop checkpoint.
           session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
@@ -528,13 +348,7 @@ describe("LiveKitSession", () => {
         return Promise.reject(new Error("always fails"));
       });
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       // Exhaust the fast attempts so the loop reaches the post-loop check.
       await vi.advanceTimersByTimeAsync(27_000);
@@ -554,14 +368,7 @@ describe("LiveKitSession", () => {
     // "reconnecting") AND `_currentChannelId` equal to ours, so only the
     // state-type check can tell the stale loop it no longer owns the session.
     it("skips give-up cleanup when the same channel was re-joined by a newer session", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const errorCb = vi.fn();
       session.setOnError(errorCb);
@@ -573,14 +380,10 @@ describe("LiveKitSession", () => {
         if (connectCalls >= 5) {
           // A fresh join for the SAME channel completed while the final
           // reconnect attempt was in flight.
-          (session as any)._state = {
-            type: "connected",
-            room: mockRoom,
-            channelId: 5,
+          enterConnected(session, 5, {
             latestToken: "fresh-token",
-            lastUrl: "/livekit",
             lastDirectUrl: "ws://localhost:7880",
-          };
+          });
           // ...and the chat socket closes for good, so the loop breaks straight
           // into the post-loop give-up check instead of an in-loop checkpoint.
           session.setWsClient({ send: vi.fn(), getState: () => "disconnected" } as any);
@@ -588,13 +391,7 @@ describe("LiveKitSession", () => {
         return Promise.reject(new Error("always fails"));
       });
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       // Exhaust the fast attempts so the loop reaches the post-loop check.
       await vi.advanceTimersByTimeAsync(27_000);
@@ -608,27 +405,14 @@ describe("LiveKitSession", () => {
     });
 
     it("catches room disconnect failure during cleanup without throwing", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const ac = new AbortController();
 
       mockRoom.connect.mockRejectedValue(new Error("connect failed"));
       mockRoom.disconnect.mockRejectedValueOnce(new Error("disconnect also failed"));
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       await vi.advanceTimersByTimeAsync(5 * 60_000 + 30_000); // to the D-4 ceiling
       await reconnectPromise;
@@ -643,35 +427,18 @@ describe("LiveKitSession", () => {
     // This exercises the very first in-loop checkpoint, right after the
     // delay, which the give-up-only tests above never reach.
     it("aborts before creating a room when a same-channel rejoin lands during the retry delay (zombie reconnect)", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const ac = new AbortController();
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
+      const reconnectPromise = startReconnect(session, 5, { token: "token", signal: ac.signal });
 
       // A fresh, same-channel join completes DURING the retry delay, before
       // the loop's first in-flight guard has a chance to run.
-      (session as any)._state = {
-        type: "connected",
-        room: mockRoom,
-        channelId: 5,
+      enterConnected(session, 5, {
         latestToken: "fresh-token",
-        lastUrl: "/livekit",
         lastDirectUrl: "ws://localhost:7880",
-      };
+      });
 
       await vi.advanceTimersByTimeAsync(3100);
       await reconnectPromise;
@@ -684,14 +451,7 @@ describe("LiveKitSession", () => {
     });
 
     it("cleans up reconnect room when signal aborts after connect resolves", async () => {
-      (session as any)._state = {
-        type: "reconnecting",
-        channelId: 5,
-        latestToken: "token",
-        lastUrl: "/livekit",
-        lastDirectUrl: "ws://localhost:7880",
-        ac: new AbortController(),
-      };
+      enterReconnecting(session, 5, { latestToken: "token" });
       session.setServerHost("localhost:7880");
       const ac = new AbortController();
 
@@ -699,16 +459,7 @@ describe("LiveKitSession", () => {
         ac.abort();
       });
 
-      const reconnectPromise = (session as any).attemptAutoReconnect(
-        "token",
-        "/livekit",
-        5,
-        "ws://localhost:7880",
-        ac.signal,
-      );
-
-      await vi.advanceTimersByTimeAsync(3100);
-      await reconnectPromise;
+      await runReconnect(session, 5, { token: "token", signal: ac.signal });
 
       expect(mockRoom.disconnect).toHaveBeenCalled();
       expect((session as any)._state.type).not.toBe("connected");

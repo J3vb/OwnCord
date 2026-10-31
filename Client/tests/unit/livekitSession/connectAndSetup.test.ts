@@ -4,7 +4,12 @@ import { Room } from "livekit-client";
 import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { ensureLiveKitProxy } from "../../../src/platform/desktop/nativeProxies";
-import { createDeferred, useLiveKitSessionHarness } from "../../helpers/livekitSessionHarness";
+import {
+  createDeferred,
+  useLiveKitSessionHarness,
+  enterConnected,
+  stubPrefs,
+} from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
@@ -16,7 +21,7 @@ vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
 vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
 
-const { mockVoiceState, mockRoom, mockInvoke, mockLoadPref } = mocks;
+const { mockVoiceState, mockRoom, mockInvoke } = mocks;
 
 describe("LiveKitSession", () => {
   let session: LiveKitSession;
@@ -302,10 +307,7 @@ describe("LiveKitSession", () => {
 
       mockRoom.connect.mockResolvedValue(undefined);
       mockRoom.switchActiveDevice.mockRejectedValueOnce(new Error("device not found"));
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "audioInputDevice") return "nonexistent-device";
-        return defaultVal;
-      });
+      stubPrefs({ audioInputDevice: "nonexistent-device" });
 
       const result = await (session as any).connectAndSetup(
         "token",
@@ -322,10 +324,7 @@ describe("LiveKitSession", () => {
       session.setServerHost("localhost:7880");
       session.setWsClient({ send: vi.fn() } as any);
       mockRoom.connect.mockResolvedValue(undefined);
-      mockLoadPref.mockImplementation((key: string, defaultVal: unknown) => {
-        if (key === "audioInputDevice") return "usb-mic";
-        return defaultVal;
-      });
+      stubPrefs({ audioInputDevice: "usb-mic" });
       const order: string[] = [];
       mockRoom.switchActiveDevice.mockImplementation(async (kind: string) => {
         order.push(kind);
@@ -397,14 +396,7 @@ describe("LiveKitSession", () => {
 
       // A newer attempt (channel 2) has already superseded this one and
       // installed its own connected state into the shared _state.
-      (session as any)._state = {
-        type: "connected",
-        room: mockRoom,
-        channelId: 2,
-        latestToken: "token-B",
-        lastUrl: "/livekit-b",
-        lastDirectUrl: undefined,
-      };
+      enterConnected(session, 2, { latestToken: "token-B", lastUrl: "/livekit-b" });
 
       // Now let the stalled attempt's restoreLocalVoiceState resolve.
       micDeferred.resolve(undefined);
