@@ -4,8 +4,6 @@
   "src/components/settings/VoiceAudioTab.ts": 1700,
   "src/features/messaging/emojiData.ts": 1950,
   "src/features/voice/native/nativeRoom.ts": 1450,
-  "src/lib/api.ts": 2150,
-  "src/lib/types.ts": 2300,
   "src/lib/voice/livekitSession.ts": 1400,
   "src/lib/voice/screenShare.ts": 1250,
   "src/lib/ws.ts": 1250,
