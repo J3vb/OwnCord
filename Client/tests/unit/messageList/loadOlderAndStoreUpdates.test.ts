@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
@@ -134,9 +135,9 @@ describe("MessageList", () => {
     expect(onScrollTop).toHaveBeenCalledTimes(2);
   });
 
-  it("after a failed older-page fetch, scrolling inside the zone waits 5s before retrying", async () => {
-    vi.useFakeTimers();
-    try {
+  it(
+    "after a failed older-page fetch, scrolling inside the zone waits 5s before retrying",
+    fakeTimersTest(async () => {
       setHasMore(1, true);
       setMessages(1, [makeMessage({ id: 1 })]);
       messagesStore.flush();
@@ -168,10 +169,8 @@ describe("MessageList", () => {
       vi.advanceTimersByTime(1000);
       root.dispatchEvent(new Event("scroll"));
       expect(onScrollTop).toHaveBeenCalledTimes(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    }),
+  );
 
   it("does not re-trigger onScrollTop from a live tail append while a history fetch is in flight", async () => {
     setHasMore(1, true);

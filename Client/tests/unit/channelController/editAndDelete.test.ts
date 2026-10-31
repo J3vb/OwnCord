@@ -1,11 +1,17 @@
 import { describe, it, expect, vi } from "vitest";
+import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/channelControllerMocks";
 import { createChannelController } from "../../../src/pages/main-page/ChannelController";
 import type { ChannelControllerOptions } from "../../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { messagingText } from "../../../src/i18n/messaging";
 import { capturedMessageListOpts } from "../../helpers/channelControllerMocks";
-import { makeOpts, useChannelControllerHarness } from "../../helpers/channelControllerHarness";
+import {
+  makeOpts,
+  sentFrames,
+  mountController,
+  useChannelControllerHarness,
+} from "../../helpers/channelControllerHarness";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
@@ -34,44 +40,29 @@ const { mockGetChannelMessages, mockStartEdit, mockIsEditing, mockIsIdle } = moc
 // Tests
 // ---------------------------------------------------------------------------
 
+function editRow(id: number, content: string, over: Record<string, unknown> = {}) {
+  return {
+    id,
+    content,
+    user: { id: 1, username: "me" },
+    deleted: false,
+    status: "sent",
+    ...over,
+  };
+}
+
 describe("createChannelController", () => {
   useChannelControllerHarness();
 
   describe("edit-last-message event", () => {
     it("finds the last non-deleted message by current user and starts edit", () => {
       mockGetChannelMessages.mockReturnValue([
-        {
-          id: 1,
-          content: "first",
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "sent",
-        },
-        {
-          id: 2,
-          content: "other user",
-          user: { id: 2, username: "them" },
-          deleted: false,
-          status: "sent",
-        },
-        {
-          id: 3,
-          content: "my deleted",
-          user: { id: 1, username: "me" },
-          deleted: true,
-          status: "sent",
-        },
-        {
-          id: 4,
-          content: "my latest",
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "sent",
-        },
+        editRow(1, "first"),
+        editRow(2, "other user", { user: { id: 2, username: "them" } }),
+        editRow(3, "my deleted", { deleted: true }),
+        editRow(4, "my latest"),
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       vi.clearAllMocks();
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
@@ -81,25 +72,12 @@ describe("createChannelController", () => {
 
     it("skips a sticker message and edits the last message with text", () => {
       mockGetChannelMessages.mockReturnValue([
-        {
-          id: 1,
-          content: "my text",
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "sent",
-        },
-        {
-          id: 2,
-          content: "[Sticker: Wave]",
+        editRow(1, "my text"),
+        editRow(2, "[Sticker: Wave]", {
           sticker: { id: 3, name: "Wave", url: "/api/v1/stickers/3/image" },
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "sent",
-        },
+        }),
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       vi.clearAllMocks();
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
@@ -109,24 +87,10 @@ describe("createChannelController", () => {
 
     it("skips deleted messages and finds earlier non-deleted message", () => {
       mockGetChannelMessages.mockReturnValue([
-        {
-          id: 1,
-          content: "earliest",
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "sent",
-        },
-        {
-          id: 2,
-          content: "deleted",
-          user: { id: 1, username: "me" },
-          deleted: true,
-          status: "sent",
-        },
+        editRow(1, "earliest"),
+        editRow(2, "deleted", { deleted: true }),
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       vi.clearAllMocks();
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
@@ -136,17 +100,9 @@ describe("createChannelController", () => {
 
     it("does nothing when no own messages exist", () => {
       mockGetChannelMessages.mockReturnValue([
-        {
-          id: 1,
-          content: "other",
-          user: { id: 2, username: "them" },
-          deleted: false,
-          status: "sent",
-        },
+        editRow(1, "other", { user: { id: 2, username: "them" } }),
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       vi.clearAllMocks();
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
@@ -156,24 +112,10 @@ describe("createChannelController", () => {
 
     it("skips an unconfirmed/failed optimistic row (id 0) and edits the last actually-sent message", () => {
       mockGetChannelMessages.mockReturnValue([
-        {
-          id: 5,
-          content: "sent earlier",
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "sent",
-        },
-        {
-          id: 0,
-          content: "still sending",
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "pending",
-        },
+        editRow(5, "sent earlier"),
+        editRow(0, "still sending", { status: "pending" }),
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       vi.clearAllMocks();
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
@@ -185,18 +127,8 @@ describe("createChannelController", () => {
     });
 
     it("does nothing when every own message is still pending/failed", () => {
-      mockGetChannelMessages.mockReturnValue([
-        {
-          id: 0,
-          content: "still sending",
-          user: { id: 1, username: "me" },
-          deleted: false,
-          status: "failed",
-        },
-      ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mockGetChannelMessages.mockReturnValue([editRow(0, "still sending", { status: "failed" })]);
+      const { opts } = mountController();
       vi.clearAllMocks();
 
       opts.slots.inputSlot.dispatchEvent(new Event("edit-last-message"));
@@ -251,9 +183,7 @@ describe("createChannelController", () => {
     }
 
     it("does not toast success when a delete is sent and acknowledged", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
 
       capturedMessageListOpts!.onDeleteClick(5, true);
 
@@ -267,16 +197,12 @@ describe("createChannelController", () => {
 
     it("shows one error and sends nothing when deleting while disconnected", () => {
       setConnectionStatus("disconnected");
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
       vi.clearAllMocks();
 
       capturedMessageListOpts!.onDeleteClick(5, true);
 
-      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-        ([frame]) => (frame as { type: string }).type === "chat_delete",
-      );
+      const sends = sentFrames(opts, "chat_delete");
       expect(sends).toHaveLength(0);
       expect(opts.showToast).toHaveBeenCalledTimes(1);
       expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("delete"), "error");
@@ -292,9 +218,7 @@ describe("createChannelController", () => {
 
       capturedMessageListOpts!.onEditSave(5, "new content");
 
-      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-        ([frame]) => (frame as { type: string }).type === "chat_edit",
-      );
+      const sends = sentFrames(opts, "chat_edit");
       expect(sends).toHaveLength(1);
       expect(opts.showToast).not.toHaveBeenCalledWith(expect.any(String), "success");
       ctrl.destroyChannel();
@@ -303,17 +227,13 @@ describe("createChannelController", () => {
     it("shows one error, sends nothing, and keeps the editor open when saving offline", () => {
       setConnectionStatus("reconnecting");
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
       vi.clearAllMocks();
 
       // false keeps the editor open with the text; nothing was sent.
       expect(capturedMessageListOpts!.onEditSave(5, "new content")).toBe(false);
 
-      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-        ([frame]) => (frame as { type: string }).type === "chat_edit",
-      );
+      const sends = sentFrames(opts, "chat_edit");
       expect(sends).toHaveLength(0);
       expect(opts.showToast).toHaveBeenCalledTimes(1);
       expect(opts.showToast).toHaveBeenCalledWith(messagingText("toast.editFailed"), "error");
@@ -506,9 +426,9 @@ describe("createChannelController", () => {
       ctrl.destroyChannel();
     });
 
-    it("drops an unechoed edit and delete silently after the expiry, so a later drop shows no error", async () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "drops an unechoed edit and delete silently after the expiry, so a later drop shows no error",
+      fakeTimersTest(async () => {
         mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
         const { opts } = optsWithIds();
         const ctrl = createChannelController(opts);
@@ -532,10 +452,8 @@ describe("createChannelController", () => {
         expect(opts.showToast).not.toHaveBeenCalled();
         expect(mockStartEdit).not.toHaveBeenCalled();
         ctrl.destroyChannel();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
     it("keeps another edit the user opened when a failed edit comes back late", async () => {
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/channelControllerMocks";
 import { createChannelController } from "../../../src/pages/main-page/ChannelController";
 import {
@@ -14,7 +15,14 @@ import {
   capturedMessageListOpts,
   capturedMessageInputOpts,
 } from "../../helpers/channelControllerMocks";
-import { makeOpts, useChannelControllerHarness } from "../../helpers/channelControllerHarness";
+import {
+  installSendIds,
+  makeOpts,
+  sentFrames,
+  mountController,
+  mountControllerWithSendIds,
+  useChannelControllerHarness,
+} from "../../helpers/channelControllerHarness";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
@@ -62,6 +70,12 @@ describe("createChannelController", () => {
   useChannelControllerHarness();
 
   describe("MessageList callbacks (delete confirmation dialog)", () => {
+    function mountBobsMessage(): ReturnType<typeof mountController> {
+      mockGetChannelMessages.mockReturnValue([
+        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
+      ]);
+      return mountController();
+    }
     function deleteModal(): HTMLElement | null {
       return document.querySelector("[data-testid='msg-delete-modal']");
     }
@@ -73,38 +87,22 @@ describe("createChannelController", () => {
     }
 
     it("opens a dialog and sends nothing on the first click", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
-      ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountBobsMessage();
 
       capturedMessageListOpts!.onDeleteClick(5, false);
 
       expect(deleteModal()).not.toBeNull();
-      expect(
-        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-          ([f]) => (f as { type: string }).type === "chat_delete",
-        ),
-      ).toHaveLength(0);
+      expect(sentFrames(opts, "chat_delete")).toHaveLength(0);
       ctrl.destroyChannel();
     });
 
     it("sends exactly one chat_delete when the dialog is confirmed", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
-      ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountBobsMessage();
 
       capturedMessageListOpts!.onDeleteClick(5, false);
       confirmBtn().click();
 
-      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-        ([f]) => (f as { type: string }).type === "chat_delete",
-      );
+      const sends = sentFrames(opts, "chat_delete");
       expect(sends).toHaveLength(1);
       expect(sends[0]![0]).toEqual({ type: "chat_delete", payload: { message_id: 5 } });
       expect(deleteModal()).toBeNull();
@@ -112,52 +110,29 @@ describe("createChannelController", () => {
     });
 
     it("cancelling the dialog sends nothing and closes it", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
-      ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountBobsMessage();
 
       capturedMessageListOpts!.onDeleteClick(5, false);
       cancelBtn().click();
 
       expect(deleteModal()).toBeNull();
-      expect(
-        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-          ([f]) => (f as { type: string }).type === "chat_delete",
-        ),
-      ).toHaveLength(0);
+      expect(sentFrames(opts, "chat_delete")).toHaveLength(0);
       ctrl.destroyChannel();
     });
 
     it("Escape cancels the dialog without deleting", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
-      ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountBobsMessage();
 
       capturedMessageListOpts!.onDeleteClick(5, false);
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
       expect(deleteModal()).toBeNull();
-      expect(
-        (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-          ([f]) => (f as { type: string }).type === "chat_delete",
-        ),
-      ).toHaveLength(0);
+      expect(sentFrames(opts, "chat_delete")).toHaveLength(0);
       ctrl.destroyChannel();
     });
 
     it("Shift-click deletes immediately with no dialog", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
-      ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountBobsMessage();
 
       capturedMessageListOpts!.onDeleteClick(5, true);
 
@@ -170,21 +145,14 @@ describe("createChannelController", () => {
     });
 
     it("keeps the delivery gate: confirming while disconnected shows one error and sends nothing", () => {
-      mockGetChannelMessages.mockReturnValue([
-        { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
-      ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountBobsMessage();
       setConnectionStatus("disconnected");
       vi.clearAllMocks();
 
       capturedMessageListOpts!.onDeleteClick(5, false);
       confirmBtn().click();
 
-      const sends = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.filter(
-        ([f]) => (f as { type: string }).type === "chat_delete",
-      );
+      const sends = sentFrames(opts, "chat_delete");
       expect(sends).toHaveLength(0);
       expect(opts.showToast).toHaveBeenCalledTimes(1);
       expect(opts.showToast).toHaveBeenCalledWith(expect.stringContaining("delete"), "error");
@@ -195,9 +163,7 @@ describe("createChannelController", () => {
       mockGetChannelMessages.mockReturnValue([
         { id: 5, content: "bye", user: { id: 2, username: "Bob" } },
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { ctrl } = mountController();
 
       capturedMessageListOpts!.onDeleteClick(5, false);
       expect(deleteModal()).not.toBeNull();
@@ -207,9 +173,7 @@ describe("createChannelController", () => {
     });
 
     it("onReactionClick delegates to reactionCtrl", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageListOpts.onReactionClick(5, "👍");
 
@@ -237,8 +201,7 @@ describe("createChannelController", () => {
           },
         }),
       });
-      let next = 0;
-      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      installSendIds(opts);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       capturedMessageInputOpts.onSend("private text", null, [], []);
@@ -274,8 +237,7 @@ describe("createChannelController", () => {
       );
       const opts = makeOpts();
       Object.assign(opts.api, { getConfig: () => ({ host: "chat.example", token: "token" }) });
-      let next = 0;
-      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      installSendIds(opts);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       capturedMessageInputOpts.onSend("send once", null, [], []);
@@ -318,8 +280,7 @@ describe("createChannelController", () => {
 
       const opts = makeOpts();
       Object.assign(opts.api, { getConfig: () => ({ host: owner.host, token: "token" }) });
-      let next = 0;
-      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      installSendIds(opts);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       const listeners = [...vi.mocked(opts.ws.on).mock.calls];
@@ -383,8 +344,7 @@ describe("createChannelController", () => {
       activatePendingMessages(owner, user, true);
       const opts = makeOpts();
       Object.assign(opts.api, { getConfig: () => ({ host: owner.host, token: "token" }) });
-      let next = 0;
-      vi.mocked(opts.ws.send).mockImplementation(() => `cid-${++next}`);
+      installSendIds(opts);
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "general");
       capturedMessageInputOpts.onSend("private text", null, [], []);
@@ -448,9 +408,9 @@ describe("createChannelController", () => {
       expect(opts.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "chat_send" }));
     });
 
-    it("releases every acknowledged send timer and its session cleanup", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "releases every acknowledged send timer and its session cleanup",
+      fakeTimersTest(() => {
         const cleanups = new Set<() => void>();
         const opts = makeOpts();
         Object.assign(opts.api, {
@@ -477,15 +437,11 @@ describe("createChannelController", () => {
         expect(vi.getTimerCount()).toBe(0);
         vi.advanceTimersByTime(20_000);
         expect(mockMarkSendFailed).not.toHaveBeenCalled();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
     it("onSend sends chat_send via ws", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageInputOpts.onSend("hello", null, [], []);
 
@@ -502,9 +458,7 @@ describe("createChannelController", () => {
 
     it("onSend drops the reply when its target was deleted", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 7, content: "", deleted: true }]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageInputOpts.onSend("hello", 7, [], []);
 
@@ -518,9 +472,7 @@ describe("createChannelController", () => {
 
     it("onSend keeps the reply when its target is live", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 7, content: "original", deleted: false }]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageInputOpts.onSend("hello", 7, [], []);
 
@@ -537,9 +489,7 @@ describe("createChannelController", () => {
       // land the optimistic row in the live tail, not mid-history.
       mockIsWindowDetached.mockReturnValueOnce(true);
       mockMarkChannelRead.mockClear();
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
 
       capturedMessageInputOpts.onSend("hello", null, [], []);
@@ -622,9 +572,7 @@ describe("createChannelController", () => {
     });
 
     it("composer shows the timeout with the server-supplied expiry and re-enables on lift", async () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { ctrl } = mountController();
       expect(mockSetDisabled).toHaveBeenLastCalledWith(null);
 
       setActiveTimeout(new Date(Date.now() + 60_000).toISOString());
@@ -640,9 +588,7 @@ describe("createChannelController", () => {
     });
 
     it("onRetryLoad re-invokes loadMessages for the mounted channel", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
 
       capturedMessageListOpts.onRetryLoad();
@@ -651,9 +597,7 @@ describe("createChannelController", () => {
     });
 
     it("onJumpToMessage routes a reply-bar jump through the shared jumper", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountController();
 
       capturedMessageListOpts.onJumpToMessage(1234);
 
@@ -663,9 +607,7 @@ describe("createChannelController", () => {
 
     it("onJumpToPresent reattaches the channel and refetches the live tail", () => {
       mockMarkChannelRead.mockClear();
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
       (opts.msgCtrl.loadMessages as ReturnType<typeof vi.fn>).mockClear();
 
       capturedMessageListOpts.onJumpToPresent();
@@ -684,11 +626,7 @@ describe("createChannelController", () => {
     });
 
     it("onRetry re-sends the failed draft with a fresh correlation id", () => {
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountControllerWithSendIds();
 
       // cid-1 is channel_focus; the chat_send gets cid-2.
       capturedMessageInputOpts.onSend("hello", null, [], []);
@@ -706,11 +644,7 @@ describe("createChannelController", () => {
     });
 
     it("onRetry re-sends a refused reply as a plain message", () => {
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountControllerWithSendIds();
       mockGetChannelMessages.mockReturnValue([]);
       capturedMessageInputOpts.onSend("hello", 7, [], []);
       mockGetChannelMessages.mockReturnValue([
@@ -728,11 +662,7 @@ describe("createChannelController", () => {
     });
 
     it("onRetry keeps the reply when the send failed for another reason", () => {
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountControllerWithSendIds();
       mockGetChannelMessages.mockReturnValue([]);
       capturedMessageInputOpts.onSend("hello", 7, [], []);
       mockGetChannelMessages.mockReturnValue([
@@ -750,11 +680,7 @@ describe("createChannelController", () => {
     });
 
     it("onDeleteDraft discards the failed row without re-sending", () => {
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountControllerWithSendIds();
 
       capturedMessageInputOpts.onSend("hello", null, [], []);
       const sendCalls = (opts.ws.send as ReturnType<typeof vi.fn>).mock.calls.length;
@@ -769,11 +695,7 @@ describe("createChannelController", () => {
       // A failed row survives a channel switch (it is carried across history
       // refetches), so its draft must too — a per-mount draft map left Retry
       // silently inert once the reader switched away and back.
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { ctrl } = mountControllerWithSendIds();
 
       // cid-1 is channel_focus; the chat_send gets cid-2.
       capturedMessageInputOpts.onSend("hello", null, [], []);
@@ -797,11 +719,7 @@ describe("createChannelController", () => {
       // The draft map outlives a channel switch so a failed row stays
       // retriable. Nothing else prunes it, so an accepted send must release
       // its own entry or every message of the session is retained forever.
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountControllerWithSendIds();
 
       capturedMessageInputOpts.onSend("hello", null, [], []);
 
@@ -819,9 +737,7 @@ describe("createChannelController", () => {
     });
 
     it("onTyping sends typing_start via ws", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageInputOpts.onTyping();
 
@@ -833,9 +749,7 @@ describe("createChannelController", () => {
 
     it("onEditSave skips the send, and closes the editor, when content unchanged", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "hello" }]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       // true closes the editor.
       expect(capturedMessageListOpts!.onEditSave(5, "hello")).toBe(true);
@@ -864,9 +778,7 @@ describe("createChannelController", () => {
     });
 
     it("onUploadFile returns file data on success", async () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountController();
 
       const result = await capturedMessageInputOpts!.onUploadFile(new File(["x"], "test.txt"));
 
@@ -892,9 +804,7 @@ describe("createChannelController", () => {
 
   describe("MessageList callbacks - additional", () => {
     it("onScrollTop delegates to msgCtrl.loadOlderMessages", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageListOpts!.onScrollTop();
 
@@ -902,9 +812,7 @@ describe("createChannelController", () => {
     });
 
     it("onScrollBottom delegates to msgCtrl.loadNewerMessages", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageListOpts!.onScrollBottom!();
 
@@ -915,9 +823,7 @@ describe("createChannelController", () => {
       mockGetChannelMessages.mockReturnValue([
         { id: 5, content: "hello", user: { id: 2, username: "alice" } },
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountController();
 
       capturedMessageListOpts!.onReplyClick(5);
 
@@ -940,9 +846,7 @@ describe("createChannelController", () => {
 
     it("onReplyClick uses empty string for unknown message", () => {
       mockGetChannelMessages.mockReturnValue([]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountController();
 
       capturedMessageListOpts!.onReplyClick(999);
 
@@ -953,9 +857,7 @@ describe("createChannelController", () => {
       mockGetChannelMessages.mockReturnValue([
         { id: 5, content: "hello", user: { id: 1, username: "me" } },
       ]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountController();
 
       capturedMessageListOpts!.onEditClick(5);
 
@@ -965,9 +867,7 @@ describe("createChannelController", () => {
     it("onEditClick hands an unknown id to the list, which refuses it", () => {
       mockGetChannelMessages.mockReturnValue([]);
       mockStartEdit.mockReturnValue(false);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageListOpts!.onEditClick(999);
 
@@ -1130,9 +1030,7 @@ describe("createChannelController", () => {
     });
 
     it("onScrollTop does not load when channelAbort is null (after destroy)", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
 
       // Capture the onScrollTop callback
       const scrollTopCb = capturedMessageListOpts!.onScrollTop;
@@ -1151,9 +1049,7 @@ describe("createChannelController", () => {
   describe("MessageInput callbacks - additional", () => {
     it("onEditSave sends chat_edit when content changed", () => {
       mockGetChannelMessages.mockReturnValue([{ id: 5, content: "old content" }]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       expect(capturedMessageListOpts!.onEditSave(5, "new content")).toBe(true);
 
@@ -1168,9 +1064,7 @@ describe("createChannelController", () => {
 
     it("onEditSave sends edit when message not found in store", () => {
       mockGetChannelMessages.mockReturnValue([]);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageListOpts!.onEditSave(999, "new content");
 
@@ -1181,9 +1075,7 @@ describe("createChannelController", () => {
     });
 
     it("onSend includes reply_to and attachments", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageInputOpts.onSend(
         "hello",
@@ -1206,9 +1098,7 @@ describe("createChannelController", () => {
     });
 
     it("sends reply_ping false with a reply and leaves it out without one (3A-12)", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountController();
 
       capturedMessageInputOpts.onSend("off", 10, [], [], false);
       capturedMessageInputOpts.onSend("plain", null, [], [], true);
@@ -1222,11 +1112,7 @@ describe("createChannelController", () => {
     });
 
     it("a retry resends the same reply_ping (3A-12)", () => {
-      const opts = makeOpts();
-      let n = 0;
-      (opts.ws.send as ReturnType<typeof vi.fn>).mockImplementation(() => `cid-${++n}`);
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts } = mountControllerWithSendIds();
       mockGetChannelMessages.mockReturnValue([]);
       capturedMessageInputOpts.onSend("hey", 7, [], [], false);
       mockGetChannelMessages.mockReturnValue([

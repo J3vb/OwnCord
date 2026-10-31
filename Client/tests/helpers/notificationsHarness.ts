@@ -91,3 +91,25 @@ export function useNotificationsHarness(): void {
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
   });
 }
+
+type SendNotificationMock = ReturnType<typeof vi.fn>;
+
+/** The plugin's sendNotification mock with its call history cleared. */
+export async function freshSendNotification(): Promise<SendNotificationMock> {
+  const { sendNotification } = await import("@tauri-apps/plugin-notification");
+  (sendNotification as SendNotificationMock).mockClear();
+  return sendNotification as SendNotificationMock;
+}
+
+/** Desktop notifications on; taskbar flash and sounds off. */
+export function armDesktopPrefs(): void {
+  testPrefs.set("desktopNotifications", true);
+  testPrefs.set("flashTaskbar", false);
+  testPrefs.set("notificationSounds", false);
+}
+
+export async function armDesktopNotifications(): Promise<SendNotificationMock> {
+  const sendNotification = await freshSendNotification();
+  armDesktopPrefs();
+  return sendNotification;
+}

@@ -7,7 +7,13 @@ import type { DmChannel } from "../../../src/stores/dm.store";
 import { membersStore } from "../../../src/stores/members.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { setLogLevel } from "../../../src/lib/logger";
-import { makePayload, useNotificationsHarness } from "../../helpers/notificationsHarness";
+import {
+  armDesktopNotifications,
+  freshSendNotification,
+  armDesktopPrefs,
+  makePayload,
+  useNotificationsHarness,
+} from "../../helpers/notificationsHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
@@ -37,12 +43,7 @@ describe("notifyIncomingMessage", () => {
 
   describe("sendNotification receives correct title and body", () => {
     it("passes title with format 'username in #channelName'", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      const sendNotification = await armDesktopNotifications();
 
       const payload = makePayload({
         user: { id: 2, username: "Alice", avatar: null },
@@ -66,8 +67,7 @@ describe("notifyIncomingMessage", () => {
     // agree, so the title routes through it too, with no "#" (a DM is not a
     // channel).
     it("titles a DM notification from dmDisplayName, not the channelsStore fallback", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       const dm: DmChannel = {
         channelId: 55,
@@ -83,9 +83,7 @@ describe("notifyIncomingMessage", () => {
       };
       dmStore.setState(() => ({ channels: [dm] }));
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       const payload = makePayload({
         user: { id: 2, username: "bob", avatar: null },
@@ -107,8 +105,7 @@ describe("notifyIncomingMessage", () => {
     // (lib/text/formatting.ts) prefers the live membersStore copy of the
     // author's nickname over whatever was frozen into the payload.
     it("titles the notification with the member store's nickname, not the raw username", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       membersStore.setState(() => ({
         members: new Map([
@@ -128,9 +125,7 @@ describe("notifyIncomingMessage", () => {
         roleRevision: 1,
       }));
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       const payload = makePayload({
         user: { id: 2, username: "a_martinez", avatar: null },
@@ -150,12 +145,7 @@ describe("notifyIncomingMessage", () => {
     // Same fix, payload-only path: the author has a display_name on the
     // message but is not (yet) in the member store.
     it("titles the notification with the payload's display_name when the author is not in the member store", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      const sendNotification = await armDesktopNotifications();
 
       const payload = makePayload({
         user: { id: 2, username: "a_martinez", avatar: null, display_name: "Alice" },
@@ -173,14 +163,11 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("uses fallback channel name with correct channel ID", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       channelsStore.setState((prev) => ({ ...prev, channels: new Map() }));
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       const payload = makePayload({
         user: { id: 2, username: "Bob", avatar: null },
@@ -200,16 +187,13 @@ describe("notifyIncomingMessage", () => {
 
   describe("sanitizeNotif: truncation boundary and control chars", () => {
     it("title at exactly 80 chars is NOT truncated", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       // "X in #general" = 13 chars. We need username to make title exactly 80.
       // title = `${username} in #general` => username.length + 12 = 80 => 68
       const username = "U".repeat(68);
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       const payload = makePayload({
         user: { id: 2, username, avatar: null },
@@ -228,15 +212,12 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("title at 81 chars IS truncated with '...'", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       // title = `${username} in #general` => username.length + 12 = 81 => 69
       const username = "U".repeat(69);
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       const payload = makePayload({
         user: { id: 2, username, avatar: null },
@@ -254,12 +235,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("body at exactly 100 chars is NOT truncated", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      const sendNotification = await armDesktopNotifications();
 
       const content = "B".repeat(100);
       const payload = makePayload({
@@ -277,12 +253,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("body at 101 chars IS truncated with '...'", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      const sendNotification = await armDesktopNotifications();
 
       const content = "B".repeat(101);
       const payload = makePayload({
@@ -300,12 +271,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("strips control characters from username and content", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      const sendNotification = await armDesktopNotifications();
 
       const payload = makePayload({
         user: { id: 2, username: "Evil\x00\x1FUser\x7F", avatar: null },
@@ -322,12 +288,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("control chars are removed before length check (not counted)", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      const sendNotification = await armDesktopNotifications();
 
       // 100 visible chars + 5 control chars => after strip = 100, should NOT truncate
       const content = "C".repeat(100) + "\x00\x01\x02\x03\x04";
@@ -348,13 +309,10 @@ describe("notifyIncomingMessage", () => {
 
   describe("suppressEveryone: driven by mentions_everyone, not substrings", () => {
     it("suppresses an @everyone the server honoured", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("suppressEveryone", true);
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ content: "ping @everyone", mentions_everyone: true }));
 
@@ -364,13 +322,10 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("suppresses an @here the server honoured", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("suppressEveryone", true);
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ content: "ping @here", mentions_everyone: true }));
 
@@ -379,13 +334,10 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("does NOT suppress an @everyone the server did not honour", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("suppressEveryone", true);
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       // Sender lacked MENTION_EVERYONE: the token is plain text.
       notifyIncomingMessage(makePayload({ content: "ping @everyone", mentions_everyone: false }));
@@ -396,13 +348,10 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("does NOT suppress an @everyone that also names the user", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("suppressEveryone", true);
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(
         makePayload({ content: "@everyone and @Me", mentions: [1], mentions_everyone: true }),
@@ -415,13 +364,10 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("does NOT suppress message without @everyone or @here even with toggle on", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("suppressEveryone", true);
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ content: "just a normal message" }));
 
@@ -431,13 +377,10 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("does NOT suppress @everyone when suppressEveryone pref is false", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("suppressEveryone", false);
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ content: "Hey @everyone", mentions_everyone: true }));
 
@@ -449,8 +392,7 @@ describe("notifyIncomingMessage", () => {
 
   describe("guard clause: own message check", () => {
     it("skips notification when payload user ID matches current user ID exactly", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("desktopNotifications", true);
 
@@ -463,14 +405,11 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("proceeds when current user is null (not logged in) — does not crash", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       resetAuthState();
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload());
 
@@ -480,13 +419,10 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("proceeds when payload user ID differs from current user ID", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       // Current user id=1, payload user id=2 (different)
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ user: { id: 2, username: "Other", avatar: null } }));
 
@@ -498,8 +434,7 @@ describe("notifyIncomingMessage", () => {
 
   describe("guard clause: focused window + active channel", () => {
     it("skips when BOTH window focused AND channel matches (AND, not OR)", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
@@ -534,15 +469,12 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("proceeds when window NOT focused even for active channel", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       vi.spyOn(document, "hasFocus").mockReturnValue(false);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ channel_id: 1 }));
 
@@ -561,16 +493,13 @@ describe("notifyIncomingMessage", () => {
     // literally nothing — not even a popup — even though the window is
     // focused and they are looking at #general.
     it("proceeds when window focused AND channel matches BUT the window is detached (reading back-history)", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
       messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([1]) }));
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ channel_id: 1 }));
 
@@ -587,9 +516,7 @@ describe("notifyIncomingMessage", () => {
       await import("@tauri-apps/api/window");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       mockOscillator.start.mockClear();
 
@@ -604,8 +531,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("fires ONLY notification sound when other toggles are off", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("desktopNotifications", false);
       testPrefs.set("flashTaskbar", false);

@@ -7,7 +7,12 @@ import { dmStore } from "../../../src/stores/dm.store";
 import type { DmChannel } from "../../../src/stores/dm.store";
 import { setBlockedByMe } from "../../../src/stores/blocks.store";
 import { setLogLevel } from "../../../src/lib/logger";
-import { makePayload, useNotificationsHarness } from "../../helpers/notificationsHarness";
+import {
+  freshSendNotification,
+  armDesktopPrefs,
+  makePayload,
+  useNotificationsHarness,
+} from "../../helpers/notificationsHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
@@ -27,12 +32,44 @@ afterEach(() => {
   setLogLevel("warn");
 });
 
+/** Makes the Tauri path throw and installs a fake Web Notification with the given permission. */
+function stubWebNotification(
+  permission: string,
+  requestResult?: string,
+): {
+  mockWebNotification: ReturnType<typeof vi.fn>;
+  mockRequestPerm: ReturnType<typeof vi.fn>;
+  restore: () => void;
+} {
+  shouldTauriNotifThrow.value = true;
+  const mockWebNotification = vi.fn();
+  const mockRequestPerm = requestResult ? vi.fn().mockResolvedValue(requestResult) : vi.fn();
+  const originalNotification = globalThis.Notification;
+  (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
+    permission,
+    requestPermission: mockRequestPerm,
+  });
+  return {
+    mockWebNotification,
+    mockRequestPerm,
+    restore: () => {
+      shouldTauriNotifThrow.value = false;
+      (globalThis as Record<string, unknown>).Notification = originalNotification;
+    },
+  };
+}
+
+async function notifyAndSettle(): Promise<void> {
+  armDesktopPrefs();
+  notifyIncomingMessage(makePayload());
+  await new Promise((r) => setTimeout(r, 50));
+}
+
 describe("notifyIncomingMessage", () => {
   useNotificationsHarness();
 
   it("does not notify for own messages", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     const payload = makePayload({ user: { id: 1, username: "Me", avatar: null } });
     notifyIncomingMessage(payload);
     await new Promise((r) => setTimeout(r, 50));
@@ -40,8 +77,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("makes no sound and no OS toast for a call log row", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     mockOscillator.start.mockClear();
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
     testPrefs.set("desktopNotifications", true);
@@ -65,8 +101,7 @@ describe("notifyIncomingMessage", () => {
     "group_icon",
     "group_future",
   ])("makes no sound and no OS toast for a %s row", async (kind) => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     mockOscillator.start.mockClear();
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
     testPrefs.set("desktopNotifications", true);
@@ -78,8 +113,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("does not notify when window is focused and message is in active channel", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
     const payload = makePayload({ channel_id: 1 });
@@ -110,8 +144,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("suppresses @everyone when toggle is enabled", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     testPrefs.set("suppressEveryone", true);
     const payload = makePayload({
       content: "Hey @everyone check this out",
@@ -123,8 +156,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("does not suppress @everyone when toggle is disabled", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     testPrefs.set("suppressEveryone", false);
     const payload = makePayload({ content: "Hey @everyone check this out" });
     notifyIncomingMessage(payload);
@@ -134,8 +166,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("role mention notifies a holder", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     testPrefs.set("notificationLevel", "mentions");
     authStore.setState((prev) => ({
       ...prev,
@@ -157,8 +188,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("handles long messages by truncating", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     const longContent = "A".repeat(200);
     const payload = makePayload({ content: longContent });
     notifyIncomingMessage(payload);
@@ -170,8 +200,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("handles @here the same as @everyone", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     testPrefs.set("suppressEveryone", true);
     const payload = makePayload({ content: "Hey @here important update", mentions_everyone: true });
     notifyIncomingMessage(payload);
@@ -180,8 +209,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("skips desktop notification when toggle is off", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     testPrefs.set("desktopNotifications", false);
     const payload = makePayload();
     notifyIncomingMessage(payload);
@@ -209,8 +237,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("falls back to channel ID string when channel is not in store", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     // Set channels store to have no channels
     channelsStore.setState((prev) => ({ ...prev, channels: new Map() }));
     const payload = makePayload({ channel_id: 999 });
@@ -224,8 +251,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("notifies when window is not focused, even for active channel", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
     const payload = makePayload({ channel_id: 1 });
@@ -321,8 +347,7 @@ describe("notifyIncomingMessage", () => {
   // and the notification proceeds. Renamed to match actual, intended
   // behavior (also covered by "proceeds when current user is null" below).
   it("notifies when current user is null (not logged in)", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     resetAuthState();
     // payload.user.id = 2 (different from null user), should proceed
     const payload = makePayload();
@@ -355,8 +380,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("handles short content without truncation", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     const payload = makePayload({ content: "Hi" });
     notifyIncomingMessage(payload);
     await vi.waitFor(() => {
@@ -365,8 +389,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("handles content exactly at 100 char boundary", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     const payload = makePayload({ content: "A".repeat(100) });
     notifyIncomingMessage(payload);
     await vi.waitFor(() => {
@@ -377,8 +400,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("handles content just over 100 chars (101)", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     const payload = makePayload({ content: "A".repeat(101) });
     notifyIncomingMessage(payload);
     await vi.waitFor(() => {
@@ -389,8 +411,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("does not suppress normal message when suppressEveryone is enabled", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     testPrefs.set("suppressEveryone", true);
     const payload = makePayload({ content: "Normal message without at-mentions" });
     // Should proceed to notification (not suppressed)
@@ -401,8 +422,7 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("suppresses @everyone regardless of other toggles", async () => {
-    const { sendNotification } = await import("@tauri-apps/plugin-notification");
-    (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+    const sendNotification = await freshSendNotification();
     testPrefs.set("suppressEveryone", true);
     testPrefs.set("desktopNotifications", true);
     testPrefs.set("flashTaskbar", true);
@@ -536,81 +556,37 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("falls back to Web Notification API when Tauri notification throws (permission granted)", async () => {
-    shouldTauriNotifThrow.value = true;
+    const { mockWebNotification, restore } = stubWebNotification("granted");
 
-    // Mock Web Notification API
-    const mockWebNotification = vi.fn();
-    const originalNotification = globalThis.Notification;
-    (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
-      permission: "granted",
-      requestPermission: vi.fn(),
-    });
-
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", false);
-    testPrefs.set("notificationSounds", false);
-
-    const payload = makePayload();
-    notifyIncomingMessage(payload);
-
-    await new Promise((r) => setTimeout(r, 50));
+    await notifyAndSettle();
 
     expect(mockWebNotification).toHaveBeenCalled();
 
-    shouldTauriNotifThrow.value = false;
-    (globalThis as Record<string, unknown>).Notification = originalNotification;
+    restore();
   });
 
   it("falls back to Web Notification API and requests permission when not granted/denied", async () => {
-    shouldTauriNotifThrow.value = true;
+    const { mockWebNotification, mockRequestPerm, restore } = stubWebNotification(
+      "default",
+      "granted",
+    );
 
-    const mockWebNotification = vi.fn();
-    const mockRequestPerm = vi.fn().mockResolvedValue("granted");
-    const originalNotification = globalThis.Notification;
-    (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
-      permission: "default",
-      requestPermission: mockRequestPerm,
-    });
-
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", false);
-    testPrefs.set("notificationSounds", false);
-
-    const payload = makePayload();
-    notifyIncomingMessage(payload);
-
-    await new Promise((r) => setTimeout(r, 50));
+    await notifyAndSettle();
 
     expect(mockRequestPerm).toHaveBeenCalled();
     expect(mockWebNotification).toHaveBeenCalled();
 
-    shouldTauriNotifThrow.value = false;
-    (globalThis as Record<string, unknown>).Notification = originalNotification;
+    restore();
   });
 
   it("does not show Web Notification when permission is denied", async () => {
-    shouldTauriNotifThrow.value = true;
+    const { mockWebNotification, restore } = stubWebNotification("denied");
 
-    const mockWebNotification = vi.fn();
-    const originalNotification = globalThis.Notification;
-    (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
-      permission: "denied",
-      requestPermission: vi.fn(),
-    });
-
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", false);
-    testPrefs.set("notificationSounds", false);
-
-    const payload = makePayload();
-    notifyIncomingMessage(payload);
-
-    await new Promise((r) => setTimeout(r, 50));
+    await notifyAndSettle();
 
     expect(mockWebNotification).not.toHaveBeenCalled();
 
-    shouldTauriNotifThrow.value = false;
-    (globalThis as Record<string, unknown>).Notification = originalNotification;
+    restore();
   });
 
   it("handles Web Notification API also failing (double catch)", async () => {
@@ -628,9 +604,7 @@ describe("notifyIncomingMessage", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     setLogLevel("debug");
 
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", false);
-    testPrefs.set("notificationSounds", false);
+    armDesktopPrefs();
 
     const payload = makePayload();
     notifyIncomingMessage(payload);
@@ -657,30 +631,17 @@ describe("notifyIncomingMessage", () => {
   });
 
   it("does not create Web Notification when requestPermission returns non-granted", async () => {
-    shouldTauriNotifThrow.value = true;
+    const { mockWebNotification, mockRequestPerm, restore } = stubWebNotification(
+      "default",
+      "denied",
+    );
 
-    const mockWebNotification = vi.fn();
-    const mockRequestPerm = vi.fn().mockResolvedValue("denied");
-    const originalNotification = globalThis.Notification;
-    (globalThis as Record<string, unknown>).Notification = Object.assign(mockWebNotification, {
-      permission: "default",
-      requestPermission: mockRequestPerm,
-    });
-
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", false);
-    testPrefs.set("notificationSounds", false);
-
-    const payload = makePayload();
-    notifyIncomingMessage(payload);
-
-    await new Promise((r) => setTimeout(r, 50));
+    await notifyAndSettle();
 
     expect(mockRequestPerm).toHaveBeenCalled();
     // Should not construct a Notification since permission denied
     expect(mockWebNotification).not.toHaveBeenCalled();
 
-    shouldTauriNotifThrow.value = false;
-    (globalThis as Record<string, unknown>).Notification = originalNotification;
+    restore();
   });
 });
