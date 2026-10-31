@@ -37,7 +37,7 @@ describe("DeleteChannelModal", () => {
     return { modal, options };
   }
 
-  const dialog: MakeDialog = ({ action, onClose }) =>
+  const openDialog: MakeDialog = ({ action, onClose }) =>
     makeModal({ onConfirm: action, onClose }).modal;
 
   it("renders the modal overlay", () => {
@@ -75,13 +75,13 @@ describe("DeleteChannelModal", () => {
   });
 
   it("calls onClose when close button is clicked", () =>
-    checkClickCloses(dialog, container, ".modal-close"));
+    checkClickCloses(openDialog, container, ".modal-close"));
 
   it("calls onClose when cancel button is clicked", () =>
-    checkClickCloses(dialog, container, ".btn-modal-cancel"));
+    checkClickCloses(openDialog, container, ".btn-modal-cancel"));
 
   it("removes overlay on destroy", () =>
-    checkOverlayRemovedOnDestroy(dialog, container, "[data-testid='delete-channel-modal']"));
+    checkOverlayRemovedOnDestroy(openDialog, container, "[data-testid='delete-channel-modal']"));
 
   it("shows error and re-enables button when onConfirm rejects with Error", async () => {
     const onConfirm = vi.fn().mockRejectedValue(new Error("Permission denied"));
@@ -166,10 +166,10 @@ describe("DeleteChannelModal", () => {
   });
 
   it("calls onClose on backdrop click", () =>
-    checkBackdropClickCloses(dialog, container, "[data-testid='delete-channel-modal']"));
+    checkBackdropClickCloses(openDialog, container, "[data-testid='delete-channel-modal']"));
 
   it("stays open when a drag-select ends on the backdrop", () =>
-    checkDragSelectKeepsOpen(dialog, container, "[data-testid='delete-channel-modal']"));
+    checkDragSelectKeepsOpen(openDialog, container, "[data-testid='delete-channel-modal']"));
 
   // ── dialog accessibility contract (DC-13) ──────────────────────────────────
 
@@ -190,12 +190,12 @@ describe("DeleteChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("Escape cancels without confirming the delete", () => checkEscapeCancels(dialog));
+  it("Escape cancels without confirming the delete", () => checkEscapeCancels(openDialog));
 
   it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () =>
-    checkEscapeKeepsImeCandidate(dialog));
+    checkEscapeKeepsImeCandidate(openDialog));
 
-  it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(dialog));
+  it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(openDialog));
 
   it("moves focus into the dialog on open and restores it on destroy", () => {
     const trigger = document.createElement("button");

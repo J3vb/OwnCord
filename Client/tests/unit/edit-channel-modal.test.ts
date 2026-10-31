@@ -54,7 +54,8 @@ describe("EditChannelModal", () => {
     return { modal, options };
   }
 
-  const dialog: MakeDialog = ({ action, onClose }) => makeModal({ onSave: action, onClose }).modal;
+  const openDialog: MakeDialog = ({ action, onClose }) =>
+    makeModal({ onSave: action, onClose }).modal;
 
   it("renders the modal overlay", () => {
     const { modal } = makeModal();
@@ -213,10 +214,10 @@ describe("EditChannelModal", () => {
   });
 
   it("calls onClose when close button is clicked", () =>
-    checkClickCloses(dialog, container, ".modal-close"));
+    checkClickCloses(openDialog, container, ".modal-close"));
 
   it("removes overlay on destroy", () =>
-    checkOverlayRemovedOnDestroy(dialog, container, "[data-testid='edit-channel-modal']"));
+    checkOverlayRemovedOnDestroy(openDialog, container, "[data-testid='edit-channel-modal']"));
 
   it("shows error message when onSave rejects with Error", async () => {
     const onSave = vi.fn().mockRejectedValue(new Error("Server error"));
@@ -294,13 +295,13 @@ describe("EditChannelModal", () => {
   });
 
   it("calls onClose when cancel button is clicked", () =>
-    checkClickCloses(dialog, container, ".btn-modal-cancel"));
+    checkClickCloses(openDialog, container, ".btn-modal-cancel"));
 
   it("calls onClose on backdrop click", () =>
-    checkBackdropClickCloses(dialog, container, "[data-testid='edit-channel-modal']"));
+    checkBackdropClickCloses(openDialog, container, "[data-testid='edit-channel-modal']"));
 
   it("stays open when a drag-select ends on the backdrop", () =>
-    checkDragSelectKeepsOpen(dialog, container, "[data-testid='edit-channel-modal']"));
+    checkDragSelectKeepsOpen(openDialog, container, "[data-testid='edit-channel-modal']"));
 
   it("adds error class to input on empty name validation", () => {
     const onSave = vi.fn(async () => {});
@@ -790,12 +791,12 @@ describe("EditChannelModal", () => {
       modal.destroy?.();
     });
 
-    it("Escape calls onClose without saving", () => checkEscapeCancels(dialog));
+    it("Escape calls onClose without saving", () => checkEscapeCancels(openDialog));
 
     it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () =>
-      checkEscapeKeepsImeCandidate(dialog));
+      checkEscapeKeepsImeCandidate(openDialog));
 
-    it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(dialog));
+    it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(openDialog));
 
     it("focuses the name input on open and restores focus on destroy", () => {
       const trigger = document.createElement("button");

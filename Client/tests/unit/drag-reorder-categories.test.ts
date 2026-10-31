@@ -188,6 +188,18 @@ function seed(
   }));
 }
 
+/** Signs in as the owner, seeds the store and builds the sidebar DOM. */
+function ownerSidebar(
+  channels: readonly Channel[],
+  categories: Parameters<typeof seed>[1],
+  specs: readonly Spec[],
+) {
+  signIn("owner");
+  seed(channels, categories);
+  const h = handlers();
+  return { h, sb: build(specs, h, h.lifetime) };
+}
+
 function reordersOf(fn: Mock<Handlers["onReorder"]>): readonly ChannelReorderData[] {
   expect(fn).toHaveBeenCalledTimes(1);
   return fn.mock.calls[0]?.[0] as readonly ChannelReorderData[];
@@ -236,10 +248,7 @@ const SPECS: readonly Spec[] = [
 
 describe("dragging a channel into another category", () => {
   it("a drop on a row of another category files the channel there and re-slots the target group", () => {
-    signIn("owner");
-    seed([...A, ...B], CATEGORIES);
-    const h = handlers();
-    const sb = build(SPECS, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], CATEGORIES, SPECS);
 
     // Rows: A header 0-20, ch1 20-40, ch2 40-60, B header 60-80, ch3 80-100, ch4 100-120.
     dragTo(sb.rows.get(1)!, 25, 104); // top half of ch4: B becomes [3, 1, 4]
@@ -265,10 +274,7 @@ describe("dragging a channel into another category", () => {
   });
 
   it("the bottom half of the last row appends after it", () => {
-    signIn("owner");
-    seed([...A, ...B], CATEGORIES);
-    const h = handlers();
-    const sb = build(SPECS, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], CATEGORIES, SPECS);
 
     dragTo(sb.rows.get(1)!, 25, 116); // bottom half of ch4
 
@@ -276,10 +282,7 @@ describe("dragging a channel into another category", () => {
   });
 
   it("a drop on the category header appends at the end of that category", () => {
-    signIn("owner");
-    seed([...A, ...B], CATEGORIES);
-    const h = handlers();
-    const sb = build(SPECS, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], CATEGORIES, SPECS);
 
     dragTo(sb.rows.get(1)!, 25, 70); // B's header
 
@@ -390,10 +393,7 @@ describe("text above voice across categories", () => {
   const all = [...A, ch(6, 2, { type: "voice", catId: 10, cat: "A", catPos: 0 }), ...textB, voiceB];
 
   it("a text channel dropped on a voice row lands after the last text row", () => {
-    signIn("owner");
-    seed(all, CATEGORIES);
-    const h = handlers();
-    const sb = build(withVoice, h, h.lifetime);
+    const { h, sb } = ownerSidebar(all, CATEGORIES, withVoice);
 
     // A: header 0, ch1 20, ch2 40, ch6 60; B: header 80, ch3 100, ch4 120, ch5 140.
     dragTo(sb.rows.get(1)!, 25, 144); // top half of the voice row
@@ -403,10 +403,7 @@ describe("text above voice across categories", () => {
   });
 
   it("a text channel dropped on the header lands before the voice rows", () => {
-    signIn("owner");
-    seed(all, CATEGORIES);
-    const h = handlers();
-    const sb = build(withVoice, h, h.lifetime);
+    const { h, sb } = ownerSidebar(all, CATEGORIES, withVoice);
 
     dragTo(sb.rows.get(1)!, 25, 90);
 
@@ -414,10 +411,7 @@ describe("text above voice across categories", () => {
   });
 
   it("a voice channel dropped on a text row lands among the voice rows, at their start", () => {
-    signIn("owner");
-    seed(all, CATEGORIES);
-    const h = handlers();
-    const sb = build(withVoice, h, h.lifetime);
+    const { h, sb } = ownerSidebar(all, CATEGORIES, withVoice);
 
     dragTo(sb.rows.get(6)!, 65, 104); // top half of ch3, a text row
 
@@ -427,10 +421,7 @@ describe("text above voice across categories", () => {
   });
 
   it("a voice channel dropped on the header goes after the existing voice rows", () => {
-    signIn("owner");
-    seed(all, CATEGORIES);
-    const h = handlers();
-    const sb = build(withVoice, h, h.lifetime);
+    const { h, sb } = ownerSidebar(all, CATEGORIES, withVoice);
 
     dragTo(sb.rows.get(6)!, 65, 90);
 
@@ -483,10 +474,7 @@ describe("text above voice across categories", () => {
 
 describe("a channel drag when the viewer loses MANAGE_CHANNELS mid-drag", () => {
   it("is dropped on release: no callback and no store write", () => {
-    signIn("owner");
-    seed([...A, ...B], CATEGORIES);
-    const h = handlers();
-    const sb = build(SPECS, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], CATEGORIES, SPECS);
 
     sb.rows.get(1)!.dispatchEvent(mouse("mousedown", 25));
     sb.rows.get(1)!.dispatchEvent(mouse("mousemove", 45));
@@ -554,10 +542,7 @@ describe("a non-manager cannot drag", () => {
 
 describe("drop indicator across categories", () => {
   it("marks a header and a row of another category, and clears them on release", () => {
-    signIn("owner");
-    seed([...A, ...B], CATEGORIES);
-    const h = handlers();
-    const sb = build(SPECS, h, h.lifetime);
+    const { sb } = ownerSidebar([...A, ...B], CATEGORIES, SPECS);
     const source = sb.rows.get(1)!;
 
     source.dispatchEvent(mouse("mousedown", 25));
@@ -659,10 +644,7 @@ describe("dragging a category header", () => {
   });
 
   it("dropping on the lower part of another category's group sends it after that category", () => {
-    signIn("owner");
-    seed([...A, ...B], cats);
-    const h = handlers();
-    const sb = build(three, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], cats, three);
     const header = sb.headers.get("cat:10")!;
 
     // A: 0-60; B: header 60-80, rows to 120; C: header 120-140.
@@ -684,10 +666,7 @@ describe("dragging a category header", () => {
   });
 
   it("dropping on the upper half of another header sends it before that category", () => {
-    signIn("owner");
-    seed([...A, ...B], cats);
-    const h = handlers();
-    const sb = build(three, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], cats, three);
     const header = sb.headers.get("cat:12")!;
 
     header.dispatchEvent(mouse("mousedown", 125));
@@ -698,10 +677,7 @@ describe("dragging a category header", () => {
   });
 
   it("a drop on itself, on the uncategorized area or off every category sends nothing", () => {
-    signIn("owner");
-    seed([...A, ...B], cats);
-    const h = handlers();
-    const sb = build(three, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], cats, three);
     const header = sb.headers.get("cat:11")!;
 
     dragTo(header, 65, 70); // its own header
@@ -710,10 +686,7 @@ describe("dragging a category header", () => {
   });
 
   it("a press on the header's button stays a click, not a drag", () => {
-    signIn("owner");
-    seed([...A, ...B], cats);
-    const h = handlers();
-    const sb = build(three, h, h.lifetime);
+    const { sb } = ownerSidebar([...A, ...B], cats, three);
     const header = sb.headers.get("cat:10")!;
     const arrow = document.createElement("button");
     header.appendChild(arrow);
@@ -725,10 +698,7 @@ describe("dragging a category header", () => {
   });
 
   it("is refused when the viewer lost MANAGE_CHANNELS mid-drag", () => {
-    signIn("owner");
-    seed([...A, ...B], cats);
-    const h = handlers();
-    const sb = build(three, h, h.lifetime);
+    const { h, sb } = ownerSidebar([...A, ...B], cats, three);
     const header = sb.headers.get("cat:10")!;
 
     header.dispatchEvent(mouse("mousedown", 5));
