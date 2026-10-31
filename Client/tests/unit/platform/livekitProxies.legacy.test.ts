@@ -9,12 +9,11 @@
 import { vi } from "vitest";
 import type { LiveKitProxiesSeam } from "./livekitProxies.suite";
 import { describeLiveKitProxiesSuite } from "./livekitProxies.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 describeLiveKitProxiesSuite(async () => {
   vi.resetModules();

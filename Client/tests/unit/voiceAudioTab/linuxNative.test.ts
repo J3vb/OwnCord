@@ -151,15 +151,31 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     vi.unstubAllGlobals();
   });
 
-  async function mount() {
+  async function mountBare() {
     const { createVoiceAudioTab: create } =
       await import("../../../src/features/settings/VoiceAudioTab");
     const ac = new AbortController();
     const tab = create(ac.signal);
     const element = tab.build();
     document.body.appendChild(element);
-    await new Promise((r) => setTimeout(r, 0));
     return { element, ac, tab };
+  }
+
+  async function mount() {
+    const mounted = await mountBare();
+    await new Promise((r) => setTimeout(r, 0));
+    return mounted;
+  }
+
+  /** Makes the next mic test start wait; the returned function resolves it with a test id. */
+  function holdMicStart(): (id: number) => void {
+    let resolveStart!: (id: number) => void;
+    startMicTest.mockReturnValue(
+      new Promise<number>((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+    return resolveStart;
   }
 
   /** The camera select once its device options have been populated. */
@@ -637,12 +653,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   it("a start still in flight when the tab closes is stopped once it resolves", async () => {
-    let resolveStart!: (id: number) => void;
-    startMicTest.mockReturnValue(
-      new Promise<number>((resolve) => {
-        resolveStart = resolve;
-      }),
-    );
+    const resolveStart = holdMicStart();
     const tab = await mount();
     micTestRow(tab.element).button.click();
     await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(1));
@@ -655,12 +666,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   it("a start superseded by a stop click is stopped when it resolves", async () => {
-    let resolveStart!: (id: number) => void;
-    startMicTest.mockReturnValue(
-      new Promise<number>((resolve) => {
-        resolveStart = resolve;
-      }),
-    );
+    const resolveStart = holdMicStart();
     const tab = await mount();
     const { button } = micTestRow(tab.element);
     button.click();
@@ -728,12 +734,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
   });
 
   it("a test the host ended before its start resolved resets the button", async () => {
-    let resolveStart!: (id: number) => void;
-    startMicTest.mockReturnValue(
-      new Promise<number>((resolve) => {
-        resolveStart = resolve;
-      }),
-    );
+    const resolveStart = holdMicStart();
     const tab = await mount();
     micTestRow(tab.element).button.click();
     await vi.waitFor(() => expect(startMicTest).toHaveBeenCalledTimes(1));
@@ -973,11 +974,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     startCameraPreview
       .mockResolvedValueOnce({ width: 320, height: 180, frames: "ws://127.0.0.1:9/own" })
       .mockResolvedValue({ width: 1280, height: 720, frames: "ws://127.0.0.1:9/call" });
-    const { createVoiceAudioTab: create } =
-      await import("../../../src/features/settings/VoiceAudioTab");
-    const ac = new AbortController();
-    const element = create(ac.signal).build();
-    document.body.appendChild(element);
+    const { ac } = await mountBare();
     await vi.waitFor(() => expect(renderers).toHaveLength(1));
     const first = renderers[0]!;
     expect(first.url).toBe("ws://127.0.0.1:9/own/camera");
@@ -1022,11 +1019,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         }),
       )
       .mockResolvedValue({ width: 320, height: 180, frames: "ws://127.0.0.1:9/tok2" });
-    const { createVoiceAudioTab: create } =
-      await import("../../../src/features/settings/VoiceAudioTab");
-    const ac = new AbortController();
-    const element = create(ac.signal).build();
-    document.body.appendChild(element);
+    const { element } = await mountBare();
     const videoSelect = await cameraSelect(element);
     await vi.waitFor(() => {
       expect(startCameraPreview).toHaveBeenCalledTimes(1);
@@ -1058,11 +1051,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         }),
       )
       .mockRejectedValue(new Error("no camera"));
-    const { createVoiceAudioTab: create } =
-      await import("../../../src/features/settings/VoiceAudioTab");
-    const ac = new AbortController();
-    const element = create(ac.signal).build();
-    document.body.appendChild(element);
+    const { element } = await mountBare();
     const videoSelect = await cameraSelect(element);
     await vi.waitFor(() => {
       expect(startCameraPreview).toHaveBeenCalledTimes(1);
@@ -1088,11 +1077,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         resolveStart = resolve;
       }),
     );
-    const { createVoiceAudioTab: create } =
-      await import("../../../src/features/settings/VoiceAudioTab");
-    const ac = new AbortController();
-    const element = create(ac.signal).build();
-    document.body.appendChild(element);
+    const { ac } = await mountBare();
     await vi.waitFor(() => {
       expect(startCameraPreview).toHaveBeenCalledTimes(1);
     });
@@ -1157,11 +1142,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
         resolveDevices = resolve;
       }),
     );
-    const { createVoiceAudioTab: create } =
-      await import("../../../src/features/settings/VoiceAudioTab");
-    const ac = new AbortController();
-    const element = create(ac.signal).build();
-    document.body.appendChild(element);
+    const { element } = await mountBare();
     // Let the support query resolve and the IIFE reach the discovery await.
     await new Promise((r) => setTimeout(r, 0));
     const videoSelect = element.querySelector(

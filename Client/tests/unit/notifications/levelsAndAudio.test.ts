@@ -3,7 +3,6 @@ import * as mocks from "../../helpers/notificationsMocks";
 import { notifyIncomingMessage } from "../../../src/lib/notifications";
 import { cleanupNotificationAudio } from "../../../src/lib/media/notificationSound";
 import { channelsStore } from "../../../src/stores/channels.store";
-import { dmStore } from "../../../src/stores/dm.store";
 import type { ChatMessagePayload } from "../../../src/lib/types";
 import { setLogLevel } from "../../../src/lib/logger";
 import {
@@ -12,7 +11,17 @@ import {
   unmuteChannel,
 } from "../../../src/lib/prefs/channelMutes";
 import { setMessageJumpHandler } from "../../../src/lib/nav/messageNavigation";
-import { makePayload, useNotificationsHarness } from "../../helpers/notificationsHarness";
+import {
+  armDesktopNotifications,
+  freshSendNotification,
+  armDesktopPrefs,
+  makePayload,
+  setAlertPrefs,
+  notifyAs,
+  seedBobDm,
+  expectNoAlerts,
+  useNotificationsHarness,
+} from "../../helpers/notificationsHarness";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
@@ -43,9 +52,7 @@ describe("notifyIncomingMessage", () => {
       (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
       mockOscillator.start.mockClear();
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("notificationSounds", true);
-      testPrefs.set("flashTaskbar", true);
+      setAlertPrefs(true, true, true);
       testPrefs.set("userStatus", "dnd");
 
       notifyIncomingMessage(makePayload());
@@ -58,8 +65,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("still notifies for other statuses", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
 
       testPrefs.set("desktopNotifications", true);
       testPrefs.set("userStatus", "idle");
@@ -86,33 +92,13 @@ describe("notifyIncomingMessage", () => {
         makePayload({ content: "hey @Me", mentions: [1], mentions_everyone: false }),
       );
 
-      await new Promise((r) => setTimeout(r, 50));
-      expect(sendNotification).not.toHaveBeenCalled();
-      expect(mockOscillator.start).not.toHaveBeenCalled();
-      expect(win.requestUserAttention).not.toHaveBeenCalled();
+      await expectNoAlerts(sendNotification, win);
     });
 
-    const bobDm = (): void =>
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+    const bobDm = (): void => seedBobDm();
 
     it("Nothing does not silence a DM; a server channel message stays silent", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       testPrefs.set("notificationLevel", "nothing");
       bobDm();
 
@@ -120,34 +106,21 @@ describe("notifyIncomingMessage", () => {
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
 
-      notifyIncomingMessage(
-        makePayload({
-          channel_id: 55,
-          content: "hey",
-          user: { id: 2, username: "bob", avatar: null },
-        }),
-      );
+      notifyAs("bob", 55, "hey");
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();
       });
     });
 
     it("Nothing: a muted DM stays silent (the mute still applies)", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       testPrefs.set("notificationLevel", "nothing");
       bobDm();
       setChannelMutesHost("a.example");
       muteChannel(55);
 
       try {
-        notifyIncomingMessage(
-          makePayload({
-            channel_id: 55,
-            content: "hey",
-            user: { id: 2, username: "bob", avatar: null },
-          }),
-        );
+        notifyAs("bob", 55, "hey");
         await new Promise((r) => setTimeout(r, 50));
         expect(sendNotification).not.toHaveBeenCalled();
       } finally {
@@ -157,28 +130,20 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("Nothing + Do Not Disturb: a DM shows no popup and plays no chime", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       mockOscillator.start.mockClear();
       testPrefs.set("notificationLevel", "nothing");
       testPrefs.set("userStatus", "dnd");
       bobDm();
 
-      notifyIncomingMessage(
-        makePayload({
-          channel_id: 55,
-          content: "hey",
-          user: { id: 2, username: "bob", avatar: null },
-        }),
-      );
+      notifyAs("bob", 55, "hey");
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
       expect(mockOscillator.start).not.toHaveBeenCalled();
     });
 
     it("Mentions only suppresses a plain message but not one that names you", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       testPrefs.set("notificationLevel", "mentions");
 
       notifyIncomingMessage(makePayload({ content: "just chatter", mentions: [] }));
@@ -194,33 +159,11 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("treats a DM as addressed to you at Mentions only", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       testPrefs.set("notificationLevel", "mentions");
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedBobDm();
 
-      notifyIncomingMessage(
-        makePayload({
-          channel_id: 55,
-          content: "hey",
-          user: { id: 2, username: "bob", avatar: null },
-        }),
-      );
+      notifyAs("bob", 55, "hey");
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();
@@ -234,8 +177,7 @@ describe("notifyIncomingMessage", () => {
     // (two concurrent dynamic imports of the mocked notifier in one tick do not
     // both resolve under vitest). Date.now is mocked, so this costs no window.
     it("collapses a burst of channel messages into one popup", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 
       notifyIncomingMessage(makePayload({ id: 1, content: "one" }));
@@ -253,8 +195,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("notifies again once the coalescing window has passed", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 
       notifyIncomingMessage(makePayload({ id: 1 }));
@@ -270,8 +211,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("always lets a mention through a burst", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 
       notifyIncomingMessage(makePayload({ id: 1, content: "chatter" }));
@@ -289,25 +229,9 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("collapses a burst of direct messages like any channel", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedBobDm();
       const dm = (id: number) =>
         makePayload({ id, channel_id: 55, user: { id: 2, username: "bob", avatar: null } });
 
@@ -326,8 +250,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("coalesces per channel, not globally", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
 
       notifyIncomingMessage(makePayload({ id: 1, channel_id: 1 }));
@@ -343,8 +266,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("a message that raised no alert does not start the window", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
       testPrefs.set("notificationSounds", false);
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
@@ -372,10 +294,7 @@ describe("notifyIncomingMessage", () => {
       mockOscillator.start.mockClear();
       mockOscillator.stop.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       // Verify exact frequency values (kills arithmetic mutations)
@@ -387,10 +306,7 @@ describe("notifyIncomingMessage", () => {
       mockGain.gain.setValueAtTime.mockClear();
       mockGain.gain.exponentialRampToValueAtTime.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       expect(mockGain.gain.setValueAtTime).toHaveBeenCalledWith(0.3, 0);
@@ -401,10 +317,7 @@ describe("notifyIncomingMessage", () => {
       mockOscillator.start.mockClear();
       mockOscillator.stop.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       expect(mockOscillator.start).toHaveBeenCalledWith(0);
@@ -415,10 +328,7 @@ describe("notifyIncomingMessage", () => {
       mockOscillator.connect.mockClear();
       mockGain.connect.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       expect(mockOscillator.connect).toHaveBeenCalledWith(mockGain);
@@ -429,9 +339,7 @@ describe("notifyIncomingMessage", () => {
   describe("cleanupNotificationAudio", () => {
     it("calls close() on the AudioContext when one exists", () => {
       // First, ensure an AudioContext is created by playing a sound
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       // Now add a close mock to the prototype
@@ -460,10 +368,7 @@ describe("notifyIncomingMessage", () => {
       const win = getCurrentWindow();
       (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", true);
-      testPrefs.set("notificationSounds", false);
-
+      setAlertPrefs(false, true, false);
       notifyIncomingMessage(makePayload());
 
       await vi.waitFor(() => {
@@ -481,9 +386,7 @@ describe("notifyIncomingMessage", () => {
       (mod.requestPermission as ReturnType<typeof vi.fn>).mockClear();
       (mod.sendNotification as ReturnType<typeof vi.fn>).mockClear();
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload());
 
@@ -499,9 +402,7 @@ describe("notifyIncomingMessage", () => {
       (mod.requestPermission as ReturnType<typeof vi.fn>).mockResolvedValueOnce("default");
       (mod.sendNotification as ReturnType<typeof vi.fn>).mockClear();
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload());
 
@@ -525,16 +426,9 @@ describe("notifyIncomingMessage", () => {
         requestPermission: vi.fn(),
       });
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
-      const payload = makePayload({
-        user: { id: 2, username: "WebUser", avatar: null },
-        channel_id: 1,
-        content: "web notif test",
-      });
-      notifyIncomingMessage(payload);
+      notifyAs("WebUser", 1, "web notif test");
 
       await new Promise((r) => setTimeout(r, 50));
 
@@ -556,9 +450,7 @@ describe("notifyIncomingMessage", () => {
         requestPermission: mockRequestPerm,
       });
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload());
 
@@ -572,11 +464,7 @@ describe("notifyIncomingMessage", () => {
   });
   describe("mention titles", () => {
     async function titleFor(payload: ChatMessagePayload): Promise<string> {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      const sendNotification = await armDesktopNotifications();
       notifyIncomingMessage(payload);
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();
@@ -614,8 +502,7 @@ describe("notifyIncomingMessage", () => {
     });
 
     it("stays silent under Do Not Disturb even for a mention", async () => {
-      const { sendNotification } = await import("@tauri-apps/plugin-notification");
-      (sendNotification as ReturnType<typeof vi.fn>).mockClear();
+      const sendNotification = await freshSendNotification();
       testPrefs.set("userStatus", "dnd");
       testPrefs.set("desktopNotifications", true);
 
@@ -630,9 +517,7 @@ describe("notifyIncomingMessage", () => {
     it("shows the message notification with the channel and message it points at", async () => {
       const { invoke } = await import("@tauri-apps/api/core");
       (invoke as ReturnType<typeof vi.fn>).mockClear();
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", false);
+      armDesktopPrefs();
 
       notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));
 
@@ -667,9 +552,7 @@ describe("notifyIncomingMessage", () => {
         const jump = vi.fn();
         const unregister = setMessageJumpHandler(jump);
         setChannelMutesHost("a.example");
-        testPrefs.set("desktopNotifications", true);
-        testPrefs.set("flashTaskbar", false);
-        testPrefs.set("notificationSounds", false);
+        armDesktopPrefs();
 
         try {
           notifyIncomingMessage(makePayload({ id: 42, channel_id: 7 }));

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
+import {
+  createMemberPickerModal,
+  type MemberPickerOptions,
+} from "../../src/pages/main-page/MemberPickerModal";
+import type { MountableComponent } from "@lib/text/safeRender";
 import { membersStore } from "../../src/stores/members.store";
 import type { Member } from "../../src/stores/members.store";
 import { resetMembersState } from "../helpers/storeResets";
@@ -45,9 +49,19 @@ function resetStores(): void {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("createMemberPickerModal", () => {
-  let container: HTMLDivElement;
+let container: HTMLDivElement;
 
+function openPicker(overrides: Partial<MemberPickerOptions> = {}): MountableComponent {
+  const component = createMemberPickerModal({
+    onSelect: vi.fn(),
+    onClose: vi.fn(),
+    ...overrides,
+  });
+  component.mount(container);
+  return component;
+}
+
+describe("createMemberPickerModal", () => {
   beforeEach(() => {
     resetStores();
     container = document.createElement("div");
@@ -76,11 +90,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const overlay = container.querySelector(".modal-overlay");
     expect(overlay).not.toBeNull();
@@ -93,11 +103,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const modal = container.querySelector(".dm-member-picker-modal");
     expect(modal).not.toBeNull();
@@ -109,11 +115,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const title = container.querySelector("h3");
     expect(title).not.toBeNull();
@@ -126,11 +128,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const subtitle = container.querySelector("p");
     expect(subtitle).not.toBeNull();
@@ -149,11 +147,7 @@ describe("createMemberPickerModal", () => {
       makeMember({ id: 3, username: "Bob" }),
     ]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const items = container.querySelectorAll(".dm-member-picker-item");
     expect(items.length).toBe(2); // "Me" excluded
@@ -168,11 +162,7 @@ describe("createMemberPickerModal", () => {
       makeMember({ id: 10, username: "OtherUser" }),
     ]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const items = container.querySelectorAll(".dm-member-picker-item");
     expect(items.length).toBe(1);
@@ -188,11 +178,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 1, username: "Me" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const items = container.querySelectorAll(".dm-member-picker-item");
     expect(items.length).toBe(0);
@@ -204,11 +190,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const items = container.querySelectorAll(".dm-member-picker-item");
     expect(items.length).toBe(0);
@@ -222,11 +204,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "alice" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const avatar = container.querySelector(".dm-avatar");
     expect(avatar).not.toBeNull();
@@ -239,11 +217,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Bob" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item");
     expect(item!.textContent).toContain("Bob");
@@ -257,11 +231,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Alice", status: "online" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item");
     expect(item!.textContent).toContain("Online");
@@ -273,11 +243,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Alice", status: "offline" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item");
     expect(item!.textContent).toContain("Offline");
@@ -289,11 +255,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Alice", status: "online" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item");
     const spans = item!.querySelectorAll("span");
@@ -308,11 +270,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Alice", status: "idle" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item");
     const spans = item!.querySelectorAll("span");
@@ -329,11 +287,7 @@ describe("createMemberPickerModal", () => {
     setStoreMembers([makeMember({ id: 42, username: "Alice" })]);
 
     const onSelect = vi.fn();
-    const component = createMemberPickerModal({
-      onSelect,
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker({ onSelect });
 
     const item = container.querySelector(".dm-member-picker-item") as HTMLElement;
     item.click();
@@ -348,11 +302,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Alice" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item") as HTMLElement;
     item.click();
@@ -373,11 +323,7 @@ describe("createMemberPickerModal", () => {
     ]);
 
     const onSelect = vi.fn();
-    const component = createMemberPickerModal({
-      onSelect,
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker({ onSelect });
 
     const items = container.querySelectorAll(".dm-member-picker-item");
     // Click the second item (Bob, id=20) — order depends on Map iteration
@@ -403,11 +349,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const cancelBtn = container.querySelector(".btn-secondary") as HTMLButtonElement;
     expect(cancelBtn).not.toBeNull();
@@ -420,11 +362,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const cancelBtn = container.querySelector(".btn-secondary") as HTMLButtonElement;
     cancelBtn.click();
@@ -440,11 +378,7 @@ describe("createMemberPickerModal", () => {
     setStoreMembers([]);
 
     const onClose = vi.fn();
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose,
-    });
-    component.mount(container);
+    const component = openPicker({ onClose });
 
     const cancelBtn = container.querySelector(".btn-secondary") as HTMLButtonElement;
     cancelBtn.click();
@@ -461,11 +395,7 @@ describe("createMemberPickerModal", () => {
     setStoreMembers([]);
 
     const onClose = vi.fn();
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose,
-    });
-    component.mount(container);
+    const component = openPicker({ onClose });
 
     const overlay = container.querySelector(".modal-overlay") as HTMLElement;
     // Click directly on the overlay (not on the modal content)
@@ -484,11 +414,7 @@ describe("createMemberPickerModal", () => {
     setStoreMembers([]);
 
     const onClose = vi.fn();
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose,
-    });
-    component.mount(container);
+    const component = openPicker({ onClose });
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
@@ -503,11 +429,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     expect(container.querySelector(".modal-overlay")).not.toBeNull();
 
@@ -520,11 +442,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     component.destroy!();
     // Should not throw
@@ -551,11 +469,7 @@ describe("createMemberPickerModal", () => {
       makeMember({ id: 1, username: "Alice" }),
     ]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     // User id 0 should be excluded (matches the default fallback)
     const items = container.querySelectorAll(".dm-member-picker-item");
@@ -571,11 +485,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Alice" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item");
     expect(item!.classList.contains("channel-item")).toBe(true);
@@ -587,11 +497,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 2, username: "Alice" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const item = container.querySelector(".dm-member-picker-item") as HTMLElement;
     expect(item.style.cursor).toBe("pointer");
@@ -603,11 +509,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const list = container.querySelector(".dm-member-picker-list") as HTMLElement;
     expect(list).not.toBeNull();
@@ -630,11 +532,7 @@ describe("createMemberPickerModal", () => {
       makeMember({ id: 20, username: "Bob" }),
     ]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker();
 
     const items = container.querySelectorAll<HTMLElement>(".dm-member-picker-item");
     expect(items.length).toBe(2);
@@ -652,11 +550,7 @@ describe("createMemberPickerModal", () => {
     setStoreMembers([makeMember({ id: 42, username: "Alice" })]);
 
     const onSelect = vi.fn();
-    const component = createMemberPickerModal({
-      onSelect,
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker({ onSelect });
 
     const item = container.querySelector(".dm-member-picker-item") as HTMLElement;
     item.focus();
@@ -675,11 +569,7 @@ describe("createMemberPickerModal", () => {
     ]);
 
     const onSelect = vi.fn();
-    const component = createMemberPickerModal({
-      onSelect,
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker({ onSelect });
 
     const items = container.querySelectorAll<HTMLElement>(".dm-member-picker-item");
     items[0]!.focus();
@@ -699,12 +589,7 @@ describe("createMemberPickerModal", () => {
     setCurrentUser(1);
     setStoreMembers([makeMember({ id: 20, username: "Bob" })]);
 
-    const component = createMemberPickerModal({
-      onSelect: vi.fn(),
-      onSelectGroup: vi.fn(),
-      onClose: vi.fn(),
-    });
-    component.mount(container);
+    const component = openPicker({ onSelectGroup: vi.fn() });
 
     const item = container.querySelector(".dm-member-picker-item") as HTMLElement;
     item.focus();

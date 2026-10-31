@@ -1,6 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import type { DeleteChannelModalOptions } from "@components/DeleteChannelModal";
+import {
+  checkBackdropClickCloses,
+  checkClickCloses,
+  checkCloseButtonLabelled,
+  checkFocusMovesInAndRestores,
+  checkModalSemantics,
+  checkDragSelectKeepsOpen,
+  checkEscapeCancels,
+  checkEscapeIgnoredAfterDestroy,
+  checkEscapeKeepsImeCandidate,
+  checkOverlayRemovedOnDestroy,
+  type MakeDialog,
+} from "../helpers/modalHarness";
 
 describe("DeleteChannelModal", () => {
   let container: HTMLDivElement;
@@ -27,6 +40,20 @@ describe("DeleteChannelModal", () => {
     return { modal, options };
   }
 
+  function clickConfirm(): HTMLButtonElement {
+    const deleteBtn = container.querySelector(
+      "[data-testid='delete-channel-confirm']",
+    ) as HTMLButtonElement;
+    deleteBtn.click();
+    return deleteBtn;
+  }
+
+  const errorText = (): string | null | undefined =>
+    container.querySelector("[data-testid='delete-channel-error']")?.textContent;
+
+  const openDialog: MakeDialog = ({ action, onClose }) =>
+    makeModal({ onConfirm: action, onClose }).modal;
+
   it("renders the modal overlay", () => {
     const { modal } = makeModal();
     expect(container.querySelector("[data-testid='delete-channel-modal']")).not.toBeNull();
@@ -50,10 +77,7 @@ describe("DeleteChannelModal", () => {
   it("calls onConfirm when delete button is clicked", async () => {
     const onConfirm = vi.fn(async () => {});
     const { modal } = makeModal({ onConfirm });
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    clickConfirm();
 
     await vi.waitFor(() => {
       expect(onConfirm).toHaveBeenCalled();
@@ -61,44 +85,22 @@ describe("DeleteChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("calls onClose when close button is clicked", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
-    closeBtn.click();
-    expect(onClose).toHaveBeenCalled();
-    modal.destroy?.();
-  });
+  it("calls onClose when close button is clicked", () =>
+    checkClickCloses(openDialog, container, ".modal-close"));
 
-  it("calls onClose when cancel button is clicked", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
-    cancelBtn.click();
-    expect(onClose).toHaveBeenCalled();
-    modal.destroy?.();
-  });
+  it("calls onClose when cancel button is clicked", () =>
+    checkClickCloses(openDialog, container, ".btn-modal-cancel"));
 
-  it("removes overlay on destroy", () => {
-    const { modal } = makeModal();
-    expect(container.querySelector("[data-testid='delete-channel-modal']")).not.toBeNull();
-    modal.destroy?.();
-    expect(container.querySelector("[data-testid='delete-channel-modal']")).toBeNull();
-  });
+  it("removes overlay on destroy", () =>
+    checkOverlayRemovedOnDestroy(openDialog, container, "[data-testid='delete-channel-modal']"));
 
   it("shows error and re-enables button when onConfirm rejects with Error", async () => {
     const onConfirm = vi.fn().mockRejectedValue(new Error("Permission denied"));
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    const deleteBtn = clickConfirm();
 
-    await vi.waitFor(() => {
-      const error = container.querySelector("[data-testid='delete-channel-error']");
-      expect(error?.textContent).toBe("Permission denied");
-    });
+    await vi.waitFor(() => expect(errorText()).toBe("Permission denied"));
 
     expect(deleteBtn.hasAttribute("disabled")).toBe(false);
     expect(deleteBtn.textContent).toBe("Delete Channel");
@@ -110,15 +112,9 @@ describe("DeleteChannelModal", () => {
     const onConfirm = vi.fn().mockRejectedValue(42);
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    clickConfirm();
 
-    await vi.waitFor(() => {
-      const error = container.querySelector("[data-testid='delete-channel-error']");
-      expect(error?.textContent).toBe("Failed to delete channel");
-    });
+    await vi.waitFor(() => expect(errorText()).toBe("Failed to delete channel"));
 
     modal.destroy?.();
   });
@@ -129,10 +125,7 @@ describe("DeleteChannelModal", () => {
     const onConfirm = vi.fn(async () => {});
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    const deleteBtn = clickConfirm();
 
     await vi.waitFor(() => {
       expect(deleteBtn.hasAttribute("disabled")).toBe(false);
@@ -156,10 +149,7 @@ describe("DeleteChannelModal", () => {
     );
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    const deleteBtn = clickConfirm();
 
     expect(deleteBtn.hasAttribute("disabled")).toBe(true);
     expect(deleteBtn.textContent).toBe("Deleting...");
@@ -168,97 +158,26 @@ describe("DeleteChannelModal", () => {
     modal.destroy?.();
   });
 
-  it("calls onClose on backdrop click", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
+  it("calls onClose on backdrop click", () =>
+    checkBackdropClickCloses(openDialog, container, "[data-testid='delete-channel-modal']"));
 
-    const overlay = container.querySelector(
-      "[data-testid='delete-channel-modal']",
-    ) as HTMLDivElement;
-    overlay.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-
-    expect(onClose).toHaveBeenCalled();
-    modal.destroy?.();
-  });
-
-  it("stays open when a drag-select ends on the backdrop", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-    const overlayEl = container.querySelector(
-      "[data-testid='delete-channel-modal']",
-    ) as HTMLElement;
-    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(onClose).not.toHaveBeenCalled();
-    modal.destroy?.();
-  });
+  it("stays open when a drag-select ends on the backdrop", () =>
+    checkDragSelectKeepsOpen(openDialog, container, "[data-testid='delete-channel-modal']"));
 
   // ── dialog accessibility contract (DC-13) ──────────────────────────────────
 
-  it("stamps dialog semantics named by the header title", () => {
-    const { modal } = makeModal();
-    const dialog = container.querySelector(".modal") as HTMLElement;
-    expect(dialog.getAttribute("role")).toBe("dialog");
-    expect(dialog.getAttribute("aria-modal")).toBe("true");
-    expect(dialog.getAttribute("aria-labelledby")).toBe("delete-channel-title");
-    expect(container.querySelector("#delete-channel-title")?.textContent).toBe("Delete Channel");
-    modal.destroy?.();
-  });
+  it("stamps dialog semantics named by the header title", () =>
+    checkModalSemantics(openDialog, container, "delete-channel-title", "Delete Channel"));
 
-  it("labels the icon-only close button", () => {
-    const { modal } = makeModal();
-    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
-    expect(closeBtn.getAttribute("aria-label")).toBe("Close");
-    modal.destroy?.();
-  });
+  it("labels the icon-only close button", () => checkCloseButtonLabelled(openDialog, container));
 
-  it("Escape cancels without confirming the delete", () => {
-    const onConfirm = vi.fn(async () => {});
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onConfirm, onClose });
+  it("Escape cancels without confirming the delete", () => checkEscapeCancels(openDialog));
 
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+  it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () =>
+    checkEscapeKeepsImeCandidate(openDialog));
 
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(onConfirm).not.toHaveBeenCalled();
-    modal.destroy?.();
-  });
+  it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(openDialog));
 
-  it("Escape that cancels an IME candidate keeps it open; a plain Escape still closes", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }),
-    );
-    expect(onClose).not.toHaveBeenCalled();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    modal.destroy?.();
-  });
-
-  it("ignores Escape after destroy", () => {
-    const onClose = vi.fn();
-    const { modal } = makeModal({ onClose });
-    modal.destroy?.();
-
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it("moves focus into the dialog on open and restores it on destroy", () => {
-    const trigger = document.createElement("button");
-    container.appendChild(trigger);
-    trigger.focus();
-
-    const { modal } = makeModal();
-    // Focus starts on Cancel (the shared confirm preset) — safely away from the
-    // destructive confirm.
-    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
-    expect(document.activeElement).toBe(cancelBtn);
-
-    modal.destroy?.();
-    expect(document.activeElement).toBe(trigger);
-  });
+  it("moves focus into the dialog on open and restores it on destroy", () =>
+    checkFocusMovesInAndRestores(openDialog, container, ".btn-modal-cancel"));
 });

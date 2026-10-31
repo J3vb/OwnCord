@@ -2,13 +2,12 @@
 // "Close to Tray" and "Start Minimized". A native failure must come back as a
 // typed result, never as a rejection the settings tab has to catch.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 const { windowPrefs } = await import("../../../src/platform/desktop/windowPrefs");
 

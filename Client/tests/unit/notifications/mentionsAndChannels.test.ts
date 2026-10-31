@@ -7,7 +7,6 @@ import {
   openMessageTarget,
 } from "../../../src/lib/notifications";
 import { channelsStore } from "../../../src/stores/channels.store";
-import { dmStore } from "../../../src/stores/dm.store";
 import { membersStore } from "../../../src/stores/members.store";
 import { setBlockedByMe } from "../../../src/stores/blocks.store";
 import type { ChannelActivityEntry } from "../../../src/lib/types";
@@ -18,7 +17,12 @@ import {
   unmuteChannel,
 } from "../../../src/lib/prefs/channelMutes";
 import { setMessageJumpHandler } from "../../../src/lib/nav/messageNavigation";
-import { makePayload, useNotificationsHarness } from "../../helpers/notificationsHarness";
+import {
+  expectNoAlerts,
+  makePayload,
+  seedBobDm,
+  useNotificationsHarness,
+} from "../../helpers/notificationsHarness";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
@@ -57,10 +61,7 @@ describe("notifyIncomingMessage", () => {
 
       notifyMention(1);
 
-      await new Promise((r) => setTimeout(r, 50));
-      expect(invoke).not.toHaveBeenCalled();
-      expect(mockOscillator.start).not.toHaveBeenCalled();
-      expect(win.requestUserAttention).not.toHaveBeenCalled();
+      await expectNoAlerts(invoke, win);
     });
 
     it("Mentions only shows the popup, titled with the channel and targeting it", async () => {
@@ -105,10 +106,7 @@ describe("notifyIncomingMessage", () => {
 
       notifyMention(1);
 
-      await new Promise((r) => setTimeout(r, 50));
-      expect(invoke).not.toHaveBeenCalled();
-      expect(mockOscillator.start).not.toHaveBeenCalled();
-      expect(win.requestUserAttention).not.toHaveBeenCalled();
+      await expectNoAlerts(invoke, win);
     });
 
     it("Do Not Disturb suppresses the popup, the chime and the taskbar flash", async () => {
@@ -117,10 +115,7 @@ describe("notifyIncomingMessage", () => {
 
       notifyMention(1);
 
-      await new Promise((r) => setTimeout(r, 50));
-      expect(invoke).not.toHaveBeenCalled();
-      expect(mockOscillator.start).not.toHaveBeenCalled();
-      expect(win.requestUserAttention).not.toHaveBeenCalled();
+      await expectNoAlerts(invoke, win);
     });
 
     it("stays silent while Suppress @everyone is on", async () => {
@@ -130,10 +125,7 @@ describe("notifyIncomingMessage", () => {
       try {
         notifyMention(1);
 
-        await new Promise((r) => setTimeout(r, 50));
-        expect(invoke).not.toHaveBeenCalled();
-        expect(mockOscillator.start).not.toHaveBeenCalled();
-        expect(win.requestUserAttention).not.toHaveBeenCalled();
+        await expectNoAlerts(invoke, win);
       } finally {
         testPrefs.set("suppressEveryone", false);
       }
@@ -159,22 +151,7 @@ describe("notifyIncomingMessage", () => {
 
     it("skips a DM", async () => {
       const { invoke } = await spies();
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedBobDm();
 
       notifyMention(55);
 
@@ -461,10 +438,7 @@ describe("notifyIncomingMessage", () => {
 
       notifyChannelActivity(entry({ mentions_you: true }));
 
-      await new Promise((r) => setTimeout(r, 50));
-      expect(invoke).not.toHaveBeenCalled();
-      expect(mockOscillator.start).not.toHaveBeenCalled();
-      expect(win.requestUserAttention).not.toHaveBeenCalled();
+      await expectNoAlerts(invoke, win);
     });
   });
 
@@ -679,22 +653,7 @@ describe("notifyIncomingMessage", () => {
       const seen = await alerts();
       testPrefs.set("notificationLevel", "nothing");
       testPrefs.set(`channelNotificationLevels:${HOST}`, { "55": "nothing" });
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 55,
-            recipient: { id: 2, username: "bob", avatar: "", status: "online" },
-            participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedBobDm();
 
       notifyIncomingMessage(makePayload({ channel_id: 55, content: "psst" }));
 

@@ -1,11 +1,11 @@
-import { vi, beforeEach } from "vitest";
-import { resetNotificationCoalescing } from "../../src/lib/notifications";
+import { vi, beforeEach, expect } from "vitest";
+import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
-import { testPrefs } from "./notificationsMocks";
+import { mockOscillator, testPrefs } from "./notificationsMocks";
 import { signInAs } from "./storeSeeds";
 
 export function makePayload(overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload {
@@ -90,4 +90,68 @@ export function useNotificationsHarness(): void {
     // Ensure document.hasFocus returns false (simulating unfocused window)
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
   });
+}
+
+type SendNotificationMock = ReturnType<typeof vi.fn>;
+
+/** The plugin's sendNotification mock with its call history cleared. */
+export async function freshSendNotification(): Promise<SendNotificationMock> {
+  const { sendNotification } = await import("@tauri-apps/plugin-notification");
+  (sendNotification as SendNotificationMock).mockClear();
+  return sendNotification as SendNotificationMock;
+}
+
+export function setAlertPrefs(desktop: boolean, flash: boolean, sounds: boolean): void {
+  testPrefs.set("desktopNotifications", desktop);
+  testPrefs.set("flashTaskbar", flash);
+  testPrefs.set("notificationSounds", sounds);
+}
+
+/** Desktop notifications on; taskbar flash and sounds off. */
+export function armDesktopPrefs(): void {
+  setAlertPrefs(true, false, false);
+}
+
+export async function armDesktopNotifications(): Promise<SendNotificationMock> {
+  const sendNotification = await freshSendNotification();
+  armDesktopPrefs();
+  return sendNotification;
+}
+
+/** Opens a one-to-one DM with bob on channel 55, which channelsStore does not know. */
+export function seedBobDm(): void {
+  dmStore.setState(() => ({
+    channels: [
+      {
+        channelId: 55,
+        recipient: { id: 2, username: "bob", avatar: "", status: "online" },
+        participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
+        name: "",
+        isGroup: false,
+        lastMessageId: null,
+        lastMessage: "",
+        lastMessageAt: "",
+        unreadCount: 0,
+        mentionCount: 0,
+      },
+    ],
+  }));
+}
+
+/** Waits out the async paths, then asserts no popup, chime or taskbar flash happened. */
+export async function expectNoAlerts(
+  invoke: unknown,
+  win: { requestUserAttention: unknown },
+): Promise<void> {
+  await new Promise((r) => setTimeout(r, 50));
+  expect(invoke).not.toHaveBeenCalled();
+  expect(mockOscillator.start).not.toHaveBeenCalled();
+  expect(win.requestUserAttention).not.toHaveBeenCalled();
+}
+
+/** Delivers a plain message from user 2 through notifyIncomingMessage. */
+export function notifyAs(username: string, channelId: number, content: string): void {
+  notifyIncomingMessage(
+    makePayload({ user: { id: 2, username, avatar: null }, channel_id: channelId, content }),
+  );
 }

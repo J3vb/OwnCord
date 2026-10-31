@@ -2,7 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/channelControllerMocks";
 import { createChannelController } from "../../../src/pages/main-page/ChannelController";
 import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
-import { makeOpts, useChannelControllerHarness } from "../../helpers/channelControllerHarness";
+import {
+  dmSummary,
+  dmUser,
+  type DmUser,
+  makeChatHeaderRefs,
+  makeOpts,
+  useChannelControllerHarness,
+} from "../../helpers/channelControllerHarness";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/dom", () => mocks.domMock());
@@ -47,38 +54,13 @@ describe("createChannelController", () => {
   describe("DM channel header", () => {
     it("updates chat header for DM channel with recipient status", () => {
       mockDmStoreGetState.mockReturnValue({
-        channels: [
-          {
-            channelId: 42,
-            recipient: { id: 5, username: "alice", avatar: "", status: "online" },
-            participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-          },
-        ],
+        channels: [dmSummary([dmUser(5, "alice", "online")])],
       });
       mockMembersStoreGetState.mockReturnValue({
         members: new Map([[5, { id: 5, username: "alice", status: "idle" }]]),
       });
 
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
 
@@ -93,38 +75,13 @@ describe("createChannelController", () => {
 
     it("uses DM recipient status when member not found in members store", () => {
       mockDmStoreGetState.mockReturnValue({
-        channels: [
-          {
-            channelId: 42,
-            recipient: { id: 5, username: "bob", avatar: "", status: "dnd" },
-            participants: [{ id: 5, username: "bob", avatar: "", status: "dnd" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-          },
-        ],
+        channels: [dmSummary([dmUser(5, "bob", "dnd")])],
       });
       mockMembersStoreGetState.mockReturnValue({
         members: new Map(),
       });
 
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
 
@@ -137,41 +94,11 @@ describe("createChannelController", () => {
     });
 
     it("hands the header the partner's avatar for a 1:1 and the face stack for a group", () => {
-      const user = (id: number, username: string) => ({
-        id,
-        username,
-        avatar: "",
-        status: "online",
-      });
-      const dm = (
-        isGroup: boolean,
-        participants: [ReturnType<typeof user>, ...ReturnType<typeof user>[]],
-      ) => ({
-        channelId: 42,
-        recipient: participants[0],
-        participants,
-        name: isGroup ? "Crew" : "",
-        isGroup,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-      });
+      const user = (id: number, username: string) => dmUser(id, username);
+      const dm = (isGroup: boolean, participants: [DmUser, ...DmUser[]]) =>
+        dmSummary(participants, { name: isGroup ? "Crew" : "", isGroup });
       mockMembersStoreGetState.mockReturnValue({ members: new Map() });
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
 
       mockDmStoreGetState.mockReturnValue({ channels: [dm(false, [user(5, "alice")])] });
       createChannelController(makeOpts({ chatHeaderRefs })).mountChannel(42, "alice", "dm");
@@ -200,20 +127,7 @@ describe("createChannelController", () => {
     it("falls back to 'Offline' when DM channel not found in dmStore", () => {
       mockDmStoreGetState.mockReturnValue({ channels: [] });
 
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
 
@@ -230,36 +144,11 @@ describe("createChannelController", () => {
 
     it("keeps the DM header subtitle live when the partner's presence changes", () => {
       mockDmStoreGetState.mockReturnValue({
-        channels: [
-          {
-            channelId: 42,
-            recipient: { id: 5, username: "alice", avatar: "", status: "offline" },
-            participants: [{ id: 5, username: "alice", avatar: "", status: "offline" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-          },
-        ],
+        channels: [dmSummary([dmUser(5, "alice", "offline")])],
       });
       mockMembersStoreGetState.mockReturnValue({ members: new Map() });
 
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "alice", "dm");
@@ -288,33 +177,10 @@ describe("createChannelController", () => {
     });
 
     it("keeps a group DM header live when the roster changes", () => {
-      const dmChannel = {
-        channelId: 42,
-        recipient: { id: 5, username: "alice", avatar: "", status: "online" },
-        participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
-        name: "",
-        isGroup: true,
-        lastMessageId: null,
-        lastMessage: "",
-        lastMessageAt: "",
-        unreadCount: 0,
-      };
+      const dmChannel = dmSummary([dmUser(5, "alice")], { isGroup: true });
       mockDmStoreGetState.mockReturnValue({ channels: [dmChannel] });
 
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
       ctrl.mountChannel(42, "Group", "dm");
@@ -367,20 +233,7 @@ describe("createChannelController", () => {
           unreadCount: 0,
         }) as never;
       mockMembersStoreGetState.mockReturnValue({ members: new Map() });
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const headerAvatar = (): HTMLElement =>
         (mockUpdateChatHeaderForDm.mock.calls.at(-1)![1] as { avatar: HTMLElement }).avatar;
       const flush = async (): Promise<void> => {
@@ -419,20 +272,7 @@ describe("createChannelController", () => {
     });
 
     it("resets header for non-DM channel when chatHeaderRefs is provided", () => {
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
 
@@ -464,20 +304,7 @@ describe("createChannelController", () => {
           nsfw: false,
         },
       ]);
-      const chatHeaderRefs = {
-        hashEl: document.createElement("span"),
-        nameEl: document.createElement("span"),
-        topicEl: document.createElement("span"),
-        callBtn: document.createElement("button"),
-        videoCallBtn: document.createElement("button"),
-        profileBtn: document.createElement("button"),
-        membersBtn: document.createElement("button"),
-        memberListBtn: document.createElement("button"),
-        callChatBtn: document.createElement("button"),
-        avatarEl: document.createElement("span"),
-        sidebarToggle: document.createElement("button"),
-        nameGroupEl: document.createElement("div"),
-      };
+      const chatHeaderRefs = makeChatHeaderRefs();
       const opts = makeOpts({ chatHeaderRefs });
       const ctrl = createChannelController(opts);
 
@@ -494,19 +321,7 @@ describe("createChannelController", () => {
   describe("DM composer block gating", () => {
     function mountDm(reason: string | null): void {
       mockDmStoreGetState.mockReturnValue({
-        channels: [
-          {
-            channelId: 42,
-            recipient: { id: 5, username: "alice", avatar: "", status: "online" },
-            participants: [{ id: 5, username: "alice", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-          },
-        ],
+        channels: [dmSummary([dmUser(5, "alice", "online")])],
       });
       mockDmComposerBlockReason.mockReturnValue(reason);
       const ctrl = createChannelController(makeOpts());
@@ -554,20 +369,7 @@ describe("createChannelController", () => {
     it("does not gate a group DM's composer on block state", () => {
       mockDmStoreGetState.mockReturnValue({
         channels: [
-          {
-            channelId: 42,
-            recipient: { id: 5, username: "alice", avatar: "", status: "online" },
-            participants: [
-              { id: 5, username: "alice", avatar: "", status: "online" },
-              { id: 6, username: "bob", avatar: "", status: "online" },
-            ],
-            name: "Crew",
-            isGroup: true,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-          },
+          dmSummary([dmUser(5, "alice"), dmUser(6, "bob")], { name: "Crew", isGroup: true }),
         ],
       });
       mockDmComposerBlockReason.mockReturnValue("You've blocked this user.");

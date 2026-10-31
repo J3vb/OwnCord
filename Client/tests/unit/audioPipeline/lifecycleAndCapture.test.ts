@@ -16,6 +16,7 @@ import {
   installFakeAudio,
 } from "../../helpers/fakeAudioContext";
 import {
+  useAudioPipelineEnv,
   micTrack,
   contextOf,
   inputGain,
@@ -85,27 +86,7 @@ describe("isMissingDeviceError", () => {
 });
 
 describe("AudioPipeline lifecycle and settings", () => {
-  beforeEach(() => {
-    prefs.clear();
-    for (const fn of Object.values(logs)) fn.mockClear();
-    installFakeAudio();
-    FakeAudioWorkletNode.instances = [];
-    vi.stubGlobal("AudioWorkletNode", FakeAudioWorkletNode);
-    vi.stubGlobal("navigator", {
-      ...navigator,
-      mediaDevices: {
-        getUserMedia: vi.fn(async () => new FakeMediaStream([fakeMediaStreamTrack("mic-2")])),
-        enumerateDevices: vi.fn(async () => []),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      },
-    });
-    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
+  useAudioPipelineEnv();
 
   const lastContext = (): FakeAudioContext => FakeAudioContext.instances.at(-1)!;
 

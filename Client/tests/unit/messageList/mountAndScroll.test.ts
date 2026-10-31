@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
@@ -552,9 +553,9 @@ describe("MessageList", () => {
       );
     });
 
-    it("relabels rendered message times when the clock format changes", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "relabels rendered message times when the clock format changes",
+      fakeTimersTest(() => {
         vi.setSystemTime(new Date(2024, 0, 15, 18, 34, 0));
         setMessages(1, [makeMessage({ id: 1, timestamp: new Date().toISOString() })]);
         msgList.mount(container);
@@ -570,14 +571,12 @@ describe("MessageList", () => {
         expect(text).toContain("18:34");
         expect(text).not.toMatch(/AM|PM/i);
         expect(container.querySelector<HTMLElement>(".msg-time")!.title).toContain("18:34");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("relabels the compact and gutter clock times, keeping them short", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "relabels the compact and gutter clock times, keeping them short",
+      fakeTimersTest(() => {
         vi.setSystemTime(new Date(2024, 0, 15, 18, 34, 0));
         const now = new Date().toISOString();
         setMessages(1, [
@@ -601,14 +600,12 @@ describe("MessageList", () => {
           expect(el.textContent).not.toMatch(/AM|PM|Today|Yesterday/i);
           expect(el.title).toContain("18:34");
         }
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("rewrites a relative <t:…:R> timestamp as time passes", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "rewrites a relative <t:…:R> timestamp as time passes",
+      fakeTimersTest(() => {
         vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
         const target = Math.floor(Date.now() / 1000) + 5 * 60;
         setMessages(1, [
@@ -620,9 +617,7 @@ describe("MessageList", () => {
 
         vi.advanceTimersByTime(3 * 60_000);
         expect(time.textContent).toBe("in 2 minutes");
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
   });
 });

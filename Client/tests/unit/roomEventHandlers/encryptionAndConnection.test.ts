@@ -26,6 +26,22 @@ vi.mock("@stores/voice.store", (importOriginal) => mocks.voiceStoreMock(importOr
 
 useRoomEventHandlersHarness();
 
+const bob = { identity: "bob", isLocal: false } as Participant;
+const decryptFailed = () =>
+  new Error("InvalidKey: Decryption failed: The operation failed for an operation-specific reason");
+
+/** A peer failing past the grace window: degraded, quiet-gap recovery pending. */
+function degradeByDecrypt(h: Harness): void {
+  for (let i = 0; i < 4; i++) {
+    h.handlers.handleEncryptionError(decryptFailed(), bob);
+    vi.advanceTimersByTime(1000);
+  }
+  expectConsole("warn", /receive-side decrypt failure/);
+  expectConsole("warn", /receive-side decrypt failure/);
+  expectConsole("warn", /receive-side decrypt failure/);
+  expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+}
+
 describe("remote publications without end-to-end encryption", () => {
   it("never subscribes one and marks the call not secured", () => {
     const h = build();
@@ -139,7 +155,6 @@ describe("handleEncryptionError", () => {
 
   it("SRE-M2: counts every receive-side decrypt failure, tolerated or not", () => {
     const h = build();
-    const bob = { identity: "bob", isLocal: false } as Participant;
     const before = voiceJoinSnapshot().decryptErrorCount;
 
     h.handlers.handleEncryptionError(
@@ -153,7 +168,6 @@ describe("handleEncryptionError", () => {
 
   it("SRE-M2: counts a native decrypt failure from a remote participant", () => {
     const h = build();
-    const bob = { identity: "bob", isLocal: false } as Participant;
     const before = voiceJoinSnapshot().decryptErrorCount;
 
     h.handlers.handleEncryptionError(new Error("native decrypt failure"), bob);
@@ -194,12 +208,6 @@ describe("handleEncryptionError", () => {
   // failures stop once the offer lands. Only a streak that outlasts the grace
   // window is a real failure.
   describe("receive-side decrypt failures", () => {
-    const bob = { identity: "bob", isLocal: false } as Participant;
-    const decryptFailed = () =>
-      new Error(
-        "InvalidKey: Decryption failed: The operation failed for an operation-specific reason",
-      );
-
     beforeEach(() => {
       vi.useFakeTimers();
     });
@@ -239,14 +247,7 @@ describe("handleEncryptionError", () => {
     it("clears the degraded badge again once a stalled peer's decrypts resume", () => {
       const h = build();
 
-      for (let i = 0; i < 4; i++) {
-        h.handlers.handleEncryptionError(decryptFailed(), bob);
-        vi.advanceTimersByTime(1000);
-      }
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      degradeByDecrypt(h);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
 
       // The key finally lands: the worker stops reporting, so a quiet gap
@@ -263,14 +264,7 @@ describe("handleEncryptionError", () => {
       // again, so a gap past the streak reset already means recovery.
       const h = build({ isNativeRoom: () => true });
 
-      for (let i = 0; i < 4; i++) {
-        h.handlers.handleEncryptionError(decryptFailed(), bob);
-        vi.advanceTimersByTime(1000);
-      }
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      degradeByDecrypt(h);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
 
       vi.advanceTimersByTime(3000);
@@ -303,14 +297,7 @@ describe("handleEncryptionError", () => {
     it("keeps the badge degraded when the worker dies while a decrypt recovery is pending", () => {
       const h = build();
 
-      for (let i = 0; i < 4; i++) {
-        h.handlers.handleEncryptionError(decryptFailed(), bob);
-        vi.advanceTimersByTime(1000);
-      }
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      degradeByDecrypt(h);
       // The worker dies: no more decrypt reports arrive, and the quiet gap
       // that follows must not read as the peer's decrypts resuming.
       h.handlers.handleEncryptionError(new Error("E2EE worker crashed"));
@@ -321,14 +308,7 @@ describe("handleEncryptionError", () => {
       // A later decrypt streak (after a fresh key install) and its quiet gap
       // do not clear it either.
       h.handlers.noteRoomKeyInstalled();
-      for (let i = 0; i < 4; i++) {
-        h.handlers.handleEncryptionError(decryptFailed(), bob);
-        vi.advanceTimersByTime(1000);
-      }
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      degradeByDecrypt(h);
       vi.advanceTimersByTime(5000);
       expect(voiceStore.getState().encryptionDegraded).toBe(true);
     });
@@ -336,14 +316,7 @@ describe("handleEncryptionError", () => {
     it("does not let a pending recovery from a left call touch the next one", () => {
       const h = build();
 
-      for (let i = 0; i < 4; i++) {
-        h.handlers.handleEncryptionError(decryptFailed(), bob);
-        vi.advanceTimersByTime(1000);
-      }
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("warn", /receive-side decrypt failure/);
-      expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
+      degradeByDecrypt(h);
       // Leave; the next call starts clean and is degraded by its own cause,
       // which the left call's quiet-gap timer must not clear.
       h.handlers.resetEncryptionRecovery();
@@ -877,24 +850,6 @@ describe("disconnect and reconnect state", () => {
 // ── encryption recovery timers ─────────────────────────────────────────────
 
 describe("encryption recovery timers", () => {
-  const bob = { identity: "bob", isLocal: false } as Participant;
-  const decryptFailed = () =>
-    new Error(
-      "InvalidKey: Decryption failed: The operation failed for an operation-specific reason",
-    );
-
-  /** A peer failing past the grace window: degraded, quiet-gap recovery pending. */
-  function degradeByDecrypt(h: Harness): void {
-    for (let i = 0; i < 4; i++) {
-      h.handlers.handleEncryptionError(decryptFailed(), bob);
-      vi.advanceTimersByTime(1000);
-    }
-    expectConsole("warn", /receive-side decrypt failure/);
-    expectConsole("warn", /receive-side decrypt failure/);
-    expectConsole("warn", /receive-side decrypt failure/);
-    expectConsole("error", /\[roomEventHandlers\] LiveKit E2EE encryption error/);
-  }
-
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -1099,7 +1054,6 @@ describe("room event log lines", () => {
   it("names the sender and the error for a decrypt failure that is tolerated", () => {
     const logs = captureLogs();
     const h = build();
-    const bob = { identity: "bob", isLocal: false } as Participant;
 
     h.handlers.handleEncryptionError(new Error("InvalidKey: Decryption failed"), bob);
     expectConsole("warn", /receive-side decrypt failure/);
@@ -1118,7 +1072,6 @@ describe("room event log lines", () => {
   it("names the sender and the error for an encryption failure that degrades the call", () => {
     const logs = captureLogs();
     const h = build();
-    const bob = { identity: "bob", isLocal: false } as Participant;
 
     h.handlers.handleEncryptionError(new Error("native decrypt failure"), bob);
     expectConsole("error", /LiveKit E2EE encryption error/);

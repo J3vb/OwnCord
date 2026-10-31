@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // ---------------------------------------------------------------------------
 
 import { createMessageList } from "../../src/components/MessageList";
+import type { MessageListOptions } from "../../src/components/MessageList";
 import { messagesStore, addMessage, setMessages } from "../../src/stores/messages.store";
 import { membersStore, setMembers } from "../../src/stores/members.store";
 
@@ -54,6 +55,25 @@ function makeMessage(
   };
 }
 
+function newList(
+  overrides: Partial<MessageListOptions> = {},
+): ReturnType<typeof createMessageList> {
+  return createMessageList({
+    channelId: 1,
+    channelName: "general",
+    currentUserId: 1,
+    onScrollTop: vi.fn(),
+    onReplyClick: vi.fn(),
+    onEditClick: vi.fn(),
+    onEditSave: vi.fn(() => true),
+    onEmptyEdit: vi.fn(),
+    onDeleteClick: vi.fn(),
+    onReactionClick: vi.fn(),
+    onPinClick: vi.fn(),
+    ...overrides,
+  });
+}
+
 describe("MessageList", () => {
   let container: HTMLDivElement;
 
@@ -67,21 +87,14 @@ describe("MessageList", () => {
     container.remove();
   });
 
-  it("renders empty when no messages", () => {
-    const list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+  function mountList(overrides: Partial<MessageListOptions> = {}): ReturnType<typeof newList> {
+    const list = newList(overrides);
     list.mount(container);
+    return list;
+  }
+
+  it("renders empty when no messages", () => {
+    const list = mountList();
     const messagesContainer = container.querySelector(".messages-container");
     expect(messagesContainer).not.toBeNull();
     const welcome = messagesContainer?.querySelector(".channel-welcome");
@@ -95,20 +108,7 @@ describe("MessageList", () => {
   it("renders messages after store update", () => {
     setMessages(1, [makeMessage(1, 10, "Alice", "Hello", "2026-03-15T10:00:00Z")], false);
 
-    const list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
-    list.mount(container);
+    const list = mountList();
 
     const groups = container.querySelectorAll(".message");
     expect(groups.length).toBe(1);
@@ -129,20 +129,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const messages = container.querySelectorAll(".message");
       expect(messages.length).toBe(3);
@@ -162,20 +149,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const groups = container.querySelectorAll(".message");
       expect(groups.length).toBe(2);
@@ -192,20 +166,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const groups = container.querySelectorAll(".message");
       expect(groups.length).toBe(2);
@@ -224,20 +185,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const dividers = container.querySelectorAll(".msg-day-divider");
       expect(dividers.length).toBe(2); // one for each day
@@ -262,20 +210,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const mentions = container.querySelectorAll(".mention");
       expect(mentions.length).toBe(1);
@@ -291,20 +226,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const mentions = container.querySelectorAll(".mention");
       expect(mentions.length).toBe(2);
@@ -318,20 +240,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       expect(container.querySelectorAll(".mention").length).toBe(0);
       expect(container.textContent).toContain("@nobody");
@@ -347,20 +256,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       // The store keeps a tombstone; the list draws no row for it (WP 3A-8).
       expect(container.querySelector("[data-testid='message-1']")).toBeNull();
@@ -380,20 +276,7 @@ describe("MessageList", () => {
         false,
       );
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const edited = container.querySelector(".msg-edited");
       expect(edited?.textContent).toBe("(edited)");
@@ -405,20 +288,7 @@ describe("MessageList", () => {
     it("applies msg--system class to System user messages", () => {
       setMessages(1, [makeMessage(1, 0, "System", "Alice joined", "2026-03-15T10:00:00Z")], false);
 
-      const list = createMessageList({
-        channelId: 1,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
-      list.mount(container);
+      const list = mountList();
 
       const systemGroup = container.querySelector(".system-msg");
       expect(systemGroup).not.toBeNull();
@@ -427,20 +297,7 @@ describe("MessageList", () => {
   });
 
   it("reacts to store changes", () => {
-    const list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
-    list.mount(container);
+    const list = mountList();
 
     expect(container.querySelectorAll(".message").length).toBe(0);
 
@@ -461,20 +318,7 @@ describe("MessageList", () => {
   });
 
   it("cleans up subscriptions on destroy", () => {
-    const list = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
-    list.mount(container);
+    const list = mountList();
     list.destroy?.();
 
     // After destroy, adding messages should not cause re-render

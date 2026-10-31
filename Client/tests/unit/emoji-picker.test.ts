@@ -47,6 +47,13 @@ describe("EmojiPicker", () => {
     return { picker, options };
   }
 
+  function searchFor(picker: { element: HTMLElement }, query: string): HTMLInputElement {
+    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
+    input.value = query;
+    input.dispatchEvent(new Event("input"));
+    return input;
+  }
+
   it("creates element with emoji-picker and open classes", () => {
     const { picker } = makePicker();
     expect(picker.element.classList.contains("emoji-picker")).toBe(true);
@@ -118,9 +125,7 @@ describe("EmojiPicker", () => {
   it("Shift+Enter in the search input picks the first match with keepOpen", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-    input.value = "smile";
-    input.dispatchEvent(new Event("input"));
+    const input = searchFor(picker, "smile");
     const firstMatch = picker.element.querySelector(".ep-emoji") as HTMLElement;
 
     input.dispatchEvent(
@@ -180,18 +185,14 @@ describe("EmojiPicker", () => {
 
   it("search matches multi-word names typed with spaces", () => {
     const { picker } = makePicker();
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-    input.value = "thumbs up";
-    input.dispatchEvent(new Event("input"));
+    searchFor(picker, "thumbs up");
     expect(emojiCell(picker.element, "👍")).toBeDefined();
     picker.destroy();
   });
 
   it("search matches curated multi-word keywords typed with spaces", () => {
     const { picker } = makePicker();
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-    input.value = "high five";
-    input.dispatchEvent(new Event("input"));
+    searchFor(picker, "high five");
     expect(emojiCell(picker.element, "✋")).toBeDefined();
     picker.destroy();
   });
@@ -226,9 +227,7 @@ describe("EmojiPicker", () => {
   it("finds a toned Recent entry by its name", () => {
     localStorage.setItem("owncord:recent-emoji", JSON.stringify(["👍🏿"]));
     const { picker } = makePicker();
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-    input.value = "thumbsup";
-    input.dispatchEvent(new Event("input"));
+    searchFor(picker, "thumbsup");
     const recentLabel = picker.element.querySelector(
       '.ep-category-label[data-category="emoji.category.recent"]',
     );
@@ -367,9 +366,7 @@ describe("EmojiPicker", () => {
 
   it("re-applies the roving tabindex when search replaces the cells", () => {
     const { picker } = makePicker();
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-    input.value = "fire";
-    input.dispatchEvent(new Event("input"));
+    searchFor(picker, "fire");
 
     const cells = Array.from(picker.element.querySelectorAll(".ep-emoji"));
     expect(cells.length).toBeGreaterThan(0);
@@ -414,10 +411,7 @@ describe("EmojiPicker", () => {
   it("Enter in the search input picks the first filtered emoji", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-
-    input.value = "smile";
-    input.dispatchEvent(new Event("input"));
+    const input = searchFor(picker, "smile");
 
     const firstMatch = picker.element.querySelector(".ep-emoji") as HTMLElement;
     expect(firstMatch).not.toBeNull();
@@ -435,10 +429,7 @@ describe("EmojiPicker", () => {
   it("Enter that commits an IME composition in the search input does not pick", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-
-    input.value = "smile";
-    input.dispatchEvent(new Event("input"));
+    const input = searchFor(picker, "smile");
     input.dispatchEvent(
       new KeyboardEvent("keydown", {
         key: "Enter",
@@ -455,10 +446,7 @@ describe("EmojiPicker", () => {
   it("Enter in the search input does nothing when nothing matches", () => {
     const onSelect = vi.fn();
     const { picker } = makePicker({ onSelect });
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-
-    input.value = "zzzznotanemoji";
-    input.dispatchEvent(new Event("input"));
+    const input = searchFor(picker, "zzzznotanemoji");
     input.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
@@ -603,9 +591,7 @@ describe("EmojiPicker", () => {
     // Any search keystroke fully discards and rebuilds the cell set, even
     // when the same emoji still matches — renderAllCategories always calls
     // clearChildren() first.
-    const input = picker.element.querySelector(".ep-search") as HTMLInputElement;
-    input.value = "fire";
-    input.dispatchEvent(new Event("input"));
+    searchFor(picker, "fire");
     expect(picker.element.contains(firstEmoji)).toBe(false);
 
     // Dispatching directly on the stale, detached span must not still reach

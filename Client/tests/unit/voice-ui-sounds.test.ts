@@ -66,6 +66,17 @@ const SELF = {
   screenshare: false,
 };
 
+function roster10(...members: Array<typeof SELF>) {
+  return new Map([[10, new Map(members.map((m) => [m.userId, m]))]]);
+}
+
+/** Puts the store in a known state, lets it settle, and forgets the sounds that caused. */
+function seedVoice(patch: Partial<ReturnType<typeof voiceStore.getState>>): void {
+  voiceStore.setState((prev) => ({ ...prev, ...patch }));
+  voiceStore.flush();
+  playVoiceSound.mockClear();
+}
+
 let stop: () => void = () => {};
 
 beforeEach(() => {
@@ -101,13 +112,10 @@ afterEach(() => {
 
 describe("voice UI sounds", () => {
   it("plays the join sound once for a remote voice_join in the current channel", () => {
-    voiceStore.setState((prev) => ({
-      ...prev,
+    seedVoice({
       currentChannelId: 10,
-      voiceUsers: new Map([[10, new Map([[1, SELF]])]]),
-    }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+      voiceUsers: roster10(SELF),
+    });
 
     updateVoiceState(voiceState(10, 2));
     voiceStore.flush();
@@ -117,21 +125,10 @@ describe("voice UI sounds", () => {
 
   it("plays the leave sound once for a remote voice_leave", () => {
     const member = { ...SELF, userId: 2, username: "peer" };
-    voiceStore.setState((prev) => ({
-      ...prev,
+    seedVoice({
       currentChannelId: 10,
-      voiceUsers: new Map([
-        [
-          10,
-          new Map([
-            [1, SELF],
-            [2, member],
-          ]),
-        ],
-      ]),
-    }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+      voiceUsers: roster10(SELF, member),
+    });
 
     removeVoiceUser({ channel_id: 10, user_id: 2 });
     voiceStore.flush();
@@ -141,21 +138,10 @@ describe("voice UI sounds", () => {
 
   it("plays nothing for a peer's mute toggle in the current channel", () => {
     const member = { ...SELF, userId: 2, username: "peer" };
-    voiceStore.setState((prev) => ({
-      ...prev,
+    seedVoice({
       currentChannelId: 10,
-      voiceUsers: new Map([
-        [
-          10,
-          new Map([
-            [1, SELF],
-            [2, member],
-          ]),
-        ],
-      ]),
-    }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+      voiceUsers: roster10(SELF, member),
+    });
 
     updateVoiceState({ ...voiceState(10, 2), muted: true });
     voiceStore.flush();
@@ -164,9 +150,7 @@ describe("voice UI sounds", () => {
   });
 
   it("plays nothing for a voice_state in another channel", () => {
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10 });
 
     updateVoiceState(voiceState(20, 2));
     voiceStore.flush();
@@ -175,9 +159,7 @@ describe("voice UI sounds", () => {
   });
 
   it("plays nothing for a push-to-talk gate edge", () => {
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10 });
 
     setPttGated(true);
     voiceStore.flush();
@@ -193,9 +175,7 @@ describe("voice UI sounds", () => {
       { channel_id: 10, user_id: 2, muted: false, deafened: false },
       { channel_id: 10, user_id: 3, muted: false, deafened: false },
     ];
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10 });
 
     setVoiceStates(states);
     voiceStore.flush();
@@ -207,21 +187,10 @@ describe("voice UI sounds", () => {
     const member = { ...SELF, userId: 2, username: "peer" };
     beforeEach(() => {
       authStore.setState((prev) => ({ ...prev, user: { id: 1, username: "me" } as never }));
-      voiceStore.setState((prev) => ({
-        ...prev,
+      seedVoice({
         currentChannelId: 10,
-        voiceUsers: new Map([
-          [
-            10,
-            new Map([
-              [1, SELF],
-              [2, member],
-            ]),
-          ],
-        ]),
-      }));
-      voiceStore.flush();
-      playVoiceSound.mockClear();
+        voiceUsers: roster10(SELF, member),
+      });
     });
 
     it("plays the stream sounds when a member in your channel starts and stops sharing", () => {
@@ -291,9 +260,7 @@ describe("voice UI sounds", () => {
   });
 
   it("plays the mute and unmute sounds on the local mute edge", () => {
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10 });
 
     setLocalMuted(true);
     voiceStore.flush();
@@ -304,9 +271,7 @@ describe("voice UI sounds", () => {
   });
 
   it("plays the deafen sound and suppresses the accompanying mute edge", () => {
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10 });
 
     setLocalDeafened(true);
     setLocalMuted(true);
@@ -316,9 +281,7 @@ describe("voice UI sounds", () => {
   });
 
   it("plays the undeafen sound on the deafen falling edge", () => {
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10, localDeafened: true }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10, localDeafened: true });
 
     setLocalDeafened(false);
     voiceStore.flush();
@@ -327,9 +290,7 @@ describe("voice UI sounds", () => {
   });
 
   it("plays nothing on a voice-session reset (sign-out)", () => {
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10, localDeafened: true }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10, localDeafened: true });
 
     authStore.setState((prev) => ({ ...prev, isAuthenticated: false }));
     resetVoiceStore();
@@ -340,9 +301,7 @@ describe("voice UI sounds", () => {
 
   it("obeys Do Not Disturb, matching the message chime", () => {
     testPrefs.set("userStatus", "dnd");
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10 });
 
     setLocalMuted(true);
     voiceStore.flush();
@@ -351,9 +310,7 @@ describe("voice UI sounds", () => {
   });
 
   it("plays nothing while deafened", () => {
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10, localDeafened: true }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10, localDeafened: true });
 
     updateVoiceState(voiceState(10, 2));
     voiceStore.flush();
@@ -363,9 +320,7 @@ describe("voice UI sounds", () => {
 
   it("obeys the voiceSounds preference", () => {
     testPrefs.set("voiceSounds", false);
-    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ currentChannelId: 10 });
 
     setLocalMuted(true);
     voiceStore.flush();
@@ -603,9 +558,7 @@ describe("voice UI sounds: session start, teardown and ordering", () => {
   /** Restart the sounds on top of whatever the store holds now. */
   const restartOn = (patch: Partial<ReturnType<typeof voiceStore.getState>>): void => {
     stop();
-    voiceStore.setState((prev) => ({ ...prev, ...patch }));
-    voiceStore.flush();
-    playVoiceSound.mockClear();
+    seedVoice({ ...patch });
     stop = startVoiceUiSounds();
   };
 
@@ -806,9 +759,7 @@ describe("voice UI sounds: session start, teardown and ordering", () => {
   describe("deafen and the sound switches", () => {
     it("plays no deafen sound under Do Not Disturb", () => {
       testPrefs.set("userStatus", "dnd");
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-      voiceStore.flush();
-      playVoiceSound.mockClear();
+      seedVoice({ currentChannelId: 10 });
 
       setLocalDeafened(true);
       voiceStore.flush();
@@ -820,9 +771,7 @@ describe("voice UI sounds: session start, teardown and ordering", () => {
 
     it("plays no deafen sound when the voice sounds are off", () => {
       testPrefs.set("voiceSounds", false);
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 10 }));
-      voiceStore.flush();
-      playVoiceSound.mockClear();
+      seedVoice({ currentChannelId: 10 });
 
       setLocalDeafened(true);
       voiceStore.flush();
@@ -852,13 +801,10 @@ describe("voice UI sounds: session start, teardown and ordering", () => {
 
     it("plays nothing when your own row arrives in the roster of your channel", () => {
       signIn();
-      voiceStore.setState((prev) => ({
-        ...prev,
+      seedVoice({
         currentChannelId: 10,
         voiceUsers: new Map([[10, new Map([[2, peerRow(2)]])]]),
-      }));
-      voiceStore.flush();
-      playVoiceSound.mockClear();
+      });
 
       updateVoiceState(voiceState(10, 1));
       voiceStore.flush();
@@ -868,8 +814,7 @@ describe("voice UI sounds: session start, teardown and ordering", () => {
 
     it("plays nothing when your own row leaves the roster of your channel", () => {
       signIn();
-      voiceStore.setState((prev) => ({
-        ...prev,
+      seedVoice({
         currentChannelId: 10,
         voiceUsers: new Map([
           [
@@ -880,9 +825,7 @@ describe("voice UI sounds: session start, teardown and ordering", () => {
             ]),
           ],
         ]),
-      }));
-      voiceStore.flush();
-      playVoiceSound.mockClear();
+      });
 
       removeVoiceUser({ channel_id: 10, user_id: 1 });
       voiceStore.flush();

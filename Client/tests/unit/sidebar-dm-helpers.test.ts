@@ -11,64 +11,54 @@ import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore, addDmChannel, addDmToChannelsStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { uiStore } from "../../src/stores/ui.store";
+import type { Channel } from "../../src/stores/channels.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { dmRecipient, makeDm, resetDmAndUiState } from "../helpers/dmHarness";
 import { resetMembersState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
-
-// ---------------------------------------------------------------------------
-// Store reset
-// ---------------------------------------------------------------------------
-
-function resetStores(): void {
-  resetChannelsState();
-  dmStore.setState(() => ({ channels: [] }));
-  resetMembersState();
-  uiStore.setState(() => ({
-    sidebarCollapsed: false,
-    memberListVisible: true,
-    settingsOpen: false,
-    activeModal: null,
-    theme: "dark" as const,
-    connectionStatus: "disconnected" as const,
-    connectionDialFailed: false,
-    transientError: null,
-    sessionReplaced: false,
-    persistentError: null,
-    updateRequiredHost: null,
-    collapsedCategories: new Set<string>(),
-    sidebarMode: "channels" as const,
-    activeDmUserId: null,
-    activeView: null,
-    settingsTab: null,
-  }));
-}
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
+function resetStores(): void {
+  resetChannelsState();
+  resetMembersState();
+  resetDmAndUiState();
+}
+
 function makeDmChannel(overrides: Partial<DmChannel> = {}): DmChannel {
-  const base: DmChannel = {
-    channelId: 100,
-    recipient: {
-      id: 10,
-      username: "Alice",
-      avatar: "",
-      status: "online",
-    },
-    participants: [],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-    ...overrides,
-  };
+  const base = makeDm(overrides);
   // A 1:1 DM's participant list IS its recipient, so a fixture that overrides
   // only `recipient` should not silently keep the default's participants.
   return base.participants.length > 0 ? base : { ...base, participants: [base.recipient] };
+}
+
+function seedChannel(
+  channel: Pick<Channel, "id" | "name" | "type">,
+  activeChannelId?: number,
+): void {
+  channelsStore.setState((prev) => {
+    const next = new Map(prev.channels);
+    next.set(channel.id, {
+      ...channel,
+      category: null,
+      position: 0,
+      unreadCount: 0,
+      mentionCount: 0,
+      lastMessageId: null,
+      canSend: true,
+      topic: "",
+      slowMode: 0,
+      nsfw: false,
+      isPrivate: false,
+      voiceMaxUsers: 0,
+      voiceMaxVideo: 0,
+    });
+    return activeChannelId === undefined
+      ? { ...prev, channels: next }
+      : { ...prev, channels: next, activeChannelId };
+  });
 }
 
 function makeDeps(overrides: Partial<DmHelperDeps> = {}): DmHelperDeps {
@@ -76,7 +66,7 @@ function makeDeps(overrides: Partial<DmHelperDeps> = {}): DmHelperDeps {
     api: {
       createDm: vi.fn().mockResolvedValue({
         channel_id: 200,
-        recipient: { id: 20, username: "Bob", avatar: "", status: "online" },
+        recipient: dmRecipient(20, "Bob"),
       }),
     } as unknown as DmHelperDeps["api"],
     getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
@@ -84,6 +74,16 @@ function makeDeps(overrides: Partial<DmHelperDeps> = {}): DmHelperDeps {
     setChannelBeforeDm: vi.fn(),
     ...overrides,
   };
+}
+
+async function createDmRejecting(reason: unknown): Promise<ReturnType<typeof vi.fn>> {
+  const show = vi.fn();
+  const deps = makeDeps({
+    api: { createDm: vi.fn().mockRejectedValue(reason) } as unknown as DmHelperDeps["api"],
+    getToast: vi.fn().mockReturnValue({ show }),
+  });
+  await handleCreateDm(20, deps);
+  return show;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,27 +116,7 @@ describe("SidebarDmHelpers", () => {
 
     it("does not rewrite an existing channel whose name already matches", () => {
       // Pre-populate with a channel that already carries the DM's display name
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(100, {
-          id: 100,
-          name: "Alice",
-          type: "dm",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next };
-      });
+      seedChannel({ id: 100, name: "Alice", type: "dm" });
 
       const dm = makeDmChannel({ channelId: 100 });
       addDmToChannelsStore(dm);
@@ -148,27 +128,7 @@ describe("SidebarDmHelpers", () => {
 
     it("overwrites an existing channel with an empty name", () => {
       // Pre-populate with a channel that has an empty name (server sends DMs with name='')
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(100, {
-          id: 100,
-          name: "",
-          type: "dm",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next };
-      });
+      seedChannel({ id: 100, name: "", type: "dm" });
 
       const dm = makeDmChannel({ channelId: 100 });
       addDmToChannelsStore(dm);
@@ -186,27 +146,7 @@ describe("SidebarDmHelpers", () => {
   describe("selectDmConversation", () => {
     it("saves current non-DM channel before switching", () => {
       // Set a text channel as active
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, {
-          id: 1,
-          name: "general",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next, activeChannelId: 1 };
-      });
+      seedChannel({ id: 1, name: "general", type: "text" }, 1);
 
       const deps = makeDeps();
       const dm = makeDmChannel();
@@ -217,27 +157,7 @@ describe("SidebarDmHelpers", () => {
 
     it("does not save channel if current channel is a DM", () => {
       // Set a DM channel as active
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(50, {
-          id: 50,
-          name: "OtherDm",
-          type: "dm",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next, activeChannelId: 50 };
-      });
+      seedChannel({ id: 50, name: "OtherDm", type: "dm" }, 50);
 
       const deps = makeDeps();
       const dm = makeDmChannel();
@@ -257,7 +177,7 @@ describe("SidebarDmHelpers", () => {
     it("sets activeDmUserId in UI store", () => {
       const deps = makeDeps();
       const dm = makeDmChannel({
-        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+        recipient: dmRecipient(10, "Alice"),
       });
       selectDmConversation(dm, deps);
 
@@ -355,84 +275,39 @@ describe("SidebarDmHelpers", () => {
     });
 
     it("shows error toast on API failure", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        createDm: vi.fn().mockRejectedValue(new Error("Network error")),
-      };
-      const deps = makeDeps({
-        api: mockApi as unknown as DmHelperDeps["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      });
-
-      await handleCreateDm(20, deps);
+      const mockShow = await createDmRejecting(new Error("Network error"));
 
       expect(mockShow).toHaveBeenCalledWith("Network error", "error");
     });
 
     it("shows the app's neutral text for a 403, never the server's", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        createDm: vi
-          .fn()
-          .mockRejectedValue(
-            new ApiClientError(403, "FORBIDDEN", "cannot create DM: server words"),
-          ),
-      };
-      const deps = makeDeps({
-        api: mockApi as unknown as DmHelperDeps["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      });
-
-      await handleCreateDm(20, deps);
+      const mockShow = await createDmRejecting(
+        new ApiClientError(403, "FORBIDDEN", "cannot create DM: server words"),
+      );
 
       expect(mockShow).toHaveBeenCalledWith("You can't message this user right now.", "error");
     });
 
     it("keeps the server's own text for a 403 that is not FORBIDDEN", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        createDm: vi
-          .fn()
-          .mockRejectedValue(new ApiClientError(403, "TIMED_OUT", "You are timed out")),
-      };
-      const deps = makeDeps({
-        api: mockApi as unknown as DmHelperDeps["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      });
-
-      await handleCreateDm(20, deps);
+      const mockShow = await createDmRejecting(
+        new ApiClientError(403, "TIMED_OUT", "You are timed out"),
+      );
 
       expect(mockShow).toHaveBeenCalledTimes(1);
       expect(mockShow.mock.calls[0]![0]).toBe("You are timed out");
     });
 
     it("keeps the normal error copy for a 404", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        createDm: vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "user not found")),
-      };
-      const deps = makeDeps({
-        api: mockApi as unknown as DmHelperDeps["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      });
-
-      await handleCreateDm(20, deps);
+      const mockShow = await createDmRejecting(
+        new ApiClientError(404, "NOT_FOUND", "user not found"),
+      );
 
       expect(mockShow).toHaveBeenCalledTimes(1);
       expect(mockShow.mock.calls[0]![0]).toBe("That item no longer exists.");
     });
 
     it("shows generic error toast for non-Error exceptions", async () => {
-      const mockShow = vi.fn();
-      const mockApi = {
-        createDm: vi.fn().mockRejectedValue("string error"),
-      };
-      const deps = makeDeps({
-        api: mockApi as unknown as DmHelperDeps["api"],
-        getToast: vi.fn().mockReturnValue({ show: mockShow }),
-      });
-
-      await handleCreateDm(20, deps);
+      const mockShow = await createDmRejecting("string error");
 
       expect(mockShow).toHaveBeenCalledWith("Failed to create DM", "error");
     });
@@ -520,7 +395,7 @@ describe("SidebarDmHelpers", () => {
       addDmChannel(
         makeDmChannel({
           channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+          recipient: dmRecipient(10, "Alice"),
         }),
       );
 
@@ -532,7 +407,7 @@ describe("SidebarDmHelpers", () => {
       addDmChannel(
         makeDmChannel({
           channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+          recipient: dmRecipient(10, "Alice"),
         }),
       );
 
@@ -568,7 +443,7 @@ describe("SidebarDmHelpers", () => {
       addDmChannel(
         makeDmChannel({
           channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+          recipient: dmRecipient(10, "Alice"),
         }),
       );
 
@@ -597,13 +472,13 @@ describe("SidebarDmHelpers", () => {
       addDmChannel(
         makeDmChannel({
           channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
+          recipient: dmRecipient(10, "Alice"),
         }),
       );
       addDmChannel(
         makeDmChannel({
           channelId: 101,
-          recipient: { id: 11, username: "Bob", avatar: "", status: "idle" },
+          recipient: dmRecipient(11, "Bob", "idle"),
         }),
       );
 

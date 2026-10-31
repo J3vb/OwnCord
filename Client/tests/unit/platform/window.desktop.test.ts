@@ -6,6 +6,7 @@
 import { vi } from "vitest";
 import type { MonitorRect, WindowControl } from "../../../src/platform/contracts/window";
 import { describeWindowControlSuite } from "./window.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const h = vi.hoisted(() => ({
   maximized: false,
@@ -55,9 +56,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
     },
   }),
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 describeWindowControlSuite(async () => {
   Object.assign(h, {
