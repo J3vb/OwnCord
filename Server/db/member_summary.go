@@ -58,20 +58,22 @@ type MemberSummary struct {
 	DisplayName *string `json:"display_name"`
 	// About is the profile bio (About Me). Null when unset.
 	About *string `json:"about"`
-	// Mobile is the live "on the Android app" flag, set only by the ws ready
-	// presentation (never read from the database) and omitted when false. A
-	// ready encodes it after custom_status, so encodeRoster's cached bytes do not
-	// carry it.
-	Mobile bool `json:"mobile,omitempty"`
 	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
 	CreatedAt string `json:"created_at"`
 	// MemberBanner is nil for a member with no banner, which omits both keys. An
 	// embedded pointer keeps MemberSummary under the range-copy size limit.
 	*MemberBanner
 	// CustomStatus is the free-text status line shown under the name. Null
-	// when unset. It must stay the LAST field: encodeRoster in package ws
+	// when unset. It must stay the last field with a value in the cached encoding
+	// (Mobile, omitted when false, follows it): encodeRoster in package ws
 	// splices the per-viewer status and custom_status around it.
 	CustomStatus *string `json:"custom_status"`
+	// Mobile is the live "on the Android app" flag, set only by the ws ready
+	// presentation (never read from the database) and omitted when false. It
+	// follows CustomStatus so a marshal puts it where writeReadyMembers splices
+	// it; encodeRoster encodes members with it false, so the cached bytes never
+	// carry it.
+	Mobile bool `json:"mobile,omitempty"`
 }
 
 // ForViewer returns a copy of the summary as viewerID may see it: an invisible

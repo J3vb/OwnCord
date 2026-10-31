@@ -48,6 +48,9 @@ type ChatDeps struct {
 	// LiveStatus is Hub.LiveStatus: a send's dm_channel_open presents each
 	// participant's live status, not the users.status row.
 	LiveStatus func(userID int64) string
+	// LiveMobile is Hub.LiveMobile: the same dm_channel_open carries each participant's
+	// phone flag. Nil leaves everyone off the phone.
+	LiveMobile func(userID int64) bool
 }
 
 // PresenceDeps holds dependencies for presence, typing and channel focus handlers.

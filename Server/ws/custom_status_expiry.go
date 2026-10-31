@@ -95,7 +95,7 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 		if cur == nil || cur.customStatus == nil || cur.customStatusExpiresAt != expiresAt {
 			continue
 		}
-		if c.presence.CompareAndSwap(cur, &livePresence{status: cur.status, idleSince: cur.idleSince, setAt: cur.setAt, activity: cur.activity, listening: cur.listening}) && first == nil {
+		if c.presence.CompareAndSwap(cur, &livePresence{status: cur.status, idleSince: cur.idleSince, setAt: cur.setAt, activity: cur.activity, listening: cur.listening, selfIdle: cur.selfIdle}) && first == nil {
 			first = c
 		}
 	}

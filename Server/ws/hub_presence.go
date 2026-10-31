@@ -161,7 +161,11 @@ type pendingPresence struct {
 	// mobile is the connecting user's merged phone flag (mergeLivePresence); false
 	// for a disconnect.
 	mobile bool
-	member *memberJoinUser
+	// connecting, when set, is the connection this entry announces: queuePresence
+	// reads its phone flag under presenceMu, so a presence_update that landed
+	// first is not overtaken by a flag read before the lock.
+	connecting *Client
+	member     *memberJoinUser
 }
 
 // QueuePresence coalesces connect/disconnect presence: the latest state per user
@@ -181,6 +185,10 @@ func (h *Hub) queuePresence(userID int64, p pendingPresence) {
 	}
 	if p.member == nil {
 		p.member = h.presenceQueue[userID].member
+	}
+	if p.connecting != nil {
+		p.mobile = h.connectMobile(p.connecting, p.status)
+		p.connecting = nil
 	}
 	h.presenceQueue[userID] = p
 	armed := h.presenceFlushArmed
@@ -450,7 +458,7 @@ func (h *Hub) applyPresenceChoice(c *Client, p *livePresence, events []Event) []
 	if !isIdleStatus(p.status) {
 		for _, o := range h.clientsOf(c.userID) {
 			if o != c {
-				o.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
+				o.stampChosenStatus(p.status, p.customStatus, p.customStatusExpiresAt)
 			}
 		}
 	}

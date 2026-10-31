@@ -62,19 +62,19 @@ func mergeLivePresence(conns []*Client) livePresence {
 
 // mobileShown reports whether the merged presence, whose status comes from srcConn,
 // shows the phone: srcConn is the Android app and every other stamped connection in
-// the same idle class (all active, or all idle) is a phone too. A desktop that is as
+// the same idle class (all active, or all idle, by each device's own idle fact) is a phone too. A desktop that is as
 // active as the phone wins, and a phone beside an idle desktop shows, since the idle
 // desktop is not what the user is using.
 func mobileShown(conns []*Client, srcConn *Client, src *livePresence) bool {
 	if !srcConn.features.mobile {
 		return false
 	}
-	srcIdle := isIdleStatus(src.status)
+	srcIdle := src.selfIdle
 	for _, c := range conns {
 		if c == srcConn || c.features.mobile {
 			continue
 		}
-		if p := c.presence.Load(); p != nil && p.status != "" && isIdleStatus(p.status) == srcIdle {
+		if p := c.presence.Load(); p != nil && p.status != "" && p.selfIdle == srcIdle {
 			return false
 		}
 	}
@@ -127,6 +127,11 @@ func (h *Hub) userListening(c *Client) *listeningActivity {
 // connection or none has stamped one yet. Safe to call from any goroutine.
 func (h *Hub) LiveStatus(userID int64) string {
 	return mergeLivePresence(h.clientsOf(userID)).status
+}
+
+// LiveMobile reports whether userID's merged live presence is on the Android app.
+func (h *Hub) LiveMobile(userID int64) bool {
+	return mergeLivePresence(h.clientsOf(userID)).mobile
 }
 
 // StoppedUserIDs returns every user the hub held when GracefulStopContext began,

@@ -186,6 +186,11 @@ type livePresence struct {
 	// equally active backs it. A connection's own stored value is always false;
 	// whether it is a phone is a fact of the socket (Client.features).
 	mobile bool
+	// selfIdle is whether this connection's own device is idle: set by its own
+	// updates (its connect stamp and its own presence_update) and carried over
+	// when another device's chosen status is stamped on it. status alone cannot
+	// say, since a chosen status overwrites every device's.
+	selfIdle bool
 }
 
 // noActivity reports whether the connection shows neither a game nor a song.
@@ -198,7 +203,7 @@ var afkNow = time.Now
 // status: it keeps prev.activity and prev.listening, keeps prev.idleSince while the
 // status stays idle, stamps now on entry to idle, and is zero for other statuses.
 func nextLivePresence(prev *livePresence, status string, customStatus *string, expiresAt string, now time.Time) *livePresence {
-	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt, setAt: now}
+	next := &livePresence{status: status, customStatus: customStatus, customStatusExpiresAt: expiresAt, setAt: now, selfIdle: isIdleStatus(status)}
 	if prev != nil {
 		next.activity = prev.activity
 		next.listening = prev.listening
@@ -230,6 +235,22 @@ func (c *Client) setLivePresence(status string, customStatus *string, expiresAt 
 	for {
 		prev := c.presence.Load()
 		if c.presence.CompareAndSwap(prev, nextLivePresence(prev, status, customStatus, expiresAt, now)) {
+			return
+		}
+	}
+}
+
+// stampChosenStatus records a status another device chose on this connection. It
+// is setLivePresence except that this device's own idle fact is kept.
+func (c *Client) stampChosenStatus(status string, customStatus *string, expiresAt string) {
+	now := afkNow()
+	for {
+		prev := c.presence.Load()
+		next := nextLivePresence(prev, status, customStatus, expiresAt, now)
+		if prev != nil {
+			next.selfIdle = prev.selfIdle
+		}
+		if c.presence.CompareAndSwap(prev, next) {
 			return
 		}
 	}

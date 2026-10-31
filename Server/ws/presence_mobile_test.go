@@ -34,7 +34,7 @@ func TestParseClientFeatures_Mobile(t *testing.T) {
 // mobileConn is a stamped connection for the merge tests.
 func mobileConn(phone bool, status string, setAt time.Time) *Client {
 	c := &Client{features: clientFeatures{mobile: phone}}
-	c.presence.Store(&livePresence{status: status, setAt: setAt})
+	c.presence.Store(&livePresence{status: status, setAt: setAt, selfIdle: isIdleStatus(status)})
 	return c
 }
 
@@ -253,5 +253,65 @@ func TestPresentableMembers_Mobile(t *testing.T) {
 	}}, 9)
 	if !dms[0].Recipient.Mobile || !dms[0].Recipients[0].Mobile || dms[0].Recipients[1].Mobile {
 		t.Errorf("dm recipients = %+v", dms[0])
+	}
+}
+
+// Both devices auto-idle, then the user picks up the phone: its chosen status is
+// stamped on the desktop too, but the desktop is still idle itself.
+func TestMultiDevice_PhonePickedUpAfterBothIdleShowsPhone(t *testing.T) {
+	for _, chosen := range []string{db.StatusOnline, db.StatusDND} {
+		t.Run(chosen, func(t *testing.T) {
+			f := newMDFix(t)
+			desktop := f.dev("session-desktop", f.text)
+			phone := f.dev("session-phone", f.text)
+			phone.c.features = clientFeatures{mobile: true}
+			f.applyPresence(desktop, db.StatusIdle)
+			f.applyPresence(phone, db.StatusIdle)
+			obs := f.observer(f.text)
+			obs.settle()
+			obs.got = nil
+
+			f.applyPresence(phone, chosen)
+			waitFor(t, "the phone presence", func() bool { return lastPresenceFrame(obs, f.uid) != nil })
+			if p := lastPresenceFrame(obs, f.uid); p["status"] != chosen || !hasMobile(p) {
+				t.Fatalf("presence after the phone chose %s = %v, want that status with mobile:true", chosen, p)
+			}
+
+			// The desktop wakes up too: now an equally active desktop wins.
+			obs.got = nil
+			f.applyPresence(desktop, db.StatusOnline)
+			waitFor(t, "the desktop presence", func() bool { return lastPresenceFrame(obs, f.uid) != nil })
+			if p := lastPresenceFrame(obs, f.uid); p["status"] != db.StatusOnline || hasMobile(p) {
+				t.Fatalf("presence after the desktop woke = %v, want online without mobile", p)
+			}
+		})
+	}
+}
+
+func TestPresentDMMobile(t *testing.T) {
+	t.Parallel()
+	frame := buildDMChannelOpen(db.DMChannelInfo{
+		Recipient:  db.DMUser{ID: 1},
+		Recipients: []db.DMUser{{ID: 1}, {ID: 2}},
+	}, 9,
+		func(id int64) string {
+			if id == 1 {
+				return db.StatusOnline
+			}
+			return db.StatusInvisible
+		},
+		func(int64) bool { return true })
+	var msg struct {
+		Payload db.DMChannelInfo `json:"payload"`
+	}
+	if err := json.Unmarshal(frame, &msg); err != nil {
+		t.Fatal(err)
+	}
+	p := msg.Payload
+	if !p.Recipient.Mobile || !p.Recipients[0].Mobile {
+		t.Errorf("online phone recipient lost mobile: %+v", p)
+	}
+	if p.Recipients[1].Mobile || p.Recipients[1].Status != db.StatusOffline {
+		t.Errorf("invisible recipient = %+v, want offline without mobile", p.Recipients[1])
 	}
 }

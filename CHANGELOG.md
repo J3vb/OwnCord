@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Android**
 
+- Members using the Android app now show a phone-shaped status dot (in the same green, yellow or red) in the member list, DM lists, profiles and your own user bar, with "Online on the phone app" on hover. A member on the phone while their computer is idle also shows it; offline and invisible members never do.
 - The Android app is on the release page: download `OwnCord_<version>_arm64.apk` and install it (Android asks once to allow installs from your browser). After that the app updates itself: it shows "Update available", downloads the new version and opens Android's installer, where you tap Install. Your sign-in and settings stay.
 
 **Voice**

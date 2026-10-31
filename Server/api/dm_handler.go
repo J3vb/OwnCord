@@ -157,11 +157,13 @@ func handleCreateDM(svc *service.Services, broadcaster DMBroadcaster) http.Handl
 		// ws/serve_ready.go presentableMembers; StatusForViewer alone would ship
 		// a disconnected recipient's saved idle/dnd or a connected one's
 		// not-yet-flushed "offline".
+		presented := svc.DMs.PresentableStatus(result.Recipient.ID, user.ID, db.StatusForViewer(result.Recipient.Status, result.Recipient.ID, user.ID))
 		dmUser := db.DMUser{
 			ID:          result.Recipient.ID,
 			Username:    result.Recipient.Username,
 			Avatar:      avatarStr,
-			Status:      svc.DMs.PresentableStatus(result.Recipient.ID, user.ID, db.StatusForViewer(result.Recipient.Status, result.Recipient.ID, user.ID)),
+			Status:      presented,
+			Mobile:      svc.DMs.PresentableMobile(result.Recipient.ID, presented),
 			DisplayName: displayName,
 		}
 

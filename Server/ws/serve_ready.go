@@ -114,12 +114,18 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo, viewerID int64) []db.DMChannelInfo {
 	live := h.livePresences()
 	dmChannels = presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id].status })
+	return presentDMMobile(dmChannels, func(id int64) bool { return live[id].mobile })
+}
+
+// presentDMMobile sets each recipient's phone flag from liveMobile, false for one
+// who reads as offline. Run after presentDMStatuses, whose statuses it reads.
+func presentDMMobile(dmChannels []db.DMChannelInfo, liveMobile func(userID int64) bool) []db.DMChannelInfo {
 	for i := range dmChannels {
 		ch := &dmChannels[i]
-		ch.Recipient.Mobile = ch.Recipient.Status != db.StatusOffline && live[ch.Recipient.ID].mobile
+		ch.Recipient.Mobile = ch.Recipient.Status != db.StatusOffline && liveMobile(ch.Recipient.ID)
 		for j := range ch.Recipients {
 			r := &ch.Recipients[j]
-			r.Mobile = r.Status != db.StatusOffline && live[r.ID].mobile
+			r.Mobile = r.Status != db.StatusOffline && liveMobile(r.ID)
 		}
 	}
 	return dmChannels

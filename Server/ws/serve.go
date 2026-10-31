@@ -242,7 +242,7 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 func (h *Hub) announceFreshConnect(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 	p := pendingPresence{status: c.user.Status, customStatus: text}
-	p.mobile = h.connectMobile(c, p.status)
+	p.connecting = c
 	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
 		m := memberPayloadFor(c.user, c.roleName, c.roleIDs)
 		p.member = &m
@@ -255,7 +255,7 @@ func (h *Hub) announceFreshConnect(c *Client) {
 // the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
-	h.queuePresence(c.userID, pendingPresence{status: c.user.Status, customStatus: text, mobile: h.connectMobile(c, c.user.Status)})
+	h.queuePresence(c.userID, pendingPresence{status: c.user.Status, customStatus: text, connecting: c})
 }
 
 // connectMobile is the phone flag a connect announcement for c carries: the user's
