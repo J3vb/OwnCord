@@ -1,11 +1,19 @@
 import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  dmRow,
+  setActiveChannel,
+  setMeUser,
+  readyDm,
+  channelRow,
+  seedChannels,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -29,29 +37,15 @@ describe("WS Dispatcher", () => {
   });
 
   describe("chat_message DM store updates", () => {
-    const dmChannel = {
-      channelId: 50,
-      recipient: { id: 10, username: "bob", avatar: "", status: "online" as const },
-      participants: [],
-      name: "",
-      isGroup: false,
-      lastMessageId: null,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    };
+    const dmChannel = dmRow();
 
     beforeEach(() => {
       dmStore.setState(() => ({ channels: [{ ...dmChannel }] }));
     });
 
     it("updates DM last message with unread for non-active, non-own message", () => {
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setActiveChannel(1);
+      setMeUser();
 
       mock.dispatch("chat_message", {
         id: 500,
@@ -70,11 +64,8 @@ describe("WS Dispatcher", () => {
     });
 
     it("updates DM preview (no unread) for own message", () => {
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setActiveChannel(1);
+      setMeUser();
 
       mock.dispatch("chat_message", {
         id: 501,
@@ -96,11 +87,8 @@ describe("WS Dispatcher", () => {
       // P4-03: an active DM only skips the badge while the window has focus.
       const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
       onTestFinished(() => focus.mockRestore());
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setActiveChannel(50);
+      setMeUser();
 
       mock.dispatch("chat_message", {
         id: 502,
@@ -123,11 +111,8 @@ describe("WS Dispatcher", () => {
     // the active DM's loaded window is detached (a jump to an old permalink/
     // search hit inside the conversation).
     it("updates DM last message WITH unread when the active DM's window is detached", () => {
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setActiveChannel(50);
+      setMeUser();
       messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([50]) }));
 
       mock.dispatch("chat_message", {
@@ -147,11 +132,8 @@ describe("WS Dispatcher", () => {
     });
 
     it("increments the DM mention badge for an incoming @mention", () => {
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setActiveChannel(1);
+      setMeUser();
 
       mock.dispatch("chat_message", {
         id: 504,
@@ -176,11 +158,8 @@ describe("WS Dispatcher", () => {
       // P4-03: an active DM only skips the badge while the window has focus.
       const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
       onTestFinished(() => focus.mockRestore());
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setActiveChannel(50);
+      setMeUser();
 
       mock.dispatch("chat_message", {
         id: 505,
@@ -204,11 +183,8 @@ describe("WS Dispatcher", () => {
     // guard (lastMessageId monotonicity) already prevents the unread double
     // count; the mention badge must not double count either.
     it("does not double-count a DM mention whose id is already reflected in lastMessageId", () => {
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setActiveChannel(1);
+      setMeUser();
 
       // Simulate the `ready` snapshot that already counted this exact message.
       dmStore.setState((prev) => ({
@@ -239,14 +215,7 @@ describe("WS Dispatcher", () => {
 
   describe("DM events", () => {
     it("should call addDmChannel on dm_channel_open", () => {
-      mock.dispatch("dm_channel_open", {
-        channel_id: 50,
-        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-        last_message_id: null,
-        last_message: "",
-        last_message_at: "",
-        unread_count: 0,
-      });
+      mock.dispatch("dm_channel_open", readyDm());
 
       const channels = dmStore.getState().channels;
       expect(channels).toHaveLength(1);
@@ -258,14 +227,7 @@ describe("WS Dispatcher", () => {
     // membership — so the fallback has to be a one-element list, not an empty
     // one, or every group-aware call site breaks against an old server.
     it("treats a recipient-only payload as a one-person participant list", () => {
-      mock.dispatch("dm_channel_open", {
-        channel_id: 50,
-        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-        last_message_id: null,
-        last_message: "",
-        last_message_at: "",
-        unread_count: 0,
-      });
+      mock.dispatch("dm_channel_open", readyDm());
 
       const dm = dmStore.getState().channels[0]!;
       expect(dm.participants).toHaveLength(1);
@@ -275,20 +237,18 @@ describe("WS Dispatcher", () => {
     });
 
     it("maps a group dm_channel_open with its full participant list", () => {
-      mock.dispatch("dm_channel_open", {
-        channel_id: 51,
-        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-        recipients: [
-          { id: 10, username: "bob", avatar: "", status: "online", display_name: "Bobby" },
-          { id: 11, username: "cat", avatar: "", status: "idle" },
-        ],
-        name: "Crew",
-        is_group: true,
-        last_message_id: null,
-        last_message: "",
-        last_message_at: "",
-        unread_count: 0,
-      });
+      mock.dispatch(
+        "dm_channel_open",
+        readyDm({
+          channel_id: 51,
+          recipients: [
+            { id: 10, username: "bob", avatar: "", status: "online", display_name: "Bobby" },
+            { id: 11, username: "cat", avatar: "", status: "idle" },
+          ],
+          name: "Crew",
+          is_group: true,
+        }),
+      );
 
       const dm = dmStore.getState().channels.find((c) => c.channelId === 51)!;
       expect(dm.isGroup).toBe(true);
@@ -307,20 +267,7 @@ describe("WS Dispatcher", () => {
     it("should call removeDmChannel on dm_channel_close", () => {
       // Seed a DM channel first
       dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
+        channels: [dmRow()],
       }));
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
@@ -399,18 +346,16 @@ describe("WS Dispatcher", () => {
         voiceStore.flush();
         expect(voiceStore.getState().voiceUsers.get(73)?.size).toBe(1);
 
-        mock.dispatch("dm_channel_open", {
-          channel_id: 73,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
-          name: "",
-          is_group: true,
-          owner_id: 10,
-          last_message_id: null,
-          last_message: "",
-          last_message_at: "",
-          unread_count: 0,
-        });
+        mock.dispatch(
+          "dm_channel_open",
+          readyDm({
+            channel_id: 73,
+            participants: [{ id: 10, username: "bob", avatar: "", status: "online" }],
+            name: "",
+            is_group: true,
+            owner_id: 10,
+          }),
+        );
         voiceStore.flush();
 
         expect(voiceStore.getState().voiceUsers.has(73)).toBe(false);
@@ -420,33 +365,14 @@ describe("WS Dispatcher", () => {
     it("falls back to another open DM when the closed DM was active", () => {
       dmStore.setState(() => ({
         channels: [
-          {
-            channelId: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-          {
+          dmRow(),
+          dmRow({
             channelId: 60,
             recipient: { id: 11, username: "carl", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
+          }),
         ],
       }));
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      setActiveChannel(50);
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
 
@@ -465,33 +391,16 @@ describe("WS Dispatcher", () => {
     it("clears the dmStore unread badge on the DM it falls back to activating", () => {
       dmStore.setState(() => ({
         channels: [
-          {
-            channelId: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-          {
+          dmRow(),
+          dmRow({
             channelId: 60,
             recipient: { id: 11, username: "carl", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
             unreadCount: 3,
             mentionCount: 1,
-          },
+          }),
         ],
       }));
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      setActiveChannel(50);
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
 
@@ -509,33 +418,17 @@ describe("WS Dispatcher", () => {
     it("synthesizes the channelsStore mirror row when falling back to a DM never opened this session", () => {
       dmStore.setState(() => ({
         channels: [
-          {
-            channelId: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-          {
+          dmRow(),
+          dmRow({
             channelId: 60,
             recipient: { id: 11, username: "carl", avatar: "", status: "online" },
             participants: [{ id: 11, username: "carl", avatar: "", status: "online" }],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
             unreadCount: 2,
             mentionCount: 1,
-          },
+          }),
         ],
       }));
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      setActiveChannel(50);
       // Channel 60 has no channelsStore row yet — the bug this test locks.
       expect(channelsStore.getState().channels.has(60)).toBe(false);
 
@@ -556,42 +449,9 @@ describe("WS Dispatcher", () => {
 
     it("falls back to the first text channel when the closed DM was active and no DMs remain", () => {
       dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
+        channels: [dmRow()],
       }));
-      channelsStore.setState((prev) => {
-        const ch = new Map(prev.channels);
-        ch.set(1, {
-          id: 1,
-          name: "general",
-          type: "text" as const,
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: ch, activeChannelId: 50 };
-      });
+      seedChannels([channelRow({ id: 1, name: "general" })], { activeChannelId: 50 });
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
 
@@ -600,41 +460,10 @@ describe("WS Dispatcher", () => {
 
     it("falls back to an announcement channel when the closed DM was active, no DMs remain, and there is no text channel", () => {
       dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
+        channels: [dmRow()],
       }));
-      channelsStore.setState((prev) => {
-        const ch = new Map(prev.channels);
-        ch.set(30, {
-          id: 30,
-          name: "news",
-          type: "announcement" as const,
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: false,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: ch, activeChannelId: 50 };
+      seedChannels([channelRow({ id: 30, name: "news", type: "announcement", canSend: false })], {
+        activeChannelId: 50,
       });
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
@@ -644,22 +473,9 @@ describe("WS Dispatcher", () => {
 
     it("does not change the active channel when the closed DM was not active", () => {
       dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            participants: [],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
+        channels: [dmRow()],
       }));
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
 

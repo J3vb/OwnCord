@@ -9,7 +9,18 @@ import { membersStore } from "../../../src/stores/members.store";
 import { blocksStore, setUserBlockedByMe } from "../../../src/stores/blocks.store";
 import { uiStore, setUpdateRequiredHost } from "../../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../../src/lib/protocolTypes";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  authOkEvent,
+  setActiveChannel,
+  setMeUser,
+  readyEvent,
+  channelRow,
+  memberRow,
+  seedChannels,
+  seedMembers,
+} from "../../helpers/dispatcherHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -36,11 +47,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires auth_ok to auth store", () => {
-    mock.dispatch("auth_ok", {
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-      server_name: "TestServer",
-      motd: "Welcome!",
-    });
+    mock.dispatch("auth_ok", authOkEvent({ motd: "Welcome!" }));
 
     const state = authStore.getState();
     expect(state.isAuthenticated).toBe(true);
@@ -63,13 +70,9 @@ describe("WS Dispatcher", () => {
     // restart / proxy close observed before the client's reconnect) — a
     // channel already active on the client must be re-focused so the
     // channel message stream doesn't silently die.
-    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 42 }));
+    setActiveChannel(42);
 
-    mock.dispatch("auth_ok", {
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-      server_name: "TestServer",
-      motd: "Welcome!",
-    });
+    mock.dispatch("auth_ok", authOkEvent({ motd: "Welcome!" }));
 
     expect(mock.ws.send).toHaveBeenCalledWith({
       type: "channel_focus",
@@ -78,13 +81,9 @@ describe("WS Dispatcher", () => {
   });
 
   it("sends no channel_focus on auth_ok when no channel is active", () => {
-    channelsStore.setState((prev) => ({ ...prev, activeChannelId: null }));
+    setActiveChannel(null);
 
-    mock.dispatch("auth_ok", {
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-      server_name: "TestServer",
-      motd: "Welcome!",
-    });
+    mock.dispatch("auth_ok", authOkEvent({ motd: "Welcome!" }));
 
     expect(mock.ws.send).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: "channel_focus" }),
@@ -95,11 +94,7 @@ describe("WS Dispatcher", () => {
     // Start from an authenticated session — asserting "not authenticated"
     // against the beforeEach's already-signed-out store would pass even if
     // the handler did nothing at all.
-    mock.dispatch("auth_ok", {
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-      server_name: "TestServer",
-      motd: "",
-    });
+    mock.dispatch("auth_ok", authOkEvent());
     expect(authStore.getState().isAuthenticated).toBe(true);
 
     setUpdateRequiredHost(null);
@@ -193,54 +188,14 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires channel_delete to channels store", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(10, {
-        id: 10,
-        name: "doomed",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch };
-    });
+    seedChannels([channelRow({ id: 10, name: "doomed" })]);
 
     mock.dispatch("channel_delete", { id: 10 });
     expect(channelsStore.getState().channels.has(10)).toBe(false);
   });
 
   it("wires nsfw_ack to the channel's consent state", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(11, {
-        id: 11,
-        name: "spicy",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: true,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch };
-    });
+    seedChannels([channelRow({ id: 11, name: "spicy", nsfw: true })]);
 
     mock.dispatch("nsfw_ack", { channel_id: 11, acknowledged: true });
     expect(channelsStore.getState().channels.get(11)?.nsfwAcknowledged).toBe(true);
@@ -277,44 +232,14 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires member_ban to remove member from members store", () => {
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(77, {
-        id: 77,
-        username: "banned-user",
-        avatar: null,
-        role: "member",
-        status: "online" as const,
-      });
-      return { ...prev, members: m };
-    });
+    seedMembers([memberRow({ id: 77, username: "banned-user" })]);
 
     mock.dispatch("member_ban", { user_id: 77 });
     expect(membersStore.getState().members.has(77)).toBe(false);
   });
 
   it("wires channel_update to channels store", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(10, {
-        id: 10,
-        name: "old-name",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch };
-    });
+    seedChannels([channelRow({ id: 10, name: "old-name" })]);
 
     mock.dispatch("channel_update", {
       id: 10,
@@ -345,23 +270,7 @@ describe("WS Dispatcher", () => {
   it("carries the category fields of channel_update into the channel", () => {
     channelsStore.setState((prev) => ({
       ...prev,
-      channels: new Map(prev.channels).set(31, {
-        id: 31,
-        name: "moved",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      }),
+      channels: new Map(prev.channels).set(31, channelRow({ id: 31, name: "moved" })),
     }));
     mock.dispatch("channel_update", {
       id: 31,
@@ -378,44 +287,13 @@ describe("WS Dispatcher", () => {
 
   it("wires channel_delete and redirects to first text channel when active is deleted", () => {
     mockShowToast.mockClear();
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(10, {
-        id: 10,
-        name: "active-ch",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      ch.set(20, {
-        id: 20,
-        name: "fallback",
-        type: "text" as const,
-        category: null,
-        position: 1,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 10 };
-    });
+    seedChannels(
+      [
+        channelRow({ id: 10, name: "active-ch" }),
+        channelRow({ id: 20, name: "fallback", position: 1 }),
+      ],
+      { activeChannelId: 10 },
+    );
 
     mock.dispatch("channel_delete", { id: 10 });
 
@@ -430,44 +308,13 @@ describe("WS Dispatcher", () => {
 
   it("wires channel_delete without a toast when a non-active channel is deleted", () => {
     mockShowToast.mockClear();
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(10, {
-        id: 10,
-        name: "active-ch",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      ch.set(20, {
-        id: 20,
-        name: "background",
-        type: "text" as const,
-        category: null,
-        position: 1,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 10 };
-    });
+    seedChannels(
+      [
+        channelRow({ id: 10, name: "active-ch" }),
+        channelRow({ id: 20, name: "background", position: 1 }),
+      ],
+      { activeChannelId: 10 },
+    );
 
     mock.dispatch("channel_delete", { id: 20 });
 
@@ -477,27 +324,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires channel_delete sets active to null when no text channels remain", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(10, {
-        id: 10,
-        name: "only-ch",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 10 };
-    });
+    seedChannels([channelRow({ id: 10, name: "only-ch" })], { activeChannelId: 10 });
 
     mock.dispatch("channel_delete", { id: 10 });
 
@@ -505,44 +332,13 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires channel_delete and redirects to an announcement channel when no text channels remain", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(10, {
-        id: 10,
-        name: "active-ch",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      ch.set(30, {
-        id: 30,
-        name: "news",
-        type: "announcement" as const,
-        category: null,
-        position: 1,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: false,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 10 };
-    });
+    seedChannels(
+      [
+        channelRow({ id: 10, name: "active-ch" }),
+        channelRow({ id: 30, name: "news", type: "announcement", position: 1, canSend: false }),
+      ],
+      { activeChannelId: 10 },
+    );
 
     mock.dispatch("channel_delete", { id: 10 });
 
@@ -552,17 +348,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires member_update to update role", () => {
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(42, {
-        id: 42,
-        username: "alice",
-        avatar: null,
-        role: "member",
-        status: "online" as const,
-      });
-      return { ...prev, members: m };
-    });
+    seedMembers([memberRow({ id: 42, username: "alice" })]);
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
     expect(membersStore.getState().members.get(42)?.role).toBe("admin");
@@ -573,17 +359,7 @@ describe("WS Dispatcher", () => {
       ...prev,
       user: { id: 42, username: "alice", avatar: null, role: "member" },
     }));
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(42, {
-        id: 42,
-        username: "alice",
-        avatar: null,
-        role: "member",
-        status: "online" as const,
-      });
-      return { ...prev, members: m };
-    });
+    seedMembers([memberRow({ id: 42, username: "alice" })]);
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
 
@@ -603,10 +379,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("leaves authStore.user.role untouched for a member_update about someone else", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
 
     mock.dispatch("member_update", { user_id: 42, role: "admin" });
 
@@ -709,7 +482,7 @@ describe("WS Dispatcher", () => {
     // Pre-seed a stale being-blocked entry that a fresh ready must clear.
     blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set([5]) }));
 
-    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    mock.dispatch("ready", readyEvent());
 
     expect(blocksStore.getState().blockedByThem.size).toBe(0);
     expect(listBlocks).toHaveBeenCalled();
@@ -738,7 +511,7 @@ describe("WS Dispatcher", () => {
     blocksStore.setState(() => ({ blockedByMe: new Set([42]), blockedByThem: new Set() }));
 
     // Reconnect: ready fires the GET, which does not resolve yet.
-    mock.dispatch("ready", { channels: [], members: [], voice_states: [], roles: [] });
+    mock.dispatch("ready", readyEvent());
     expect(listBlocks).toHaveBeenCalled();
 
     // While it's in flight, the user clicks "Unblock" on 42 — the same
@@ -759,11 +532,7 @@ describe("WS Dispatcher", () => {
   it("auth_ok with null token uses empty string fallback", () => {
     resetAuthState();
 
-    mock.dispatch("auth_ok", {
-      user: { id: 1, username: "alex", avatar: null, role: "admin" },
-      server_name: "TestServer",
-      motd: "Welcome!",
-    });
+    mock.dispatch("auth_ok", authOkEvent({ motd: "Welcome!" }));
 
     expect(authStore.getState().isAuthenticated).toBe(true);
   });

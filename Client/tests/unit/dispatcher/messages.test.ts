@@ -18,7 +18,13 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../../src/features/messaging/reactionUsers";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  setMeUser,
+  channelRow,
+  seedChannels,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -59,27 +65,7 @@ describe("WS Dispatcher", () => {
 
   it("wires chat_message to increment unread for non-active channel", () => {
     // Set up a channel first
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "off-topic",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
-    });
+    seedChannels([channelRow({ id: 5, name: "off-topic" })], { activeChannelId: 1 });
 
     mock.dispatch("chat_message", {
       id: 200,
@@ -101,31 +87,19 @@ describe("WS Dispatcher", () => {
   // advanced to its id) AND redelivered as a queued chat_message once the
   // socket drains — the channel path had no replay guard at all.
   it("does not double-count a channel unread/mention whose id is already reflected in lastMessageId", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "off-topic",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 1,
-        mentionCount: 1,
-        lastMessageId: 200, // already reflects message 200 via `ready`
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 1 }; // active is channel 1
-    });
+    setMeUser();
+    seedChannels(
+      [
+        channelRow({
+          id: 5,
+          name: "off-topic",
+          unreadCount: 1,
+          mentionCount: 1,
+          lastMessageId: 200,
+        }),
+      ],
+      { activeChannelId: 1 },
+    );
 
     // The same message redelivered as a queued chat_message.
     mock.dispatch("chat_message", {
@@ -153,27 +127,7 @@ describe("WS Dispatcher", () => {
   // reads back-history leaves no row AND no badge — nothing records it ever
   // arrived.
   it("wires chat_message to increment unread for the active channel when its window is detached", () => {
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "general",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 5 }; // channel 5 IS active...
-    });
+    seedChannels([channelRow({ id: 5, name: "general" })], { activeChannelId: 5 });
     // ...but its loaded window is detached from the live tail (viewing
     // back-history via a jump).
     messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([5]) }));
@@ -596,27 +550,7 @@ describe("WS Dispatcher", () => {
       user: { id: 1, username: "alex", avatar: null, role: "admin" },
     }));
 
-    channelsStore.setState((prev) => {
-      const ch = new Map(prev.channels);
-      ch.set(5, {
-        id: 5,
-        name: "other-ch",
-        type: "text" as const,
-        category: null,
-        position: 0,
-        unreadCount: 0,
-        mentionCount: 0,
-        lastMessageId: null,
-        canSend: true,
-        topic: "",
-        slowMode: 0,
-        nsfw: false,
-        isPrivate: false,
-        voiceMaxUsers: 0,
-        voiceMaxVideo: 0,
-      });
-      return { ...prev, channels: ch, activeChannelId: 1 };
-    });
+    seedChannels([channelRow({ id: 5, name: "other-ch" })], { activeChannelId: 1 });
 
     mock.dispatch("chat_message", {
       id: 300,

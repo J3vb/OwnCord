@@ -12,7 +12,12 @@ import { safetyText } from "../../../src/i18n/safety";
 import { createPresenceSender, setActivePresenceSender } from "../../../src/lib/presence/presence";
 import { createPresenceLimiter } from "../../../src/lib/net/rateLimiter";
 import { loadCustomStatus, saveCustomStatus } from "../../../src/lib/presence/userStatus";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  dmRow,
+  memberRow,
+} from "../../helpers/dispatcherHarness";
 import { resetMessagesState } from "../../helpers/storeResets";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -172,17 +177,7 @@ describe("WS Dispatcher", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [
-            1,
-            {
-              id: 1,
-              username: "alice",
-              avatar: null,
-              role: "member",
-              status: "online",
-              customStatus: "old text",
-            } as never,
-          ],
+          [1, memberRow({ id: 1, username: "alice", customStatus: "old text" }) as never],
         ]),
       }));
       saveCustomStatus("old text");
@@ -213,17 +208,7 @@ describe("WS Dispatcher", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [
-            1,
-            {
-              id: 1,
-              username: "alice",
-              avatar: null,
-              role: "member",
-              status: "online",
-              customStatus: "old text",
-            } as never,
-          ],
+          [1, memberRow({ id: 1, username: "alice", customStatus: "old text" }) as never],
         ]),
       }));
       saveCustomStatus("old text");
@@ -257,17 +242,7 @@ describe("WS Dispatcher", () => {
       membersStore.setState((prev) => ({
         ...prev,
         members: new Map([
-          [
-            1,
-            {
-              id: 1,
-              username: "alice",
-              avatar: null,
-              role: "member",
-              status: "online",
-              customStatus: "old text",
-            } as never,
-          ],
+          [1, memberRow({ id: 1, username: "alice", customStatus: "old text" }) as never],
         ]),
       }));
       saveCustomStatus("old text");
@@ -354,18 +329,10 @@ describe("WS Dispatcher", () => {
   it("gates the DM composer (blockedByThem) when a DM send is refused with FORBIDDEN", () => {
     dmStore.setState(() => ({
       channels: [
-        {
+        dmRow({
           channelId: 7,
           recipient: { id: 5, username: "alice", avatar: "", status: "online" },
-          participants: [],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
+        }),
       ],
     }));
     addOptimisticMessage({
@@ -409,7 +376,7 @@ describe("WS Dispatcher", () => {
     // gate an unrelated 1:1 DM with that same person.
     dmStore.setState(() => ({
       channels: [
-        {
+        dmRow({
           channelId: 8,
           recipient: { id: 5, username: "alice", avatar: "", status: "online" },
           participants: [
@@ -418,12 +385,7 @@ describe("WS Dispatcher", () => {
           ],
           name: "Crew",
           isGroup: true,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
+        }),
       ],
     }));
     addOptimisticMessage({

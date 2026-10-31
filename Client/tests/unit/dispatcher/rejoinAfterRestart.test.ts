@@ -6,7 +6,13 @@ import { voiceStore } from "../../../src/stores/voice.store";
 import { uiStore, setTransientError } from "../../../src/stores/ui.store";
 import { leaveVoice as mockLeaveVoice } from "@lib/voice/livekitSession";
 import { takeJoinRefusal } from "../../../src/features/voice/joinRequest";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  readyChannel,
+  readyDm,
+  readyMember,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -139,7 +145,7 @@ describe("WS Dispatcher", () => {
       mock.dispatch("ready", {
         channels,
         dm_channels: dmChannels,
-        members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
+        members: [readyMember({ id: 5, username: "me" })],
         // The restarted hub wiped voice_states: we are not in the call.
         voice_states: [],
         roles: [],
@@ -252,7 +258,7 @@ describe("WS Dispatcher", () => {
       announceRestartAndDrop();
       await vi.runAllTimersAsync();
 
-      readyAfterRestart([{ id: 7, name: "general", type: "text", category: null, position: 0 }]);
+      readyAfterRestart([readyChannel({ id: 7 })]);
 
       expect(mock.ws.send).not.toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_join" }),
@@ -266,15 +272,11 @@ describe("WS Dispatcher", () => {
       readyAfterRestart(
         [],
         [
-          {
+          readyDm({
             channel_id: 42,
             recipient: { id: 6, username: "friend", avatar: "", status: "online" },
             recipients: [{ id: 6, username: "friend", avatar: "", status: "online" }],
-            last_message_id: null,
-            last_message: "",
-            last_message_at: "",
-            unread_count: 0,
-          },
+          }),
         ],
       );
 

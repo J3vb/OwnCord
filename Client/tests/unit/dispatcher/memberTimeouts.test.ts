@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { authStore } from "../../../src/stores/auth.store";
 import { memberTimeoutsStore, setMemberTimeouts } from "../../../src/features/moderation/store";
 import { voiceStore } from "../../../src/stores/voice.store";
 import {
   setMuted as mockSetMuted,
   setDeafened as mockSetDeafened,
 } from "@lib/voice/livekitSession";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  setMeUser,
+  readyEvent,
+  readyMember,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -39,10 +44,7 @@ describe("WS Dispatcher", () => {
   // enforcement on this path too, the widget shows the user as deafened while
   // every remote publication stays subscribed and audible.
   it("enforces a moderator server-deafen/mute from the ready (full-resync) payload", async () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     // The LiveKit session survived the WS drop (nothing tears voice down on a
     // socket drop alone) — voiceStatus is NOT idle, so the "stale voice
     // state" defense-in-depth branch below must not fire and swallow this.
@@ -52,21 +54,22 @@ describe("WS Dispatcher", () => {
       voiceStatus: "connected",
     }));
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
-      voice_states: [
-        {
-          channel_id: 3,
-          user_id: 5,
-          muted: true,
-          deafened: true,
-          server_muted: true,
-          server_deafened: true,
-        },
-      ],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        members: [readyMember({ id: 5, username: "me" })],
+        voice_states: [
+          {
+            channel_id: 3,
+            user_id: 5,
+            muted: true,
+            deafened: true,
+            server_muted: true,
+            server_deafened: true,
+          },
+        ],
+      }),
+    );
     await vi.runAllTimersAsync();
 
     expect(vi.mocked(mockSetDeafened)).toHaveBeenCalledWith(true);
@@ -80,31 +83,29 @@ describe("WS Dispatcher", () => {
   it("leaves local audio alone on a ready whose self voice_state has no moderator flags", async () => {
     vi.mocked(mockSetDeafened).mockClear();
     vi.mocked(mockSetMuted).mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 3,
       voiceStatus: "connected",
     }));
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
-      voice_states: [
-        {
-          channel_id: 3,
-          user_id: 5,
-          muted: false,
-          deafened: false,
-          server_muted: false,
-          server_deafened: false,
-        },
-      ],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        members: [readyMember({ id: 5, username: "me" })],
+        voice_states: [
+          {
+            channel_id: 3,
+            user_id: 5,
+            muted: false,
+            deafened: false,
+            server_muted: false,
+            server_deafened: false,
+          },
+        ],
+      }),
+    );
     await vi.runAllTimersAsync();
 
     expect(vi.mocked(mockSetDeafened)).not.toHaveBeenCalled();
@@ -156,10 +157,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("mirrors a moderator mute/deafen into the local flags and honors it", async () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
 
     mock.dispatch("voice_state", {
@@ -193,10 +191,7 @@ describe("WS Dispatcher", () => {
     beforeEach(() => {
       vi.mocked(mockSetDeafened).mockClear();
       vi.mocked(mockSetMuted).mockClear();
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
+      setMeUser();
       voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
     });
 
@@ -299,10 +294,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("does not set the local moderator flags from another user's voice_state", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
 
     mock.dispatch("voice_state", {
       channel_id: 3,

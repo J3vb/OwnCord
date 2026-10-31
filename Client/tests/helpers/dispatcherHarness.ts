@@ -10,6 +10,9 @@ import { uiStore } from "../../src/stores/ui.store";
 import { resetJoinRequest } from "../../src/features/voice/joinRequest";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ServerMessage } from "../../src/lib/types";
+import type { DmChannel } from "../../src/stores/dm.store";
+import { channelsStore, type Channel, type ChannelsState } from "../../src/stores/channels.store";
+import { membersStore, type Member } from "../../src/stores/members.store";
 import { getLazyVoiceImportsInFlight } from "./dispatcherMocks";
 import { resetMessagesState, resetMembersState } from "./storeResets";
 import { resetChannelsState } from "./storeSeeds";
@@ -160,5 +163,117 @@ export function useDispatcherHarness(binding: DispatcherHarnessBinding): void {
     await expectLazyVoiceImportsSettled();
     binding.currentCleanup()();
     vi.useRealTimers();
+  });
+}
+
+type Fields = Record<string, unknown>;
+
+/** A `ready` payload with every list empty; `overrides` replaces or adds fields. */
+export function readyEvent(overrides: Fields = {}): Fields {
+  return { channels: [], members: [], voice_states: [], roles: [], ...overrides };
+}
+
+/** A text channel as `ready` ships it (id 1, "general"). */
+export function readyChannel(overrides: Fields = {}): Fields {
+  return { id: 1, name: "general", type: "text", category: null, position: 0, ...overrides };
+}
+
+/** A DM channel as `ready` ships it (id 50, with bob). */
+export function readyDm(overrides: Fields = {}): Fields {
+  return {
+    channel_id: 50,
+    recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+    last_message_id: null,
+    last_message: "",
+    last_message_at: "",
+    unread_count: 0,
+    ...overrides,
+  };
+}
+
+/** A DM row as dmStore holds it (id 50, with bob). */
+export function dmRow(overrides: Partial<DmChannel> = {}): DmChannel {
+  return {
+    channelId: 50,
+    recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+    participants: [],
+    name: "",
+    isGroup: false,
+    lastMessageId: null,
+    lastMessage: "",
+    lastMessageAt: "",
+    unreadCount: 0,
+    mentionCount: 0,
+    ...overrides,
+  };
+}
+
+/** An `auth_ok` payload for admin "alex" on "TestServer". */
+export function authOkEvent(overrides: Fields = {}): Fields {
+  return {
+    user: { id: 1, username: "alex", avatar: null, role: "admin" },
+    server_name: "TestServer",
+    motd: "",
+    ...overrides,
+  };
+}
+
+/** Make member "me" (id 5) the signed-in user, leaving the rest of authStore alone. */
+export function setMeUser(): void {
+  authStore.setState((prev) => ({
+    ...prev,
+    user: { id: 5, username: "me", avatar: null, role: "member" },
+  }));
+}
+
+export function setActiveChannel(id: number | null): void {
+  channelsStore.setState((prev) => ({ ...prev, activeChannelId: id }));
+}
+
+/** A channel row as channelsStore holds it: an empty text channel the user can send in. */
+export function channelRow(overrides: Pick<Channel, "id" | "name"> & Partial<Channel>): Channel {
+  return {
+    type: "text",
+    category: null,
+    position: 0,
+    unreadCount: 0,
+    mentionCount: 0,
+    lastMessageId: null,
+    canSend: true,
+    topic: "",
+    slowMode: 0,
+    nsfw: false,
+    isPrivate: false,
+    voiceMaxUsers: 0,
+    voiceMaxVideo: 0,
+    ...overrides,
+  };
+}
+
+/** Add `rows` to channelsStore; `extra` overrides other fields of the state. */
+export function seedChannels(rows: readonly Channel[], extra: Partial<ChannelsState> = {}): void {
+  channelsStore.setState((prev) => {
+    const ch = new Map(prev.channels);
+    for (const row of rows) ch.set(row.id, row);
+    return { ...prev, channels: ch, ...extra };
+  });
+}
+
+/** A member as `ready` ships it: online, role "member". */
+export function readyMember(overrides: Fields = {}): Fields {
+  return { avatar: null, role: "member", status: "online", ...overrides };
+}
+
+/** An online member with no role beyond "member". */
+export function memberRow(overrides: Pick<Member, "id" | "username"> & Partial<Member>): Member {
+  return { avatar: null, role: "member", status: "online", ...overrides };
+}
+
+/** Add `rows` to membersStore. */
+export function seedMembers(rows: readonly Member[]): void {
+  membersStore.setState((prev) => {
+    const m = new Map(prev.members);
+    for (const row of rows) m.set(row.id, row);
+    return { ...prev, members: m };
   });
 }

@@ -28,7 +28,18 @@ import {
 import { setMarkReadSender } from "../../../src/lib/readState";
 import type { MessageResponse } from "../../../src/lib/types";
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../../src/lib/net/identity";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  readyChannel,
+  readyEvent,
+  setActiveChannel,
+  dmRow,
+  readyDm,
+  readyMember,
+  channelRow,
+  seedChannels,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -56,10 +67,10 @@ describe("WS Dispatcher", () => {
   it("wires ready to channels, members, and voice stores", () => {
     mock.dispatch("ready", {
       channels: [
-        { id: 1, name: "general", type: "text", category: null, position: 0 },
+        readyChannel(),
         { id: 2, name: "voice", type: "voice", category: null, position: 1 },
       ],
-      members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
+      members: [readyMember({ id: 1, username: "alex", role: "admin" })],
       voice_states: [{ channel_id: 2, user_id: 1, muted: false, deafened: false }],
       roles: [],
     });
@@ -70,22 +81,23 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires ready with DM channels in payload", () => {
-    mock.dispatch("ready", {
-      channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
-      members: [],
-      voice_states: [],
-      roles: [{ id: 1, name: "admin", permissions: 0x7fffffff }],
-      dm_channels: [
-        {
-          channel_id: 100,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          last_message_id: 5,
-          last_message: "hello",
-          last_message_at: "2026-03-15T10:00:00Z",
-          unread_count: 2,
-        },
-      ],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [readyChannel()],
+        roles: [{ id: 1, name: "admin", permissions: 0x7fffffff }],
+        dm_channels: [
+          {
+            channel_id: 100,
+            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+            last_message_id: 5,
+            last_message: "hello",
+            last_message_at: "2026-03-15T10:00:00Z",
+            unread_count: 2,
+          },
+        ],
+      }),
+    );
 
     const dms = dmStore.getState().channels;
     expect(dms).toHaveLength(1);
@@ -95,15 +107,15 @@ describe("WS Dispatcher", () => {
   });
 
   it("ready auto-selects first text channel when no active channel", () => {
-    mock.dispatch("ready", {
-      channels: [
-        { id: 5, name: "voice-only", type: "voice", category: null, position: 0 },
-        { id: 7, name: "general", type: "text", category: null, position: 1 },
-      ],
-      members: [],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [
+          { id: 5, name: "voice-only", type: "voice", category: null, position: 0 },
+          readyChannel({ id: 7, position: 1 }),
+        ],
+      }),
+    );
 
     expect(channelsStore.getState().activeChannelId).toBe(7);
   });
@@ -114,12 +126,12 @@ describe("WS Dispatcher", () => {
     // ChannelController gives them a composer) — a user whose only readable
     // channel is an announcement channel must still land on it, not a blank
     // pane, on first ready.
-    mock.dispatch("ready", {
-      channels: [{ id: 9, name: "news", type: "announcement", category: null, position: 0 }],
-      members: [],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [{ id: 9, name: "news", type: "announcement", category: null, position: 0 }],
+      }),
+    );
 
     expect(channelsStore.getState().activeChannelId).toBe(9);
   });
@@ -128,20 +140,17 @@ describe("WS Dispatcher", () => {
     // Regression guard for the auto-select branch: an already-active channel
     // that is STILL in the new snapshot must not be reassigned to the first
     // text channel (99 sorts after 1, so a naive "pick first" would move it).
-    channelsStore.setState((prev) => ({
-      ...prev,
-      activeChannelId: 99,
-    }));
+    setActiveChannel(99);
 
-    mock.dispatch("ready", {
-      channels: [
-        { id: 1, name: "general", type: "text", category: null, position: 0 },
-        { id: 99, name: "kept", type: "text", category: null, position: 1 },
-      ],
-      members: [],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [
+          readyChannel(),
+          { id: 99, name: "kept", type: "text", category: null, position: 1 },
+        ],
+      }),
+    );
 
     expect(channelsStore.getState().activeChannelId).toBe(99);
   });
@@ -152,62 +161,34 @@ describe("WS Dispatcher", () => {
     // pinning the bug (BUG report #2): a channel deleted/closed while this
     // client was offline stayed "active" forever, leaving its message list
     // and composer mounted against a channel the server no longer knows.
-    channelsStore.setState((prev) => ({
-      ...prev,
-      activeChannelId: 99,
-    }));
+    setActiveChannel(99);
 
-    mock.dispatch("ready", {
-      channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
-      members: [],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch("ready", readyEvent({ channels: [readyChannel()] }));
 
     expect(channelsStore.getState().activeChannelId).toBeNull();
   });
 
   it("ready keeps the active DM channel when it is still present in dm_channels", () => {
-    channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+    setActiveChannel(50);
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [],
-      voice_states: [],
-      roles: [],
-      dm_channels: [
-        {
-          channel_id: 50,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          last_message_id: null,
-          last_message: "",
-          last_message_at: "",
-          unread_count: 0,
-        },
-      ],
-    });
+    mock.dispatch("ready", readyEvent({ dm_channels: [readyDm()] }));
 
     expect(channelsStore.getState().activeChannelId).toBe(50);
   });
 
   it("ready with no text channels does not set active", () => {
-    mock.dispatch("ready", {
-      channels: [{ id: 5, name: "voice-only", type: "voice", category: null, position: 0 }],
-      members: [],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [{ id: 5, name: "voice-only", type: "voice", category: null, position: 0 }],
+      }),
+    );
 
     expect(channelsStore.getState().activeChannelId).toBeNull();
   });
 
   it("ready with no DM channels in payload leaves dmStore empty", () => {
-    mock.dispatch("ready", {
-      channels: [],
-      members: [],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch("ready", readyEvent());
 
     expect(dmStore.getState().channels).toHaveLength(0);
   });
@@ -216,29 +197,10 @@ describe("WS Dispatcher", () => {
     // The server always sends dm_channels; [] is an authoritative "no open
     // DMs" (all closed on another device), not "nothing to say".
     dmStore.setState(() => ({
-      channels: [
-        {
-          channelId: 50,
-          recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-          participants: [],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
-      ],
+      channels: [dmRow()],
     }));
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [],
-      voice_states: [],
-      roles: [],
-      dm_channels: [],
-    });
+    mock.dispatch("ready", readyEvent({ dm_channels: [] }));
 
     expect(dmStore.getState().channels).toHaveLength(0);
   });
@@ -256,25 +218,25 @@ describe("WS Dispatcher", () => {
       onTestFinished(() => focus.mockRestore());
       const sender = vi.fn();
       setMarkReadSender(sender);
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
 
-      mock.dispatch("ready", {
-        channels: [
-          {
-            id: 1,
-            name: "general",
-            type: "text",
-            category: null,
-            position: 0,
-            unread_count: 4,
-            mention_count: 2,
-          },
-        ],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          channels: [
+            {
+              id: 1,
+              name: "general",
+              type: "text",
+              category: null,
+              position: 0,
+              unread_count: 4,
+              mention_count: 2,
+            },
+          ],
+          dm_channels: [],
+        }),
+      );
 
       const ch = channelsStore.getState().channels.get(1);
       expect(ch?.unreadCount).toBe(0);
@@ -287,25 +249,25 @@ describe("WS Dispatcher", () => {
       onTestFinished(() => focus.mockRestore());
       const sender = vi.fn();
       setMarkReadSender(sender);
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
 
-      mock.dispatch("ready", {
-        channels: [
-          {
-            id: 1,
-            name: "general",
-            type: "text",
-            category: null,
-            position: 0,
-            unread_count: 4,
-            mention_count: 2,
-          },
-        ],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          channels: [
+            {
+              id: 1,
+              name: "general",
+              type: "text",
+              category: null,
+              position: 0,
+              unread_count: 4,
+              mention_count: 2,
+            },
+          ],
+          dm_channels: [],
+        }),
+      );
 
       const ch = channelsStore.getState().channels.get(1);
       expect(ch?.unreadCount).toBe(4);
@@ -318,25 +280,24 @@ describe("WS Dispatcher", () => {
       onTestFinished(() => focus.mockRestore());
       const sender = vi.fn();
       setMarkReadSender(sender);
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 50 }));
+      setActiveChannel(50);
 
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [
-          {
-            channel_id: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            last_message_id: 5,
-            last_message: "hello",
-            last_message_at: "2026-03-15T10:00:00Z",
-            unread_count: 3,
-            mention_count: 1,
-          },
-        ],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          dm_channels: [
+            {
+              channel_id: 50,
+              recipient: { id: 10, username: "bob", avatar: "", status: "online" },
+              last_message_id: 5,
+              last_message: "hello",
+              last_message_at: "2026-03-15T10:00:00Z",
+              unread_count: 3,
+              mention_count: 1,
+            },
+          ],
+        }),
+      );
 
       const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
       expect(dm?.unreadCount).toBe(0);
@@ -348,13 +309,7 @@ describe("WS Dispatcher", () => {
       const sender = vi.fn();
       setMarkReadSender(sender);
 
-      mock.dispatch("ready", {
-        channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: [readyChannel()], dm_channels: [] }));
 
       // Auto-select ran, but a first connect is not a resync — the payload's
       // counts are fresh and the user was not yet reading anything.
@@ -368,24 +323,9 @@ describe("WS Dispatcher", () => {
     it("does not mark_read the channel this ready just cleared", () => {
       const sender = vi.fn();
       setMarkReadSender(sender);
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 99 }));
+      setActiveChannel(99);
 
-      mock.dispatch("ready", {
-        channels: [{ id: 1, name: "general", type: "text", category: null, position: 0 }],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [
-          {
-            channel_id: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            last_message_id: null,
-            last_message: "",
-            last_message_at: "",
-            unread_count: 0,
-          },
-        ],
-      });
+      mock.dispatch("ready", readyEvent({ channels: [readyChannel()], dm_channels: [readyDm()] }));
 
       expect(channelsStore.getState().activeChannelId).toBeNull();
       expect(sender).not.toHaveBeenCalled();
@@ -424,13 +364,7 @@ describe("WS Dispatcher", () => {
     it("removes a dm-typed mirror row absent from the fresh dm_channels payload", () => {
       seedDmMirrorRow(3, 1);
 
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ dm_channels: [] }));
 
       expect(channelsStore.getState().channels.has(50)).toBe(false);
     });
@@ -442,23 +376,7 @@ describe("WS Dispatcher", () => {
     it("restates a surviving dm-typed mirror row's unread/mention counts from the payload", () => {
       seedDmMirrorRow(9, 4);
 
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [
-          {
-            channel_id: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            last_message_id: null,
-            last_message: "",
-            last_message_at: "",
-            unread_count: 0,
-            mention_count: 0,
-          },
-        ],
-      });
+      mock.dispatch("ready", readyEvent({ dm_channels: [readyDm({ mention_count: 0 })] }));
 
       const ch = channelsStore.getState().channels.get(50);
       expect(ch?.unreadCount).toBe(0);
@@ -472,23 +390,10 @@ describe("WS Dispatcher", () => {
     it("restates a mirror row whose mention count alone drifted", () => {
       seedDmMirrorRow(2, 4);
 
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [
-          {
-            channel_id: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            last_message_id: null,
-            last_message: "",
-            last_message_at: "",
-            unread_count: 2,
-            mention_count: 1,
-          },
-        ],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({ dm_channels: [readyDm({ unread_count: 2, mention_count: 1 })] }),
+      );
 
       const ch = channelsStore.getState().channels.get(50);
       expect(ch?.mentionCount).toBe(1);
@@ -496,50 +401,27 @@ describe("WS Dispatcher", () => {
     });
 
     it("leaves a non-dm channel row's counts alone", () => {
-      channelsStore.setState((prev) => {
-        const ch = new Map(prev.channels);
-        ch.set(1, {
-          id: 1,
-          name: "general",
-          type: "text" as const,
-          category: null,
-          position: 0,
-          unreadCount: 5,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        // Active channel is some other id — channel 1 must be neither
-        // auto-selected (activeChannelId isn't null) nor mark-read'd (it
-        // isn't the active one), both of which legitimately zero a badge on
-        // their own and would otherwise be confused for this reconciliation
-        // reaching into a channel type it must not touch.
-        return { ...prev, channels: ch, activeChannelId: 2 };
+      seedChannels([channelRow({ id: 1, name: "general", unreadCount: 5 })], {
+        activeChannelId: 2,
       });
 
-      mock.dispatch("ready", {
-        channels: [
-          {
-            id: 1,
-            name: "general",
-            type: "text",
-            category: null,
-            position: 0,
-            unread_count: 5,
-            mention_count: 0,
-          },
-        ],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          channels: [
+            {
+              id: 1,
+              name: "general",
+              type: "text",
+              category: null,
+              position: 0,
+              unread_count: 5,
+              mention_count: 0,
+            },
+          ],
+          dm_channels: [],
+        }),
+      );
 
       expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(5);
     });
@@ -564,15 +446,9 @@ describe("WS Dispatcher", () => {
 
     it("leaves history alone on the session's very first ready", () => {
       setMessages(1, [storedMessage(10)], false);
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
 
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ dm_channels: [] }));
 
       expect(isChannelLoaded(1)).toBe(true);
       expect(getChannelMessages(1)).toHaveLength(1);
@@ -591,35 +467,21 @@ describe("WS Dispatcher", () => {
       });
       cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
 
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
       setMessages(2, [storedMessage(20, 2)], false);
       // Channel 1 must stay present in every ready payload — otherwise the
       // "channel this session was viewing is gone" branch clears
       // activeChannelId first, which would make the refetch target null for
       // reasons unrelated to what this test is pinning.
-      const readyChannels = [
-        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
-      ];
+      const readyChannels = [readyChannel()];
 
       // First ready in this dispatcher's lifetime: initial connect.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
       expect(getMessages).not.toHaveBeenCalled();
 
       // Second ready: a full-ready resync.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
       // The inactive channel is invalidated but not eagerly refetched; its
       // rows stay for an instant render on the next visit (P2-T4).
@@ -649,30 +511,16 @@ describe("WS Dispatcher", () => {
       const getMessages = vi.fn().mockReturnValue(new Promise(() => {}));
       cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
 
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
-      const readyChannels = [
-        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
-      ];
+      const readyChannels = [readyChannel()];
 
       // First ready: initial connect.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
       // Second ready: a full-ready resync. The synchronous invalidation runs
       // and the refetch is fired but never resolves in this test.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
       // The rows stay on screen (P2-T4); the load state is "loading", not
       // idle (null), so a channel that had no rows shows the spinner rather
@@ -702,37 +550,22 @@ describe("WS Dispatcher", () => {
       );
       cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
 
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
       setMessages(2, [storedMessage(20, 2)], false);
-      const readyChannels = [
-        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
-        { id: 2, name: "other", type: "text" as const, category: null, position: 0 },
-      ];
+      const readyChannels = [readyChannel(), readyChannel({ id: 2, name: "other" })];
 
       // First ready: initial connect.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
       // Second ready: a full-ready resync. The refetch for channel 1 (the
       // active channel at the time) starts but does not resolve yet.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
       expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
       expect(isChannelLoaded(1)).toBe(false);
 
       // The user switches to channel 2 before that refetch resolves.
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+      setActiveChannel(2);
 
       // The stale channel-1 refetch now resolves with its pre-resync-era
       // snapshot.
@@ -756,30 +589,16 @@ describe("WS Dispatcher", () => {
     // back. The default wireDispatcher(mock.ws) from the outer beforeEach
     // has no `api` at all, so there is no getMessages to refetch with here.
     it("keeps loaded history across a resync when there is no getMessages to refetch it", () => {
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
 
-      const readyChannels = [
-        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
-      ];
+      const readyChannels = [readyChannel()];
 
       // First ready: initial connect.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
       // Second ready: a full-ready resync, with nothing able to refetch it.
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
       expect(isChannelLoaded(1)).toBe(true);
       expect(getChannelMessages(1)).toHaveLength(1);
@@ -812,7 +631,7 @@ describe("WS Dispatcher", () => {
       const getMessages = vi.fn().mockResolvedValue({ messages: [], has_more: false });
       cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
 
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
       addOptimisticMessage({
         correlationId: "c1",
@@ -824,20 +643,8 @@ describe("WS Dispatcher", () => {
       });
       markSendFailed("c1", "SLOW_MODE");
 
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ dm_channels: [] }));
+      mock.dispatch("ready", readyEvent({ dm_channels: [] }));
 
       const msgs = getChannelMessages(1);
       expect(msgs.some((m) => m.correlationId === "c1" && m.status === "failed")).toBe(true);
@@ -861,20 +668,8 @@ describe("WS Dispatcher", () => {
       setMessages(1, [storedMessage(10)], false);
 
       expect(() => {
-        mock.dispatch("ready", {
-          channels: [],
-          members: [],
-          voice_states: [],
-          roles: [],
-          dm_channels: [],
-        });
-        mock.dispatch("ready", {
-          channels: [],
-          members: [],
-          voice_states: [],
-          roles: [],
-          dm_channels: [],
-        });
+        mock.dispatch("ready", readyEvent({ dm_channels: [] }));
+        mock.dispatch("ready", readyEvent({ dm_channels: [] }));
       }).not.toThrow();
 
       expect(getMessages).not.toHaveBeenCalled();
@@ -898,27 +693,13 @@ describe("WS Dispatcher", () => {
       const getMessages = vi.fn().mockRejectedValue(new Error("network down"));
       cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
 
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
 
-      const readyChannels = [
-        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
-      ];
+      const readyChannels = [readyChannel()];
 
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
-      mock.dispatch("ready", {
-        channels: readyChannels,
-        members: [],
-        voice_states: [],
-        roles: [],
-        dm_channels: [],
-      });
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
+      mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
       await Promise.resolve();
       await Promise.resolve();
@@ -944,12 +725,9 @@ describe("WS Dispatcher", () => {
       );
       cleanup = wireDispatcher(mock.ws, { listBlocks, getMessages });
 
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+      setActiveChannel(1);
       setMessages(1, [storedMessage(10)], false);
-      const readyChannels = [
-        { id: 1, name: "general", type: "text" as const, category: null, position: 0 },
-        { id: 2, name: "other", type: "text" as const, category: null, position: 0 },
-      ];
+      const readyChannels = [readyChannel(), readyChannel({ id: 2, name: "other" })];
       const readyPayload = {
         channels: readyChannels,
         members: [],
@@ -964,7 +742,7 @@ describe("WS Dispatcher", () => {
       mock.dispatch("ready", readyPayload);
       expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
 
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
+      setActiveChannel(2);
       rejectGetMessages!(new Error("network down"));
       await Promise.resolve();
       await Promise.resolve();
@@ -977,7 +755,7 @@ describe("WS Dispatcher", () => {
     // the reader loaded and splices the refetch into it.
     describe("keeps loaded history (P2-T4)", () => {
       const readyPayload = {
-        channels: [{ id: 1, name: "general", type: "text" as const, category: null, position: 0 }],
+        channels: [readyChannel()],
         members: [],
         voice_states: [],
         roles: [],
@@ -1011,7 +789,7 @@ describe("WS Dispatcher", () => {
           listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
           getMessages,
         });
-        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        setActiveChannel(1);
         load200();
         const cached = getChannelMessages(1);
 
@@ -1038,7 +816,7 @@ describe("WS Dispatcher", () => {
           listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
           getMessages,
         });
-        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        setActiveChannel(1);
         load200();
 
         mock.dispatch("ready", readyPayload);
@@ -1065,7 +843,7 @@ describe("WS Dispatcher", () => {
         });
         const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 130 : null));
         try {
-          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setActiveChannel(1);
           setAroundMessages(1, page(100, 160).reverse(), true, true);
 
           mock.dispatch("ready", readyPayload);
@@ -1091,7 +869,7 @@ describe("WS Dispatcher", () => {
           listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
           getMessages,
         });
-        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        setActiveChannel(1);
         load200();
 
         mock.dispatch("ready", readyPayload);
@@ -1117,7 +895,7 @@ describe("WS Dispatcher", () => {
         });
         const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 10 : null));
         try {
-          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setActiveChannel(1);
           setMessages(1, page(451, 500), true);
           for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
           expect(isWindowDetached(1)).toBe(false);
@@ -1143,7 +921,7 @@ describe("WS Dispatcher", () => {
         });
         const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 490 : null));
         try {
-          channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+          setActiveChannel(1);
           setMessages(1, page(451, 500), true);
           for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
 
@@ -1167,7 +945,7 @@ describe("WS Dispatcher", () => {
           getMessages,
           getMessagesAround,
         });
-        channelsStore.setState((prev) => ({ ...prev, activeChannelId: 1 }));
+        setActiveChannel(1);
         setAroundMessages(1, page(100, 160).reverse(), true, true);
 
         mock.dispatch("ready", readyPayload);
@@ -1198,21 +976,12 @@ describe("WS Dispatcher", () => {
       user: { id: 7, username: "alex", avatar: null, role: "member" },
     }));
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [
-        {
-          id: 7,
-          username: "alex",
-          avatar: null,
-          role: "member",
-          status: "online",
-          identity_public_key: null,
-        },
-      ],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        members: [readyMember({ id: 7, username: "alex", identity_public_key: null })],
+      }),
+    );
 
     await Promise.resolve();
     expect(mockEnsurePublished).toHaveBeenCalledWith(
@@ -1246,29 +1015,15 @@ describe("WS Dispatcher", () => {
       user: { id: 7, username: "alex", avatar: null, role: "member" },
     }));
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [
-        {
-          id: 3,
-          username: "zoe",
-          avatar: null,
-          role: "member",
-          status: "online",
-          identity_public_key: "zoe-key",
-        },
-        {
-          id: 7,
-          username: "alex",
-          avatar: null,
-          role: "member",
-          status: "online",
-          identity_public_key: "alex-key",
-        },
-      ],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        members: [
+          readyMember({ id: 3, username: "zoe", identity_public_key: "zoe-key" }),
+          readyMember({ id: 7, username: "alex", identity_public_key: "alex-key" }),
+        ],
+      }),
+    );
 
     await Promise.resolve();
     // Both the username and the "key the server already holds" must be ours:
@@ -1299,12 +1054,12 @@ describe("WS Dispatcher", () => {
     // long-term identity key published against it.
     authStore.setState((prev) => ({ ...prev, user: null }));
 
-    mock.dispatch("ready", {
-      channels: [],
-      members: [{ id: 0, username: "nobody", avatar: null, role: "member", status: "online" }],
-      voice_states: [],
-      roles: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        members: [readyMember({ id: 0, username: "nobody" })],
+      }),
+    );
 
     await Promise.resolve();
     expect(mockEnsurePublished).not.toHaveBeenCalled();

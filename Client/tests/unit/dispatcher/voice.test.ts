@@ -16,7 +16,13 @@ import {
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "@lib/voice/screenShare";
 import { takeVoiceMoved } from "../../../src/features/voice/moveHint";
 import { noteJoinSent, takeJoinRefusal } from "../../../src/features/voice/joinRequest";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  type DispatcherMock,
+  setMeUser,
+  readyEvent,
+  readyChannel,
+} from "../../helpers/dispatcherHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -59,10 +65,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_state to the roster only when this device holds no call", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -81,10 +84,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_state and adopts the channel if current user and this device is joining", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({ ...prev, voiceStatus: "joining" }));
 
     mock.dispatch("voice_state", {
@@ -102,10 +102,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_state does NOT auto-join for other users", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
 
     mock.dispatch("voice_state", {
       channel_id: 3,
@@ -122,10 +119,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_leave and clears local voice state if current user kicked", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
 
     // First join voice
     voiceStore.setState((prev) => ({
@@ -142,10 +136,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_leave does NOT clear local state for other users", () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
 
     voiceStore.setState((prev) => ({
       ...prev,
@@ -166,10 +157,7 @@ describe("WS Dispatcher", () => {
   // publish + E2EE key material stay live while the UI shows not-in-voice.
   it("tears down the LiveKit session on a self voice_leave for the current channel", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 3,
@@ -190,10 +178,7 @@ describe("WS Dispatcher", () => {
   it("leaves the session to the reconnect loop on a self voice_leave while reconnecting", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
     vi.mocked(mockIsAutoReconnecting).mockReturnValueOnce(true);
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 3,
@@ -216,10 +201,7 @@ describe("WS Dispatcher", () => {
   // session, so a server eviction must still tear it down.
   it("tears down on a self voice_leave while the SDK reconnects inside a connected session", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 3,
@@ -240,10 +222,7 @@ describe("WS Dispatcher", () => {
   // elsewhere) must not kill the newer join's live session.
   it("does not tear down the session for a stale voice_leave from a channel already left", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     // Currently in channel 9 (a newer join) — the incoming voice_leave is for
     // the old channel 3.
     voiceStore.setState((prev) => ({
@@ -267,10 +246,7 @@ describe("WS Dispatcher", () => {
   // the entire voice widget (mute/leave controls included) while a session
   // may still be live. Same guard as the LiveKit teardown above.
   it("does not blank voiceStore.currentChannelId on a self voice_leave for a channel mid-switch away from", async () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     // Optimistically already moved to the new channel (7); the incoming
     // voice_leave is for the old channel (3).
     voiceStore.setState((prev) => ({
@@ -299,10 +275,7 @@ describe("WS Dispatcher", () => {
   // shape directly so a future re-introduction of such a flag is caught here.
   it("does not pass a stale-leave roster snapshot to handleParticipantLeft on a genuine departure", async () => {
     vi.mocked(mockHandleParticipantLeft).mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     // Peer 7 is present in the roster right up until their own leave, just
     // as a real join (voice_state) would have left them — nothing removes
     // them from voiceUsers before this voice_leave is processed.
@@ -353,10 +326,7 @@ describe("WS Dispatcher", () => {
   // room-key rotation) for a call that peer was never part of.
   it("does not touch E2EE peer state for a voice_leave from a channel this client is not in", async () => {
     vi.mocked(mockHandleParticipantLeft).mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     // This client's live voice session is channel 3.
     voiceStore.setState((prev) => ({
       ...prev,
@@ -375,10 +345,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_moved to a leave + re-join of the destination channel", async () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
 
     mock.dispatch("voice_moved", { to_channel_id: 7 });
@@ -395,10 +362,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_disconnected to clearing the local voice session", async () => {
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 3 }));
 
     mock.dispatch("voice_disconnected", { channel_id: 3, reason: "kicked" });
@@ -416,10 +380,7 @@ describe("WS Dispatcher", () => {
   it("does not tear down a fresher voice session for a stale queued voice_disconnected", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
     mockShowToast.mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     // A newer session is live in channel 9; the queued voice_disconnected is
     // for the old channel 3 the kick already evicted us from.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9 }));
@@ -441,10 +402,7 @@ describe("WS Dispatcher", () => {
   // explanation the user gets for being dropped from the call.
   it("still surfaces the kick toast after the sibling voice_leave already cleared the store", async () => {
     mockShowToast.mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
-      user: { id: 5, username: "me", avatar: null, role: "member" },
-    }));
+    setMeUser();
     // voice_leave for this same kick already cleared the store.
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
 
@@ -515,13 +473,14 @@ describe("WS Dispatcher", () => {
       { token: "test-token", serverName: "Test", motd: "" },
     );
 
-    mock.dispatch("ready", {
-      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
-      members: [],
-      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
-      roles: [],
-      dm_channels: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [readyChannel({ category: "" })],
+        voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+        dm_channels: [],
+      }),
+    );
 
     expect(mock.ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "voice_leave" }));
     expect(voiceStore.getState().currentChannelId).toBeNull();
@@ -538,13 +497,14 @@ describe("WS Dispatcher", () => {
       { token: "test-token", serverName: "Test", motd: "" },
     );
 
-    mock.dispatch("ready", {
-      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
-      members: [],
-      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
-      roles: [],
-      dm_channels: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [readyChannel({ category: "" })],
+        voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+        dm_channels: [],
+      }),
+    );
 
     // voice_leave should NOT be sent — the LiveKit room is active
     const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
@@ -565,15 +525,16 @@ describe("WS Dispatcher", () => {
     const { reconcileVideoFlags } = await import("@lib/voice/livekitSession");
     vi.mocked(reconcileVideoFlags).mockClear();
 
-    mock.dispatch("ready", {
-      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
-      members: [],
-      voice_states: [
-        { user_id: 42, channel_id: 10, muted: false, deafened: false, screenshare: true },
-      ],
-      roles: [],
-      dm_channels: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [readyChannel({ category: "" })],
+        voice_states: [
+          { user_id: 42, channel_id: 10, muted: false, deafened: false, screenshare: true },
+        ],
+        dm_channels: [],
+      }),
+    );
 
     await vi.waitFor(() => expect(reconcileVideoFlags).toHaveBeenCalledWith(false, true));
   });
@@ -586,13 +547,14 @@ describe("WS Dispatcher", () => {
       { token: "test-token", serverName: "Test", motd: "" },
     );
 
-    mock.dispatch("ready", {
-      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
-      members: [],
-      voice_states: [{ user_id: 99, channel_id: 10, muted: false, deafened: false }],
-      roles: [],
-      dm_channels: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [readyChannel({ category: "" })],
+        voice_states: [{ user_id: 99, channel_id: 10, muted: false, deafened: false }],
+        dm_channels: [],
+      }),
+    );
 
     // voice_leave should NOT be sent — user 42 is not in voice_states
     const sendCalls = (mock.ws.send as ReturnType<typeof vi.fn>).mock.calls;
@@ -662,13 +624,14 @@ describe("WS Dispatcher", () => {
 
     // The full resync's voice_states shows peer 7 has left channel 10 while
     // we were disconnected — only self remains.
-    mock.dispatch("ready", {
-      channels: [{ id: 1, name: "general", type: "text", category: "", position: 0 }],
-      members: [],
-      voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
-      roles: [],
-      dm_channels: [],
-    });
+    mock.dispatch(
+      "ready",
+      readyEvent({
+        channels: [readyChannel({ category: "" })],
+        voice_states: [{ user_id: 42, channel_id: 10, muted: false, deafened: false }],
+        dm_channels: [],
+      }),
+    );
     await vi.runAllTimersAsync();
 
     expect(mockHandleParticipantLeft).toHaveBeenCalledWith(7);
