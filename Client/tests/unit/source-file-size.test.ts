@@ -19,7 +19,7 @@ const MAX_LINES = 1200;
 const STEP = 50;
 
 /** Files still over the limit. Lower this with every file that leaves the list; it never rises. */
-const OVER_LIMIT_CAP = 14;
+const OVER_LIMIT_CAP = 12;
 
 const ceilings = JSON.parse(readFileSync(join(__dirname, "file-sizes.json"), "utf8")) as Record<
   string,
