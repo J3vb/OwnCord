@@ -1,4 +1,6 @@
 import { vi } from "vitest";
+import { loggerMock as sharedLoggerMock } from "./loggerMock";
+import { withOverrides } from "./voiceSessionMock";
 
 export const mockAppVersion = vi.fn();
 
@@ -33,20 +35,8 @@ export function newAppVersionMock() {
   };
 }
 
-// Mock logger
 export function loggerMock() {
-  return {
-    createLogger: () => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    }),
-    getLogBuffer: () => [],
-    clearLogBuffer: vi.fn(),
-    addLogListener: () => () => {},
-    setLogLevel: vi.fn(),
-  };
+  return sharedLoggerMock({ buffer: true });
 }
 
 export function uiStoreMock() {
@@ -66,15 +56,10 @@ export function uiStoreMock() {
 }
 
 export function voiceLivekitSessionMock() {
-  return {
+  return withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-    setVoiceSensitivity: vi.fn(),
-    setInputVolume: vi.fn(),
-    setOutputVolume: vi.fn(),
-    reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-    getSessionDebugInfo: vi.fn().mockReturnValue({}),
-  };
+  });
 }
 
 export function authStoreMock() {

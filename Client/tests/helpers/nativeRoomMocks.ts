@@ -3,6 +3,7 @@ import type {
   NativeVoiceEnvelope,
   NativeVoiceStats,
 } from "../../src/platform/contracts/nativeVoice";
+import { loggerMock as sharedLoggerMock } from "./loggerMock";
 
 export const log = {
   tags: [] as string[],
@@ -97,12 +98,12 @@ export function livekitClientMock() {
 }
 
 export function loggerMock() {
-  return {
+  return sharedLoggerMock({
     createLogger: (tag: string) => {
       log.tags.push(tag);
       return log;
     },
-  };
+  });
 }
 
 export function videoRendererMock() {

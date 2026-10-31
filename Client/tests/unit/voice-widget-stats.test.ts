@@ -7,20 +7,14 @@
 // jsdom never applies app.css, so the visual rules are pinned separately in
 // voice-polish-css.test.ts; here we pin the DOM the redesign produces.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const connectionStatsMock = vi.hoisted(() => ({
   listeners: [] as unknown[],
   qualityListeners: [] as unknown[],
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  getRoomForStats: vi.fn().mockReturnValue(null),
-  retryMicPermission: vi.fn().mockResolvedValue(undefined),
-  joinVoice: vi.fn(),
-  leaveVoice: vi.fn(),
-  toggleMute: vi.fn(),
-  toggleDeafen: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({

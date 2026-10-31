@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 // Must mock before imports
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
@@ -13,24 +14,21 @@ vi.mock("../../src/features/voice/native/platform", () => ({
   isWindowsDesktop: () => false,
   canPublishScreen: () => true,
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  getLocalScreenshareStream: () => ({
-    getVideoTracks: () => [
-      { label: "window:42:0", getSettings: () => ({ displaySurface: "window" }) },
-    ],
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getLocalScreenshareStream: () => ({
+      getVideoTracks: () => [
+        { label: "window:42:0", getSettings: () => ({ displaySurface: "window" }) },
+      ],
+    }),
+    getScreenshareQuality: () => mockShareQuality(),
+    changeScreenshareSource: () => mockChangeSource(),
+    canChangeScreenshareSource: () => mockCanChange(),
+    setScreenshareQuality: (q: string) => mockSetQuality(q),
+    retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
+    reapplyEnhancedNoiseSuppression: () => mockReapplyEnhanced(),
   }),
-  getScreenshareQuality: () => mockShareQuality(),
-  changeScreenshareSource: () => mockChangeSource(),
-  canChangeScreenshareSource: () => mockCanChange(),
-  setScreenshareQuality: (q: string) => mockSetQuality(q),
-  getRoomForStats: vi.fn().mockReturnValue(null),
-  retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
-  reapplyEnhancedNoiseSuppression: () => mockReapplyEnhanced(),
-  joinVoice: vi.fn(),
-  leaveVoice: vi.fn(),
-  toggleMute: vi.fn(),
-  toggleDeafen: vi.fn(),
-}));
+);
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({

@@ -15,17 +15,18 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { localMuted, volumes } = vi.hoisted(() => ({
   localMuted: new Set<number>(),
   volumes: new Map<number, number>(),
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  setUserVolume: vi.fn(),
-  getUserVolume: (userId: number) => volumes.get(userId) ?? 1,
-  getUserLocalMute: (userId: number) => localMuted.has(userId),
-  rePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getUserVolume: (userId: number) => volumes.get(userId) ?? 1,
+    getUserLocalMute: (userId: number) => localMuted.has(userId),
+  }),
+);
 vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../../src/components/message-list/attachments")>();

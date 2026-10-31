@@ -5,6 +5,7 @@
  * something did NOT happen.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import {
   notifyChannelActivity,
   notifyIncomingMessage,
@@ -32,15 +33,7 @@ vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
-vi.mock("../../src/lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("../../src/lib/voice/livekitSession", () => voiceSession.defaults());
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn(() => {
     if (shouldTauriNotifThrow.value) throw new Error("Tauri not available");

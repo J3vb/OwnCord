@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 // vi.hoisted ensures these are available when vi.mock factory runs
 const {
@@ -25,10 +26,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-  getShareDiagnostics: vi.fn().mockReturnValue(null),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 const { mockGetVersion } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -9,19 +9,13 @@
 // app.css, so the CSS-only facts (the focus-within reveal) are asserted in
 // voice-polish-css.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  getRoomForStats: vi.fn().mockReturnValue(null),
-  retryMicPermission: vi.fn().mockResolvedValue(undefined),
-  getUserVolume: vi.fn().mockReturnValue(100),
-  setUserVolume: vi.fn(),
-  getUserLocalMute: vi.fn().mockReturnValue(false),
-  setUserLocalMute: vi.fn(),
-  getScreenshareAudioMuted: vi.fn().mockReturnValue(false),
-  getScreenshareAudioVolume: vi.fn().mockReturnValue(1),
-  muteScreenshareAudio: vi.fn(),
-  setScreenshareAudioVolume: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getUserVolume: vi.fn().mockReturnValue(100),
+  }),
+);
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({

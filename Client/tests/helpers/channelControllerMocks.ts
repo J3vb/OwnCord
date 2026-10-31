@@ -171,16 +171,7 @@ export const { mockBlocksGetState, mockDmComposerBlockReason, blocksSubscribers 
 
 export const { mockThreadOpenById } = { mockThreadOpenById: vi.fn() };
 
-export function loggerMock() {
-  return {
-    createLogger: () => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    }),
-  };
-}
+export { loggerMock } from "./loggerMock";
 
 export function domMock() {
   return {

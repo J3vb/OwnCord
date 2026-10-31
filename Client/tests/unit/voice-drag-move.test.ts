@@ -1,11 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  setUserVolume: vi.fn(),
-  getUserVolume: vi.fn(() => 1),
-  getUserLocalMute: vi.fn(() => false),
-  rePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 const { mockOpenUserProfilePopup } = vi.hoisted(() => ({
   mockOpenUserProfilePopup: vi.fn(() => () => undefined),

@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { withOverrides } from "./voiceSessionMock";
 
 // Mock livekitSession. rePinPeerIdentity is hoisted
 // so the mock factory can reference it and tests can assert re-pin was invoked.
@@ -18,13 +19,10 @@ export const { mockOpenUserProfilePopup } = {
 };
 
 export function voiceLivekitSessionMock() {
-  return {
-    setUserVolume: vi.fn(),
-    getUserVolume: vi.fn(() => 1),
+  return withOverrides({
     getUserLocalMute: (userId: number) => mockGetUserLocalMute(userId),
     rePinPeerIdentity: mockRePinPeerIdentity,
-    peerAnnouncedIdentityKey: vi.fn(() => null),
-  };
+  });
 }
 
 export function uiToastMock() {

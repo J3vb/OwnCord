@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { withOverrides } from "./voiceSessionMock";
 
 // jsdom has no matchMedia; the lazily-loaded sidebar drawer reads its
 // breakpoint from it. Wide: the drawer stays out of the way.
@@ -108,43 +109,17 @@ export async function consentExternalMock(importOriginal: <T>() => Promise<T>) {
   };
 }
 
-export function loggerMock() {
-  return {
-    createLogger: () => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    }),
-  };
-}
+export { loggerMock } from "./loggerMock";
 
 export function voiceLivekitSessionMock() {
-  return {
-    cleanupAll: vi.fn(),
+  return withOverrides({
     setOnRemoteVideo: vi.fn(
       (cb: (userId: number, stream: MediaStream, isScreenshare: boolean) => void) => {
         capturedOnRemoteVideo.current = cb;
       },
     ),
-    setOnRemoteVideoRemoved: vi.fn(),
-    clearOnRemoteVideo: vi.fn(),
-    setWsClient: vi.fn(),
-    setServerHost: vi.fn(),
-    setOnError: vi.fn(),
-    leaveVoice: vi.fn(),
-    setMuted: vi.fn(),
-    setDeafened: vi.fn(),
-    enableCamera: vi.fn().mockResolvedValue(undefined),
-    disableCamera: vi.fn().mockResolvedValue(undefined),
-    enableScreenshare: vi.fn().mockResolvedValue(undefined),
-    disableScreenshare: vi.fn().mockResolvedValue(undefined),
-    getLocalCameraStream: vi.fn(() => null),
-    getLocalScreenshareStream: vi.fn(() => null),
-    getRemoteVideoStats: vi.fn().mockResolvedValue(null),
     getLocalScreenshareStats: vi.fn().mockResolvedValue({ sentFps: 57 }),
-    setRemoteVideoView: vi.fn(),
-  };
+  });
 }
 
 export function mediaNotificationSoundMock() {

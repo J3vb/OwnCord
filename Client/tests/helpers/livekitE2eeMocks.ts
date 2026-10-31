@@ -87,16 +87,7 @@ export function voiceStoreMock() {
   };
 }
 
-export function loggerMock() {
-  return {
-    createLogger: () => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    }),
-  };
-}
+export { loggerMock } from "./loggerMock";
 
 export async function voiceVoiceJoinTraceMock(importOriginal: <T>() => Promise<T>) {
   return {

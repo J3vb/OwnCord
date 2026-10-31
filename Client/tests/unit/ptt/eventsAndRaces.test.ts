@@ -1,5 +1,6 @@
 // Push-to-Talk service tests, continued from keyAndGating.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../../helpers/voiceSessionMock";
 
 // ---------------------------------------------------------------------------
 // Shared mock state
@@ -71,10 +72,12 @@ vi.mock("@lib/logger", () => ({
 
 // PTT only ever calls setPttGated; setMuted is mocked so tests can assert it is
 // never touched (PTT no longer uses mute).
-vi.mock("../../../src/lib/voice/livekitSession", () => ({
-  setPttGated: (gated: boolean) => mockSetPttGated(gated),
-  setMuted: (muted: boolean) => mockSetMuted(muted),
-}));
+vi.mock("../../../src/lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    setPttGated: (gated: boolean) => mockSetPttGated(gated),
+    setMuted: (muted: boolean) => mockSetMuted(muted),
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Import module under test (AFTER mocks)

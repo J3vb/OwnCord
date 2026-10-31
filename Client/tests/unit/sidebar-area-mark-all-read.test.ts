@@ -10,13 +10,14 @@
  * the composed DOM, and the CSS check below reads it from there.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  rePinPeerIdentity: vi.fn(),
-  leaveVoice: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    rePinPeerIdentity: vi.fn(),
+  }),
+);
 vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),

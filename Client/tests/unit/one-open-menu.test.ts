@@ -5,17 +5,13 @@
  * keyboard (no mousedown at all) left any open menu in place.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  setUserVolume: vi.fn(),
-  getUserVolume: vi.fn(() => 100),
-  setUserLocalMute: vi.fn(),
-  getUserLocalMute: vi.fn(() => false),
-  getScreenshareAudioMuted: vi.fn(() => false),
-  getScreenshareAudioVolume: vi.fn(() => 1),
-  muteScreenshareAudio: vi.fn(),
-  setScreenshareAudioVolume: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getUserVolume: vi.fn(() => 100),
+  }),
+);
 
 const { showContextMenu, openMenuShell } = await import("@lib/ui/contextMenu");
 const { attachThreadContextMenu } = await import("@components/channel-sidebar/threadMenu");

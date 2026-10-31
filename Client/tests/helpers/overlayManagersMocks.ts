@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { loggerMock as sharedLoggerMock } from "./loggerMock";
 
 // ---------------------------------------------------------------------------
 // Mocks (vi.hoisted so they're available in vi.mock factories)
@@ -43,14 +44,7 @@ export const {
 };
 
 export function loggerMock() {
-  return {
-    createLogger: () => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: mockLogError,
-    }),
-  };
+  return sharedLoggerMock({ error: mockLogError });
 }
 
 export function quickSwitcherMock() {

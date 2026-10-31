@@ -23,6 +23,7 @@
  * disconnect/send/onServerBusy are added.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 /** Everything the session teardown does, in the order it did it. */
 const { events, wsClients } = vi.hoisted(() => ({
@@ -84,9 +85,11 @@ vi.mock("@tauri-apps/plugin-deep-link", () => ({
 const { mockLeaveVoice } = vi.hoisted(() => ({
   mockLeaveVoice: vi.fn((..._args: unknown[]): Promise<void> => Promise.resolve()),
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
+  }),
+);
 vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
 vi.mock("@components/CertMismatchModal", () => ({
   createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
