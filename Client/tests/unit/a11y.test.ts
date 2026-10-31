@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 import {
   applyDialogSemantics,
@@ -7,16 +7,11 @@ import {
   enableRovingNavigation,
   setRovingTabindex,
 } from "@lib/ui/a11y";
+import { useMountContainer } from "../helpers/mountContainer";
 
 let container: HTMLDivElement;
-
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  container.remove();
+useMountContainer((mounted) => {
+  container = mounted;
 });
 
 function tab(el: Element, shiftKey = false): KeyboardEvent {

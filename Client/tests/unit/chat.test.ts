@@ -607,17 +607,12 @@ describe("TypingIndicator", () => {
 import { createMessageInput } from "../../src/components/MessageInput";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { useMountContainer } from "../helpers/mountContainer";
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("mounts with textarea and send button", () => {

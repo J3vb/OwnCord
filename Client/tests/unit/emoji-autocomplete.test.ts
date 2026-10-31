@@ -37,6 +37,7 @@ import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/e
 import { membersStore } from "../../src/stores/members.store";
 import { loadEmojiCatalog, setSkinTone } from "../../src/features/messaging/emojiCatalog";
 import { resetMembersState } from "../helpers/storeResets";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const EMOJI = [
   { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
@@ -186,14 +187,8 @@ describe("filterEmojiSuggestions", () => {
 
 describe("createEmojiAutocomplete", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   function mount(onSelect = vi.fn(), onClose = vi.fn()) {

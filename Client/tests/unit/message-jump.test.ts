@@ -52,6 +52,7 @@ import { expectConsole } from "../helpers/console";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -659,14 +660,8 @@ describe("Copy Message Link action", () => {
 
 describe("permalink chips in message content", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("renders a pasted permalink as a compact chip naming the channel", () => {
