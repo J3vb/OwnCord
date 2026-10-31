@@ -8,26 +8,19 @@
  * ordinary file chip, never a stuck loading state.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/net/httpProxy", () => ({
-  ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
-  stopHttpProxy: () => Promise.resolve(),
-}));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
+vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock());
+vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn() }));
-vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
-vi.mock("@stores/auth.store", () => ({
-  getToken: () => "session-token",
-  authStore: { getState: () => ({ uploadPolicy: null }) },
-}));
+vi.mock("@lib/icons", () => mocks.iconsMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
+vi.mock("@stores/auth.store", () => mocks.authStoreMock(() => "session-token"));
 
 import {
   clearAttachmentCaches,

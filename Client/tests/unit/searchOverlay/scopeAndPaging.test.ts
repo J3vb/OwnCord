@@ -1,9 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createSearchOverlay } from "../../../src/components/SearchOverlay";
+import { describe, it, expect, vi } from "vitest";
 import type { SearchResultItem, SearchResponse } from "../../../src/lib/types";
-import { setDmChannels } from "../../../src/stores/dm.store";
-import { resetBlocksStore } from "../../../src/stores/blocks.store";
-import { makeResult, makeOptions } from "../../helpers/searchOverlayHarness";
+import {
+  makeResult,
+  makeOptions,
+  mountOverlay,
+  searchInput,
+  typeQuery,
+  pressKey,
+  expectActiveRow,
+  useSearchOverlayEnv,
+  searchFor,
+} from "../../helpers/searchOverlayHarness";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -11,33 +18,11 @@ import { makeResult, makeOptions } from "../../helpers/searchOverlayHarness";
 
 describe("createSearchOverlay", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    setDmChannels([]);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    container.remove();
-    setDmChannels([]);
-    resetBlocksStore();
-    localStorage.removeItem("owncord:settings:timeFormat");
-    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
-  });
+  useSearchOverlayEnv((c) => (container = c));
 
   it("defaults to whole-server scope even when the overlay opened on a channel (D4)", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const opts = makeOptions({ onSearch, currentChannelId: 99 });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "scoped";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch, currentChannelId: 99 }, "scoped");
 
     expect(onSearch).toHaveBeenCalledWith("scoped", undefined, expect.any(AbortSignal), undefined);
 
@@ -46,14 +31,7 @@ describe("createSearchOverlay", () => {
 
   it("narrowing to 'This channel' re-runs the search scoped to the current channel (D4)", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const opts = makeOptions({ onSearch, currentChannelId: 99 });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "scoped";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch, currentChannelId: 99 }, "scoped");
     expect(onSearch).toHaveBeenLastCalledWith(
       "scoped",
       undefined,
@@ -83,14 +61,7 @@ describe("createSearchOverlay", () => {
       .fn()
       .mockResolvedValueOnce({ results: [first], next_before: 30 })
       .mockResolvedValueOnce({ results: [channelRow], next_before: null });
-    const opts = makeOptions({ onSearch, currentChannelId: 99 });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch, currentChannelId: 99 }, "hello");
 
     const loadMore = container.querySelector(
       "[data-testid='search-load-more']",
@@ -121,14 +92,7 @@ describe("createSearchOverlay", () => {
           abortedSignal = signal;
         }),
     );
-    const opts = makeOptions({ onSearch, currentChannelId: 99 });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch, currentChannelId: 99 }, "hello");
     expect(onSearch).toHaveBeenCalledTimes(1);
     const wholeServerSignal = abortedSignal;
 
@@ -139,8 +103,7 @@ describe("createSearchOverlay", () => {
   });
 
   it("does not offer a scope toggle behind the NSFW gate", () => {
-    const overlay = createSearchOverlay(makeOptions());
-    overlay.mount(container);
+    const overlay = mountOverlay(container, makeOptions());
 
     // No currentChannelId: whole-server only, nothing to narrow.
     expect(container.querySelector("[data-testid='search-scope']")).toBeNull();
@@ -150,14 +113,7 @@ describe("createSearchOverlay", () => {
 
   it("choosing 'Whole server' from channel scope calls onSearch with channelId undefined (D4)", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const opts = makeOptions({ onSearch, currentChannelId: 99 });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "scoped";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch, currentChannelId: 99 }, "scoped");
 
     // Narrow, then widen back: the whole-server search drops channel_id.
     (container.querySelector("[data-testid='search-scope-channel']") as HTMLButtonElement).click();
@@ -180,8 +136,7 @@ describe("createSearchOverlay", () => {
 
   it("makes the scope control a single Tab stop reachable by keyboard (D4)", () => {
     const opts = makeOptions({ currentChannelId: 99 });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
     const channelChip = container.querySelector("[data-testid='search-scope-channel']")!;
     const serverChip = container.querySelector("[data-testid='search-scope-server']")!;
@@ -199,14 +154,7 @@ describe("createSearchOverlay", () => {
       .fn()
       .mockResolvedValueOnce({ results: [first], next_before: 30 })
       .mockResolvedValueOnce({ results: [second], next_before: null });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "page";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "page");
 
     const loadMore = container.querySelector(
       "[data-testid='search-load-more']",
@@ -233,14 +181,7 @@ describe("createSearchOverlay", () => {
       .fn()
       .mockResolvedValueOnce({ results: [first], next_before: 30 })
       .mockResolvedValueOnce({ results: [second], next_before: null });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay, input } = await searchFor(container, { onSearch }, "hello");
 
     const loadMore = container.querySelector(
       "[data-testid='search-load-more']",
@@ -263,14 +204,7 @@ describe("createSearchOverlay", () => {
 
   it("does not show 'Load more' when the first page has no cursor", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [makeResult()] });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "single";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "single");
 
     const loadMore = container.querySelector(
       "[data-testid='search-load-more']",
@@ -284,14 +218,7 @@ describe("createSearchOverlay", () => {
     const longContent = "a".repeat(250);
     const result = makeResult({ content: longContent });
     const onSearch = vi.fn().mockResolvedValue({ results: [result] });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "long";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "long");
 
     const content = container.querySelector(".search-result-content")!;
     // 200 chars + a single trailing ellipsis (3A-11c: "…" replaces "...").
@@ -307,9 +234,8 @@ describe("createSearchOverlay", () => {
       query: string,
       onSearch = vi.fn().mockResolvedValue({ results }),
     ) {
-      const overlay = createSearchOverlay(makeOptions({ onSearch }));
-      overlay.mount(container);
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+      const overlay = mountOverlay(container, makeOptions({ onSearch }));
+      const input = searchInput(container);
       input.value = query;
       input.dispatchEvent(new Event("input"));
       await vi.advanceTimersByTimeAsync(300);
@@ -490,15 +416,10 @@ describe("createSearchOverlay", () => {
         .fn()
         .mockRejectedValueOnce(new Error("net"))
         .mockResolvedValue({ results: [] });
-      const overlay = createSearchOverlay(makeOptions({ onSearch, currentChannelId: 42 }));
-      overlay.mount(container);
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-      input.value = "h";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(300);
-      input.value = "hello";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(600);
+      const overlay = mountOverlay(container, makeOptions({ onSearch, currentChannelId: 42 }));
+      const input = searchInput(container);
+      await typeQuery(input, "h");
+      await typeQuery(input, "hello", 600);
       const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
       expect(retryBtn.style.display).not.toBe("none");
       input.value = "";
@@ -525,10 +446,8 @@ describe("createSearchOverlay", () => {
       const { overlay } = await run([], "hello", onSearch);
       const retryBtn = container.querySelector("[data-testid='search-retry']") as HTMLButtonElement;
       retryBtn.click(); // second call: stays pending
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-      input.value = "hello2";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(600);
+      const input = searchInput(container);
+      await typeQuery(input, "hello2", 600);
       resolveOld({ results: [makeResult({ message_id: 5, content: "older" })] });
       await vi.advanceTimersByTimeAsync(0);
       const text = container.querySelector(".search-result-content")!.textContent;
@@ -545,29 +464,14 @@ describe("createSearchOverlay", () => {
         makeResult({ message_id: 3 }),
       ];
       const onSearch = vi.fn().mockResolvedValue({ results });
-      const opts = makeOptions({ onSearch });
-      const overlay = createSearchOverlay(opts);
-      overlay.mount(container);
-
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-      input.value = "test";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(300);
+      const { overlay, input } = await searchFor(container, { onSearch }, "test");
 
       // First item is active
-      expect(
-        container
-          .querySelector("[data-testid='search-result-0']")!
-          .classList.contains("search-result-item--active"),
-      ).toBe(true);
+      expectActiveRow(container, 0);
 
       // Arrow up should wrap to last
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-      expect(
-        container
-          .querySelector("[data-testid='search-result-2']")!
-          .classList.contains("search-result-item--active"),
-      ).toBe(true);
+      pressKey(input, "ArrowUp");
+      expectActiveRow(container, 2);
 
       overlay.destroy?.();
     });
@@ -575,30 +479,15 @@ describe("createSearchOverlay", () => {
     it("ArrowDown wraps from last to first", async () => {
       const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
       const onSearch = vi.fn().mockResolvedValue({ results });
-      const opts = makeOptions({ onSearch });
-      const overlay = createSearchOverlay(opts);
-      overlay.mount(container);
-
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-      input.value = "test";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(300);
+      const { overlay, input } = await searchFor(container, { onSearch }, "test");
 
       // Move to last
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-      expect(
-        container
-          .querySelector("[data-testid='search-result-1']")!
-          .classList.contains("search-result-item--active"),
-      ).toBe(true);
+      pressKey(input, "ArrowDown");
+      expectActiveRow(container, 1);
 
       // One more should wrap to first
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-      expect(
-        container
-          .querySelector("[data-testid='search-result-0']")!
-          .classList.contains("search-result-item--active"),
-      ).toBe(true);
+      pressKey(input, "ArrowDown");
+      expectActiveRow(container, 0);
 
       overlay.destroy?.();
     });
@@ -614,15 +503,12 @@ describe("createSearchOverlay", () => {
         return new Promise(() => {}); // Never resolves — stalled search
       });
     const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    const input = searchInput(container);
 
     // First search
-    input.value = "first";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    await typeQuery(input, "first");
     expect(onSearch).toHaveBeenCalledTimes(1);
     const firstSignal = abortedSignal;
 
@@ -630,9 +516,7 @@ describe("createSearchOverlay", () => {
     // Advance past the MIN_SEARCH_INTERVAL_MS (500ms) rate limit before triggering debounce
     onSearch.mockImplementation(() => Promise.resolve({ results: [] }));
     await vi.advanceTimersByTimeAsync(200); // now 500ms since first search fired
-    input.value = "second";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    await typeQuery(input, "second");
 
     expect(firstSignal!.aborted).toBe(true);
     expect(onSearch).toHaveBeenCalledTimes(2);
@@ -652,16 +536,13 @@ describe("createSearchOverlay", () => {
       makeResult({ message_id: 3 }),
     ];
     const onSearch = vi.fn().mockResolvedValue({ results });
-    const overlay = createSearchOverlay(makeOptions({ onSearch }));
-    overlay.mount(container);
+    const overlay = mountOverlay(container, makeOptions({ onSearch }));
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "test";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const input = searchInput(container);
+    await typeQuery(input, "test");
 
     scrollIntoView.mockClear();
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    pressKey(input, "ArrowDown");
 
     const rows = container.querySelectorAll(".search-result-item");
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
@@ -683,20 +564,11 @@ describe("createSearchOverlay", () => {
           resolveSearch = resolve;
         }),
     );
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay, input } = await searchFor(container, { onSearch }, "hello");
     expect(onSearch).toHaveBeenCalledTimes(1);
 
     // Clear the query before the stalled search lands.
-    input.value = "";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    await typeQuery(input, "");
 
     expect(abortedSignal!.aborted).toBe(true);
 
@@ -717,14 +589,7 @@ describe("createSearchOverlay", () => {
           resolveSearch = resolve;
         }),
     );
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "searching";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "searching");
 
     const status = container.querySelector(".search-overlay-status");
     expect(status!.textContent).toBe("Searching...");
@@ -741,14 +606,7 @@ describe("createSearchOverlay", () => {
   it("ignores AbortError from cancelled search without showing error", async () => {
     const abortError = new DOMException("The operation was aborted.", "AbortError");
     const onSearch = vi.fn().mockRejectedValue(abortError);
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "aborted";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "aborted");
 
     const status = container.querySelector(".search-overlay-status");
     // Should NOT show "Search failed" for abort errors
@@ -760,16 +618,13 @@ describe("createSearchOverlay", () => {
   it("Enter is a no-op when there are no results", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
     const onSelectResult = vi.fn();
-    const opts = makeOptions({ onSearch, onSelectResult });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const { opts, overlay, input } = await searchFor(
+      container,
+      { onSearch, onSelectResult },
+      "empty",
+    );
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "empty";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
-
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    pressKey(input, "Enter");
     expect(onSelectResult).not.toHaveBeenCalled();
     expect(opts.onClose).not.toHaveBeenCalled();
 
@@ -778,18 +633,11 @@ describe("createSearchOverlay", () => {
 
   it("ArrowUp/ArrowDown are no-ops when results are empty", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "empty";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay, input } = await searchFor(container, { onSearch }, "empty");
 
     // Should not throw
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    pressKey(input, "ArrowDown");
+    pressKey(input, "ArrowUp");
 
     expect(container.querySelectorAll(".search-result-item").length).toBe(0);
 
@@ -799,10 +647,9 @@ describe("createSearchOverlay", () => {
   it("debounces rapid input changes", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
     const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    const input = searchInput(container);
 
     // Type multiple characters rapidly
     input.value = "ab";
@@ -823,15 +670,12 @@ describe("createSearchOverlay", () => {
   it("reschedules a rate-limited search instead of dropping it", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
     const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    const input = searchInput(container);
 
     // First query fires after debounce, stamping the rate-limit clock.
-    input.value = "he";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    await typeQuery(input, "he");
     expect(onSearch).toHaveBeenLastCalledWith("he", undefined, expect.any(AbortSignal), undefined);
 
     // The user keeps typing; the next debounced search lands only ~300ms after

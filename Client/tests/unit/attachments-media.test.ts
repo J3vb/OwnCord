@@ -8,6 +8,7 @@
  * Nothing is downloaded until the viewer presses play (DP-16, D2 (a)).
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
 const { fetchMock, saveMock, writeFileMock, createObjectURLMock, revokeObjectURLMock, playMock } =
   vi.hoisted(() => ({
@@ -19,23 +20,15 @@ const { fetchMock, saveMock, writeFileMock, createObjectURLMock, revokeObjectURL
     playMock: vi.fn(),
   }));
 
-vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
-vi.mock("@lib/net/httpProxy", () => ({
-  ensureHttpProxy: () => Promise.resolve("http://127.0.0.1:9999"),
-  stopHttpProxy: () => Promise.resolve(),
-}));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
-vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
-vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
-vi.mock("@stores/auth.store", () => ({
-  getToken: () => "session-token",
-  authStore: { getState: () => ({ uploadPolicy: null }) },
-}));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
+vi.mock("@lib/net/httpProxy", () => mocks.httpProxyMock());
+vi.mock("@lib/logger", () => mocks.loggerMock());
+vi.mock("@tauri-apps/plugin-dialog", () => mocks.dialogMock(saveMock));
+vi.mock("@tauri-apps/plugin-fs", () => mocks.fsMock(writeFileMock));
+vi.mock("@lib/icons", () => mocks.iconsMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
+vi.mock("@stores/auth.store", () => mocks.authStoreMock(() => "session-token"));
 
 import {
   clearAttachmentCaches,
@@ -53,6 +46,21 @@ import type { Attachment } from "@lib/types";
 async function pressPlay(el: HTMLElement): Promise<void> {
   await vi.waitFor(() => expect(el.querySelector(".msg-media-play")).not.toBeNull());
   (el.querySelector(".msg-media-play") as HTMLButtonElement).click();
+}
+
+function mediaResponse(mime: string, bytes: number[]) {
+  return {
+    ok: true,
+    headers: { get: () => mime },
+    arrayBuffer: () => Promise.resolve(new Uint8Array(bytes).buffer),
+  };
+}
+
+/** Gives the <video> intrinsic dimensions and fires the event the renderer sizes from. */
+function loadVideoMetadata(video: HTMLVideoElement, width: number, height: number): void {
+  Object.defineProperty(video, "videoWidth", { value: width });
+  Object.defineProperty(video, "videoHeight", { value: height });
+  video.dispatchEvent(new Event("loadedmetadata"));
 }
 
 /** A server without file links (the link POST answers 404) whose file route
@@ -188,11 +196,7 @@ describe("renderAttachment — video", () => {
 
   /** Render a video, press play and wait for its source to arrive. */
   async function playedVideo(): Promise<HTMLVideoElement> {
-    serveBlob({
-      ok: true,
-      headers: { get: () => "video/quicktime" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
-    });
+    serveBlob(mediaResponse("video/quicktime", [1, 2, 3]));
     const el = document.body.appendChild(
       renderAttachment(att({ mime: "video/quicktime", filename: "clip.mov", size: 2048 })),
     );
@@ -269,9 +273,7 @@ describe("renderAttachment — video", () => {
 
   it("sizes a player to the clip's real ratio once metadata loads", async () => {
     const video = await playedVideo();
-    Object.defineProperty(video, "videoWidth", { value: 1080 });
-    Object.defineProperty(video, "videoHeight", { value: 1920 });
-    video.dispatchEvent(new Event("loadedmetadata"));
+    loadVideoMetadata(video, 1080, 1920);
     expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("1080/1920");
     // Scaled into the 400x300 box: 300 tall, so 169 wide, no black bars.
     expect(video.style.width).toBe("169px");
@@ -279,43 +281,33 @@ describe("renderAttachment — video", () => {
 
   it("never scales a small clip up", async () => {
     const video = await playedVideo();
-    Object.defineProperty(video, "videoWidth", { value: 320 });
-    Object.defineProperty(video, "videoHeight", { value: 240 });
-    video.dispatchEvent(new Event("loadedmetadata"));
+    loadVideoMetadata(video, 320, 240);
     expect(video.style.width).toBe("320px");
   });
 
   it("widens a tiny clip so its controls fit", async () => {
     const video = await playedVideo();
-    Object.defineProperty(video, "videoWidth", { value: 40 });
-    Object.defineProperty(video, "videoHeight", { value: 40 });
-    video.dispatchEvent(new Event("loadedmetadata"));
+    loadVideoMetadata(video, 40, 40);
     expect(video.style.width).toBe("120px");
     expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("40/40");
   });
 
   it("letterboxes a very tall clip instead of passing the box height", async () => {
     const video = await playedVideo();
-    Object.defineProperty(video, "videoWidth", { value: 100 });
-    Object.defineProperty(video, "videoHeight", { value: 10000 });
-    video.dispatchEvent(new Event("loadedmetadata"));
+    loadVideoMetadata(video, 100, 10000);
     expect(video.style.width).toBe("120px");
     expect(video.style.aspectRatio.replace(/\s/g, "")).toBe("120/300");
   });
 
   it("caps a wide clip at the box width", async () => {
     const video = await playedVideo();
-    Object.defineProperty(video, "videoWidth", { value: 1920 });
-    Object.defineProperty(video, "videoHeight", { value: 1080 });
-    video.dispatchEvent(new Event("loadedmetadata"));
+    loadVideoMetadata(video, 1920, 1080);
     expect(video.style.width).toBe("400px");
   });
 
   it("keeps a played clip's shape when the row is rebuilt", async () => {
     const video = await playedVideo();
-    Object.defineProperty(video, "videoWidth", { value: 1080 });
-    Object.defineProperty(video, "videoHeight", { value: 1920 });
-    video.dispatchEvent(new Event("loadedmetadata"));
+    loadVideoMetadata(video, 1080, 1920);
 
     const rebuilt = renderAttachment(att({ mime: "video/quicktime", filename: "clip.mov" }));
     const again = rebuilt.querySelector("video") as HTMLVideoElement;
@@ -340,9 +332,7 @@ describe("renderAttachment — video", () => {
 
   it("keeps a player whose video decodes", async () => {
     const video = await playedVideo();
-    Object.defineProperty(video, "videoWidth", { value: 1280 });
-    Object.defineProperty(video, "videoHeight", { value: 720 });
-    video.dispatchEvent(new Event("loadedmetadata"));
+    loadVideoMetadata(video, 1280, 720);
     expect(document.querySelector("video")).toBe(video);
     expect(document.querySelector(".msg-file")).toBeNull();
   });
@@ -365,11 +355,7 @@ describe("renderAttachment — video", () => {
   });
 
   it("downloads nothing until play is pressed", async () => {
-    serveBlob({
-      ok: true,
-      headers: { get: () => "video/mp4" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
-    });
+    serveBlob(mediaResponse("video/mp4", [1, 2, 3]));
 
     const el = document.body.appendChild(
       renderAttachment(att({ mime: "video/mp4", filename: "clip.mp4" })),
@@ -390,11 +376,7 @@ describe("renderAttachment — video", () => {
   });
 
   it("sources the player from the authenticated fetch, not the raw URL", async () => {
-    serveBlob({
-      ok: true,
-      headers: { get: () => "video/mp4" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
-    });
+    serveBlob(mediaResponse("video/mp4", [1, 2, 3]));
 
     const el = renderAttachment(att({ mime: "video/webm", filename: "clip.webm" }));
     const video = el.querySelector("video") as HTMLVideoElement;
@@ -427,11 +409,7 @@ describe("renderAttachment — video", () => {
   });
 
   it("reuses one download when the same attachment is rendered twice", async () => {
-    serveBlob({
-      ok: true,
-      headers: { get: () => "video/mp4" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
-    });
+    serveBlob(mediaResponse("video/mp4", [1, 2, 3]));
 
     const first = renderAttachment(att({ mime: "video/mp4" }));
     await pressPlay(first);
@@ -451,11 +429,7 @@ describe("renderAttachment — video", () => {
   });
 
   it("revokes cached blob URLs when the attachment caches are cleared", async () => {
-    serveBlob({
-      ok: true,
-      headers: { get: () => "video/mp4" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    serveBlob(mediaResponse("video/mp4", [1]));
 
     const el = renderAttachment(att({ mime: "video/mp4" }));
     await pressPlay(el);
@@ -470,11 +444,7 @@ describe("renderAttachment — video", () => {
   it("evicts the oldest blob (FIFO) once the media cache cap is exceeded", async () => {
     let nextBlobId = 0;
     createObjectURLMock.mockImplementation(() => `blob:mock-${++nextBlobId}`);
-    serveBlob({
-      ok: true,
-      headers: { get: () => "video/mp4" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    serveBlob(mediaResponse("video/mp4", [1]));
 
     // One more than the cap (20) — the first URL fetched must be evicted (and
     // its blob revoked) to make room for the last one, without ever growing
@@ -527,11 +497,7 @@ describe("renderAttachment — audio", () => {
   });
 
   it("sets the player source from the authenticated fetch", async () => {
-    serveBlob({
-      ok: true,
-      headers: { get: () => "audio/wav" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    serveBlob(mediaResponse("audio/wav", [1]));
 
     const el = document.body.appendChild(
       renderAttachment(att({ mime: "audio/wav", filename: "sound.wav" })),
@@ -559,11 +525,7 @@ describe("renderAttachment — audio", () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     el.remove();
-    respond({
-      ok: true,
-      headers: { get: () => "audio/wav" },
-      arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-    });
+    respond(mediaResponse("audio/wav", [1]));
 
     await vi.waitFor(() => {
       expect(audio.src).toContain("blob:mock-1");

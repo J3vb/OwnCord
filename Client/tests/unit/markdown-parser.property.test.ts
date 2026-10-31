@@ -11,7 +11,7 @@
  *    already in place for bracket matching.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 
 import { parseInline, parseBlocks } from "../../src/lib/text/markdown";
@@ -19,41 +19,9 @@ import {
   renderInlineContent,
   renderMessageContent,
 } from "../../src/features/messaging/content/contentParser";
-import { membersStore } from "../../src/stores/members.store";
-import { setChannels } from "../../src/stores/channels.store";
-import type { ReadyChannel } from "../../src/lib/types";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
+import { useContentContainer } from "../helpers/contentRenderHarness";
 
-const CHANNELS: ReadyChannel[] = [
-  { id: 1, name: "general", type: "text", category: null, position: 0 },
-];
-
-function seedStores(): void {
-  membersStore.setState(() => ({
-    members: new Map([
-      [10, { id: 10, username: "alice", avatar: null, role: "member", status: "online" as const }],
-    ]),
-    typingUsers: new Map(),
-  }));
-  signInAs(
-    { id: 12, username: "me", avatar: null, role: "member" },
-    { token: "t", serverName: null },
-  );
-  resetChannelsState();
-  setChannels(CHANNELS);
-}
-
-let container: HTMLDivElement;
-
-beforeEach(() => {
-  seedStores();
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  container.remove();
-});
+useContentContainer();
 
 /** Small alphabet of markdown-significant characters, weighted heavily toward
  *  the tokens the grammar actually branches on — random unicode alone rarely

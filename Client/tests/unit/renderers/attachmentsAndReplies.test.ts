@@ -9,6 +9,8 @@ import {
   makeMessage,
   makeOpts,
   useRenderersHarness,
+  mountMessage,
+  mountContent,
 } from "../../helpers/renderersHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -35,9 +37,7 @@ describe("renderers", () => {
       it(`produces a .msg-image embed for a ${ext} URL`, async () => {
         const url = `https://example.com/image${ext}`;
         const msg = makeMessage({ content: url });
-        const ac = new AbortController();
-        const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-        container.appendChild(el);
+        const { ac } = mountMessage(container, msg);
 
         // renderUrlEmbeds calls isDirectImageUrl → renderInlineImage
         // which produces a div.msg-image inside the message element.
@@ -54,9 +54,7 @@ describe("renderers", () => {
     it("does not produce a .msg-image embed for a non-image URL", () => {
       const url = "https://example.com/page.html";
       const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       // A generic link card (.msg-embed-link) should appear instead
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
@@ -70,9 +68,7 @@ describe("renderers", () => {
       // The path itself has no image extension — only a query string does
       const url = "https://example.com/image?format=png";
       const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
       expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
@@ -83,10 +79,7 @@ describe("renderers", () => {
     it("matches image extensions case-insensitively", async () => {
       // Uppercase extensions must also be detected
       const url = "https://example.com/photo.PNG";
-      const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountContent(container, url);
 
       expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url });
       await brokerImages(1);
@@ -97,9 +90,7 @@ describe("renderers", () => {
     it("does not treat a YouTube URL with no image extension as a direct image", () => {
       const url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
       const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       // YouTube gets a player embed, not a .msg-image with that src
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
@@ -174,9 +165,7 @@ describe("renderers", () => {
     it("creates an img element with the correct src attribute", async () => {
       const url = "https://example.com/photo.jpg";
       const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const img = container.querySelector(`.msg-image img`) as HTMLImageElement | null;
       expect(img).not.toBeNull();
@@ -192,9 +181,7 @@ describe("renderers", () => {
     it("wraps the img in a div with class msg-image", () => {
       const url = "https://cdn.example.com/banner.gif";
       const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const wrap = container.querySelector(".msg-image");
       expect(wrap).not.toBeNull();
@@ -205,10 +192,7 @@ describe("renderers", () => {
 
     it("appends a lightbox overlay to document.body on img click", async () => {
       const url = "https://example.com/photo.png";
-      const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountContent(container, url);
 
       const [img] = await brokerImages(1);
       expect(img).toBeDefined();
@@ -229,10 +213,7 @@ describe("renderers", () => {
 
     it("lightbox contains a close button that removes the overlay", async () => {
       const url = "https://example.com/photo.webp";
-      const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountContent(container, url);
 
       const [img] = await brokerImages(1);
       img!.click();
@@ -251,10 +232,7 @@ describe("renderers", () => {
 
     it("lightbox contains an img element with the same src as the inline image", async () => {
       const url = "https://example.com/pic.jpeg";
-      const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountContent(container, url);
 
       const [img] = await brokerImages(1);
       img!.click();
@@ -272,10 +250,7 @@ describe("renderers", () => {
 
     it("closes lightbox when Escape key is pressed", async () => {
       const url = "https://example.com/escape-test.png";
-      const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountContent(container, url);
 
       const [img] = await brokerImages(1);
       img!.click();
@@ -300,9 +275,7 @@ describe("renderers", () => {
         user: { id: 0, username: "System", avatar: null },
         content: "@alice joined the server",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".system-msg")).not.toBeNull();
       expect(container.querySelector(".sm-icon")).not.toBeNull();
@@ -318,9 +291,7 @@ describe("renderers", () => {
         content: "@alice joined the server",
         timestamp: new Date().toISOString(),
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { el, ac } = mountMessage(container, msg);
 
       // The header format is "Today at 2:34 PM", not the bare 24h "14:34"
       // formatTime used to render here (DP-48).
@@ -335,9 +306,7 @@ describe("renderers", () => {
         content: "@alice was promoted to admin",
       });
       seedMentionMembers();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { el, ac } = mountMessage(container, msg);
 
       const mention = el.querySelector(".mention");
       expect(mention).not.toBeNull();
@@ -355,9 +324,7 @@ describe("renderers", () => {
         user: { id: 42, username: "System", avatar: null },
         content: "Your session was flagged — re-enter your password at evil.example",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".system-msg")).toBeNull();
       expect(container.querySelector(".msg-author")).not.toBeNull();
@@ -528,9 +495,7 @@ describe("renderers", () => {
     it("produces a .msg-image element for a direct image URL instead of a generic link card", () => {
       const url = "https://static.example.com/hero.png";
       const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-image")).not.toBeNull();
       expect(container.querySelector(".msg-embed-link")).toBeNull();
@@ -541,9 +506,7 @@ describe("renderers", () => {
     it("does not duplicate embeds for the same URL appearing twice in content", async () => {
       const url = "https://example.com/img.gif";
       const msg = makeMessage({ content: `${url} and again ${url}` });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       // URL dedup inside renderUrlEmbeds — only one img embed produced
       expect(container.querySelectorAll(".msg-image img").length).toBe(1);
@@ -557,9 +520,7 @@ describe("renderers", () => {
     it("skips image URLs that appear inside code blocks", () => {
       const url = "https://example.com/hidden.png";
       const msg = makeMessage({ content: `\`\`\`${url}\`\`\`` });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       // URL inside a code block must not produce an embed
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
@@ -571,9 +532,7 @@ describe("renderers", () => {
     it("skips image URLs inside inline code", () => {
       const url = "https://example.com/inline.png";
       const msg = makeMessage({ content: `Look at \`${url}\`` });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
       expect(imageMock).not.toHaveBeenCalledWith(expect.any(String), { url });
@@ -584,10 +543,7 @@ describe("renderers", () => {
     it("renders multiple different image URLs as separate .msg-image embeds", async () => {
       const url1 = "https://example.com/a.png";
       const url2 = "https://example.com/b.gif";
-      const msg = makeMessage({ content: `${url1} and ${url2}` });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountContent(container, `${url1} and ${url2}`);
 
       expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: url1 });
       expect(imageMock).toHaveBeenCalledWith(expect.any(String), { url: url2 });
@@ -600,9 +556,7 @@ describe("renderers", () => {
     it("renders a generic link card for a plain https URL with no image extension", () => {
       const url = "https://example.com/some-article";
       const msg = makeMessage({ content: url });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-embed-link")).not.toBeNull();
       expect(container.querySelector(`.msg-image img[src="${url}"]`)).toBeNull();
@@ -613,9 +567,7 @@ describe("renderers", () => {
 
     it("produces no embeds for a message with no URLs", () => {
       const msg = makeMessage({ content: "just plain text, no links" });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-embed")).toBeNull();
       expect(container.querySelector(".msg-image")).toBeNull();
