@@ -88,13 +88,6 @@ export interface SidebarScope {
   serverOnlineEl: HTMLSpanElement;
   // Invite, Audit Log and Moderation: one row of quiet icon buttons.
   headerActions: HTMLDivElement;
-  // Mark Server as Read: a server-wide action, so it lives in this header rather
-  // than in ChannelSidebar's own header (hidden here, see sidebar.css). First in
-  // the row so it appearing and disappearing does not move Invite. Shown only
-  // while a server channel is unread (DMs are not part of the server and are
-  // left alone); those badges live in channels.store.
-  markAllBtn: HTMLButtonElement;
-  syncMarkAllBtn: () => void;
   headerInviteCtrl: InviteManagerController;
   headerInviteBtn: HTMLButtonElement;
   // ---------------------------------------------------------------------------

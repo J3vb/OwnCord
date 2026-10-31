@@ -59,6 +59,8 @@ and only when it changes something a contributor or fork holder must do
 - On Linux, dragging files from the file manager into a channel, or pasting files you copied there (Ctrl+V), attached nothing. Both now attach the files, as on Windows.
 - Voice Activity with the sensitivity slider set by hand let typing, a fan or breathing through, and after you spoke it stayed open through them. The slider now also asks the noise filter whether it hears a voice, as automatic sensitivity already did.
 
+- Clicking a channel right after a new message arrived sometimes opened the channel below it: a Mark Server as Read icon appeared in the header and pushed the channel list down. The icon is gone, so the list no longer moves; Mark as Read stays in the server name menu and on Shift+Esc.
+
 ## v2.7.0
 
 **OwnCord 2.7** (the eighth public beta) is the first release with an **Android app**: download the APK from the release page and it updates itself after that. On phones, OwnCord now works like a phone app, with a server drawer, a call bar, a full-screen call view, Push to Talk and a phone-shaped status dot. Admins get a Storage page, per-member upload limits, a health row and saved server logs, and the voice gate now works in decibels like Discord's.
