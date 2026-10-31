@@ -38,7 +38,7 @@ On the server, the GIF proxy (`Server/api/gif_handler.go`) and the plugin
 Those rows in the table below are still current.
 
 The full policy is the C-09 contract in
-[trust-model.md](../trust-model.md#desktop-preview-destination-policy-c-09--contract-for-b7).
+[trust-model.md](trust-model-evidence.md#desktop-preview-destination-policy-c-09--contract-for-b7).
 
 ## Why previews stay client-side
 

@@ -1,10 +1,33 @@
 # Credential storage
 
-This page explains where the desktop client keeps its secrets: saved logins,
-the voice identity key, and unsent message text. It also covers how to check
-the store on a machine and what to do when saving fails. It is for users
-debugging a lost login or identity key, and for contributors changing the
-secret store.
+Where the desktop app keeps your saved sign-in, your voice key and unsent
+messages.
+
+## For users
+
+- **Your saved sign-ins and voice key** are kept in the system keychain:
+  Windows Credential Manager, or the keyring on Linux. If there is no working
+  keychain, the app uses an encrypted file instead.
+- **Your password never reaches the app's web page.** Only the Rust side of
+  the app reads it, to sign you in.
+- **Unsent messages** are kept the same way, per server and per account, so
+  they survive a crash.
+
+**Lost your saved sign-in or got a "key changed" notice for yourself?** Look
+in the app's log (tray icon → **Open Log Folder**) for a line starting with
+`credential store:`. Anything other than `OS keyring, persists until deleted`
+names the problem. On Windows you can check the stored entries with:
+
+```bat
+cmdkey /list | findstr /i owncord
+```
+
+The Credential Manager window hides these entries, so it looks empty even when
+everything is fine.
+
+## Technical detail
+
+The rest of this page is for contributors changing the secret store.
 
 The client saves these secrets through a verified secret store, under the
 service name `com.owncord.client`. It tries the OS credential store first.

@@ -1273,7 +1273,7 @@ Client                     OwnCord Server              LiveKit Server
   includes a compose-internal name such as `ws://livekit:7880`, which only
   works inside the container network. This rule is the same on every platform,
   including Linux native voice
-  ([security.md](../security.md#tauri-capabilities-least-privilege)).
+  ([security.md](../security-model.md#tauri-capabilities-least-privilege)).
   - Linux clients up to 2.0.0-beta.1 used any `direct_url` as-is for a
     `localhost` server. See
     [Linux app cannot join voice](troubleshooting.md#the-linux-app-cannot-join-voice).
