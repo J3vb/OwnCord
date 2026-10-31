@@ -412,7 +412,7 @@ describe("createAvatarElement with an animated picture", () => {
     await vi.waitFor(() => expect(reduced.querySelector("img")?.getAttribute("src")).toBe(STILL));
   });
 
-  it("drops the picture when its row went away while the still was being drawn", async () => {
+  it("binds no animation for a row that went away while the still was being drawn", async () => {
     fetchImageAsObjectUrl.mockResolvedValue("blob:old");
     cachedImageBytes.mockReturnValue(async () => twoFrameGif());
     const el = createAvatarElement(
@@ -423,11 +423,34 @@ describe("createAvatarElement with an animated picture", () => {
     await vi.waitFor(() => expect(loads.length).toBe(1));
     // A user_update with a new avatar rebuilt the row meanwhile.
     el.remove();
+    const observers = vi.spyOn(globalThis, "MutationObserver");
     loads[0]!();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(el.querySelector("img")).toBeNull();
-    expect(el.textContent).toBe("A");
+    // The first frame goes in, but nothing that would keep the discarded row
+    // alive: no animation binding, no document observer.
+    await vi.waitFor(() => expect(el.querySelector("img")?.getAttribute("src")).toBe(STILL));
+    expect(el.querySelector("img")?.dataset["mediaSrc"]).toBeUndefined();
+    expect(observers).not.toHaveBeenCalled();
+  });
+
+  it("plays a picture drawn before its tile was shown once it is pointed at", async () => {
+    fetchImageAsObjectUrl.mockResolvedValue("blob:anim");
+    cachedImageBytes.mockReturnValue(async () => twoFrameGif());
+    // A call tile built while the camera is on, shown when it goes off.
+    const el = createAvatarElement(
+      { username: "ada", avatar: "/api/v1/files/tile" },
+      { className: "dcp-avatar" },
+    );
+    await vi.waitFor(() => expect(loads.length).toBe(1));
+    loads[0]!();
+    await vi.waitFor(() => expect(el.querySelector("img")?.getAttribute("src")).toBe(STILL));
+
+    document.body.appendChild(el);
+    vi.spyOn(el, "matches").mockImplementation((sel) => sel === ":hover");
+    el.dispatchEvent(new Event("pointerenter"));
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("blob:anim");
+    vi.mocked(el.matches).mockReturnValue(false);
+    el.dispatchEvent(new Event("pointerleave"));
+    expect(el.querySelector("img")?.getAttribute("src")).toBe(STILL);
   });
 
   it("shows a still picture as it is, with no hover binding", async () => {

@@ -239,10 +239,23 @@ export function createAvatarElement(
   }
 
   const resolved = resolveServerUrl(subject.avatar);
+  const bindAnimationOnFirstUse = (
+    img: HTMLImageElement,
+    objectUrl: string,
+    still: string,
+  ): void => {
+    const bind = (): void => {
+      if (!wrapper.isConnected) return;
+      wrapper.removeEventListener("pointerenter", bind);
+      wrapper.removeEventListener("focusin", bind);
+      // Binding checks the hover and focus already on it, so it starts playing.
+      bindAnimatedImage(img, objectUrl, still, avatarAnimationMode(wrapper, options.animate));
+    };
+    wrapper.addEventListener("pointerenter", bind);
+    wrapper.addEventListener("focusin", bind);
+  };
+
   const swapInImage = (objectUrl: string | null): Promise<void> | undefined => {
-    // Swapped in even while detached: a host may build the avatar ahead of
-    // showing it (a call tile kept for when the camera goes off), and a
-    // picture that arrived meanwhile would otherwise never show.
     if (objectUrl === null) return undefined;
     const img = createElement("img", {
       class: "avatar-img",
@@ -251,10 +264,18 @@ export function createAvatarElement(
       decoding: "async",
     });
     recoverEvictedImage(img, { url: resolved });
-    return setAvatarSource(img, objectUrl, () =>
-      avatarAnimationMode(wrapper, options.animate),
-    ).then((current) => {
-      if (!current) return;
+    return avatarStill(objectUrl).then((still) => {
+      if (still === null) img.src = objectUrl;
+      else if (wrapper.isConnected) {
+        bindAnimatedImage(img, objectUrl, still, avatarAnimationMode(wrapper, options.animate));
+      } else {
+        // Not on screen: a host may build the avatar ahead of showing it (a
+        // call tile kept for when the camera goes off), or the row was torn
+        // down. Show the first frame either way, and bind the animation only
+        // once someone points at it, so a discarded avatar holds no observer.
+        img.src = still;
+        bindAnimationOnFirstUse(img, objectUrl, still);
+      }
       // Replacing rather than hiding keeps the letter out of the accessibility
       // tree once a real picture is there.
       letter.remove();
