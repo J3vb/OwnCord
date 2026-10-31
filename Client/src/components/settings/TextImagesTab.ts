@@ -9,7 +9,7 @@ import {
   composerButtonPrefKey,
   type ComposerButton,
 } from "../../features/messaging/composerButtons";
-import { appendToggleRows } from "./helpers";
+import { appendToggleRows, platformText } from "./helpers";
 import { settingsText as t } from "../../i18n/settings";
 
 export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
@@ -58,14 +58,18 @@ export function buildTextImagesTab(signal: AbortSignal): HTMLDivElement {
     {
       button: "emoji",
       label: t("images.chatBar.emoji.label"),
-      desc: t("images.chatBar.emoji.desc"),
+      desc: platformText(t("images.chatBar.emoji.desc"), t("images.chatBar.emoji.desc.android")),
     },
     {
       button: "sticker",
       label: t("images.chatBar.sticker.label"),
       desc: t("images.chatBar.sticker.desc"),
     },
-    { button: "gif", label: t("images.chatBar.gif.label"), desc: t("images.chatBar.gif.desc") },
+    {
+      button: "gif",
+      label: t("images.chatBar.gif.label"),
+      desc: platformText(t("images.chatBar.gif.desc"), t("images.chatBar.gif.desc.android")),
+    },
     { button: "poll", label: t("images.chatBar.poll.label"), desc: t("images.chatBar.poll.desc") },
     {
       button: "voice",

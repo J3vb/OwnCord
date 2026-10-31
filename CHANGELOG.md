@@ -49,25 +49,97 @@ and only when it changes something a contributor or fork holder must do
 
 ### Added
 
+**Android**
+
+- The Android app is on the release page: download `OwnCord_<version>_arm64.apk` and install it (Android asks once to allow installs from your browser). After that the app updates itself: it shows "Update available", downloads the new version and opens Android's installer, where you tap Install. Your sign-in and settings stay.
+
+**Voice**
+
+- On Linux, one failed connection on the local video preview socket stopped every camera, screen and remote video preview until the call was rejoined — the socket now keeps accepting connections.
+
+**Desktop UI**
+
+- Sign-in checks on incoming server messages in the desktop app no longer read every message in full — they skip messages that cannot be the sign-in reply.
+
 **Phones and touch screens**
 
 - Message actions, the emoji/GIF/sticker picker and member profiles open as bottom sheets on phones: big reaction buttons, full-width picker, large Message and Call buttons. Swipe down, tap outside or press Back to close. The header search box is a search icon.
+- On phones, a call bar under the header shows the call you are in with mute and leave, and tapping a voice channel asks before joining. The call view's chat now starts closed on a phone
+- On phones, the channel drawer has your server list on its left (Direct Messages, your servers, Add a server) and a "Find or start a conversation" search under the server name. Swipe right on the chat for the channels, left for the member list, and a message left to reply; swipe the drawer or member list away to close it. In the Android app, Back closes sheets and dialogs, then the drawer or member list, then opens the channel list, and one more Back leaves the app.
+- Phone polish: message times show just the clock (the full date stays in the tooltip), reactions and menu rows are 44 px to tap, the channel menu (long-press), the server menu and the status picker open as bottom sheets (Mute Channel and Notification Settings open a second page), a failed send's "delivery not confirmed" line wraps, the call bar hides while you are in your own DM call, the phone layout now holds when the phone is turned sideways, and the Android app gives a short buzz when a long-press opens a sheet.
+- Phone call screen: the call view's controls are 44 px with Chat beside Leave, tapping a stream or camera focuses it and tapping it again gives the focus back, a focused tile's full screen button turns the phone to landscape where it can and Back leaves full screen, and a DM call rings on the whole screen with big Accept and Decline buttons (Back hides it down to the banner, and the ring goes on).
 
 **Desktop UI**
 
 - Picking another server in the server rail or the switch list asks "Switch to (server name)?" first, so a stray click no longer drops you out of a call. Tick "Don't ask again" to skip it; turn it back on in Settings > Advanced > Ask before switching servers.
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
 
+**Server admin panel**
+
+- New Storage page (Manage Server): one bar shows what fills the disk (uploads, database, backups, free space), and every uploaded file is listed, largest or newest first, filterable by type, channel, member and age. Tick up to 100 files and delete them; each delete goes in the audit log. It also finds leftover files no message uses and cleans them up.
+- Members page: a Storage column shows how much each member has uploaded, and the row menu's Upload limit gives one member their own limit or none, instead of the server-wide one. **This changes the database** (one new column).
+
+### Changed
+
+**Voice**
+
+- The Input Sensitivity slider is now in decibels, like Discord's: each step is the same loudness change anywhere on the slider, and the value beside the meter reads "-40 dB" instead of a percentage. A saved sensitivity is moved onto the new scale once and keeps the gate level it had.
+- Voice Activity opens the mic at the slider's level and closes it only 6 dB lower, after half a second of quiet, so a voice near the line no longer flickers and the quieter stretches of a word are not cut.
+- Automatic input sensitivity now learns how loud your voice is and sets the gate between the room's noise and your voice, instead of a fixed step above the noise. With Noise Suppression on, breaths, chairs and keyboards no longer open the mic once you have spoken; in a loud room the gate stays low enough for soft words. A louder room is followed within 3 s.
+- On Linux, automatic input sensitivity also asks the noise suppressor whether what it hears is a voice, as on Windows: typing, a cough or a fan that clears the level no longer opens the mic; Enhanced Noise Suppression does not have to be on.
+- Automatic input sensitivity also asks the noise suppressor whether what it hears is a voice, like Discord's Krisp gate: typing, a cough or a fan that clears the level no longer opens the mic, and quiet speech at the line still does. This works on the desktop app on Windows and in the browser client; Enhanced Noise Suppression does not have to be on.
+
+**Phones and touch screens**
+
+- The Android app hides desktop-only settings and buttons (pop-out, Keybinds, tray, taskbar and screen share options), and Enter adds a new line in the message box there; the send button sends.
+
+**Admin panel**
+
+- The admin panel's Dashboard opens with a health row: CPU (OwnCord's share and the whole machine's), RAM, free disk space and uptime, each with a one-hour line, refreshed every 5 seconds. Inside Docker with a memory limit, RAM is measured against the container's limit. Tiles turn yellow or red when CPU stays high, memory is nearly full or the disk runs low. Shown to admins with View Diagnostics.
+- A Slow requests card under the health row lists the ten slowest kinds of request in the last hour: the route, how many calls, the typical and the worst time. Routes show by pattern (`/api/v1/channels/{id}/messages`), never with ids. Live connections such as voice, the log viewer and file downloads are left out. Shown to admins with View Diagnostics.
+- Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
+
 ### Fixed
+
+**Admin panel**
+
+- "Back up now" and "Restore" showed an error after 30 seconds on a big database even though the work finished (and a retried backup made a second copy) — both now run to completion.
+- A database error while deciding an appeal told the moderator it was "already decided or withdrawn" — it now reports a server error.
+- Server logs opened slowly once many lines were collected. A full log now opens in a fraction of a second, and the page keeps the last 10,000 lines instead of 2,000.
+
+**Forums & threads**
+
+- The thread list of a big forum or channel got slower the more threads it had, even for the first page. Each page now only counts messages for the threads it shows.
 
 **Login & connection**
 
+- Very large `event_persistence` numbers in `config.yaml` or the environment could stop the server from starting — they are now brought into range with a warning, like the same settings in the admin panel.
 - The server address was case-sensitive, so `Chat.Example.com` missed the saved `chat.example.com` server and its saved sign-in — the address is now lowercased, and a saved server typed in another case is matched.
 - Phone keyboards capitalised and auto-corrected the server address — the address boxes now turn that off.
+- Pasting a server link such as `https://chat.example.com/` failed with "Invalid host format" — the link's host is used.
+- A mistyped server address was sent anyway and came back as a bare "Invalid host format" — the form now says what a server address looks like before it sends anything.
+- The example in the empty server address box looked like a filled-in address — it now reads "e.g. chat.example.com:8443".
+- On phones the keyboard popped up over the saved servers as soon as the login page opened — the page no longer focuses the address box on a touch screen.
+- Password managers offered the saved password when creating an account — Register now asks for a new one, and phone keyboards no longer capitalise the username or invite code.
+
+**Messages & files**
+
+- A message near the 4,000-character limit with picked @mentions was counted before the mentions grew into their longer form, so the box was cleared and the send then failed. The limit, the counter and the edit box now count what is actually sent, and the draft stays when it is too long.
+
+**Desktop UI**
+
+- Turning Role Colors on or off in Settings > Accessibility now recolours the usernames already in the chat, without reopening the channel.
+- The Media panel and the Pinned messages panel stayed open when you clicked outside them — a click anywhere else now closes them.
 
 **Phones and touch screens**
 
 - Tapping a message popped up its reaction bar — a tap now does nothing, and a long-press opens the message menu with the quick reactions, like Discord.
+
+### Changed
+
+**Voice**
+
+- The video codec for camera and screen share now defaults to Auto: H.264 when your graphics card can encode it, otherwise VP8. In the Windows app on an NVIDIA or AMD graphics card, Auto now uses the graphics card's H.264 encoder (before, it always ended up on VP8). If you picked a codec yourself in Settings > Voice & Audio, that choice is kept.
 
 ## v2.6.0
 

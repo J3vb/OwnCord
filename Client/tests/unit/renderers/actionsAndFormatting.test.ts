@@ -342,7 +342,7 @@ describe("renderers", () => {
   // mutations only reach Date's local-time engine on a process main thread.
   // A worker-thread pool spawns an isolate that never observes the change,
   // even though the assignment itself succeeds — which used to skip this
-  // block silently. vitest.config.ts pins `pool: "forks"` and the probe now
+  // block silently. vitest.config.ts pins a process pool and the probe now
   // throws instead of skipping, except under the one sanctioned opt-out
   // (Stryker, which hard-codes a thread pool). See helpers/tz-pin.ts.
   const dstTZPinHonored = tzPinHonored(

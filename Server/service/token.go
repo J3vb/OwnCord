@@ -18,17 +18,28 @@ import (
 // operator's next step differs: create the owner, not check the spelling.
 var ErrNoOwnerAccount = errors.New("no owner account exists yet")
 
+// tokenStore is what TokenService reads and writes. *db.DB satisfies it.
+type tokenStore interface {
+	db.Auditor
+	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
+	GetOwnerUser(ctx context.Context) (*db.User, error)
+	CreateAPIToken(ctx context.Context, userID int64, tokenHash, label string, expiresAt *time.Time) (int64, error)
+	ListAPITokens(ctx context.Context) ([]db.APITokenListItem, error)
+	RevokeAPIToken(ctx context.Context, id int64) (int64, error)
+	RevokeAPITokenByLabel(ctx context.Context, label string) (int64, error)
+}
+
 // TokenService owns API tokens: minting, listing and revoking the long-lived
 // bearer credentials outside the session table. The admin panel's HTTP routes and
 // `server token ...` (the bootstrap CLI, which works with no credential) share it.
 // Their real differences (only the CLI revokes by label; audit rows are
 // attributed differently) are explicit parts of the contract.
 type TokenService struct {
-	st Store
+	st tokenStore
 }
 
 // NewTokenService creates a TokenService.
-func NewTokenService(st Store) *TokenService {
+func NewTokenService(st tokenStore) *TokenService {
 	return &TokenService{st: st}
 }
 

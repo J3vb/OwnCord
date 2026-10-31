@@ -36,6 +36,8 @@ func fakeGitHubRelease(t *testing.T, tag string) *httptest.Server {
 		"OwnCord_1.0.0_amd64.deb.sig",
 		"OwnCord_1.0.0_arm64.deb",
 		"OwnCord_1.0.0_arm64.deb.sig",
+		"OwnCord_1.0.0_arm64.apk",
+		"OwnCord_1.0.0_arm64.apk.sig",
 	}
 
 	mux.HandleFunc("/repos/test/repo/releases/latest", func(w http.ResponseWriter, r *http.Request) {
@@ -272,6 +274,30 @@ func TestClientUpdate_LinuxArm64TargetGetsAarch64AppImage(t *testing.T) {
 	url, _ := entry["url"].(string)
 	if !strings.HasSuffix(url, "_aarch64.AppImage.tar.gz") {
 		t.Errorf("linux arm64 url = %q, want aarch64 AppImage updater archive", url)
+	}
+}
+
+func TestClientUpdate_AndroidTargetGetsSignedAPK(t *testing.T) {
+	srv := fakeGitHubRelease(t, "v2.0.0")
+	u := updater.NewUpdater("1.0.0", "", "test", "repo")
+	u.SetBaseURL(srv.URL)
+
+	router := buildClientUpdateRouter(u)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/client-update/android-aarch64-apk/1.0.0", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	entry := platformEntry(t, rr, "android-aarch64-apk")
+	url, _ := entry["url"].(string)
+	if !strings.HasSuffix(url, "_arm64.apk") {
+		t.Errorf("android url = %q, want the arm64 APK", url)
+	}
+	if sig, _ := entry["signature"].(string); sig == "" {
+		t.Error("android platform entry missing signature")
 	}
 }
 

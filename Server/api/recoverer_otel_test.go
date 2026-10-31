@@ -48,7 +48,7 @@ func TestRecoverer_PanicLogCarriesTraceID(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	r := chi.NewRouter()
-	routerMiddleware(r, &config.Config{})
+	routerMiddleware(r, &config.Config{}, nil)
 	r.Get("/boom", func(http.ResponseWriter, *http.Request) { panic("boom") })
 
 	rr := httptest.NewRecorder()

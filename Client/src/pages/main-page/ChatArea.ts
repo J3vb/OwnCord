@@ -10,6 +10,8 @@ import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { createLazyVideoGrid } from "./lazyVideoGrid";
 import type { LazyVideoGrid } from "./lazyVideoGrid";
+import type { PhoneCallBarOptions } from "@components/PhoneCallBar";
+import { createLazyPhoneCallBar } from "./lazyPhoneCallBar";
 import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
@@ -46,6 +48,8 @@ export interface ChatAreaOptions {
   readonly onStartVideoCall?: () => void;
   /** Rename the open group DM (the header's group name click). */
   readonly onRenameGroup?: () => void;
+  /** What the phone call bar does; without it the page has no bar. */
+  readonly callBar?: PhoneCallBarOptions;
   /** Deleted-message events, so an open media gallery drops their items. */
   readonly subscribeDeletes: MessageDeleteSubscriber;
   /** Edits that removed files from a message, for the same gallery. */
@@ -72,6 +76,8 @@ export interface ChatAreaResult {
   readonly chatHeaderRefs: ChatHeaderRefs;
   /** The header's narrow-width sidebar toggle, for the drawer controller. */
   readonly sidebarToggle: HTMLButtonElement;
+  /** Re-decide whether the phone call bar shows (the call view opened or closed). */
+  readonly refreshCallBar: () => void;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
   /** Close the media gallery if it is open. */
@@ -216,6 +222,13 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   });
   chatArea.appendChild(chatHeader.element);
 
+  // --- Phone call bar (directly under the header) ---
+  const callBar = opts.callBar === undefined ? null : createLazyPhoneCallBar(opts.callBar);
+  if (callBar !== null) {
+    callBar.mount(chatArea);
+    children.push(callBar);
+  }
+
   // --- Slots ---
   const callPanelSlot = createElement("div", {
     class: "call-panel-slot",
@@ -268,6 +281,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     chatHeaderName,
     chatHeaderRefs: chatHeader.refs,
     sidebarToggle: chatHeader.refs.sidebarToggle,
+    refreshCallBar: () => callBar?.refresh(),
     searchCtrl,
     closePinnedPanel: pinnedCtrl.cleanup,
     closeMediaGallery: mediaCtrl.cleanup,

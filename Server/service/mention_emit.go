@@ -24,7 +24,7 @@ func (s *MessageService) SetMentionNotifier(n MentionCountNotifier) {
 // notifyMentionBumped pushes the badge updates for one flush's changed readers
 // (the no-worker fallback path). It reads the hook at call time, so a notifier
 // installed after SendMessage still receives the frame.
-func (s *MessageService) notifyMentionBumped(channelID int64, bumped map[int64]int64) {
+func (s *mentionState) notifyMentionBumped(channelID int64, bumped map[int64]int64) {
 	if s.mentionNotifier == nil {
 		return
 	}
@@ -38,7 +38,7 @@ func (s *MessageService) notifyMentionBumped(channelID int64, bumped map[int64]i
 // carries the latest committed total and a delete inside the coalesce window is
 // never overtaken by an older increment total. A failed reversal emits nothing, so
 // a reader keeps the total they have.
-func (s *MessageService) reverseMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error {
+func (s *mentionState) reverseMentionCounts(ctx context.Context, channelID int64, msgIDs []int64) error {
 	s.mentionEmitMu.Lock()
 	defer s.mentionEmitMu.Unlock()
 	lowered, err := s.st.DecrementMentionCounts(ctx, channelID, msgIDs)
@@ -53,7 +53,7 @@ func (s *MessageService) reverseMentionCounts(ctx context.Context, channelID int
 // frames, holding mentionEmitMu across both so an increment frame is never
 // overtaken by a later decrement. It is the no-worker fallback; the bounded
 // worker's flush holds the same lock (mentionWorker.emitMu).
-func (s *MessageService) emitIncrement(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) {
+func (s *mentionState) emitIncrement(ctx context.Context, channelID int64, entries []db.MentionBatchEntry) {
 	s.mentionEmitMu.Lock()
 	defer s.mentionEmitMu.Unlock()
 	bumped, err := s.st.IncrementMentionCountsBatch(ctx, channelID, entries)

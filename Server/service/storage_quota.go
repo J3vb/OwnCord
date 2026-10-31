@@ -176,7 +176,10 @@ func (s *UploadService) reserve(ctx context.Context, userID, n int64, charge boo
 // once more, so deleting files frees space without waiting for the tick. Paid only
 // on the refusal path.
 func (s *UploadService) chargeLocked(ctx context.Context, userID, n int64) error {
-	quota := s.quota.limits.UserQuotaBytes
+	quota, err := s.effectiveQuotaLocked(ctx, userID)
+	if err != nil {
+		return err
+	}
 	ok, err := s.st.ChargeUserStorage(ctx, userID, n, quota)
 	if err != nil {
 		return fmt.Errorf("%w: storage charge: %w", ErrInternal, err)

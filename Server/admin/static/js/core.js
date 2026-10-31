@@ -43,6 +43,7 @@ const I={
   triangleAlert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
   circleX:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>',
   circleDashed:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.1 2.18a10 10 0 0 1 3.8 0"/><path d="M13.9 21.82a10 10 0 0 1-3.8 0"/><path d="M17.61 3.72a10 10 0 0 1 2.69 2.7"/><path d="M2.18 13.9a10 10 0 0 1 0-3.8"/><path d="M20.28 17.61a10 10 0 0 1-2.7 2.69"/><path d="M21.82 10.1a10 10 0 0 1 0 3.8"/><path d="M3.72 6.39a10 10 0 0 1 2.7-2.69"/><path d="M6.39 20.28a10 10 0 0 1-2.69-2.7"/></svg>',
+  disk:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="12" x2="2" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" y1="16" x2="6.01" y2="16"/><line x1="10" y1="16" x2="10.01" y2="16"/></svg>',
   chevronRight:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
 };
 
@@ -56,7 +57,8 @@ const state={section:'dashboard',token:localStorage.getItem('admin_token')||'',
   cachedStats:null,cachedUpdate:null,channelCache:{},roleList:[],pluginRuntime:'unknown',pluginBusy:false,
   logEntries:[],logLevels:{DEBUG:true,INFO:true,WARN:true,ERROR:true},
   logLevel:'',logLevelBase:'',logLevelUntil:0,logLevelTimer:null,
-  logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:2000};
+  logSearch:'',logAutoScroll:true,logPaused:false,logEventSource:null,logReconnectTimer:null,logConnectSeq:0,logMaxLines:10000,
+  logCounts:{DEBUG:0,INFO:0,WARN:0,ERROR:0},logPending:[],logRepaint:false,logPaintFrame:0,logUnseen:0,logAtBottom:true};
 
 /* ═══ API ═══ */
 /* A 401 means the admin session is gone. Handle it here rather than letting
@@ -163,6 +165,7 @@ const ACTION_LABEL={
   update_apply:'applied a server update',update_applied:'finished a server update',update_failed:'failed to apply a server update',
   api_token_create:'created an API token',api_token_revoke:'revoked an API token',support_bundle_create:'created a support bundle',
   plugin_install:'installed a plugin',plugin_uninstall:'uninstalled a plugin',
+  upload_delete:'deleted a file uploaded by {t}',upload_limit_change:'changed the upload limit of {t}',storage_cleanup:'removed leftover files from storage',
 };
 /* What an entry acted on, in words, never empty: an erased account keeps
    only its token, and a channel the Channels page has loaded reads by name. */
@@ -469,6 +472,7 @@ const NAV=[
   {id:'settings',label:'Settings',icon:I.settings,unsaved:()=>state.settingsChanged,allowed:()=>can(PERM.MANAGE_SERVER)},
   {id:'config',label:'Server configuration',icon:I.settings,unsaved:()=>state.configChanged,allowed:()=>ownerOrHolds(PERM.MANAGE_CONFIG)},
   {id:'retention',label:'Message retention',icon:I.trash,allowed:()=>can(PERM.MANAGE_SERVER)},
+  {id:'storage',label:'Storage',icon:I.disk,allowed:()=>can(PERM.MANAGE_SERVER)},
   {id:'backups',get label(){return ownerOrHolds(PERM.RESTORE_BACKUPS)?'Backups & restore':'Backups'},icon:I.backup,allowed:()=>ownerOrHolds(PERM.RESTORE_BACKUPS)||can(PERM.MANAGE_BACKUPS)},
   {id:'updates',label:'Updates',icon:I.updates,badge:()=>state.badges.update,badgeText:'update available',allowed:()=>ownerOrHolds(PERM.MANAGE_UPDATES)},
   {id:'whatsnew',label:'What\'s new',icon:I.star},
@@ -658,7 +662,7 @@ function dismissButton(id,sig,what){return'<button class="notice-dismiss" aria-l
 /* ═══ Content Router ═══ */
 function renderContent(){
   const c=document.getElementById('content');if(!c)return;c.scrollTop=0;
-  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,stickers:renderStickers,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
+  const r={dashboard:renderDashboard,users:renderUsers,channels:renderChannels,roles:renderRoles,emoji:renderEmoji,stickers:renderStickers,invites:renderInvites,audit:renderAudit,tokens:renderTokens,plugins:renderPlugins,logs:renderLogs,diagnostics:renderDiagnostics,settings:renderSettings,config:renderServerConfig,retention:renderRetention,storage:renderStorage,backups:renderBackups,updates:renderUpdates,whatsnew:renderWhatsNew};
   c.innerHTML='<div class="page-title">Loading...</div>';
   const fn=r[state.section];
   if(typeof fn!=='function'){console.error('[Admin] No render function for section: '+state.section);c.innerHTML='<div class="page-title">Error</div><p style="color:var(--text-danger)">Unknown section: '+esc(state.section)+'</p><button class="btn btn-accent" data-action="navigateTo" data-args="'+actArgs('dashboard')+'">Back to Dashboard</button>';return}

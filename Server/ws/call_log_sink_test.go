@@ -257,6 +257,7 @@ func TestCallLog_JoinReachesDMThroughHub(t *testing.T) {
 // The callee declining is a stateless nudge: it adds no participant to the
 // call row the caller's join produced.
 func TestCallLog_DeclineAddsNoParticipant(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)

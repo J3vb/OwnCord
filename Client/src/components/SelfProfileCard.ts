@@ -38,6 +38,7 @@ import {
   STATUS_DEFS,
   customStatusClearsLine,
   parseExpiry,
+  statusNote,
   statusTimerLine,
   type StatusDef,
 } from "@components/statusDefs";
@@ -500,12 +501,13 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       text.appendChild(
         createElement("span", { class: "spc-status-label" }, shellText(def.labelKey)),
       );
-      if (def.noteKey !== undefined) {
+      const note = statusNote(def);
+      if (note !== null) {
         text.appendChild(
           createElement(
             "span",
             { class: "spc-status-note", "data-testid": `spc-note-${def.value}` },
-            shellText(def.noteKey),
+            note,
           ),
         );
       }

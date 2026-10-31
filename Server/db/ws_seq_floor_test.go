@@ -55,6 +55,7 @@ func TestCarryWSSeqFloorForRestore_ErrorPaths(t *testing.T) {
 	const validSidecar = "3000000000\n"
 	seedLive := func(t *testing.T, path, value string) {
 		t.Helper()
+		WriteMigratedFileForTest(t, path)
 		d, err := Open(path)
 		if err != nil {
 			t.Fatal(err)

@@ -100,8 +100,9 @@ func TestGracefulStop_WithClientsHavingVoiceState(t *testing.T) {
 		t.Fatalf("voiceChID before stop = %d, want 42", got)
 	}
 
-	// GracefulStop is synchronous — returning at all proves no deadlock.
-	hub.GracefulStop()
+	// GracefulStop is synchronous — returning at all proves no deadlock. A
+	// cancelled context skips the 5 s client notice window; teardown is the same.
+	hub.GracefulStopContext(cancelledContext(), ws.RestartReasonShutdown)
 	// GracefulStop signals clients to close — test clients don't have real
 	// goroutines so they won't self-unregister, but verify the hub accepted
 	// the stop without deadlocking on voice-state cleanup.
@@ -125,7 +126,13 @@ func TestGracefulStop_MultipleClients(t *testing.T) {
 
 	// GracefulStop is synchronous — returning at all proves no deadlock on
 	// multiple clients.
-	hub.GracefulStop()
+	hub.GracefulStopContext(cancelledContext(), ws.RestartReasonShutdown)
+}
+
+func cancelledContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
 }
 
 // ─── Ping message type (handlers.go — pong response) ─────────────────────────

@@ -93,6 +93,21 @@ export const voiceText = defineCatalog("voice", {
   "call.infraredCamera": "{name} (infrared)",
   "call.sameNameCamera": "{name} ({n})",
 
+  "callBar.region": "Voice call",
+  "callBar.open": "Open call in {name}",
+  "callBar.people": { one: "{count} person", other: "{count} people" },
+  "callBar.detail": "{people} · {time}",
+  "callBar.leave": "Leave call",
+
+  "joinSheet.label": "Join {name}",
+  "joinSheet.inHere": { one: "{count} person in here", other: "{count} people in here" },
+  "joinSheet.empty": "No one is here yet",
+  "joinSheet.people": "People in {name}",
+  "joinSheet.join": "Join Voice",
+  "joinSheet.cancel": "Cancel",
+  "joinSheet.muted": "Muted",
+  "joinSheet.camera": "Camera on",
+
   "tile.watch": "Watch {name}",
   "tile.live": "LIVE",
   "tile.viewers": "Watching: {names}",

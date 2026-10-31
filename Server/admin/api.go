@@ -151,7 +151,7 @@ type backupGate struct {
 	// /backup while it is set is refused with 409 BACKUP_RUNNING.
 	running atomic.Bool
 	// hold is a test seam: when set it runs inside the guard, before the
-	// backup starts. Only export_test.go assigns it.
+	// backup or restore starts. Only export_test.go assigns it.
 	hold atomic.Pointer[func()]
 }
 
@@ -345,6 +345,10 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// Attention panel: server health detail, VIEW_DIAGNOSTICS like
 		// the support bundle that carries the same counters.
 		gates.route(r, gateViewDiagnostics, http.MethodGet, "/attention", handleGetAttention(svc.Attention))
+		// The Dashboard health row: CPU, memory, disk and uptime, the same
+		// server health detail as the attention panel.
+		gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/stats", handleGetSystemStats(setupOpts.System, hub))
+		gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/slow-requests", handleGetSlowRequests(setupOpts.System))
 		mountUserRoutes(r, gates, svc, hub, mod)
 		// The approval-mode registration queue: deciding who joins
 		// is server management, not moderation of existing members.
@@ -355,6 +359,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.With(requirePerm(permissions.ManageServer)).
 			Post("/registrations/{id}/deny", handleDenyRegistration(svc.Users))
 		mountRetentionRoutes(r, svc.Retention)
+		mountStorageRoutes(r, newStorageAPI(svc, hub, setupOpts, paths))
 
 		mountChannelActionRoutes(r, "/channels", channels, hub)
 		mountDiscordImportRoutes(r, newDiscordImportAPI(svc.Retention, setupOpts))
@@ -438,7 +443,7 @@ func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, d
 	gates.route(r, gateManageBackups, http.MethodPost, "/backup", handleBackup(database, paths, backups))
 	gates.route(r, gateListBackups, http.MethodGet, "/backups", handleListBackups(paths))
 	gates.route(r, gateRestoreBackups, http.MethodDelete, "/backups/{name}", handleDeleteBackup(database, paths))
-	gates.route(r, gateRestoreBackups, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths))
+	gates.route(r, gateRestoreBackups, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths, backups))
 	gates.route(r, gateManageBackups, http.MethodPost, "/backups/{name}/link", handleBackupLink(database, paths))
 	gates.route(r, gateRestoreBackups, http.MethodGet, "/archive", handleArchive(database, setupOpts, paths))
 	gates.route(r, gateRestoreBackups, http.MethodPost, "/archive/link", handleArchiveLink(database))

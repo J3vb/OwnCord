@@ -26,6 +26,7 @@ import {
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
+import { isAndroidApp } from "../voice/native/platform";
 
 const log = createLogger("custom-theme");
 
@@ -91,7 +92,11 @@ async function exportTheme(theme: CustomTheme): Promise<void> {
 export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
   const section = createElement("div", { class: "custom-themes" });
   const header = createElement("h3", {}, t("appearance.customThemes"));
-  const desc = createElement("p", { class: "setting-desc" }, t("appearance.customThemes.desc"));
+  const desc = createElement(
+    "p",
+    { class: "setting-desc" },
+    t(isAndroidApp() ? "appearance.customThemes.desc.android" : "appearance.customThemes.desc"),
+  );
   const list = createElement("ul", { class: "custom-theme-list" });
   const actions = createElement("div", { class: "custom-theme-actions" });
   const newBtn = createElement(

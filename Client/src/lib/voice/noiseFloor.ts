@@ -1,5 +1,6 @@
 // Automatic input sensitivity: a noise-floor estimate over the detector's
-// level reports, and the gate threshold a fixed margin above it.
+// level reports, a voice-level estimate over the reports the gate let
+// through, and the gate threshold placed between the two.
 //
 // The floor is the quietest level seen in the last WINDOW_MS (minimum
 // statistics over 1 s sub-windows). A quieter level lowers it at once; a
@@ -7,24 +8,52 @@
 // carry it: every pause between words reaches the room's own level, and one
 // pause in the window is enough. Steady music or a fan does become the floor,
 // which is the point: the user talks over it.
+//
+// The threshold starts a margin above the floor. Once the user has spoken
+// for a while, it moves halfway up toward a margin below their voice, so a
+// breath, a chair or a keyboard that clears the floor does not open the
+// gate when the voice is far above them, and a quiet voice over a loud room
+// keeps the floor margin. The voice estimate only counts after enough
+// reports, so one thump cannot park the gate above a voice that then never
+// reaches it, and it sinks slowly while nothing feeds it, so a voice that
+// turns quieter brings the gate back down.
 
 /** Margin of the gate threshold above the noise floor. */
 export const AUTO_MARGIN_DB = 10;
-/** Lowest automatic threshold (-60 dBFS, sensitivity 99 on the manual
- *  scale), so suppressed near-silence cannot let breathing open the gate. */
-export const AUTO_MIN_THRESHOLD = 0.001;
-/** Highest automatic threshold: today's default (sensitivity 50), so auto is
- *  never stricter than a fresh manual profile. */
+/** Margin the gate threshold keeps below the voice, so soft consonants and
+ *  word tails still pass. */
+export const SPEECH_MARGIN_DB = 15;
+/** Lowest automatic threshold (-55 dBFS): suppressed near-silence must not
+ *  park the gate where breathing opens it. */
+export const AUTO_MIN_THRESHOLD = 10 ** (-55 / 20);
+/** Highest automatic threshold (-26 dBFS): a loud room never pushes the gate
+ *  above ordinary speech. */
 export const AUTO_MAX_THRESHOLD = 0.05;
 
 const SUBWINDOW_MS = 1000;
-const WINDOW_MS = 8000;
+/** A rising floor (a fan, automatic gain creeping up) is followed within this. */
+const WINDOW_MS = 3000;
 /** Levels needed before the first estimate replaces the seed. */
 const WARMUP_MS = 1000;
 /** Reports ignored after an input-volume change, while its gain ramp settles. */
 const SETTLE_MS = 200;
 /** A smaller move than this is not worth re-sending to the gate. */
 const MOVE_DB = 1;
+/** A report this far above the current threshold is the voice, not the
+ *  room: it feeds the voice-level estimate. */
+const SPEECH_ABOVE_DB = 6;
+/** Weight of one report in the voice-level average: about a second of
+ *  speech at 20 reports a second. */
+const SPEECH_ALPHA = 0.05;
+/** Reports the voice estimate needs before it moves the threshold: half a
+ *  second of speech, which a thump or a cough does not reach. */
+const SPEECH_MIN_REPORTS = 10;
+/** The estimate starts sinking this long after the last report that fed
+ *  it: a pause between sentences does not count, a changed voice does. */
+const SPEECH_DECAY_AFTER_MS = 2000;
+/** How far the estimate sinks per report once it does (1.5 dB/s at 20
+ *  reports a second). */
+const SPEECH_DECAY_DB = 0.075;
 
 /** Below this a report is digital silence (a muted or stopped capture, the
  *  input volume at 0), not the room: it must not become the floor, or the
@@ -41,6 +70,9 @@ export class NoiseFloorTracker {
   private windowMinDb = Infinity;
   private firstAt: number | null = null;
   private skipUntil = -Infinity;
+  private speechDb: number | null = null;
+  private speechReports = 0;
+  private speechAt = -Infinity;
   private current: number;
 
   /** `seed`: the threshold to gate at until the first estimate (a restarted
@@ -57,14 +89,26 @@ export class NoiseFloorTracker {
     return this.current;
   }
 
-  /** Forget the learned floor after the input volume moved: the levels behind
-   *  the old gain (and its ramp) say nothing about the new one. The threshold
-   *  holds until the new levels have been heard for the warm-up. */
+  /** The voice level learned so far (RMS), null until the user has spoken
+   *  above the gate for long enough to count. */
+  get speechLevel(): number | null {
+    return this.speechDb === null || this.speechReports < SPEECH_MIN_REPORTS
+      ? null
+      : fromDb(this.speechDb);
+  }
+
+  /** Forget the learned floor and voice after the input volume moved: the
+   *  levels behind the old gain (and its ramp) say nothing about the new
+   *  one. The threshold holds until the new levels have been heard for the
+   *  warm-up. */
   reset(nowMs: number): void {
     this.closed.length = 0;
     this.windowStart = null;
     this.windowMinDb = Infinity;
     this.firstAt = null;
+    this.speechDb = null;
+    this.speechReports = 0;
+    this.speechAt = -Infinity;
     this.skipUntil = nowMs + SETTLE_MS;
   }
 
@@ -87,12 +131,22 @@ export class NoiseFloorTracker {
     }
     if (nowMs - this.firstAt < WARMUP_MS) return null;
 
+    if (db >= toDb(this.current) + SPEECH_ABOVE_DB) {
+      this.speechDb =
+        this.speechDb === null ? db : this.speechDb + SPEECH_ALPHA * (db - this.speechDb);
+      this.speechReports = Math.min(SPEECH_MIN_REPORTS, this.speechReports + 1);
+      this.speechAt = nowMs;
+    } else if (this.speechDb !== null && nowMs - this.speechAt > SPEECH_DECAY_AFTER_MS) {
+      this.speechDb = Math.max(toDb(AUTO_MIN_THRESHOLD), this.speechDb - SPEECH_DECAY_DB);
+    }
+
     let floorDb = this.windowMinDb;
     for (const sub of this.closed) floorDb = Math.min(floorDb, sub.minDb);
-    const next = Math.min(
-      AUTO_MAX_THRESHOLD,
-      Math.max(AUTO_MIN_THRESHOLD, fromDb(floorDb + AUTO_MARGIN_DB)),
-    );
+    const low = Math.max(toDb(AUTO_MIN_THRESHOLD), floorDb + AUTO_MARGIN_DB);
+    const speech = this.speechLevel;
+    const high = speech === null ? low : toDb(speech) - SPEECH_MARGIN_DB;
+    const targetDb = low + Math.max(0, (high - low) / 2);
+    const next = Math.min(AUTO_MAX_THRESHOLD, Math.max(AUTO_MIN_THRESHOLD, fromDb(targetDb)));
     if (Math.abs(toDb(next) - toDb(this.current)) < MOVE_DB) return null;
     this.current = next;
     return next;

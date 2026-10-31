@@ -24,7 +24,7 @@ type SearchRequest struct {
 // read and returns one page of hits. nextBefore is the cursor for the
 // following page of a Recent search (0 when there is none). A query with
 // filters but no words is newest-first only.
-func (s *MessageService) SearchMessages(ctx context.Context, userID int64, in SearchRequest) (results []db.MessageSearchResult, nextBefore int64, err error) {
+func (s *messageReads) SearchMessages(ctx context.Context, userID int64, in SearchRequest) (results []db.MessageSearchResult, nextBefore int64, err error) {
 	if in.Query == "" {
 		return nil, 0, fmt.Errorf("%w: query cannot be empty", ErrBadRequest)
 	}
@@ -112,7 +112,7 @@ func (s *MessageService) SearchMessages(ctx context.Context, userID int64, in Se
 // leaves that leak open). in: names narrow the scope and are compared only against
 // channels already in it, so an unreadable or nonexistent target looks like any
 // name that matches nothing.
-func (s *MessageService) searchScope(ctx context.Context, userID int64, channelID *int64, inNames []string) ([]int64, error) {
+func (s *messageReads) searchScope(ctx context.Context, userID int64, channelID *int64, inNames []string) ([]int64, error) {
 	var scope []int64
 	if channelID != nil && *channelID > 0 {
 		if err := s.requireSearchChannelAccess(ctx, userID, *channelID); err != nil {
@@ -155,7 +155,7 @@ func (s *MessageService) searchScope(ctx context.Context, userID int64, channelI
 }
 
 // resolveSearchUsers maps usernames to ids; unknown names are dropped.
-func (s *MessageService) resolveSearchUsers(ctx context.Context, names []string) ([]int64, error) {
+func (s *messageReads) resolveSearchUsers(ctx context.Context, names []string) ([]int64, error) {
 	ids := make([]int64, 0, len(names))
 	seen := make(map[int64]bool, len(names))
 	for _, name := range names {
@@ -176,7 +176,7 @@ func (s *MessageService) resolveSearchUsers(ctx context.Context, names []string)
 // result is empty when any name is unknown: mentions: values are AND'd, so one
 // unknown user means nothing can match. Two spellings of one user collapse to
 // one id.
-func (s *MessageService) resolveSearchMentions(ctx context.Context, names []string) ([]int64, error) {
+func (s *messageReads) resolveSearchMentions(ctx context.Context, names []string) ([]int64, error) {
 	ids := make([]int64, 0, len(names))
 	for _, name := range names {
 		u, err := s.st.GetUserByUsername(ctx, name)

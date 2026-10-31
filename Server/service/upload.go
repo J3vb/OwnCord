@@ -9,13 +9,36 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
+// uploadStore is what UploadService reads and writes. *db.DB satisfies it.
+type uploadStore interface {
+	IsDMParticipant(ctx context.Context, userID, channelID int64) (bool, error)
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	CreateAttachmentVoice(ctx context.Context, id string, uploaderID int64, filename, storedAs, mimeType string, size int64, width, height, durationMs *int, waveform *string) error
+	GetAttachmentWithChannel(ctx context.Context, id string) (*db.AttachmentAccess, error)
+	DeleteUnlinkedAttachment(ctx context.Context, id string, userID int64) (bool, error)
+	DiscardUnlinkedAttachment(ctx context.Context, id string, userID int64) (storedAs string, found bool, err error)
+	// IsMessageDeleted backs the tombstone half of attachment access; the avatar
+	// check backs the "public exactly while in use" half.
+	IsMessageDeleted(ctx context.Context, id int64) (deleted, found bool, err error)
+	IsAvatarFileURL(ctx context.Context, url string) (bool, error)
+	IsGroupDMIconForUser(ctx context.Context, fileID string, userID int64) (bool, error)
+	// The per-user upload byte counter: charged before a store write, released on a
+	// failed one, recounted from the rows on the maintenance tick (UploadService.Reserve).
+	ChargeUserStorage(ctx context.Context, userID, bytes, quota int64) (bool, error)
+	ReleaseUserStorage(ctx context.Context, userID, bytes int64) error
+	UserStorageUsed(ctx context.Context, userID int64) (int64, error)
+	ListUserStorageIDs(ctx context.Context) ([]int64, error)
+	RecountUserStorage(ctx context.Context, userID int64) error
+	GetSetting(ctx context.Context, key string) (string, error)
+}
+
 // UploadService owns what happens to an uploaded file once its bytes are on disk:
 // the attachment row, and the questions before serving it back (is it still
 // servable, may this caller read it). The bytes stay with the transport (multipart
 // parsing, type sniffing, image measuring, FileStore writes are HTTP and
 // filesystem work); every decision that outlives a request lives here.
 type UploadService struct {
-	st    Store
+	st    uploadStore
 	perms *PermissionService
 	// banners answers whether a file is some user's live profile banner. A slice
 	// interface, not Store (the method ratchet); nil means no banner is readable via
@@ -29,6 +52,10 @@ type UploadService struct {
 	// own backs the signed-in user's own upload list and removal (user_uploads.go);
 	// set once by NewUploadService, nil when the store cannot serve it.
 	own OwnUploadStore
+	// admin backs the admin Storage page and the per-member upload limit
+	// (admin_uploads.go); nil when the store cannot serve it, and every member
+	// then follows the server-wide limit.
+	admin AdminUploadStore
 }
 
 var _ BannerFileStore = (*db.DB)(nil)
@@ -40,9 +67,10 @@ type BannerFileStore interface {
 }
 
 // NewUploadService creates an UploadService.
-func NewUploadService(st Store, perms *PermissionService) *UploadService {
+func NewUploadService(st uploadStore, perms *PermissionService) *UploadService {
 	own, _ := st.(OwnUploadStore)
-	return &UploadService{st: st, perms: perms, own: own}
+	admin, _ := st.(AdminUploadStore)
+	return &UploadService{st: st, perms: perms, own: own, admin: admin}
 }
 
 // AttachmentRecord is the metadata of one stored file, whose bytes the caller has

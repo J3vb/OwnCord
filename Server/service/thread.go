@@ -64,16 +64,23 @@ type ThreadStore interface {
 	ArchiveDueThreads(ctx context.Context, now time.Time, limit int) (archived []db.DueThread, listed int, err error)
 }
 
+// threadServiceStore is what ThreadService reads and writes. *db.DB satisfies it.
+type threadServiceStore interface {
+	db.Auditor
+	subjectStore
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+}
+
 // ThreadService owns thread create, update, delete and the thread list.
 type ThreadService struct {
-	st      Store
+	st      threadServiceStore
 	ts      ThreadStore
 	perms   *PermissionService
 	limiter *auth.RateLimiter
 }
 
 // NewThreadService creates a ThreadService over the ThreadStore slice of st.
-func NewThreadService(st Store, perms *PermissionService, limiter *auth.RateLimiter) *ThreadService {
+func NewThreadService(st threadServiceStore, perms *PermissionService, limiter *auth.RateLimiter) *ThreadService {
 	ts, _ := st.(ThreadStore)
 	return &ThreadService{st: st, ts: ts, perms: perms, limiter: limiter}
 }

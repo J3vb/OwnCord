@@ -1,13 +1,15 @@
 // An explicit CC/CXX override must still be clang >= 21: webrtc-sys needs it,
 // and silently accepting gcc only fails much later inside the native build.
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = join(import.meta.dirname, "../../scripts/linux-webrtc-toolchain.sh");
 const dirs: string[] = [];
+// Seeded into the fake cache so the script finds the CUDA headers and never downloads them.
+const CUDA_WHEEL_VERSION = /CUDA_WHEEL_VERSION="([^"]+)"/.exec(readFileSync(SCRIPT, "utf8"))![1];
 
 /** A fake compiler answering `-dumpversion` with `major` and `--version` with `banner`. */
 function fake(dir: string, name: string, major: string, banner: string): string {
@@ -27,6 +29,8 @@ function run(major: string, banner: string) {
   const arch = process.arch === "arm64" ? "linux-arm64-release" : "linux-x64-release";
   mkdirSync(join(cache, arch, "lib"), { recursive: true });
   writeFileSync(join(cache, arch, "lib", "libwebrtc.a"), "");
+  mkdirSync(join(cache, `cuda-headers-${CUDA_WHEEL_VERSION}`, "include"), { recursive: true });
+  writeFileSync(join(cache, `cuda-headers-${CUDA_WHEEL_VERSION}`, "include", "cuda.h"), "");
   const cc = fake(dir, "cc", major, banner);
   const cxx = fake(dir, "cxx", major, banner);
   const env = {

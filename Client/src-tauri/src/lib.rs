@@ -205,6 +205,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
 
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(update_commands::android::init());
+
     // Desktop-only convenience plugins. window-state auto-saves/restores window
     // geometry (off-screen correction lives in the frontend); autostart backs
     // the "launch on login" toggle; deep-link registers the owncord:// scheme.
@@ -277,7 +280,10 @@ pub fn run() {
             credentials::load_pending_messages,
             credentials::delete_pending_messages,
             update_commands::check_client_update,
+            #[cfg(desktop)]
             update_commands::download_and_install_update,
+            #[cfg(target_os = "android")]
+            update_commands::android::download_and_install_update,
             ptt::ptt_start,
             ptt::ptt_stop,
             ptt::ptt_set_key,

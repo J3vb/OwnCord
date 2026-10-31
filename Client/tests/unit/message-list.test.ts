@@ -1302,6 +1302,40 @@ describe("MessageList", () => {
       expect(authorSpan().textContent).toBe("Alicia");
     });
 
+    it("recolours rendered names when the Role Colors preference is toggled", () => {
+      membersStore.setState(() => ({
+        members: new Map([
+          [1, { id: 1, username: "Alice", avatar: null, role: "admin", status: "online" as const }],
+        ]),
+        typingUsers: new Map(),
+        roleRevision: 0,
+      }));
+      setMessages(1, [makeMessage({ id: 1 })]);
+      msgList.mount(container);
+      const row1 = container.querySelector("[data-testid='message-1']");
+      const authorSpan = (): HTMLElement =>
+        container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
+      const setRoleColors = (on: boolean): void => {
+        localStorage.setItem("owncord:settings:roleColors", JSON.stringify(on));
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "roleColors" } }),
+        );
+      };
+      try {
+        expect(authorSpan().dataset["roleColor"]).toBe("var(--role-admin)");
+        setRoleColors(false);
+        expect(authorSpan().dataset["roleColor"]).toBe("var(--role-member)");
+        setRoleColors(true);
+        expect(authorSpan().dataset["roleColor"]).toBe("var(--role-admin)");
+        expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      } finally {
+        localStorage.removeItem("owncord:settings:roleColors");
+        window.dispatchEvent(
+          new CustomEvent("owncord:pref-change", { detail: { key: "roleColors" } }),
+        );
+      }
+    });
+
     it("re-resolves @mention highlighting on every rendered row on a rename (F3)", () => {
       authStore.setState(() => ({
         token: "t",

@@ -85,7 +85,7 @@ func TestPresenceHerd_500ConnectsInOneSecond_NoKicks(t *testing.T) {
 	go h.Run()
 	t.Cleanup(h.Stop)
 
-	const n = 500
+	n := raceScaled(500)
 	users := make([]*db.User, n)
 	for i := range users {
 		id, err := database.CreateUser(ctx, fmt.Sprintf("herd-%03d", i), "hash", 4)
@@ -116,7 +116,7 @@ func TestPresenceHerd_500ConnectsInOneSecond_NoKicks(t *testing.T) {
 		}
 		h.announceFreshConnect(c)
 		clients[i] = c
-		time.Sleep(time.Until(start.Add(time.Duration(i+1) * time.Second / n)))
+		time.Sleep(time.Until(start.Add(time.Duration(i+1) * time.Second / time.Duration(n))))
 	}
 
 	// Two windows for the last arrivals to flush, then a dispatch barrier.

@@ -173,10 +173,12 @@ async function renderDashboard(){
   if(ownerOrHolds(PERM.MANAGE_UPDATES)){try{state.cachedUpdate=await api('GET','/updates')}catch(e){/* the strip is optional; the Updates page reports the failure */}}
   const s=state.cachedStats;const u=state.cachedUpdate;
   let html='<div class="page-title">Dashboard</div><div class="page-desc">How your server is doing right now</div>';
-  /* Attention is server health detail: View Diagnostics (Administrator implies
-     it), like the route. */
+  /* Attention and the health row are server health detail: View Diagnostics
+     (Administrator implies it), like their routes. */
   let checks='';
   if(can(PERM.VIEW_DIAGNOSTICS)){
+    await startHealthPoll();
+    html+=healthRow();
     try{const a=renderAttention(await api('GET','/attention'),u&&u.update_available&&isDismissed('update',noticeSig(u.latest)));html+=a.head;checks=a.checks}
     catch(e){html+='<section id="attentionPanel" class="section-card"><div class="section-card-body"><p style="color:var(--text-danger)">Could not load attention state: '+esc(e.message)+'</p><button class="btn btn-ghost" data-action="renderContent">Retry</button></div></section>'}
   }
@@ -441,7 +443,7 @@ function pauseLabel(){return state.logPaused?OPS_ICON.play+'Resume':OPS_ICON.pau
 function renderLogs(){
   /* Each level chip is a toggle button: aria-pressed carries its state, and
      the filled or hollow dot shows it without relying on colour. */
-  const lvlBtn=(l)=>'<button class="level-toggle lvl-'+l.toLowerCase()+'" aria-pressed="'+!!state.logLevels[l]+'" data-level="'+l+'" data-action="toggleLogLevel" data-args="'+actArgs(l)+'">'+l+'</button>';
+  const lvlBtn=(l)=>'<button class="level-toggle lvl-'+l.toLowerCase()+'" aria-pressed="'+!!state.logLevels[l]+'" data-level="'+l+'" data-action="toggleLogLevel" data-args="'+actArgs(l)+'">'+l+' <span class="lvl-n" data-level-count="'+l+'">'+state.logCounts[l].toLocaleString()+'</span></button>';
   let html='<div class="page-title">Server logs</div><div class="page-desc">What the server is doing right now, newest at the bottom. Open the details on a line for everything it logged.</div>';
   html+='<div class="log-toolbar"><div class="log-conn"><span class="'+(state.logPaused?'dot-off':'dot-wait')+'" id="logDot" aria-hidden="true"></span><span id="logStatusText" role="status">'+(state.logPaused?'Paused':'Connecting...')+'</span></div>';
   html+='<div class="level-group" role="group" aria-label="Show levels">'+lvlBtn('DEBUG')+lvlBtn('INFO')+lvlBtn('WARN')+lvlBtn('ERROR')+'</div>';
@@ -450,6 +452,7 @@ function renderLogs(){
   html+='<button class="btn btn-ghost" data-action="toggleLogAutoScroll" id="autoScrollBtn" aria-pressed="'+state.logAutoScroll+'" title="Keep the newest line in view">'+I.arrowDown+'Auto-scroll</button>';
   html+='<button class="btn btn-ghost" data-action="toggleLogPause" id="pauseBtn">'+pauseLabel()+'</button>';
   html+='<button class="btn btn-ghost" data-action="copyAllLogs" title="Copy the lines the filters show">'+OPS_ICON.copy+'Copy</button>';
+  html+='<button class="btn btn-ghost" data-action="downloadLogs" title="Save the lines the filters show as a .log file">'+I.download+'Download</button>';
   html+='<button class="btn btn-ghost" data-action="clearLogs" title="Clear the lines on screen">'+I.trash+'Clear</button>';
   html+='</div></div>';
   /* The timed log-level toggle (SRE-07): raise the server's level to debug
@@ -465,15 +468,21 @@ function renderLogs(){
     +' data-action="toggleServerLogLevel"'+(canLevel?'':' disabled')+'></button></div>';
   // A focusable region, so the log scrolls from the keyboard. Not role=log:
   // that is a live region, and a streaming log would talk over everything.
-  html+='<div class="log-output" id="logOutput" role="region" aria-label="Log lines" tabindex="0"></div>';
+  html+='<div class="log-wrap"><div class="log-output" id="logOutput" role="region" aria-label="Log lines" tabindex="0"></div>'
+    +'<button class="btn btn-accent log-jump" id="logJump" data-action="jumpToNewestLog" hidden>'+I.arrowDown+'<span id="logJumpText">New lines</span></button></div>';
   html+='<div class="log-status"><span style="margin-left:auto" id="logCount">'+state.logEntries.length+' entries</span></div>';
-  setTimeout(()=>{renderLogLines();if(!state.logPaused)connectLogStream();if(canLevel)loadLogLevel()},0);
+  state.logUnseen=0;state.logAtBottom=true;
+  setTimeout(()=>{
+    const out=document.getElementById('logOutput');
+    if(out){out.addEventListener('scroll',logScrolled,{passive:true});out.addEventListener('toggle',fillLogDetails,true)}
+    renderLogLines();if(!state.logPaused)connectLogStream();if(canLevel)loadLogLevel();
+  },0);
   return html;
 }
 
 function toggleLogLevel(l){state.logLevels[l]=!state.logLevels[l];document.querySelectorAll('.level-toggle[data-level="'+l+'"]').forEach(b=>b.setAttribute('aria-pressed',String(state.logLevels[l])));renderLogLines()}
 
-function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll))}
+function toggleLogAutoScroll(){state.logAutoScroll=!state.logAutoScroll;const btn=document.getElementById('autoScrollBtn');if(btn)btn.setAttribute('aria-pressed',String(state.logAutoScroll));if(state.logAutoScroll)jumpToNewestLog()}
 
 /* The timed server log-level toggle (SRE-07). Raising the level is a PATCH
    the server reverts on its own. The switch mirrors the server's own answer
@@ -552,18 +561,18 @@ async function connectLogStream(){
   const replaceBufferOnce=function(){
     if(bufferReplaced)return;
     bufferReplaced=true;
-    state.logEntries=[];renderLogLines();
-    const c0=document.getElementById('logCount');if(c0)c0.textContent='0 entries';
+    state.logEntries=[];state.logPending=[];resetLogCounts();renderLogLines();
   };
   const es=new EventSource('/admin/api/logs/stream?ticket='+encodeURIComponent(ticket));
   state.logEventSource=es;
   es.onopen=function(){replaceBufferOnce();const t=document.getElementById('logStatusText');if(t)t.textContent='Connected';const d=document.getElementById('logDot');if(d)d.className='dot-live'};
+  /* A line from a stream that has since been replaced is dropped: it would
+     land in the view the replacement just cleared. */
   es.onmessage=function(e){
-    try{const entry=JSON.parse(e.data);replaceBufferOnce();state.logEntries.push(entry);
-      while(state.logEntries.length>state.logMaxLines)state.logEntries.shift();
-      appendLogLine(entry);
-      const c=document.getElementById('logCount');if(c)c.textContent=state.logEntries.length+' entries';
-    }catch(err){}
+    if(state.logEventSource!==es)return;
+    let entry;try{entry=JSON.parse(e.data)}catch(err){return}
+    if(!entry||typeof entry!=='object')return;
+    replaceBufferOnce();addLogEntry(entry);
   };
   es.onerror=function(){if(state.logEventSource===es){state.logEventSource.close();state.logEventSource=null}const t=document.getElementById('logStatusText');if(t)t.textContent='Reconnecting...';const d=document.getElementById('logDot');if(d)d.className='dot-wait';scheduleLogReconnect()};
 }
@@ -602,35 +611,114 @@ function logChipsHtml(entry){
     if(v.length>LOG_CHIP_MAX){v=v.slice(0,LOG_CHIP_MAX)+'…';cut=true}
     html+='<span class="log-chip"><span class="log-key">'+esc(k)+'=</span>'+esc(v)+'</span>';
   });
-  const detail='<details class="log-more"><summary>'+(cut?'full details':'details')+'</summary><pre>'+esc(JSON.stringify(a,null,2))+'</pre></details>';
+  /* The pretty-printed attrs are built when the details open, not per line:
+     a full ring of them was most of the log's page weight. */
+  const detail='<details class="log-more" data-attrs="'+esc(entry.attrs)+'"><summary>'+(cut?'full details':'details')+'</summary></details>';
   return' <span class="log-chips">'+html+'</span>'+detail;
 }
 
-function appendLogLine(entry){
-  if(!matchesLogFilter(entry))return;
+/* Lines are held in state at once and painted at most once a frame: the
+   backfill arrives as thousands of messages in a burst, and adding and
+   scrolling to each one on its own made the browser lay the whole log out
+   again per line. */
+const LOG_LEVELS=['DEBUG','INFO','WARN','ERROR'];
+function resetLogCounts(){LOG_LEVELS.forEach(l=>{state.logCounts[l]=0})}
+function countLog(entry,d){if(Object.hasOwn(state.logCounts,entry.level))state.logCounts[entry.level]+=d}
+function addLogEntry(entry){
+  state.logEntries.push(entry);countLog(entry,1);
+  /* Trimmed once a frame, not with a shift per line; the slack bounds the
+     overshoot while a hidden tab gets no frames. */
+  if(state.logEntries.length-state.logMaxLines>=LOG_TRIM_SLACK)trimLogEntries();
+  /* Past a full view of pending lines the next frame repaints from state, so
+     a background tab (no frames) stops queueing them. */
+  if(state.logRepaint)return;
+  if(state.logPending.length>=state.logMaxLines){state.logPending=[];state.logRepaint=true}
+  else state.logPending.push(entry);
+  scheduleLogPaint();
+}
+const LOG_TRIM_SLACK=500;
+function trimLogEntries(){
+  const over=state.logEntries.length-state.logMaxLines;
+  if(over>0)state.logEntries.splice(0,over).forEach(e=>countLog(e,-1));
+}
+function scheduleLogPaint(){if(!state.logPaintFrame)state.logPaintFrame=requestAnimationFrame(flushLogPaint)}
+function flushLogPaint(){
+  state.logPaintFrame=0;
+  trimLogEntries();
+  const pending=state.logPending;state.logPending=[];
+  if(state.logRepaint){state.logRepaint=false;renderLogLines();return}
+  paintLogStatus();
+  const out=document.getElementById('logOutput');if(!out||!pending.length)return;
+  let html='',added=0;
+  pending.forEach(e=>{if(matchesLogFilter(e)){html+=logLineHtml(e);added++}});
+  if(!added)return;
+  const stick=state.logAutoScroll&&state.logAtBottom;
+  out.insertAdjacentHTML('beforeend',html);
+  const extra=out.children.length-state.logMaxLines;
+  if(extra>0){const r=document.createRange();r.setStartBefore(out.firstChild);r.setEndAfter(out.children[extra-1]);r.deleteContents()}
+  if(stick)out.scrollTop=out.scrollHeight;
+  else{state.logUnseen+=added;paintLogJump()}
+}
+function paintLogStatus(){
+  const c=document.getElementById('logCount');if(c)c.textContent=state.logEntries.length.toLocaleString()+' entries';
+  document.querySelectorAll('[data-level-count]').forEach(n=>{n.textContent=state.logCounts[n.getAttribute('data-level-count')].toLocaleString()});
+}
+function paintLogJump(){
+  const b=document.getElementById('logJump');if(!b)return;
+  b.hidden=!state.logUnseen;
+  const t=document.getElementById('logJumpText');if(t)t.textContent=state.logUnseen.toLocaleString()+' new line'+(state.logUnseen===1?'':'s');
+}
+/* Within a line's height of the end counts as at the end, so a sub-pixel
+   scroll position does not stop auto-scroll. */
+function logScrolled(){
   const out=document.getElementById('logOutput');if(!out)return;
-  const div=document.createElement('div');
-  div.className='log-line l-'+entry.level.toLowerCase();
-  div.innerHTML='<span class="log-ts">'+fmtLocal(entry.ts,LOG_TIME)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+logChipsHtml(entry);
-  out.appendChild(div);
-  // Trim DOM to max lines
-  while(out.children.length>state.logMaxLines)out.removeChild(out.firstChild);
-  if(state.logAutoScroll)out.scrollTop=out.scrollHeight;
+  state.logAtBottom=out.scrollHeight-out.scrollTop-out.clientHeight<24;
+  if(state.logAtBottom&&state.logUnseen){state.logUnseen=0;paintLogJump()}
+}
+function fillLogDetails(e){
+  const d=e.target;
+  if(!(d instanceof HTMLDetailsElement)||!d.open||!d.classList.contains('log-more')||d.querySelector('pre'))return;
+  const a=logAttrs(d.getAttribute('data-attrs'));if(!a)return;
+  const pre=document.createElement('pre');pre.textContent=JSON.stringify(a,null,2);d.appendChild(pre);
+}
+function jumpToNewestLog(){
+  const out=document.getElementById('logOutput');if(!out)return;
+  out.scrollTop=out.scrollHeight;state.logAtBottom=true;state.logUnseen=0;paintLogJump();out.focus();
+}
+
+function logLineHtml(entry){
+  return'<div class="log-line l-'+esc(String(entry.level||'').toLowerCase())+'"><span class="log-ts">'+fmtLocal(entry.ts,LOG_TIME)+'</span><span class="log-lvl">'+esc(entry.level)+'</span><span class="log-src">['+esc(entry.source||'server')+']</span>'+esc(entry.msg)+logChipsHtml(entry)+'</div>';
 }
 
 function renderLogLines(){
   const out=document.getElementById('logOutput');if(!out)return;
-  out.innerHTML='';
-  state.logEntries.forEach(e=>{if(matchesLogFilter(e))appendLogLine(e)});
+  let html='';
+  state.logEntries.forEach(e=>{if(matchesLogFilter(e))html+=logLineHtml(e)});
+  out.innerHTML=html;
+  state.logPending=[];state.logRepaint=false;state.logUnseen=0;paintLogJump();paintLogStatus();
+  if(state.logAutoScroll)out.scrollTop=out.scrollHeight;
+  state.logAtBottom=true;
+}
+
+function filteredLogText(){
+  const lines=[];state.logEntries.forEach(e=>{if(matchesLogFilter(e))lines.push((e.ts||'')+' '+e.level+' ['+(e.source||'server')+'] '+e.msg+(e.attrs&&e.attrs!=='{}'?' '+e.attrs:''))});
+  return lines;
 }
 
 function copyAllLogs(){
-  const out=document.getElementById('logOutput');if(!out)return;
-  const lines=[];state.logEntries.forEach(e=>{if(matchesLogFilter(e))lines.push((e.ts||'')+' '+e.level+' ['+( e.source||'server')+'] '+e.msg+(e.attrs&&e.attrs!=='{}'?' '+e.attrs:''))});
+  const lines=filteredLogText();
   navigator.clipboard.writeText(lines.join('\n')).then(()=>showToast('Copied '+lines.length+' log lines','info')).catch(()=>showToast('Copy failed','error'));
 }
 
-function clearLogs(){state.logEntries=[];const out=document.getElementById('logOutput');if(out)out.innerHTML='';const c=document.getElementById('logCount');if(c)c.textContent='0 entries';showToast('Log view cleared','info')}
+function downloadLogs(){
+  const lines=filteredLogText();
+  if(!lines.length){showToast('No log lines to save','info');return}
+  const blob=new Blob([lines.join('\n')+'\n'],{type:'text/plain'});const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download='owncord_logs_'+new Date().toISOString().slice(0,19).replace(/[T:]/g,'-')+'.log';a.click();
+  URL.revokeObjectURL(url);showToast('Saved '+lines.length+' log lines','info');
+}
+
+function clearLogs(){state.logEntries=[];state.logPending=[];resetLogCounts();renderLogLines();showToast('Log view cleared','info')}
 
 /* ═══ API Tokens ═══ */
 function tokenStatus(t){
@@ -840,7 +928,7 @@ async function uninstallPlugin(id){
   renderContent();
 }
 
-Object.assign(ACTIONS,{clearLogs,confirmRevokeToken,runConnectivityCheck,copyAllLogs,copyAuditLog,copyToken,createToken,
+Object.assign(ACTIONS,{clearLogs,downloadLogs,jumpToNewestLog,confirmRevokeToken,runConnectivityCheck,copyAllLogs,copyAuditLog,copyToken,createToken,
   discardSupportBundle,downloadSupportBundle,exportAuditCSV,reloadAudit,installPlugin,openCreateTokenModal,openUninstallPlugin,
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
   toggleServerLogLevel,

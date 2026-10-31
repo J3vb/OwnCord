@@ -1,10 +1,14 @@
 // The song playing (`src-tauri/src/media_activity.rs`), polled by the music
 // activity loop while the sharing setting is on. The registry reaches this file
 // from the entry, so the host call and its parsing load on the first read.
+import { isAndroidHost } from "@lib/hostPlatform";
 import type { MediaDetector, MediaPrefs, MediaReading } from "../contracts/mediaDetector";
 
 export const mediaDetector: MediaDetector = {
-  available: true,
+  // The host reads a desktop media player, which a phone does not have.
+  get available(): boolean {
+    return !isAndroidHost();
+  },
   async detect(prefs: MediaPrefs): Promise<MediaReading> {
     try {
       const { readMedia } = await import("./mediaRead");

@@ -97,8 +97,8 @@ describe("client update across page changes", () => {
     const joined = downloadAndInstallUpdate("https://second.example");
     await vi.advanceTimersByTimeAsync(0);
     expect(installCalls()).toHaveLength(1);
-    // One install registered its two listeners (progress, installing) once.
-    expect(listen).toHaveBeenCalledTimes(2);
+    // One install registered its three listeners (progress, installing, installer-opened) once.
+    expect(listen).toHaveBeenCalledTimes(3);
     expect(invoke.mock.calls.filter(([command]) => command === "check_client_update")).toHaveLength(
       1,
     );
@@ -111,7 +111,7 @@ describe("client update across page changes", () => {
     expect(host.querySelector(".update-banner-text")?.textContent).toBe(
       "Update installed. Restarting…",
     );
-    expect(unlisten).toHaveBeenCalledTimes(2);
+    expect(unlisten).toHaveBeenCalledTimes(3);
     expect(relaunch).toHaveBeenCalledTimes(1);
   });
 
@@ -128,7 +128,7 @@ describe("client update across page changes", () => {
       "Update failed. Please try again later.",
     );
     expect(relaunch).not.toHaveBeenCalled();
-    expect(unlisten).toHaveBeenCalledTimes(2);
+    expect(unlisten).toHaveBeenCalledTimes(3);
     expect(host.querySelector(".update-banner-install")?.textContent).toBe("Retry");
 
     await startInstall();
@@ -139,7 +139,7 @@ describe("client update across page changes", () => {
     ]);
     finishInstall();
     await vi.advanceTimersByTimeAsync(0);
-    expect(unlisten).toHaveBeenCalledTimes(4);
+    expect(unlisten).toHaveBeenCalledTimes(6);
     expect(relaunch).toHaveBeenCalledTimes(1);
   });
 });

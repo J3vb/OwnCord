@@ -257,10 +257,11 @@ CREATE TABLE IF NOT EXISTS attachments (
 );
 -- B5-2: the upload byte counter UploadService.Reserve charges before every
 -- store write, so no upload succeeds without it. Keep in step with
--- migrations/044_user_storage.sql.
+-- migrations/044_user_storage.sql, plus quota_mb from 088.
 CREATE TABLE IF NOT EXISTS user_storage (
     user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    bytes_used INTEGER NOT NULL DEFAULT 0 CHECK (bytes_used >= 0)
+    bytes_used INTEGER NOT NULL DEFAULT 0 CHECK (bytes_used >= 0),
+    quota_mb   INTEGER CHECK (quota_mb IS NULL OR quota_mb >= 0)
 );
 CREATE TABLE IF NOT EXISTS dm_participants (
     user_id    INTEGER NOT NULL REFERENCES users(id),
