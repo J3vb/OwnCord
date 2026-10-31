@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { loggerMock as sharedLoggerMock } from "./loggerMock";
 
 export const prefs = new Map<string, unknown>();
 
@@ -17,5 +18,5 @@ export function prefsPreferencesMock() {
 }
 
 export function loggerMock() {
-  return { createLogger: () => logs };
+  return sharedLoggerMock({ createLogger: () => logs });
 }
