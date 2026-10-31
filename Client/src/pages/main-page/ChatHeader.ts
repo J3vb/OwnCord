@@ -271,7 +271,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   }
   const pinBtn = createElement("button", {
     type: "button",
-    class: "pin-btn",
+    class: "pin-btn pins-btn",
     title: messagingText("header.pins"),
     "aria-label": messagingText("header.pins"),
     "data-testid": "pin-btn",

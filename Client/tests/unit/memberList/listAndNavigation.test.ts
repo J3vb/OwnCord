@@ -6,7 +6,7 @@ import type { Member } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setRoles } from "@stores/channels.store";
 import { Permission, type UserStatus } from "../../../src/lib/types";
-import { pickAvatarColor } from "@components/message-list/avatar";
+import { pickAvatarColor } from "../../../src/features/profiles/avatar";
 import {
   applyReadyCapabilities,
   resetServerCapabilities,
@@ -22,6 +22,7 @@ import {
   testMembers,
   defaultOpts,
 } from "../../helpers/memberListHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 describe("MemberList", () => {
   let container: HTMLDivElement;
@@ -242,13 +243,7 @@ describe("MemberList", () => {
       { id: 2, name: "Staff", color: null, permissions: 0 },
       { id: 3, name: "VIP", color: null, permissions: 0 },
     ]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 99, username: "Admin", avatar: null, role: "admin" },
-      serverName: "Test",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 99, username: "Admin", avatar: null, role: "admin" }, { serverName: "Test" });
     setTestMembers(testMembers);
     memberList.mount(container);
 
@@ -544,13 +539,10 @@ describe("MemberList", () => {
       actorPerms = 0,
     ): Promise<HTMLElement | null> {
       seedRanks(actorPerms);
-      authStore.setState(() => ({
-        token: "tok",
-        user: { id: 99, username: "Actor", avatar: null, role: actorRole },
-        serverName: "Test",
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs(
+        { id: 99, username: "Actor", avatar: null, role: actorRole },
+        { serverName: "Test" },
+      );
       setTestMembers(testMembers);
       memberList.mount(container);
       const item = container.querySelector(`[data-testid="member-${targetId}"]`) as HTMLElement;
@@ -598,13 +590,7 @@ describe("MemberList", () => {
 
   it("right-clicking yourself opens Profile and Mention only", async () => {
     // Set authStore so current user is id=1 (Alice)
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 1, username: "Alice", avatar: null, role: "owner" },
-      serverName: "Test",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 1, username: "Alice", avatar: null, role: "owner" }, { serverName: "Test" });
 
     setTestMembers(testMembers);
     const opts: MemberListOptions = {
@@ -640,13 +626,7 @@ describe("MemberList", () => {
   // stale prop instead.
   it("re-reads the current user's role live from authStore instead of the mount-time opts.currentUserRole snapshot", async () => {
     setRoles([{ id: 8, name: "admin", color: null, permissions: Permission.ADMINISTRATOR }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 999, username: "Self", avatar: null, role: "member" },
-      serverName: "Test",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 999, username: "Self", avatar: null, role: "member" }, { serverName: "Test" });
     setTestMembers(testMembers);
     const opts: MemberListOptions = { ...defaultOpts(), currentUserRole: "member" };
     memberList.destroy?.();

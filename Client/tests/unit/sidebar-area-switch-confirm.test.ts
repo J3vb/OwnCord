@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  rePinPeerIdentity: vi.fn(),
-  leaveVoice: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    rePinPeerIdentity: vi.fn(),
+  }),
+);
 vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
@@ -37,7 +38,7 @@ vi.mock("../../src/features/server-rail/switchServer", () => ({
 }));
 
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { authStore } from "../../src/stores/auth.store";
+import { signInAs } from "../helpers/storeSeeds";
 
 function opts(): SidebarAreaOptions {
   return {
@@ -67,13 +68,7 @@ describe("SidebarArea - quick switcher asks before switching", () => {
     localStorage.clear();
     torn = false;
     createQuickSwitchOverlay.mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Alpha",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" }, { serverName: "Alpha" });
     area = createSidebarArea(opts());
     document.body.appendChild(area.sidebarWrapper);
   });

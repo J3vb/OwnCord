@@ -51,6 +51,7 @@ and only when it changes something a contributor or fork holder must do
 
 **Android**
 
+- Members using the Android app now show a phone-shaped status dot (in the same green, yellow or red) in the member list, DM lists, profiles and your own user bar, with "Online on the phone app" on hover. A member on the phone while their computer is idle also shows it; offline and invisible members never do.
 - The Android app is on the release page: download `OwnCord_<version>_arm64.apk` and install it (Android asks once to allow installs from your browser). After that the app updates itself: it shows "Update available", downloads the new version and opens Android's installer, where you tap Install. Your sign-in and settings stay.
 
 **Voice**
@@ -68,11 +69,17 @@ and only when it changes something a contributor or fork holder must do
 - On phones, the channel drawer has your server list on its left (Direct Messages, your servers, Add a server) and a "Find or start a conversation" search under the server name. Swipe right on the chat for the channels, left for the member list, and a message left to reply; swipe the drawer or member list away to close it. In the Android app, Back closes sheets and dialogs, then the drawer or member list, then opens the channel list, and one more Back leaves the app.
 - Phone polish: message times show just the clock (the full date stays in the tooltip), reactions and menu rows are 44 px to tap, the channel menu (long-press), the server menu and the status picker open as bottom sheets (Mute Channel and Notification Settings open a second page), a failed send's "delivery not confirmed" line wraps, the call bar hides while you are in your own DM call, the phone layout now holds when the phone is turned sideways, and the Android app gives a short buzz when a long-press opens a sheet.
 - Phone call screen: the call view's controls are 44 px with Chat beside Leave, tapping a stream or camera focuses it and tapping it again gives the focus back, a focused tile's full screen button turns the phone to landscape where it can and Back leaves full screen, and a DM call rings on the whole screen with big Accept and Decline buttons (Back hides it down to the banner, and the ring goes on).
+- Push to Talk in the Android app, as on Discord's phone app: pick it in Settings > Voice & Video > Input Mode, then hold the Hold to talk button in the call view, the call bar or a DM call to speak. Letting go, or the app going to the background, mutes the mic again.
 
 **Desktop UI**
 
 - Picking another server in the server rail or the switch list asks "Switch to (server name)?" first, so a stray click no longer drops you out of a call. Tick "Don't ask again" to skip it; turn it back on in Settings > Advanced > Ask before switching servers.
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
+
+**Server admin panel**
+
+- New Storage page (Manage Server): one bar shows what fills the disk (uploads, database, backups, free space), and every uploaded file is listed, largest or newest first, filterable by type, channel, member and age. Tick up to 100 files and delete them; each delete goes in the audit log. It also finds leftover files no message uses and cleans them up.
+- Members page: a Storage column shows how much each member has uploaded, and the row menu's Upload limit gives one member their own limit or none, instead of the server-wide one. **This changes the database** (one new column).
 
 ### Changed
 
@@ -93,8 +100,13 @@ and only when it changes something a contributor or fork holder must do
 - The admin panel's Dashboard opens with a health row: CPU (OwnCord's share and the whole machine's), RAM, free disk space and uptime, each with a one-hour line, refreshed every 5 seconds. Inside Docker with a memory limit, RAM is measured against the container's limit. Tiles turn yellow or red when CPU stays high, memory is nearly full or the disk runs low. Shown to admins with View Diagnostics.
 - A Slow requests card under the health row lists the ten slowest kinds of request in the last hour: the route, how many calls, the typical and the worst time. Routes show by pattern (`/api/v1/channels/{id}/messages`), never with ids. Live connections such as voice, the log viewer and file downloads are left out. Shown to admins with View Diagnostics.
 - Server logs: Download saves the lines the filters show as a .log file, each level button shows how many lines it holds, and when you scroll up to read, new lines no longer pull the view away; a button shows how many arrived and jumps back to the newest.
+- Server logs survive a restart: the server keeps the last 7 days (at most 200 MB) on disk under `data/logs`, and the Logs page's new History tab searches them by time range, level and text, a page at a time. Change or turn off with `logging.history_days` and `logging.history_max_mb`.
 
 ### Fixed
+
+**Voice**
+
+- On Linux, the app could crash when you switched or restarted the camera, and a built-in laptop camera could show the same few frames over and over. Cameras are now opened directly instead of through PipeWire where they can be (PipeWire is still used for cameras that need it, with each frame copied out as it arrives).
 
 **Admin panel**
 
@@ -124,6 +136,7 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - Turning Role Colors on or off in Settings > Accessibility now recolours the usernames already in the chat, without reopening the channel.
+- The Media panel and the Pinned messages panel stayed open when you clicked outside them — a click anywhere else now closes them.
 
 **Phones and touch screens**
 

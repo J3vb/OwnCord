@@ -350,7 +350,7 @@ export function createConnectPage(
   // ---------------------------------------------------------------------------
 
   let settingsOverlay: ReturnType<
-    typeof import("@components/SettingsOverlay").createSettingsOverlay
+    typeof import("../features/settings/SettingsOverlay").createSettingsOverlay
   > | null = null;
   let settingsOverlayLoading = false;
   let unsubSettingsOpen: (() => void) | null = null;
@@ -362,7 +362,7 @@ export function createConnectPage(
   function ensureSettingsOverlay(): void {
     if (settingsOverlay !== null || settingsOverlayLoading) return;
     settingsOverlayLoading = true;
-    void import("@components/SettingsOverlay").then(({ createSettingsOverlay }) => {
+    void import("../features/settings/SettingsOverlay").then(({ createSettingsOverlay }) => {
       settingsOverlayLoading = false;
       // The page may have been destroyed while the chunk loaded.
       if (signal.aborted) return;

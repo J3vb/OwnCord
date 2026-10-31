@@ -7,14 +7,14 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
 }));
 
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { setChannels } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
-import { membersStore } from "../../src/stores/members.store";
 import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { startMuteExpiryWatch } from "@lib/prefs/channelMuteExpiry";
+import { resetMembersState } from "../helpers/storeResets";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 describe("timed mute expiry redraws the sidebar", () => {
   let container: HTMLDivElement;
@@ -27,23 +27,12 @@ describe("timed mute expiry redraws the sidebar", () => {
     invalidateMuteCache();
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 9, 17, 12, 0, 0));
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
     voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     container = document.createElement("div");
     document.body.appendChild(container);
     sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn() });

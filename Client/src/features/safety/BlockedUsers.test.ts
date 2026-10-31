@@ -12,7 +12,7 @@ import { showToast } from "../../lib/ui/toast";
 import { blocksStore, setUserBlockedByMe } from "@stores/blocks.store";
 import { dmStore, type DmChannel, type DmUser } from "@stores/dm.store";
 import { membersStore, type Member } from "@stores/members.store";
-import { createAvatarElement } from "@components/message-list/avatar";
+import { createAvatarElement } from "../profiles/avatar";
 import {
   buildBlockedUsersSection,
   resetPendingUnblocks,

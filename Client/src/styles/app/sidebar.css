@@ -370,6 +370,22 @@
 .channel-item.active .ch-icon {
   opacity: 1;
 }
+/* The presence marker on a sidebar DM row: a flat dot (no ring), or the phone
+   shape while the other person is on the phone app. A group gets a neutral
+   square instead. */
+.dm-section-status {
+  --sd: 8px;
+  --status-ring: var(--bg-secondary);
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: calc(var(--sd) * var(--phone-w, 1));
+  height: calc(var(--sd) * var(--phone-h, 1));
+  border-radius: var(--status-shape, 50%);
+}
+.dm-section-status-group {
+  border-radius: 2px;
+}
 .channel-item .ch-name {
   font-size: var(--font-size-md);
   flex: 1;

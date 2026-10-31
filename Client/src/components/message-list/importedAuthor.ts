@@ -10,7 +10,7 @@ import {
   importedSubject,
 } from "../../features/messaging/importedAuthor";
 import { messagingText } from "../../i18n/messaging";
-import { createAvatarElement, pickAvatarColor } from "./avatar";
+import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 
 /** The name as drawn: the export's, or a stand-in when it is blank. */
 export function importedDisplayName(author: ImportedAuthor): string {

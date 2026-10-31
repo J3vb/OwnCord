@@ -1,12 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/connectPageMocks";
 import { createConnectPage } from "../../../src/pages/ConnectPage";
 import type { SimpleProfile } from "../../../src/pages/ConnectPage";
 import { canonicalServerHost } from "../../../src/lib/net/hostNormalize";
 import { makeCallbacks } from "../../helpers/connectPageHarness";
+import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("../../../src/lib/net/credentials", () => mocks.netCredentialsMock());
-vi.mock("../../../src/components/SettingsOverlay", () => mocks.settingsOverlayMock());
+vi.mock("../../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 vi.mock("../../../src/stores/ui.store", () => mocks.uiStoreMock());
 
 describe("canonicalServerHost", () => {
@@ -34,14 +35,8 @@ describe("canonicalServerHost", () => {
 
 describe("connect page server address case", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   function submit(profiles: SimpleProfile[], typedHost: string) {

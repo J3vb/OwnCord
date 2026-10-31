@@ -7,20 +7,14 @@
 // jsdom never applies app.css, so the visual rules are pinned separately in
 // voice-polish-css.test.ts; here we pin the DOM the redesign produces.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const connectionStatsMock = vi.hoisted(() => ({
   listeners: [] as unknown[],
   qualityListeners: [] as unknown[],
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  getRoomForStats: vi.fn().mockReturnValue(null),
-  retryMicPermission: vi.fn().mockResolvedValue(undefined),
-  joinVoice: vi.fn(),
-  leaveVoice: vi.fn(),
-  toggleMute: vi.fn(),
-  toggleDeafen: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
@@ -53,10 +47,10 @@ vi.mock("@lib/voice/connectionStats", () => ({
 
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { voiceStore } from "../../src/stores/voice.store";
-import { channelsStore } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { ConnectionStats } from "../../src/lib/voice/connectionStats";
+import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -71,13 +65,8 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "connected",
   }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetChannelsState();
+  resetMembersState();
   setConnectionStatus("connected");
 }
 

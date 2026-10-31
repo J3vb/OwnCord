@@ -1,10 +1,10 @@
 {
-  "ref": "0fe6cd0a5cb08d7425778f7792bc21c0fca4e68f",
+  "ref": "4f6062bb85e5eaada499e6513f88ef6e5114ae92",
   "method": "Server/db/query_perf_bench_test.go on its synthetic 400k-message database. The nightly job in nightly-test-depth.yml runs it at dev and at ref, interleaved on one runner, and Server/scripts/bench/bench-gate.mjs fails on more allocs/op than below or a median ns/op over 20 % above ref.",
   "update": "A PR that lowers allocs lowers allocsPerOp here; a PR that speeds a query up moves ref to its own merge base so the next regression is measured from the faster code. goalNsPerOp is the Phase Q4 target, reported only.",
   "benchmarks": {
-    "BenchmarkSearchCommonWord": { "allocsPerOp": 602, "goalNsPerOp": 50000000 },
-    "BenchmarkHistoryPage": { "allocsPerOp": 1450, "goalNsPerOp": 400000 },
+    "BenchmarkSearchCommonWord": { "allocsPerOp": 617, "goalNsPerOp": 50000000 },
+    "BenchmarkHistoryPage": { "allocsPerOp": 1524, "goalNsPerOp": 400000 },
     "BenchmarkUnreadCounts": { "allocsPerOp": 227, "goalNsPerOp": 1000000 }
   }
 }

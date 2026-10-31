@@ -8,6 +8,7 @@ import { channelsStore, setRoles, type Channel } from "../../src/stores/channels
 import type { Message } from "../../src/stores/messages.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";
+import { resetAuthState } from "./storeSeeds";
 
 /** MANAGE_MESSAGES (see lib/types Permission). */
 const MANAGE_MESSAGES = 0x10000;
@@ -95,13 +96,7 @@ export function signInAs(role: "member" | "moderator"): void {
 /** Back to a connected, signed-out, no-channel, not-timed-out baseline. */
 export function resetGateStores(): void {
   channelsStore.setState((prev) => ({ ...prev, channels: new Map(), roles: [] }));
-  authStore.setState(() => ({
-    token: null,
-    user: null,
-    serverName: null,
-    motd: null,
-    isAuthenticated: false,
-  }));
+  resetAuthState();
   setConnectionStatus("connected");
   setActiveTimeout(null);
 }

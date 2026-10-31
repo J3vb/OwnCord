@@ -128,7 +128,7 @@ export function createDmProfilePanel(st: PageState, _pg: PageApi) {
     };
     const unsubMembers = membersStore.subscribeSelector(
       (s) =>
-        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.activity?.name ?? ""}|${listeningKey(s.members.get(recipientId)?.listening)}`,
+        `${s.members.get(recipientId)?.status ?? ""}|${s.members.get(recipientId)?.mobile === true}|${s.members.get(recipientId)?.activity?.name ?? ""}|${listeningKey(s.members.get(recipientId)?.listening)}`,
       refresh,
     );
     // A banner change shows without reopening the panel.

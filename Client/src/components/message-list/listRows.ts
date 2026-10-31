@@ -5,9 +5,12 @@
 import { isServerRowKind } from "@lib/text/messageKind";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { authorAvatarKey, fullDateTimeTitle, messageHeaderTime } from "./renderers";
-import { createAvatarElement, pickAvatarColor } from "./avatar";
+import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 import { withInlineEdit } from "../../features/messaging/inlineEditLoader";
-import { relabelInlineTimestamps, resyncMentions } from "./contentParser";
+import {
+  relabelInlineTimestamps,
+  resyncMentions,
+} from "../../features/messaging/content/contentParser";
 import { highlightsCurrentUser } from "@lib/text/mentions";
 import { applyPickedMentions, tokensToPickedText } from "@lib/text/pickedMentions";
 import { readableRoleColor } from "@lib/prefs/themes";

@@ -12,7 +12,6 @@ import {
 } from "../../../src/components/message-list/renderers";
 import { membersStore } from "../../../src/stores/members.store";
 import { setRoles } from "../../../src/stores/channels.store";
-import { authStore } from "../../../src/stores/auth.store";
 import { setConnectionStatus } from "../../../src/stores/ui.store";
 import { shellText } from "../../../src/i18n/shell";
 import { formatClockTime, userRoleColorVar } from "../../../src/lib/text/formatting";
@@ -25,6 +24,7 @@ import {
   makeOpts,
   useRenderersHarness,
 } from "../../helpers/renderersHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
@@ -167,13 +167,7 @@ describe("renderers", () => {
     it("offers delete on others' messages to a role with MANAGE_MESSAGES", () => {
       // MANAGE_MESSAGES = 0x10000 (see lib/types Permission).
       setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
-      authStore.setState(() => ({
-        token: "tok",
-        user: { id: 999, username: "Mod", avatar: null, role: "moderator" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs({ id: 999, username: "Mod", avatar: null, role: "moderator" }, { serverName: null });
 
       const opts = makeOpts({ currentUserId: 999 });
       const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
@@ -189,13 +183,7 @@ describe("renderers", () => {
 
     it("withholds delete from a role without MANAGE_MESSAGES", () => {
       setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
-      authStore.setState(() => ({
-        token: "tok",
-        user: { id: 999, username: "Nobody", avatar: null, role: "member" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs({ id: 999, username: "Nobody", avatar: null, role: "member" }, { serverName: null });
 
       const opts = makeOpts({ currentUserId: 999 });
       const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
@@ -211,13 +199,7 @@ describe("renderers", () => {
       // The server gates SetMessagePinned on MANAGE_MESSAGES, so offering
       // Pin to a plain member is a broken affordance on every message.
       setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
-      authStore.setState(() => ({
-        token: "tok",
-        user: { id: 999, username: "Nobody", avatar: null, role: "member" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs({ id: 999, username: "Nobody", avatar: null, role: "member" }, { serverName: null });
 
       const opts = makeOpts({ currentUserId: 999 });
       const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
@@ -234,13 +216,7 @@ describe("renderers", () => {
 
     it("offers Pin to a role with MANAGE_MESSAGES", () => {
       setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
-      authStore.setState(() => ({
-        token: "tok",
-        user: { id: 999, username: "Mod", avatar: null, role: "moderator" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs({ id: 999, username: "Mod", avatar: null, role: "moderator" }, { serverName: null });
 
       const opts = makeOpts({ currentUserId: 999 });
       const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
@@ -256,13 +232,7 @@ describe("renderers", () => {
       // The server lets any DM participant pin (SetMessagePinned's DM branch),
       // so the gate must not hide it there.
       setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
-      authStore.setState(() => ({
-        token: "tok",
-        user: { id: 999, username: "Nobody", avatar: null, role: "member" },
-        serverName: null,
-        motd: null,
-        isAuthenticated: true,
-      }));
+      signInAs({ id: 999, username: "Nobody", avatar: null, role: "member" }, { serverName: null });
 
       const opts = makeOpts({ currentUserId: 999, channelType: "dm" });
       const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });

@@ -29,7 +29,7 @@ func (d *DB) attachGroupEvents(ctx context.Context, msgs []MessageAPIResponse) e
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := d.q.GetMessageGroupEventsByMessageIDs(ctx, ids)
+	rows, err := d.q.GetMessageGroupEventsByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
 		return fmt.Errorf("group events: %w", err)
 	}

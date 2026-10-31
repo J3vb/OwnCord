@@ -2,10 +2,11 @@ import { vi } from "vitest";
 import type { MemberListOptions } from "@components/MemberList";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
-import { authStore } from "@stores/auth.store";
 import { setRoles } from "@stores/channels.store";
 import { type UserStatus } from "../../src/lib/types";
 import { applyThemeByName } from "@lib/prefs/themes";
+import { resetMembersState } from "./storeResets";
+import { resetAuthState } from "./storeSeeds";
 
 /**
  * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
@@ -21,10 +22,7 @@ export function useDarkSurfaces(): void {
 }
 
 export function resetStore(): void {
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   // Role list drives member-list grouping/colors — reset so tests that seed
   // roles don't leak into the ones asserting the fallback groups.
   setRoles([]);
@@ -33,13 +31,7 @@ export function resetStore(): void {
   // earlier test — the "admin"/"owner" role names in particular fall back to
   // isLegacyAdminRole's full-access grant when that name isn't in the
   // per-test role list — would otherwise leak into unrelated gate tests.
-  authStore.setState(() => ({
-    token: null,
-    user: null,
-    serverName: null,
-    motd: null,
-    isAuthenticated: false,
-  }));
+  resetAuthState();
 }
 
 export function makeMember(overrides: Partial<Member> & { id: number; username: string }): Member {

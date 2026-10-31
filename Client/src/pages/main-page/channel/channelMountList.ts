@@ -6,7 +6,7 @@ import { createElement } from "@lib/dom";
 import { createConfirmModal } from "../../../features/dialogs/confirmModal";
 import { createMessageList } from "@components/MessageList";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
-import { setInlineImageDecorator } from "@components/message-list/media";
+import { setInlineImageDecorator } from "../../../features/messaging/content/media";
 import { WAVE_CONTENT } from "@components/message-list/welcomeRows";
 import { gifFavoriteStar } from "@components/message-list/gifFavoriteStar";
 import { endPoll, votePoll } from "../../../features/messaging/pollSend";

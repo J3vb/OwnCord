@@ -163,9 +163,11 @@
    size has to live here or the dot collapses to 0x0 and becomes both
    invisible and unclickable. */
 .status-picker-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: var(--radius-circle);
+  --sd: 10px;
+  position: relative;
+  width: calc(var(--sd) * var(--phone-w, 1));
+  height: calc(var(--sd) * var(--phone-h, 1));
+  border-radius: var(--status-shape, var(--radius-circle));
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -176,9 +178,16 @@
 /* In the user bar the dot sits on the avatar corner, not inline next to
    text — bigger, with a ring so it reads against any avatar picture. */
 .user-bar .status-picker-dot {
-  width: 12px;
-  height: 12px;
-  border: 3px solid color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+  --sd: 12px;
+  --status-ring: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+  /* The phone's screen is opaque: the translucent ring would show the fill through it. */
+  --status-screen: var(--bg-tertiary);
+  border: 3px solid var(--status-ring);
+}
+/* The phone is taller than the round dot: grow it up and to the left so the
+   bottom-right corner stays on the avatar's corner. */
+.user-bar .status-picker-dot.status-mobile {
+  margin: calc(var(--sd) * (1 - var(--phone-h))) 0 0 calc(var(--sd) * (1 - var(--phone-w)));
 }
 .status-picker-option {
   display: flex;

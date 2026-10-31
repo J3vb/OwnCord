@@ -13,6 +13,7 @@ import {
   saveUserStatus,
 } from "@lib/presence/userStatus";
 import { savePref } from "@lib/prefs/preferences";
+import { resetAuthState } from "../helpers/storeSeeds";
 
 const HOUR = 60 * 60_000;
 const START = new Date(2026, 9, 17, 10, 0, 0).getTime();
@@ -58,13 +59,7 @@ describe("status timer watcher", () => {
   afterEach(() => {
     vi.useRealTimers();
     membersStore.setState((p) => ({ ...p, members: new Map() }));
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
   });
 
   it("reverts to Online through the same path when the duration ends", () => {

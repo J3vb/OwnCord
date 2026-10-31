@@ -13,9 +13,9 @@ import fc from "fast-check";
 
 // The avatar image is behind the session token; stub the authenticated fetch
 // with a URL-derived data URI so a changed avatarUrl shows in the DOM.
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return {
     ...actual,
     fetchImageAsObjectUrl: vi.fn((url: string) =>
@@ -34,9 +34,10 @@ import {
   type MemberItemModel,
   type MemberRowModel,
 } from "../../src/features/members/memberRow.view";
-import { createAvatarElement } from "../../src/components/message-list/avatar";
+import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { assertEveryFieldDraws } from "../helpers/rowModelProperty";
 import type { UserStatus } from "../../src/lib/types";
+import { showsPhone } from "../../src/lib/ui/statusIndicator";
 
 const draw = (model: MemberItemModel): HTMLElement => drawMemberItem(model, createAvatarElement);
 
@@ -60,6 +61,7 @@ const rowModel: fc.Arbitrary<MemberRowModel> = fc
     activityIcon: fc.constantFrom("gamepad-2" as const, "music" as const),
     colorVar: fc.constantFrom("var(--green)", "#ff0000", "#3366cc", "var(--text-micro)"),
     status: fc.constantFrom(...STATUSES),
+    mobile: fc.boolean(),
     away: fc.boolean(),
   })
   // The list builder never sets both: a custom status wins the second line.
@@ -108,6 +110,13 @@ function mutateRow(model: MemberRowModel, field: string): MemberRowModel {
       );
       return { ...model, status: next ?? "online" };
     }
+    case "mobile":
+      // The phone only draws for a status that can be on the phone.
+      return {
+        ...model,
+        status: showsPhone(model.status, true) ? model.status : "online",
+        mobile: !model.mobile,
+      };
     case "away":
       return { ...model, away: !model.away };
     default:
@@ -118,7 +127,7 @@ function mutateRow(model: MemberRowModel, field: string): MemberRowModel {
 describe("member row view", () => {
   it("every row model field changes the row's DOM", async () => {
     await assertEveryFieldDraws(rowModel, draw, mutateRow, {
-      patch: { fields: ["status", "away"], apply: patchMemberItem },
+      patch: { fields: ["status", "mobile", "away"], apply: patchMemberItem },
       bindingOnly: { kind: "discriminant: a different kind is a different model type" },
       settle,
     });
@@ -154,7 +163,7 @@ describe("member row view", () => {
   });
 
   it("the patch fields are exactly the ones patchMemberItem handles", () => {
-    expect([...MEMBER_PATCH_FIELDS].sort()).toEqual(["away", "status", "text"]);
+    expect([...MEMBER_PATCH_FIELDS].sort()).toEqual(["away", "mobile", "status", "text"]);
   });
 });
 
@@ -171,6 +180,7 @@ describe("member row view markup", () => {
     activityIcon: "gamepad-2",
     colorVar: "#ff0000",
     status: "online",
+    mobile: false,
     away: false,
   };
 
@@ -204,6 +214,38 @@ describe("member row view markup", () => {
     expect(dot?.style.background).toBe("var(--yellow)");
     expect(dot?.getAttribute("aria-label")).toBe(dot?.title);
     expect(dot?.id).toBe("mi-status-7");
+  });
+
+  it("draws the phone shape for a member on the phone app, and a round dot otherwise", () => {
+    const phone = draw({ ...base, mobile: true, status: "idle" });
+    const dot = phone.querySelector<HTMLElement>(".mi-status");
+    expect(dot?.classList.contains("status-mobile")).toBe(true);
+    expect(dot?.style.background).toBe("var(--yellow)");
+    expect(dot?.title).toBe("Idle on the phone app");
+    expect(dot?.getAttribute("aria-label")).toBe("Idle on the phone app");
+
+    expect(
+      draw({ ...base, mobile: false })
+        .querySelector(".mi-status")
+        ?.classList.contains("status-mobile"),
+    ).toBe(false);
+    // Offline never shows the phone, whatever the flag says.
+    expect(
+      draw({ ...base, mobile: true, status: "offline" })
+        .querySelector(".mi-status")
+        ?.classList.contains("status-mobile"),
+    ).toBe(false);
+  });
+
+  it("patches the phone shape in and out without a rebuild", () => {
+    const row = draw(base);
+    patchMemberItem(row, { ...base, mobile: true });
+    const dot = row.querySelector<HTMLElement>(".mi-status");
+    expect(dot?.classList.contains("status-mobile")).toBe(true);
+    expect(dot?.title).toBe("Online on the phone app");
+    patchMemberItem(row, { ...base, mobile: false });
+    expect(dot?.classList.contains("status-mobile")).toBe(false);
+    expect(dot?.title).toBe("Online");
   });
 
   it("draws a custom status under the name and describes the row by it", () => {

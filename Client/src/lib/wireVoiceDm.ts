@@ -52,6 +52,8 @@ export interface PresenceBatchEntry {
   readonly activity?: GameActivity | null;
   /** Always present on a server with `listening_activity` (null = none). */
   readonly listening?: ListeningActivity | null;
+  /** True when the user is on the Android app; absent = not. */
+  readonly mobile?: boolean;
 }
 
 /** Many users' presence in one frame: a coalescing window's changes, or with

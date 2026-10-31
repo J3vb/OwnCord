@@ -16,7 +16,7 @@ vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: () => ({ sessionReplaced: false }), subscribe: () => () => {} },
 }));
 
-import { buildAccountTab } from "@components/settings/AccountTab";
+import { buildAccountTab } from "../../src/features/settings/AccountTab";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
 
 function session(id: number, current: boolean) {

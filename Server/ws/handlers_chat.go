@@ -106,9 +106,9 @@ func sendResultEvents(d ChatDeps, info ClientInfo, clientMessageID string, chann
 			var openPayload []byte
 			if len(result.DMParticipants) > 0 {
 				openPayload = buildDMChannelOpen(
-					db.NewDMChannelInfo(channelID, chName, result.DMIsGroup, result.DMOwnerID, result.DMIconID, result.DMParticipants, pid), pid, d.LiveStatus)
+					db.NewDMChannelInfo(channelID, chName, result.DMIsGroup, result.DMOwnerID, result.DMIconID, result.DMParticipants, pid), pid, d.LiveStatus, d.LiveMobile)
 			} else {
-				openPayload = buildDMChannelOpenFor(channelID, result.SenderUser, pid, d.LiveStatus)
+				openPayload = buildDMChannelOpenFor(channelID, result.SenderUser, pid, d.LiveStatus, d.LiveMobile)
 			}
 			if openPayload == nil {
 				continue

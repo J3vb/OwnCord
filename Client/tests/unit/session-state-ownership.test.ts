@@ -23,6 +23,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { isInstrumented } from "../helpers/instrumented";
 
 const clientRoot = path.resolve(__dirname, "../..");
 const srcDir = path.join(clientRoot, "src");
@@ -171,9 +172,11 @@ function scan(files: ReadonlyMap<string, string>): Flag[] {
   return flags;
 }
 
-const real = new Map(
-  sourceFiles.map((rel) => [rel, readFileSync(path.join(srcDir, rel), "utf8")] as const),
+const texts = sourceFiles.map(
+  (rel) => [rel, readFileSync(path.join(srcDir, rel), "utf8")] as const,
 );
+const skipped = new Set(texts.filter(([, text]) => isInstrumented(text)).map(([rel]) => rel));
+const real = new Map(texts.filter(([rel]) => !skipped.has(rel)));
 
 describe("session state ownership", () => {
   it("scans the tree it claims to scan", () => {
@@ -203,7 +206,7 @@ describe("session state ownership", () => {
     () => {
       const flagged = new Set(scan(real).map((f) => `${f.file}|${f.binding}`));
       const stale = allowlist
-        .filter((e) => !flagged.has(`${e.file}|${e.binding}`))
+        .filter((e) => !skipped.has(e.file) && !flagged.has(`${e.file}|${e.binding}`))
         .map((e) => {
           const text = real.get(e.file);
           const why =

@@ -4,14 +4,10 @@ import { channelsStore, setChannels } from "@stores/channels.store";
 import { addDmToChannelsStore } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStore(): void {
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
+  resetChannelsState();
 }
 
 const testChannels: ReadyChannel[] = [

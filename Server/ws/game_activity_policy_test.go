@@ -222,8 +222,8 @@ func TestGameActivityPolicy_PresenceUpdateAfterSweepCarriesNoActivity(t *testing
 	}
 
 	// The events a presence_update would have built before the sweep.
-	pubEvents := presenceEvents(player.userID, db.StatusDND, nil, stale, nil)
-	ghostEvents := presenceEvents(ghost.userID, db.StatusInvisible, nil, staleGhost, nil)
+	pubEvents := presenceEvents(player.userID, db.StatusDND, nil, stale, nil, false)
+	ghostEvents := presenceEvents(ghost.userID, db.StatusInvisible, nil, staleGhost, nil, false)
 
 	saveGameActivitySwitch(t, h, database, false)
 	if err := h.awaitDispatch(context.Background()); err != nil {
@@ -548,8 +548,8 @@ func TestGameActivityPolicy_StalePresenceAfterOffThenOnCarriesNoActivity(t *test
 	settle(t, h) // the connect-time presence flush must land before the test reads frames
 	sendActivity(t, h, player, "Factorio")
 	sendActivity(t, h, ghost, "Secret Game")
-	pubEvents := presenceEvents(player.userID, db.StatusDND, nil, player.livePresence().activity, nil)
-	ghostEvents := presenceEvents(ghost.userID, db.StatusInvisible, nil, ghost.livePresence().activity, nil)
+	pubEvents := presenceEvents(player.userID, db.StatusDND, nil, player.livePresence().activity, nil, false)
+	ghostEvents := presenceEvents(ghost.userID, db.StatusInvisible, nil, ghost.livePresence().activity, nil, false)
 
 	saveGameActivitySwitch(t, h, database, false)
 	saveGameActivitySwitch(t, h, database, true)

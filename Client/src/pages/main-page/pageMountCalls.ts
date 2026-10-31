@@ -4,7 +4,7 @@
  */
 import { desktop } from "../../platform/desktop";
 import type { CallState } from "@components/VideoGrid";
-import { isConnecting } from "@components/voiceStatusText";
+import { isConnecting } from "../../features/voice/voiceStatusText";
 import { showToast } from "@lib/ui/toast";
 import { dmCallText } from "../../i18n/dmCall";
 import { shellText } from "../../i18n/shell";

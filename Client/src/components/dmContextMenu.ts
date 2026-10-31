@@ -9,7 +9,7 @@ import type { ModalInstance } from "@lib/ui/modalFactory";
 import { showContextMenu, type ContextMenuItem } from "@lib/ui/contextMenu";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
-import { muteChoices, mutedUntilLabel } from "./muteMenu";
+import { muteChoices, mutedUntilLabel } from "../features/channels/muteMenu";
 import { blocksStore } from "@stores/blocks.store";
 import { callUnavailableReason } from "../features/profiles/openUserProfilePopup";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";

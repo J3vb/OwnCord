@@ -7,7 +7,7 @@ import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { membersStore } from "../../../src/stores/members.store";
-import { openImageLightbox } from "../../../src/components/message-list/media";
+import { openImageLightbox } from "../../../src/features/messaging/content/media";
 import { saveUserStatus } from "../../../src/lib/presence/userStatus";
 import {
   startRingChime,
@@ -37,7 +37,7 @@ vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messages
 vi.mock("@components/UpdateNotifier", () => mocks.updateNotifierMock());
 vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
-vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
 vi.mock("../../../src/pages/main-page/ChannelController", () => mocks.pageChannelControllerMock());

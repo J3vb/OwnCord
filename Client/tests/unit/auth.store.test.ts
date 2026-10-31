@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import {
   authStore,
   setAuth,
@@ -25,9 +26,7 @@ import { expectConsole } from "../helpers/console";
 
 // Mock the lazily-imported voice SDK module so we can assert clearAuth() only
 // pulls it in (loading the ~1.3 MB LiveKit chunk) when a voice session exists.
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 

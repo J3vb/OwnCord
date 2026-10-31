@@ -2,15 +2,16 @@
 // overlay (transitionTo("error", ...) leaves formState "totp", and
 // updateTotpOverlay hides the overlay for every non-"totp" state), so the
 // user was dropped back on the login form with no way to re-enter the code.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock("../../src/components/SettingsOverlay", () => ({
+vi.mock("../../src/features/settings/SettingsOverlay", () => ({
   createSettingsOverlay: () => ({
     mount: vi.fn(),
     destroy: vi.fn(),
@@ -31,14 +32,8 @@ const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8
 
 describe("LoginForm TOTP retry after a rejected verify", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("keeps the TOTP overlay open and lets a second code be submitted", async () => {

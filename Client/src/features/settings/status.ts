@@ -1,6 +1,6 @@
 /**
  * Status icons and disclosures for the settings tabs (UX clarity pass).
- * Kept out of components/settings/helpers.ts, which loads at startup, and in
+ * Kept out of features/settings/helpers.ts, which loads at startup, and in
  * features/ so feature-owned panes (Safety) can use them too.
  */
 

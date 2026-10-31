@@ -4,16 +4,9 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi, type Mock } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   filterChannelSuggestions,
@@ -23,17 +16,18 @@ import { createMessageInput, type MessageInputOptions } from "../../src/componen
 import {
   relabelInlineTimestamps,
   renderMessageContent,
-} from "../../src/components/message-list/contentParser";
-import { extractUrls } from "../../src/components/message-list/media";
+} from "../../src/features/messaging/content/contentParser";
+import { extractUrls } from "../../src/features/messaging/content/media";
 import { markdownToPlainText, parseBlocks, parseInline } from "../../src/lib/text/markdown";
 import { formatDiscordTimestamp } from "../../src/features/messaging/discordTimestamp";
 import { refreshTimeFormat, saveTimeFormat } from "../../src/lib/text/timeFormat";
 import { replaceEmojiShortcodes } from "../../src/features/messaging/shortcodes";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
+import { setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: "Text", position: 0 },
@@ -50,14 +44,9 @@ beforeAll(async () => {
 
 beforeEach(() => {
   localStorage.clear();
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   setChannels(CHANNELS);
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
   clearCustomEmoji();
   setCustomEmoji([]);
   emojiStore.flush();

@@ -23,7 +23,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn() }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
+vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
 vi.mock("@stores/auth.store", () => ({
   getToken: () => "session-token",
   authStore: { getState: () => ({ uploadPolicy: null }) },
@@ -33,7 +33,7 @@ import {
   clearAttachmentCaches,
   renderAttachment,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import {
   TEXT_PREVIEW_CACHE_MAX,
   TEXT_PREVIEW_MAX_LINES,

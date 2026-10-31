@@ -17,6 +17,7 @@ import {
 } from "../../src/lib/net/serverCapabilities";
 import "@components/UserProfilePopup";
 import "@components/AdminActions";
+import { resetAuthState } from "../helpers/storeSeeds";
 
 globalThis.ResizeObserver = class {
   observe(): void {}
@@ -79,13 +80,7 @@ describe("member context menu: Change Nickname", () => {
     container.remove();
     resetServerCapabilities();
     setRoles([]);
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
   });
 
   async function openMenu(targetId: number): Promise<HTMLElement | null> {

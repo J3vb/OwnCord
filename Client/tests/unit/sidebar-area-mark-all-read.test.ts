@@ -10,13 +10,14 @@
  * the composed DOM, and the CSS check below reads it from there.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  rePinPeerIdentity: vi.fn(),
-  leaveVoice: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    rePinPeerIdentity: vi.fn(),
+  }),
+);
 vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
@@ -51,11 +52,11 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
 import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
-import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
-import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/readState";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -95,26 +96,15 @@ describe("SidebarArea — Mark All as Read", () => {
   beforeEach(() => {
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     uiStore.setState((prev) => ({
       ...prev,
       collapsedCategories: new Set(),
       sidebarMode: "channels" as const,
     }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     container = document.createElement("div");
     document.body.appendChild(container);
   });

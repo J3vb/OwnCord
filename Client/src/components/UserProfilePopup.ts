@@ -19,13 +19,13 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import { createAvatarElement } from "@components/message-list/avatar";
+import { createAvatarElement } from "../features/profiles/avatar";
 import { roleColorVar } from "@lib/text/formatting";
 import { reportEntryText } from "../i18n/reportEntry";
-import { statusLabel } from "../i18n/shell";
+import { applyStatusIndicator, applyStatusLine } from "@lib/ui/statusIndicator";
 import { NOTE_MAX_LENGTH, type NoteBinding } from "../features/profiles/userNotes";
 import { paintBanner } from "../features/profiles/banner";
-import { bannerImages } from "./bannerImages";
+import { bannerImages } from "../features/profiles/bannerImages";
 import { requestsText } from "../i18n/requests";
 import { shellText } from "../i18n/shell";
 import { playingForLine } from "../features/members/gameActivityLine";
@@ -42,6 +42,8 @@ export interface UserProfileData {
   readonly avatar: string | null;
   readonly role: string;
   readonly status: UserStatus;
+  /** On the Android app: the status dot becomes a phone. */
+  readonly mobile?: boolean;
   /** Nickname. When set the popup shows it as the heading and the username
    *  underneath, because the username is still the handle you @mention. */
   readonly displayName?: string | null;
@@ -162,16 +164,6 @@ const VIEWPORT_MARGIN = 8;
 /** Breathing room between the click point and the card. */
 const ANCHOR_GAP = 8;
 
-const STATUS_COLORS: Record<UserStatus, string> = {
-  online: "var(--green)",
-  idle: "var(--yellow)",
-  dnd: "var(--red)",
-  // Only ever reached for the signed-in user looking at their own profile —
-  // the server maps invisible to offline for everyone else.
-  invisible: "var(--text-micro)",
-  offline: "var(--text-micro)",
-};
-
 /** aria-disabled, not `disabled`, so the button stays focusable and its
  *  reason is reachable by keyboard and read by a screen reader. */
 const markUnavailable = (btn: HTMLElement, reason: string, id: string): void => {
@@ -235,8 +227,7 @@ function buildAvatar(user: UserProfileData): HTMLDivElement {
 
   // Status dot overlay
   const statusDot = createElement("div", { class: "upp-status-dot" });
-  statusDot.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-  statusDot.title = statusLabel(user.status);
+  applyStatusIndicator(statusDot, user.status, user.mobile === true);
   wrapper.appendChild(statusDot);
 
   return wrapper;
@@ -710,8 +701,11 @@ export function createUserProfilePopup(
     // Status line
     const statusLine = createElement("div", { class: "upp-status-line" });
     const statusDotInline = createElement("span", { class: "upp-status-dot-inline" });
-    statusDotInline.style.background = STATUS_COLORS[user.status] ?? STATUS_COLORS.offline;
-    const statusText = createElement("span", {}, statusLabel(user.status));
+    const statusText = createElement(
+      "span",
+      {},
+      applyStatusLine(statusDotInline, user.status, user.mobile === true),
+    );
     appendChildren(statusLine, statusDotInline, statusText);
 
     // About section (2 lines max)

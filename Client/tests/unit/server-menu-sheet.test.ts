@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attachServerMenu, type ServerMenuActions } from "../../src/pages/main-page/ServerMenu";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { closeBottomSheet } from "@lib/ui/bottomSheet";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
+import { signInAs } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -53,13 +53,7 @@ describe("server menu on a phone", () => {
       vi.fn((q: string) => ({ matches: phone && q.includes("pointer: coarse") })),
     );
     localStorage.clear();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     setChannels(CHANNELS);
     grant(Permission.SEND_MESSAGES);
     actions = {

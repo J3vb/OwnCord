@@ -8,6 +8,7 @@ import {
 import { canMention, mentionInComposer } from "../../../src/features/messaging/activeComposer";
 import { lastEmojiPickerOptions, lastGifPickerOptions } from "../../helpers/messageInputMocks";
 import { makeOptions } from "../../helpers/messageInputHarness";
+import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
@@ -760,14 +761,8 @@ describe("MessageInput", () => {
 // (22) the member menu's Mention writes through insertMention (WP 3C-3)
 describe("MessageInput insertMention", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   function mountInput(overrides: Partial<MessageInputOptions> = {}) {

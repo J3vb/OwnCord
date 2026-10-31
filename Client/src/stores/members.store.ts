@@ -69,6 +69,10 @@ export interface Member {
    *  server that sends none, where `role` is the only role. */
   readonly roleIds?: readonly number[];
   readonly status: UserStatus;
+  /** On the Android app. False or undefined = not; the store sets it on every
+   *  roster, presence and batch write (optional only for the inline test
+   *  fixtures). The server never sends it for an offline member. */
+  readonly mobile?: boolean;
   /** Nickname to render instead of `username`. Null = unset. Optional only so
    *  the many inline Member test fixtures need not restate it. Mentions still
    *  resolve against `username` — it is the unique handle. */
@@ -143,6 +147,7 @@ export function setMembers(members: readonly ReadyMember[]): void {
       role: m.role,
       ...(m.role_ids === undefined ? {} : { roleIds: m.role_ids }),
       status: m.status,
+      ...(m.mobile === true ? { mobile: true } : {}),
       displayName: m.display_name ?? null,
       customStatus: m.custom_status ?? null,
       identityPublicKey: m.identity_public_key ?? null,
@@ -191,6 +196,7 @@ export function addMember(payload: MemberJoinPayload): void {
       role: payload.user.role,
       ...(payload.user.role_ids === undefined ? {} : { roleIds: payload.user.role_ids }),
       status: payload.status ?? "offline",
+      ...(prev.members.get(payload.user.id)?.mobile === true ? { mobile: true } : {}),
       displayName: payload.user.display_name ?? null,
       // member_join carries no custom status; a presence event follows it and
       // is what fills this in.
@@ -288,7 +294,8 @@ function nextCustomStatusExpiry(
 
 /** Update a member's presence status, and the custom status line that rides
  *  along with it. `customStatus` is only applied when the event carried the
- *  field — a bare status flip must not blank the text. `customStatusExpiresAt`
+ *  field — a bare status flip must not blank the text. `mobile` is whether the
+ *  Android app is shown; omit it (an optimistic flip) to keep the current flag. `customStatusExpiresAt`
  *  is passed only for your own optimistic send, where the client knows it. */
 export function updatePresence(
   userId: number,
@@ -297,6 +304,7 @@ export function updatePresence(
   customStatusExpiresAt?: string | null,
   activity?: GameActivity | null,
   listening?: ListeningActivity | null,
+  mobile?: boolean,
 ): void {
   membersStore.setState((prev) => {
     const existing = prev.members.get(userId);
@@ -305,6 +313,9 @@ export function updatePresence(
     next.set(userId, {
       ...existing,
       status,
+      // Absent = your own optimistic status flip: the flag the server last
+      // told us stays. A server frame always states it (false when omitted).
+      ...(mobile === undefined ? {} : { mobile }),
       customStatus: customStatus === undefined ? existing.customStatus : customStatus,
       ...nextCustomStatusExpiry(existing, customStatus, customStatusExpiresAt),
       // Absent = an older server (or your own optimistic status flip): the shown game stays.
@@ -329,6 +340,7 @@ export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full:
           next.set(id, {
             ...m,
             status: "offline",
+            mobile: false,
             customStatus: null,
             activity: null,
             listening: null,
@@ -342,6 +354,7 @@ export function applyPresenceBatch(updates: readonly PresenceBatchEntry[], full:
       next.set(u.user_id, {
         ...existing,
         status: u.status,
+        mobile: u.mobile === true,
         customStatus: u.custom_status,
         ...nextCustomStatusExpiry(existing, u.custom_status, undefined),
         ...(u.activity === undefined ? {} : { activity: toMemberActivity(u.activity) }),

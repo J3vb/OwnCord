@@ -7,14 +7,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { isChannelAway } from "@lib/readState";
@@ -26,24 +18,18 @@ import {
   isWindowDetached,
   getChannelMessages,
 } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import type { MessageResponse } from "@lib/types";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 let scrollHeight = 100_000;
 const NEAR_BOTTOM = 100_000 - 50;
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMessagesState();
+  resetMembersState();
   setChannels([]);
   setActiveChannel(null);
 }

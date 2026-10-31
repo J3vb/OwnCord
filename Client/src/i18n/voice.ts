@@ -43,6 +43,8 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.mute": "Mute",
   "widget.control.unmute": "Unmute",
   "widget.control.pttGated": "Push-to-talk — hold your key to talk",
+  "widget.control.pttGated.android": "Push-to-talk — hold the talk button to talk",
+  "talk.hold": "Hold to talk",
   "widget.control.listenOnly": "Listening only — no microphone access",
   "widget.control.afkLocked": "You can't speak in the AFK channel",
   "widget.control.deafen": "Deafen",

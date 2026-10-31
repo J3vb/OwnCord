@@ -12,17 +12,10 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import fc from "fast-check";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   filterMentionSuggestions,
@@ -38,6 +31,7 @@ import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { Permission } from "../../src/lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const NAMES = ["alice", "Alan", "Bob", "carol", "dave_99", "eve-ish"];
 
@@ -68,12 +62,7 @@ function signInAs(role: string, permissions: number): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   setRoles([{ id: 1, name: role, color: null, permissions }]);
   channelsStore.flush();
 }

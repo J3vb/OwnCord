@@ -34,10 +34,10 @@ import {
   externalPartition,
   fetchMediaAsObjectUrl,
   setServerHost,
-} from "../../src/components/message-list/attachments";
-import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
-import { renderInlineImage } from "../../src/components/message-list/media";
-import { getImageBox, setImageBox } from "../../src/components/message-list/imageSizes";
+} from "../../src/features/messaging/content/attachments";
+import { renderGenericLinkPreview } from "../../src/features/messaging/content/embeds";
+import { renderInlineImage } from "../../src/features/messaging/content/media";
+import { getImageBox, setImageBox } from "../../src/features/messaging/content/imageSizes";
 import {
   rememberRowHeight,
   rememberedRowHeight,
@@ -80,7 +80,7 @@ import {
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
 import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
-import { createAvatarElement } from "../../src/components/message-list/avatar";
+import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";

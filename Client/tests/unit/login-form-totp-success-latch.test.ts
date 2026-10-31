@@ -5,15 +5,16 @@
 // `formState === "error" && totpPending` branch re-opens the dead 2FA overlay
 // over the error banner, and the user is stuck: onTotpSubmit's guard in
 // main.ts silently no-ops because the partial token was already consumed.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createConnectPage } from "../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock("../../src/components/SettingsOverlay", () => ({
+vi.mock("../../src/features/settings/SettingsOverlay", () => ({
   createSettingsOverlay: () => ({
     mount: vi.fn(),
     destroy: vi.fn(),
@@ -34,14 +35,8 @@ const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8
 
 describe("LoginForm TOTP latch after a successful verify", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("does not re-open the TOTP overlay for an error that arrives after a successful verify", async () => {

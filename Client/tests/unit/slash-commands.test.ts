@@ -5,7 +5,7 @@ import {
   filterSlashCommands,
   SLASH_COMMANDS,
 } from "../../src/features/messaging/slashCommands";
-import { renderMessageContent } from "../../src/components/message-list/contentParser";
+import { renderMessageContent } from "../../src/features/messaging/content/contentParser";
 import { messagingText } from "../../src/i18n/messaging";
 
 const SHRUG = "¯\\\\\\_(ツ)\\_/¯";

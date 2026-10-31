@@ -3,7 +3,7 @@ import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { SessionScope } from "@lib/net/sessionScope";
 import { configureConnectionDiagnostics } from "@lib/net/connectionDiagnostics";
-import { createConnectionDiagnosticsPanel } from "@components/settings/ConnectionDiagnosticsPanel";
+import { createConnectionDiagnosticsPanel } from "../../src/features/settings/ConnectionDiagnosticsPanel";
 
 vi.mock("@lib/voice/livekitSession", () => ({ getRoomForStats: () => null }));
 

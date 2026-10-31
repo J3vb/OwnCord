@@ -13,7 +13,7 @@ import * as markdown from "../../src/lib/text/markdown";
 import {
   renderMessageContent,
   clearContentParseCache,
-} from "../../src/components/message-list/contentParser";
+} from "../../src/features/messaging/content/contentParser";
 
 /** Count parseBlocks calls while `fn` runs. */
 function parseCalls(fn: () => void): number {

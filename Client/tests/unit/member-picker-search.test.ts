@@ -2,11 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
 import { membersStore } from "../../src/stores/members.store";
-import { authStore } from "../../src/stores/auth.store";
 import type { Member } from "../../src/stores/members.store";
+import { signInAs } from "../helpers/storeSeeds";
 
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/components/message-list/attachments")>()),
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
   fetchImageAsObjectUrl: vi.fn().mockResolvedValue("blob:avatar-2"),
 }));
 
@@ -19,13 +19,10 @@ function setup(members: Member[]): void {
     members: new Map(members.map((m) => [m.id, m])),
     typingUsers: new Map(),
   }));
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 1, username: "Me", avatar: null, role: "member" },
-    serverName: "S",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs(
+    { id: 1, username: "Me", avatar: null, role: "member" },
+    { token: "t", serverName: "S" },
+  );
 }
 
 describe("member picker search, sort and chips", () => {

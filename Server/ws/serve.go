@@ -242,6 +242,7 @@ func (h *Hub) applyConnectStatus(ctx context.Context, c *Client) {
 func (h *Hub) announceFreshConnect(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
 	p := pendingPresence{status: c.user.Status, customStatus: text}
+	p.connecting = c
 	if h.presenceRepair.marked(&h.presenceRepair.joins, c.userID) || c.user.Banned {
 		m := memberPayloadFor(c.user, c.roleName, c.roleIDs)
 		p.member = &m
@@ -254,7 +255,14 @@ func (h *Hub) announceFreshConnect(c *Client) {
 // the invisible mapping applied.
 func (h *Hub) announceConnectPresence(c *Client) {
 	text, _ := storedCustomStatus(c.user.CustomStatus, c.user.CustomStatusExpiresAt, time.Now())
-	h.QueuePresence(c.userID, c.user.Status, text)
+	h.queuePresence(c.userID, pendingPresence{status: c.user.Status, customStatus: text, connecting: c})
+}
+
+// connectMobile is the phone flag a connect announcement for c carries: the user's
+// merged flag, but only while the merged status is the one being announced.
+func (h *Hub) connectMobile(c *Client, status string) bool {
+	shown := mergeLivePresence(h.clientsOf(c.userID))
+	return shown.status == status && shown.mobile
 }
 
 // gateResumeChannel resolves the read-permission set a resume fallback

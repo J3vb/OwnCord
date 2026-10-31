@@ -341,7 +341,7 @@ func TestPresenceFrame_FullQueueDropsAndMarksStale_ContentFrameStillCloses(t *te
 	// A window batch and a single status change, both into a full queue.
 	h.QueuePresence(mover.userID, db.StatusIdle, nil)
 	settle(t, h)
-	h.EmitEvents(context.Background(), presenceEvents(mover.userID, db.StatusDND, nil, nil, nil))
+	h.EmitEvents(context.Background(), presenceEvents(mover.userID, db.StatusDND, nil, nil, nil, false))
 	if err := h.awaitDispatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +451,7 @@ func TestPresenceUpdate_InsideTheWindowStillDeliversTheNewMember(t *testing.T) {
 		t.Fatal("a later state in the window lost the member data")
 	}
 
-	h.EmitEvents(context.Background(), presenceEvents(9, db.StatusDND, nil, nil, nil))
+	h.EmitEvents(context.Background(), presenceEvents(9, db.StatusDND, nil, nil, nil, false))
 	if len(h.broadcast) != 2 {
 		t.Fatalf("got %d frames, want member_join then the fresher presence", len(h.broadcast))
 	}

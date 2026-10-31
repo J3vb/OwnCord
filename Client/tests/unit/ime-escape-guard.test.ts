@@ -32,9 +32,9 @@ interface Exempt {
 // record it as the new binding instead.
 const CAPTURE = "key capture on a focused button, no text field; Escape cancels the capture";
 const EXEMPT: readonly Exempt[] = [
-  { file: "components/settings/KeybindsTab.ts", fn: "onKey", reason: CAPTURE },
-  { file: "components/settings/comboCapture.ts", fn: "onKey", reason: CAPTURE },
-  { file: "components/settings/pttControls.ts", fn: "onKey", reason: CAPTURE },
+  { file: "features/settings/KeybindsTab.ts", fn: "onKey", reason: CAPTURE },
+  { file: "features/settings/comboCapture.ts", fn: "onKey", reason: CAPTURE },
+  { file: "features/settings/pttControls.ts", fn: "onKey", reason: CAPTURE },
 ];
 
 type FnNode =

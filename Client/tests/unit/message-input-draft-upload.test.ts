@@ -1,7 +1,7 @@
 // An upload still running when the user switches channel keeps going in the
 // channel's draft, and the composer that restores the draft shows it again and
 // sends its id once it finishes (WP 2A-10).
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@components/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
@@ -12,6 +12,7 @@ vi.mock("@components/GifPicker", () => ({
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
 import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
+import { useMountContainer } from "../helpers/mountContainer";
 
 type UploadResult = { id: string; url: string; filename: string };
 
@@ -69,14 +70,8 @@ function send(container: HTMLElement): void {
 
 describe("MessageInput upload in flight across a channel switch", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("keeps the upload running and finishes it on the restored chip", async () => {

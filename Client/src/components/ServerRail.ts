@@ -37,7 +37,7 @@ import { setSidebarMode, uiStore } from "@stores/ui.store";
 import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
-import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../i18n/serverRail";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";

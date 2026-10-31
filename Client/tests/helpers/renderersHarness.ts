@@ -3,14 +3,15 @@ import { setServerHost } from "../../src/components/message-list/renderers";
 import type { Message } from "../../src/stores/messages.store";
 import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import {
   clearExternalImageCache,
   closeActiveLightbox,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import { previewMock, imageMock } from "./renderersMocks";
+import { resetMembersState } from "./storeResets";
+import { resetAuthState, signInAs } from "./storeSeeds";
 
 export let blobCounter = 0;
 
@@ -27,31 +28,16 @@ export async function brokerImages(count: number): Promise<HTMLImageElement[]> {
 }
 
 export function resetStores(): void {
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   channelsStore.setState((prev) => ({ ...prev, roles: [] }));
-  authStore.setState(() => ({
-    token: null,
-    user: null,
-    serverName: null,
-    motd: null,
-    isAuthenticated: false,
-  }));
+  resetAuthState();
   setConnectionStatus("connected");
 }
 
 /** Seed a moderator role (MANAGE_MESSAGES) so permission-gated actions render. */
 export function seedMessageManager(): void {
   setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
-  authStore.setState(() => ({
-    token: "tok",
-    user: { id: 999, username: "Mod", avatar: null, role: "moderator" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs({ id: 999, username: "Mod", avatar: null, role: "moderator" }, { serverName: null });
 }
 
 /** Seed the member list so @tokens resolve — unresolvable tokens stay plain text. */

@@ -3,7 +3,7 @@
  * and global shortcuts, and toasts.
  */
 import { ApiClientError, errorText } from "@lib/api";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { createSettingsOverlay } from "../../features/settings/SettingsOverlay";
 import { showToast, showChangeOutcomeToast } from "@lib/ui/toast";
 import { accountText as account } from "../../i18n/account";
 import { logout } from "@lib/net/logout";
@@ -16,7 +16,7 @@ import {
   pruneAttachmentCacheScope,
   resolveServerUrl,
   thumbnailUrl,
-} from "@components/message-list/attachments";
+} from "../../features/messaging/content/attachments";
 import { createQuickSwitcherManager } from "./OverlayManagers";
 import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
 import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations";

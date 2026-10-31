@@ -13,7 +13,7 @@ import { formatUntil, safetyText } from "../../i18n/safety";
 import { shellText } from "../../i18n/shell";
 import type { MessageListOptions } from "../MessageList";
 import { attachReactionTooltip } from "./reactionTooltip";
-import { buildCustomEmojiNode } from "./customEmoji";
+import { buildCustomEmojiNode } from "../../features/messaging/content/customEmoji";
 
 // -- Reaction rendering -------------------------------------------------------
 

@@ -642,6 +642,91 @@ describe("createPinnedPanelController", () => {
   });
 });
 
+describe("pinned panel closes on a press outside it", () => {
+  let root: HTMLDivElement;
+  let pinsBtn: HTMLButtonElement;
+  let outsideEl: HTMLDivElement;
+
+  const press = (el: Element): void => {
+    el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    root = document.createElement("div");
+    pinsBtn = document.createElement("button");
+    pinsBtn.className = "pin-btn pins-btn";
+    outsideEl = document.createElement("div");
+    root.append(pinsBtn, outsideEl);
+    document.body.appendChild(root);
+    mockPinnedMessagesMount.mockImplementationOnce((container: Element) => {
+      const panel = document.createElement("div");
+      panel.className = "pinned-panel";
+      panel.appendChild(document.createElement("button"));
+      container.appendChild(panel);
+    });
+  });
+
+  afterEach(() => {
+    for (const c of openPinnedControllers.splice(0)) c.cleanup();
+    root.remove();
+  });
+
+  async function openPanel(): Promise<ReturnType<typeof createPinnedPanelController>> {
+    const controller = createPinnedPanelController({
+      api: makeMockApi() as never,
+      getRoot: () => root,
+      getCurrentChannelId: () => 42,
+    });
+    await controller.toggle();
+    expect(mockPinnedMessagesMount).toHaveBeenCalledOnce();
+    return controller;
+  }
+
+  it("closes on a press on the page behind it", async () => {
+    await openPanel();
+    press(outsideEl);
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+  });
+
+  it("stays open on a press inside it", async () => {
+    await openPanel();
+    press(root.querySelector(".pinned-panel button")!);
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+  });
+
+  it("leaves its own header button to toggle it, so the click closes it once", async () => {
+    const controller = await openPanel();
+    press(pinsBtn);
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+    await controller.toggle();
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+    expect(createPinnedMessages).toHaveBeenCalledOnce();
+  });
+
+  it("stays open on a press in a dialog, menu, toast or image viewer over the page", async () => {
+    await openPanel();
+    for (const cls of ["modal-overlay", "context-menu", "toast-container", "image-lightbox"]) {
+      const layer = document.createElement("div");
+      layer.className = cls;
+      const inner = document.createElement("span");
+      layer.appendChild(inner);
+      document.body.appendChild(layer);
+      press(inner);
+      layer.remove();
+    }
+    expect(mockPinnedMessagesDestroy).not.toHaveBeenCalled();
+  });
+
+  it("stops listening once closed", async () => {
+    const controller = await openPanel();
+    controller.cleanup();
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+    press(outsideEl);
+    expect(mockPinnedMessagesDestroy).toHaveBeenCalledOnce();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // mapToPinnedMessage
 // ---------------------------------------------------------------------------

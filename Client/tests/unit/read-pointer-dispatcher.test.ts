@@ -4,6 +4,7 @@
  * frame's `read` flag. Server events reach the stores only here.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
@@ -32,6 +33,8 @@ import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { Message } from "../../src/stores/messages.store";
 import { expectConsole } from "../helpers/console";
+import { resetMessagesState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
@@ -39,23 +42,12 @@ vi.mock("@lib/notifications", () => ({
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  handleVoiceToken: vi.fn(async () => {}),
-  handleParticipantLeft: vi.fn(async () => {}),
-  handleE2EEAnnounce: vi.fn(async () => {}),
-  handleE2EEOffer: vi.fn(async () => {}),
-  leaveVoice: vi.fn(),
-  cleanupAll: vi.fn(),
-  isVoiceSessionActive: vi.fn(() => false),
-  isAutoReconnecting: vi.fn(() => false),
-  failPendingRejoin: vi.fn(),
-  setMuted: vi.fn(),
-  setDeafened: vi.fn(),
-  disableCamera: vi.fn(async () => {}),
-  disableScreenshare: vi.fn(async () => {}),
-  reconcileVideoFlags: vi.fn(),
-  resendWatching: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    disableCamera: vi.fn(async () => {}),
+    disableScreenshare: vi.fn(async () => {}),
+  }),
+);
 // voice/wsHandlers loads screenShare lazily on an error frame that carries an
 // id. afterEach waits for that import: one still pending when the file ends
 // resolves after the mocks are gone and loads the real module into a torn-down
@@ -163,21 +155,9 @@ describe("read pointer through the dispatcher", () => {
   beforeEach(() => {
     mockShowToast.mockClear();
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState();
     setLiveTailInView(1, true);
     unreads = [];
     reads = [];

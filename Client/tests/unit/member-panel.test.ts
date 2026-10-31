@@ -1,15 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 
 vi.mock("@components/MemberList", () => ({
   createMemberList: vi.fn().mockImplementation(() => ({
@@ -35,6 +32,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "@components/MemberList";
 import { Permission } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 function resetStores(): void {
   authStore.setState(() => ({
@@ -44,7 +42,7 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
   channelsStore.setState(() => ({
     categories: [],
     channels: new Map(),

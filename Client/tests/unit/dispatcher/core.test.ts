@@ -10,6 +10,7 @@ import { blocksStore, setUserBlockedByMe } from "../../../src/stores/blocks.stor
 import { uiStore, setUpdateRequiredHost } from "../../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../../src/lib/protocolTypes";
 import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import { resetAuthState } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -756,13 +757,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("auth_ok with null token uses empty string fallback", () => {
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
 
     mock.dispatch("auth_ok", {
       user: { id: 1, username: "alex", avatar: null, role: "admin" },

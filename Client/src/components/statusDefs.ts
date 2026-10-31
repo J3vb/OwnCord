@@ -44,10 +44,6 @@ export function statusNote(def: StatusDef): string | null {
   return shellText(def.noteKey);
 }
 
-export function colorForStatus(status: UserStatus): string {
-  return STATUS_DEFS.find((d) => d.value === status)?.color ?? "var(--text-micro)";
-}
-
 const TIME_OF_DAY = { hour: "numeric", minute: "2-digit" } as const;
 
 function sameLocalDay(a: Date, b: Date): boolean {

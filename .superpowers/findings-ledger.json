@@ -370,7 +370,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "7e22fe7",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/mountAndScroll.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -880,7 +880,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/lifecycle.test.ts",
         "revertProof": "pass",
         "branchCommit": "c3a20a95"
       },
@@ -951,7 +951,7 @@
       "fix": {
         "commit": "b1fb565",
         "branchCommit": "a50a9d3",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/mountAndScroll.test.ts",
         "revertProof": "self-reported",
         "pr": 1366
       },
@@ -1529,7 +1529,7 @@
       "confidence": "high",
       "fix": {
         "commit": "8787b906",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/lifecycle.test.ts",
         "revertProof": "pass",
         "branchCommit": "c3a20a95"
       },
@@ -1913,7 +1913,7 @@
       "fix": {
         "commit": "c3837fa",
         "branchCommit": "a910975",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/liveUpdatesAndBreakers.test.ts",
         "revertProof": "self-reported",
         "pr": 1367
       },
@@ -3339,7 +3339,7 @@
       "fix": {
         "commit": "c3837fa",
         "branchCommit": "aefcd27",
-        "test": "Client/tests/unit/api.test.ts",
+        "test": "Client/tests/unit/api/resources.test.ts",
         "revertProof": "self-reported",
         "pr": 1367
       },
@@ -3608,7 +3608,7 @@
       "fix": {
         "commit": "c3837fa",
         "branchCommit": "7b1779a",
-        "test": "Client/tests/unit/search-overlay.test.ts",
+        "test": "Client/tests/unit/searchOverlay/inputAndResults.test.ts",
         "revertProof": "self-reported",
         "pr": 1367
       },
@@ -3845,7 +3845,7 @@
       "confidence": "high",
       "fix": {
         "commit": "b9b86067",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/credentials.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Widen the gate at main.ts:763 so the in-flight-session case is covered, e.g. `if (!isAuthenticated && (router.getCurrentPage() === \"main\" || connectedOverlay !== null))`, and add `connectedOverlay?.destroy(); connectedOverlay = null;` next to the existing `sessionCleanup?.()` teardown (main.ts:776-779) before the `router.navigate(\"connect\")` at 795. That is exactly the teardown handleInviteDeepLink already open-codes at main.ts:836-852, so one guard in the shared subscriber replaces the per-caller copies.",
@@ -3934,7 +3934,7 @@
       "confidence": "high",
       "fix": {
         "commit": "01dca528",
-        "test": "Client/tests/unit/api.test.ts",
+        "test": "Client/tests/unit/api/authAndErrors.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Give doFetch/request a per-call opt-out from the session-expiry sink (e.g. an options arg `{ sessionSink: false }` consulted at api.ts:155 before calling onUnauthorized) and set it on the single caller whose 401 is not a session verdict, confirmTotp (api.ts:395-396). Server-side alternative (larger blast radius): change totp_handler.go:316 to 400 INVALID_INPUT to match the sibling confirmation failures \u2014 but two tests assert 401 there (Server/api/auth_handler_test.go:1436, Server/api/totp_handler_test.go:299), so that is a deliberate contract change.",
@@ -3957,7 +3957,7 @@
       "confidence": "high",
       "fix": {
         "commit": "e391caeb",
-        "test": "Client/tests/unit/ptt.test.ts",
+        "test": "Client/tests/unit/ptt/keyAndGating.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "In updatePttKey, after the `await initPtt()` succeeds, arm the gate if a call is already up \u2014 mirroring the join-time computation: if `voiceStore.getState().currentChannelId !== null && isPttPollingLive() && voiceStore.getState().pttGated !== true`, call `setPttGated(true)`, and if the user is not already self-muted/deafened, `setMuted(true)` and set `pttOwnsMute = true` so the next press may lift it. Putting it in updatePttKey (not initPtt) keeps the startup path, which has no call in progress, unchanged.",
@@ -4279,7 +4279,7 @@
       "confidence": "high",
       "fix": {
         "commit": "b9b86067",
-        "test": "Client/tests/unit/main.test.ts",
+        "test": "Client/tests/unit/main/lifecycle.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Give main.ts access to the session's single PresenceSender instead of adding a second budget. Smallest shape: add a module-level slot in Client/src/lib/presence.ts (e.g. `let active: PresenceSender | null = null; export function setActivePresenceSender(s: PresenceSender | null) { active = s; } export function getActivePresenceSender() { return active; }`), have MainPage.ts:133 call `setActivePresenceSender(presenceSender)` right after constructing it and `setActivePresenceSender(null)` next to `presenceSender.destroy()` in its teardown (MainPage.ts:804), then replace main.ts:263 with `getActivePresenceSender()?.send(mapped);`. saveUserStatus(mapped) on line 262 stays exactly as is, so OC-0037's assertions still pass, and the tray now shares the one token bucket, the coalescing retry, and the optimistic updatePresence with every other producer. When no session is mounted the optional call is a no-op, matching today's \"ws.send is a safe no-op\" behavior.",
@@ -4394,7 +4394,7 @@
       "confidence": "high",
       "fix": {
         "commit": "9e8719dc",
-        "test": "Client/tests/unit/settings-overlay.test.ts",
+        "test": "Client/tests/unit/settingsOverlay/shellAndPreferences.test.ts, Client/tests/unit/settingsOverlay/profileAndOverlays.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Move the attach above the initial sync in mount(): do `container.appendChild(root);` first, then `if (uiStore.getState().settingsOpen) show();`. One reorder in the shared mount() fixes every caller.",
@@ -4555,7 +4555,7 @@
       "confidence": "high",
       "fix": {
         "commit": "2ce5879c",
-        "test": "Client/tests/unit/settings-overlay.test.ts",
+        "test": "Client/tests/unit/settingsOverlay/profileAndOverlays.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "At AccountTab.ts:1151 resolve the same way the initial build does instead of writing the raw username: `setText(headerName, resolveDisplayName({ username: newName, displayName: authStore.getState().user?.display_name ?? null }));` (resolveDisplayName is already imported at :11, and updateUser has run before this .then, so the store is fresh). Leave :1152 (usernameValue) as is.",
@@ -4947,7 +4947,7 @@
       "confidence": "high",
       "fix": {
         "commit": "0b665f3c7da336b95beb7c63f3c3eb23b634e173",
-        "test": "Client/tests/unit/media.test.ts",
+        "test": "Client/tests/unit/media/urlsAndEmbeds.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Export the trailing-punctuation strip from content-parser.ts (factor renderMentions:171-179 into e.g. `stripUrlTrailingPunctuation(raw)`) and apply it once in extractUrls (media.ts:515) before returning, so the embed pipeline and the anchor agree on the same URL. One change in the shared extractor covers YouTube, direct-image and generic-preview branches.",
@@ -5223,7 +5223,7 @@
       "confidence": "medium",
       "fix": {
         "commit": "8f6b22708d2a17f349b117f74817174c1a349faf",
-        "test": "Client/tests/unit/message-list.test.ts",
+        "test": "Client/tests/unit/messageList/mountAndScroll.test.ts",
         "revertProof": "pass"
       },
       "suggestedFix": "Drop the per-call registration: hoist one factory-scoped `let flashTimer = 0; let flashEl: HTMLElement | null = null;`, and in scrollToMessage do `if (flashTimer !== 0) { clearTimeout(flashTimer); flashEl?.classList.remove(\"highlight-flash\"); } flashEl = el; flashTimer = window.setTimeout(() => { el.classList.remove(\"highlight-flash\"); flashTimer = 0; flashEl = null; }, 1500);`, then clear the same pair inside the existing destroy() (next to `ac.abort()`), so no abort listener is registered at all.",
@@ -6231,7 +6231,7 @@
       "suggestedFix": "In SearchOverlay.renderResults, resolve the DM label from the store the rest of the client uses, keeping the '#' form for real channels: `const dm = dmStore.getState().channels.find((c) => c.channelId === r.channel_id); setText(channel, dm !== undefined ? `@${dmDisplayName(dm)}` : `#${r.channel_name}`);` (import { dmStore, dmDisplayName } from \"@stores/dm.store\"). Existing search-overlay tests keep passing because dmStore is empty for text-channel hits.",
       "fix": {
         "commit": "ded5fc6",
-        "test": "Client/tests/unit/search-overlay.test.ts",
+        "test": "Client/tests/unit/searchOverlay/inputAndResults.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -6363,7 +6363,7 @@
       "suggestedFix": "Smallest correct fix for the provable part: hoist the `devicechange` registration out of the per-build path. In `createVoiceAudioTab` (VoiceAudioTab.ts:21-80), keep `let repopulate: (() => void) | null = null`, have `buildVoiceAudioTabInner` hand its `populateDevices` back through a registrar the way it already does for the mic/camera, and register `navigator.mediaDevices.addEventListener(\"devicechange\", () => repopulate?.(), { signal })` exactly once in the factory \u2014 mirroring the single `signal.addEventListener(\"abort\", cleanupMic)` at line 77 that the comment at 490-494 already points to. Then delete lines 393-401 from `buildVoiceAudioTabInner`.\n\nThe general fix, if the per-render DOM retention is also to be closed in one place rather than nine: give `renderActiveTab()` a per-render `AbortController`, abort the previous one immediately before `clearChildren(contentArea)` (SettingsOverlay.ts:126), and pass `AbortSignal.any([ac.signal, renderAC.signal])` to the builders instead of `ac.signal` (110-120) \u2014 `voiceTab.build()`/`logsTab.build()` would need to take that signal as a parameter. `destroy()`'s `ac.abort()` still cascades through `AbortSignal.any`.",
       "fix": {
         "commit": "29a2d1c",
-        "test": "Client/tests/unit/settings-overlay.test.ts",
+        "test": "Client/tests/unit/settingsOverlay/profileAndOverlays.test.ts",
         "revertProof": "self-reported"
       }
     },
@@ -7804,7 +7804,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8241,7 +8241,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8356,7 +8356,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8492,7 +8492,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8562,7 +8562,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8631,7 +8631,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -8769,7 +8769,7 @@
       "fixed": "2026-09-03",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/auditAndActions.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -9127,7 +9127,7 @@
       "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/retentionAndNav.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -9150,7 +9150,7 @@
       "evidence": "Fixed test-first and passed an independent adversarial review that refuted the first attempt where one was made. Gates run on the branch: go build, go vet, go test ./... (all green), tsc --noEmit, vitest (5328 pass; the 5 failures are the pre-existing Node 26 localStorage-shim issue that also fails on dev), cargo test --lib (116 pass), prettier --check ., eslint, sqlc, gendocs, invariants.",
       "fix": {
         "commit": "e704c753",
-        "test": "Client/tests/contract/server-admin-static-panel.test.ts, Server/admin/panel_wiring_test.go",
+        "test": "Client/tests/contract/serverAdminStaticPanel/authAndInvites.test.ts, Server/admin/panel_wiring_test.go",
         "revertProof": "adversarial review + suite green"
       }
     },
@@ -11962,7 +11962,7 @@
       "suggestedFix": "Pass countCharacters for both username inputs and restore the hint's own cap when Register re-bounds the field.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/name-limits.test.ts, Client/tests/unit/settings-overlay.test.ts (32-letter name outside the BMP)",
+        "test": "Client/tests/unit/name-limits.test.ts, Client/tests/unit/settingsOverlay/accountAndSecurity.test.ts (32-letter name outside the BMP)",
         "revertProof": "fail (maxlength 32, name cut)"
       },
       "confidence": "high",
@@ -12341,11 +12341,11 @@
       "severity": "low",
       "why": "The role colour flag is cached in formatting.ts and refreshed on the preference change, but the rendered rows were only repainted by a later member update.",
       "repro": "Open a channel with coloured names, turn Role Colors off in Settings > Accessibility: the names keep their colour until the rows are redrawn.",
-      "evidence": "Client/tests/unit/message-list.test.ts (recolours rendered names when the Role Colors preference is toggled).",
+      "evidence": "Client/tests/unit/messageList/liveUpdatesAndBreakers.test.ts (recolours rendered names when the Role Colors preference is toggled).",
       "suggestedFix": "Repaint the rendered author rows from the existing preference-change listener.",
       "fix": {
         "commit": "pending",
-        "test": "message-list.test.ts recolours rendered names when the Role Colors preference is toggled",
+        "test": "Client/tests/unit/messageList/liveUpdatesAndBreakers.test.ts",
         "revertProof": "fail (removing the roleColors listener fails the test)"
       },
       "confidence": "high",

@@ -25,7 +25,7 @@ vi.mock("../../src/platform/desktop", () => ({
   desktop: { notifier: mockNotifier },
 }));
 
-import { buildNotificationsTab } from "@components/settings/NotificationsTab";
+import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
 
 let container: HTMLDivElement;
 let ac: AbortController;

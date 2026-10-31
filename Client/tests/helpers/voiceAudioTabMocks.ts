@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { withOverrides } from "./voiceSessionMock";
 
 export const mockSwitchInputDevice = vi.fn().mockResolvedValue(undefined);
 
@@ -43,7 +44,7 @@ export function desktopPushToTalkMock() {
 }
 
 export function voiceLivekitSessionMock() {
-  return {
+  return withOverrides({
     switchInputDevice: (...args: unknown[]) => mockSwitchInputDevice(...args),
     switchOutputDevice: (...args: unknown[]) => mockSwitchOutputDevice(...args),
     switchVideoDevice: (...args: unknown[]) => mockSwitchVideoDevice(...args),
@@ -59,5 +60,5 @@ export function voiceLivekitSessionMock() {
     reapplyEnhancedNoiseSuppression: (...args: unknown[]) =>
       mockReapplyEnhancedNoiseSuppression(...args),
     getLocalMicSettings: () => mockGetLocalMicSettings(),
-  };
+  });
 }

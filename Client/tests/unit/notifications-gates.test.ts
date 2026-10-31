@@ -5,13 +5,13 @@
  * something did NOT happen.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import {
   notifyChannelActivity,
   notifyIncomingMessage,
   notifyMention,
   resetNotificationCoalescing,
 } from "../../src/lib/notifications";
-import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
@@ -19,6 +19,7 @@ import { messagesStore } from "../../src/stores/messages.store";
 import { setBlockedByMe } from "../../src/stores/blocks.store";
 import { addLogListener, setLogLevel, type LogEntry } from "../../src/lib/logger";
 import type { ChannelActivityEntry, ChatMessagePayload } from "../../src/lib/types";
+import { signInAs } from "../helpers/storeSeeds";
 
 const { testPrefs, shouldTauriNotifThrow, sendNotificationMock } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
@@ -32,15 +33,7 @@ vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
   loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
-vi.mock("../../src/lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("../../src/lib/voice/livekitSession", () => voiceSession.defaults());
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn(() => {
     if (shouldTauriNotifThrow.value) throw new Error("Tauri not available");
@@ -170,13 +163,10 @@ beforeEach(() => {
   flashSpy.mockClear();
   oscillator.start.mockClear();
   shouldTauriNotifThrow.value = false;
-  authStore.setState(() => ({
-    token: "test",
-    user: { id: 1, username: "Me", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs(
+    { id: 1, username: "Me", avatar: null, role: "member" },
+    { token: "test", serverName: null },
+  );
   channelsStore.setState(() => ({
     categories: [],
     channels: new Map([

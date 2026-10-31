@@ -17,7 +17,8 @@ import { MAX_CUSTOM_STATUS_LEN } from "@lib/presence/userStatus";
 import { attachLimitHint, collapseSpaces, lineHintText, runeCount } from "@lib/text/nameLimits";
 import { shellText } from "../i18n/shell";
 import { connectText } from "../i18n/connect";
-import { STATUS_DEFS, colorForStatus, type StatusDef } from "@components/statusDefs";
+import { STATUS_DEFS, type StatusDef } from "@components/statusDefs";
+import { applyStatusIndicator, showsPhone } from "@lib/ui/statusIndicator";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +37,8 @@ export interface StatusPickerOptions {
 export type StatusPickerComponent = MountableComponent & {
   /** Update the displayed status without recreating the picker. */
   setStatus(status: UserStatus): void;
+  /** Draw the dot as the phone shape while your own account is on the phone app. */
+  setMobile(mobile: boolean): void;
   /** Update the custom status input without recreating the picker. */
   setCustomStatus(text: string): void;
   /**
@@ -66,6 +69,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
   const { signal } = disposable;
 
   let currentStatus: UserStatus = options.currentStatus;
+  let currentMobile = false;
   let root: HTMLDivElement | null = null;
   let dotEl: HTMLDivElement | null = null;
   let dropdownEl: HTMLDivElement | null = null;
@@ -114,13 +118,18 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
 
   // ---- Status update --------------------------------------------------------
 
+  /** The trigger dot: its colour, and the phone shape with its hover text while
+   *  the account is on the phone app (no title otherwise, as before). */
+  function paintDot(): void {
+    if (dotEl === null) return;
+    applyStatusIndicator(dotEl, currentStatus, currentMobile);
+    if (!showsPhone(currentStatus, currentMobile)) dotEl.removeAttribute("title");
+  }
+
   function applyStatus(status: UserStatus): void {
     currentStatus = status;
 
-    // Update trigger dot color
-    if (dotEl !== null) {
-      dotEl.style.background = colorForStatus(status);
-    }
+    paintDot();
 
     // Update checkmarks
     for (const [value, el] of checkEls) {
@@ -343,7 +352,7 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
       "aria-haspopup": "true",
       "aria-expanded": "false",
     });
-    dotEl.style.background = colorForStatus(currentStatus);
+    paintDot();
     dotEl.addEventListener(
       "click",
       (e: MouseEvent) => {
@@ -437,6 +446,12 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     applyStatus(status);
   }
 
+  function setMobile(mobile: boolean): void {
+    if (mobile === currentMobile) return;
+    currentMobile = mobile;
+    paintDot();
+  }
+
   function setEnabled(value: boolean): void {
     enabled = value;
     if (!value) {
@@ -464,5 +479,5 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     if (customInputEl !== null) customInputEl.value = text;
   }
 
-  return { mount, destroy, setStatus, setCustomStatus, setEnabled };
+  return { mount, destroy, setStatus, setMobile, setCustomStatus, setEnabled };
 }

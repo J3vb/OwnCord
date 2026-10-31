@@ -27,7 +27,6 @@ import {
   uiStore,
 } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
-import { membersStore } from "../../src/stores/members.store";
 import { channelGroups } from "../../src/features/channels/channelRowModel";
 import { visibleCategories } from "../../src/lib/permissions";
 import { migrateCollapsedToCategoryIds } from "../../src/features/channels/collapsedMigration";
@@ -42,6 +41,8 @@ import {
 } from "../../src/features/channels/categoryActions";
 import { ApiClientError } from "@lib/api";
 import type { ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
+import { signInAs } from "../helpers/storeSeeds";
 
 type Row = Partial<ReadyChannel> & Pick<ReadyChannel, "id" | "name" | "type" | "position">;
 
@@ -204,13 +205,7 @@ describe("grouping and order (D7)", () => {
       ["cat:2", "Real name"],
       ["cat:3", "Other"],
     ]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Me", avatar: null, role: "member" },
-      serverName: "S",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Me", avatar: null, role: "member" }, { serverName: "S" });
     expect(visibleCategories()).toEqual([]);
     expect(getKnownCategories(visibleCategories()).map((k) => k.name)).toEqual([
       "Real name",
@@ -312,7 +307,7 @@ describe("category header menu", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
     container = document.createElement("div");

@@ -10,6 +10,7 @@ import { dmStore } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function dm(channelId: number, username: string, over: Partial<DmChannel> = {}): DmChannel {
   const user = { id: channelId + 100, username, avatar: "", status: "online" };
@@ -41,12 +42,7 @@ function type(container: HTMLElement, value: string): void {
 }
 
 beforeEach(() => {
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
   uiStore.setState((p) => ({ ...p, sidebarMode: "channels", activeDmUserId: null }));
 });

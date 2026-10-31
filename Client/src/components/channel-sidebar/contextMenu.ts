@@ -48,7 +48,7 @@ import { appendPurgeSection } from "@components/purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
-import { muteChoices, mutedUntilLabel } from "../muteMenu";
+import { muteChoices, mutedUntilLabel } from "../../features/channels/muteMenu";
 import { channelMoves } from "../../features/channels/channelMoves";
 
 const log = createLogger("channel-menu");

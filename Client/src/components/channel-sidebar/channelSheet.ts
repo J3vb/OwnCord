@@ -31,7 +31,7 @@ import { appendPurgeSection } from "@components/purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { openMenuSheet } from "../../features/menus/menuSheet";
-import { muteChoices, mutedUntilLabel } from "../muteMenu";
+import { muteChoices, mutedUntilLabel } from "../../features/channels/muteMenu";
 import { shellText } from "../../i18n/shell";
 import { channelMoves } from "../../features/channels/channelMoves";
 

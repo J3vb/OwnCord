@@ -258,6 +258,9 @@ export interface ReadyMember {
    *  older server, where `role` is the only role. */
   readonly role_ids?: readonly number[];
   readonly status: UserStatus;
+  /** True when the member is on the Android app. Absent = not (the server
+   *  omits it when false, and for an offline member). */
+  readonly mobile?: boolean;
   /** Nickname to render instead of `username`. Null = unset. */
   readonly display_name?: string | null;
   /** Free-text status line shown under the name. Null = unset. */

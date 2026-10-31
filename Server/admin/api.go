@@ -337,6 +337,8 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		gates.route(r, gateViewDiagnostics, http.MethodGet, "/logs/level", handleGetLogLevel(setupOpts.LogLevel))
 		gates.route(r, gateViewDiagnostics, http.MethodPatch, "/logs/level", handleSetLogLevel(database, setupOpts.LogLevel))
 		gates.route(r, gateViewDiagnostics, http.MethodDelete, "/logs/level", handleRevertLogLevel(database, setupOpts.LogLevel))
+		// Saved log history, searched on the server a page at a time.
+		gates.route(r, gateViewDiagnostics, http.MethodGet, "/logs/history", handleLogHistory(setupOpts.LogHistoryDir))
 
 		r.Get("/stats", handleGetStats(svc.Users, hub))
 		r.Get("/me", handleGetMe(settings, version))
@@ -359,6 +361,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		r.With(requirePerm(permissions.ManageServer)).
 			Post("/registrations/{id}/deny", handleDenyRegistration(svc.Users))
 		mountRetentionRoutes(r, svc.Retention)
+		mountStorageRoutes(r, newStorageAPI(svc, hub, setupOpts, paths))
 
 		mountChannelActionRoutes(r, "/channels", channels, hub)
 		mountDiscordImportRoutes(r, newDiscordImportAPI(svc.Retention, setupOpts))

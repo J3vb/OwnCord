@@ -5,23 +5,16 @@
  */
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi, type Mock } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
   fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
@@ -36,6 +29,8 @@ import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { emojiStore, setCustomEmoji, clearCustomEmoji } from "../../src/stores/emoji.store";
 import { membersStore } from "../../src/stores/members.store";
 import { loadEmojiCatalog, setSkinTone } from "../../src/features/messaging/emojiCatalog";
+import { resetMembersState } from "../helpers/storeResets";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const EMOJI = [
   { id: 1, shortcode: "wave", url: "/api/v1/emoji/1/image" },
@@ -54,7 +49,7 @@ beforeEach(() => {
   emojiStore.flush();
   setCustomEmoji(EMOJI);
   emojiStore.flush();
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
 });
 
 // ---------------------------------------------------------------------------
@@ -185,14 +180,8 @@ describe("filterEmojiSuggestions", () => {
 
 describe("createEmojiAutocomplete", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   function mount(onSelect = vi.fn(), onClose = vi.fn()) {

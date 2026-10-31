@@ -99,3 +99,56 @@
     color: var(--on-fill);
   }
 }
+
+/* features/voice/talkButton.ts: Push to Talk's hold-to-talk button, only ever
+   built in the Android app. Green while the mic is open. */
+.talk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--bg-active);
+  color: var(--text-normal);
+  font-weight: 600;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.talk-btn[hidden] {
+  display: none;
+}
+.talk-btn:disabled {
+  opacity: 0.5;
+}
+.talk-btn.talking {
+  background: var(--success-fill);
+  color: var(--on-fill);
+}
+.talk-btn--bar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-circle);
+}
+.talk-btn--call {
+  flex: 1 0 100%;
+  order: -1;
+  min-height: 56px;
+  padding: 0 var(--space-5);
+  font-size: var(--font-size-md);
+}
+.video-fs-calls--talk {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+/* Beside Mute in the user bar: the bar's own 32 px button look, green while
+   talking. */
+.user-bar .ub-controls .talk-btn[hidden] {
+  display: none;
+}
+.user-bar .ub-controls .talk-btn.talking {
+  background: var(--success-fill);
+  color: var(--on-fill);
+}

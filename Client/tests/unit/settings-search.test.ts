@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
+import * as voiceSession from "../helpers/voiceSessionMock";
+import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
 import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
 
 const mockAppVersion = vi.hoisted(() => vi.fn());
@@ -37,15 +38,12 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 
 // Held in a mutable object (rather than baked into the factory literal) so
 // individual tests can simulate the store having a display_name set — e.g.
@@ -71,12 +69,12 @@ import {
   SETTINGS_SEARCH_INDEX,
   highlightMatches,
   clearHighlights,
-} from "@components/settings/settingsSearch";
+} from "../../src/features/settings/settingsSearch";
 import { settingsText } from "../../src/i18n/settings";
 import { whatsNewText } from "../../src/i18n/whatsNew";
 import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
-import type { SearchableTab } from "@components/settings/settingsSearch";
+import type { SearchableTab } from "../../src/features/settings/settingsSearch";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
 
 const options = {

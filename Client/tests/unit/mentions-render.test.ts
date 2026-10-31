@@ -4,22 +4,15 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   renderMentionSegment,
   renderMessageContent,
   resyncMentions,
-} from "../../src/components/message-list/contentParser";
+} from "../../src/features/messaging/content/contentParser";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import { setInviteJoinHandler } from "../../src/lib/nav/inviteNavigation";
 import { renderMessage } from "../../src/components/message-list/renderers";
@@ -34,6 +27,7 @@ import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.
 import type { Message } from "../../src/stores/messages.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -50,19 +44,11 @@ function seedStores(): void {
     ]),
     typingUsers: new Map(),
   }));
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 12, username: "me", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  signInAs(
+    { id: 12, username: "me", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
+  resetChannelsState();
   setChannels(CHANNELS);
 }
 

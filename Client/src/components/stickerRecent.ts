@@ -7,7 +7,7 @@
 // recent sticker.
 
 import { authStore } from "@stores/auth.store";
-import { resolveServerUrl } from "@components/message-list/attachments";
+import { resolveServerUrl } from "../features/messaging/content/attachments";
 import { loadStoredJson, saveStoredJson } from "@lib/prefs/preferences";
 
 const MAX_RECENT = 8;

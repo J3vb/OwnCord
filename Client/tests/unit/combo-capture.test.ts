@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { buildComboCapture } from "../../src/components/settings/comboCapture";
+import { buildComboCapture } from "../../src/features/settings/comboCapture";
 import { comboLabel } from "../../src/lib/prefs/keybindLabels";
 import { loadEffectiveKeybinds, saveKeybind } from "../../src/lib/prefs/keybinds";
 

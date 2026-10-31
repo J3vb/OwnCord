@@ -1,0 +1,73 @@
+import { vi } from "vitest";
+import { loggerMock as sharedLoggerMock } from "./loggerMock";
+import { withOverrides } from "./voiceSessionMock";
+
+export const mockAppVersion = vi.fn();
+
+// Mock stores
+export const mockSetTheme = vi.fn();
+
+export const mockUiState = {
+  settingsOpen: false,
+  settingsTab: null as "Safety" | "Notifications" | "Keybinds" | null,
+  settingsTabSeq: 0,
+};
+
+export const uiSubscriptions = {
+  all: [] as Array<{ sel: (s: Record<string, unknown>) => unknown; listener: () => void }>,
+};
+
+// Held in a mutable object (rather than baked into the factory literal) so
+// individual tests can simulate the store having a display_name set — e.g.
+// to reproduce the header/username desync in OC-0188.
+export const mockAuthState = {
+  user: {
+    id: 1,
+    username: "testuser",
+    totp_enabled: false,
+    display_name: null as string | null,
+  },
+};
+
+export function newAppVersionMock() {
+  return {
+    readAppVersion: mockAppVersion,
+  };
+}
+
+export function loggerMock() {
+  return sharedLoggerMock({ buffer: true });
+}
+
+export function uiStoreMock() {
+  return {
+    uiStore: {
+      getState: () => mockUiState,
+      subscribe: () => () => {},
+      subscribeSelector: vi.fn(
+        (sel: (s: Record<string, unknown>) => unknown, listener: () => void) => {
+          uiSubscriptions.all.push({ sel, listener });
+          return () => {};
+        },
+      ),
+    },
+    setTheme: (...args: unknown[]) => mockSetTheme(...args),
+  };
+}
+
+export function voiceLivekitSessionMock() {
+  return withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  });
+}
+
+export function authStoreMock() {
+  return {
+    authStore: {
+      getState: () => mockAuthState,
+      subscribeSelector: vi.fn(() => () => {}),
+    },
+    updateUser: vi.fn(),
+  };
+}

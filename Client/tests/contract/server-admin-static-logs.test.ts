@@ -54,9 +54,12 @@ interface LogLevelState {
   reverts_at?: string;
 }
 
+type HistoryHandler = (query: URLSearchParams) => unknown;
+
 function loadAdminPanel(
   fetchCalls: FetchCall[],
   serverLevel: LogLevelState = { level: "info", base_level: "info" },
+  history: HistoryHandler = () => ({ enabled: true, entries: [] }),
 ): JSDOM {
   const logLevel = { ...serverLevel };
   return new JSDOM(ADMIN_HTML, {
@@ -99,6 +102,10 @@ function loadAdminPanel(
           }
           const snapshot = { ...logLevel };
           return { ok: true, status: 200, json: async () => snapshot } as Response;
+        }
+        if (p.startsWith("/logs/history")) {
+          const body = await history(new URLSearchParams(p.split("?")[1] ?? ""));
+          return { ok: true, status: 200, json: async () => body } as Response;
         }
         return { ok: true, status: 200, json: async () => ({}) } as Response;
       }) as typeof fetch;
@@ -681,5 +688,166 @@ describe("Server/admin/static — log stream (re)connect", () => {
     await tick();
     FakeEventSource.instances.at(-1)!.onopen?.();
     expect(conn()).toEqual(["dot-live", "Connected"]);
+  });
+});
+
+function savedEntry(minute: number, msg: string) {
+  return {
+    ts: `2026-10-30T10:${String(minute).padStart(2, "0")}:00Z`,
+    level: "INFO",
+    source: "http",
+    msg,
+    attrs: "{}",
+  };
+}
+
+describe("Server/admin/static — saved log history", () => {
+  let dom: JSDOM | undefined;
+
+  afterEach(() => {
+    dom?.window?.close();
+    dom = undefined;
+    FakeEventSource.instances = [];
+  });
+
+  async function settle(window: JSDOM["window"]): Promise<void> {
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+
+  function tab(doc: Document, label: string): HTMLButtonElement {
+    const found = [...doc.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (b) => b.textContent === label,
+    );
+    if (!found) throw new Error("no tab " + label);
+    return found;
+  }
+
+  function shownLines(doc: Document): string[] {
+    return [...doc.querySelectorAll("#logOutput .log-line")].map(
+      (l) => l.textContent?.match(/\]\s*(\S+)/)?.[1] ?? "",
+    );
+  }
+
+  it("stops the live stream and pages through saved lines, oldest at the top of each page", async () => {
+    const fetchCalls: FetchCall[] = [];
+    const queries: URLSearchParams[] = [];
+    dom = loadAdminPanel(fetchCalls, undefined, (q) => {
+      queries.push(q);
+      return q.get("cursor") === "c1"
+        ? { enabled: true, entries: [savedEntry(1, "one")] }
+        : {
+            enabled: true,
+            entries: [savedEntry(3, "three"), savedEntry(2, "two")],
+            next_cursor: "c1",
+          };
+    });
+    const { window } = dom;
+    await settle(window);
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await settle(window);
+    const live = FakeEventSource.instances[0]!;
+    expect(live.closed).toBe(false);
+
+    tab(doc, "History").click();
+    await settle(window);
+
+    expect(live.closed).toBe(true);
+    expect(tab(doc, "History").getAttribute("aria-selected")).toBe("true");
+    expect(queries).toHaveLength(1);
+    const first = queries[0]!;
+    expect(first.get("cursor")).toBeNull();
+    const from = Date.parse(first.get("from")!);
+    const to = Date.parse(first.get("to")!);
+    expect(to - from).toBe(24 * 3600 * 1000);
+    expect(shownLines(doc)).toEqual(["two", "three"]);
+    expect(doc.getElementById("logHistoryStatus")!.textContent).toMatch(/^2 lines, /);
+    const older = doc.getElementById("logOlder") as HTMLButtonElement;
+    const newer = doc.getElementById("logNewer") as HTMLButtonElement;
+    expect([older.disabled, newer.disabled]).toEqual([false, true]);
+
+    older.click();
+    await settle(window);
+    expect(queries[1]!.get("cursor")).toBe("c1");
+    // Paging keeps the times the search pinned instead of moving with the clock.
+    expect(queries[1]!.get("from")).toBe(first.get("from"));
+    expect(shownLines(doc)).toEqual(["one"]);
+    expect([older.disabled, newer.disabled]).toEqual([true, false]);
+
+    newer.click();
+    await settle(window);
+    expect(queries[2]!.get("cursor")).toBeNull();
+    expect(shownLines(doc)).toEqual(["two", "three"]);
+  });
+
+  it("drops live lines still waiting to paint when switching to History", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls, undefined, () => ({
+      enabled: true,
+      entries: [savedEntry(1, "saved")],
+    }));
+    const { window } = dom;
+    await settle(window);
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await settle(window);
+    const live = FakeEventSource.instances[0]!;
+    live.onopen?.();
+    live.onmessage?.({ data: JSON.stringify(backfillEntry(1)) });
+
+    tab(doc, "History").click();
+    await settle(window);
+    await nextFrame(window);
+    await nextFrame(window);
+    expect(shownLines(doc)).toEqual(["saved"]);
+  });
+
+  // Edge case: the server is slow to answer a search the operator has since
+  // changed. The late answer must not replace the newer search's lines.
+  it("drops a late answer to a search that was replaced", async () => {
+    const fetchCalls: FetchCall[] = [];
+    let releaseFirst: (body: unknown) => void = () => {};
+    const queries: URLSearchParams[] = [];
+    dom = loadAdminPanel(fetchCalls, undefined, (q) => {
+      queries.push(q);
+      if (queries.length === 1) return new Promise((resolve) => (releaseFirst = resolve));
+      return { enabled: true, entries: [savedEntry(5, "fresh")] };
+    });
+    const { window } = dom;
+    await settle(window);
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    bridge.state.logMode = "history";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await settle(window);
+    expect(queries).toHaveLength(1);
+
+    doc.querySelector<HTMLButtonElement>('.level-toggle[data-level="DEBUG"]')!.click();
+    await settle(window);
+    expect(queries[1]!.get("level")).toBe("INFO,WARN,ERROR");
+    expect(shownLines(doc)).toEqual(["fresh"]);
+
+    releaseFirst({ enabled: true, entries: [savedEntry(1, "stale")] });
+    await settle(window);
+    expect(shownLines(doc)).toEqual(["fresh"]);
+  });
+
+  it("says when saved logs are turned off on the server", async () => {
+    const fetchCalls: FetchCall[] = [];
+    dom = loadAdminPanel(fetchCalls, undefined, () => ({ enabled: false, entries: [] }));
+    const { window } = dom;
+    await settle(window);
+    const bridge = (window as unknown as { __test: Bridge }).__test;
+    const doc = window.document;
+    bridge.state.section = "logs";
+    bridge.state.logMode = "history";
+    doc.getElementById("content")!.innerHTML = bridge.renderLogs();
+    await settle(window);
+    expect(doc.getElementById("logHistoryStatus")!.textContent).toContain("logging.history_days");
   });
 });

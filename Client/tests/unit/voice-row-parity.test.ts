@@ -15,20 +15,21 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { localMuted, volumes } = vi.hoisted(() => ({
   localMuted: new Set<number>(),
   volumes: new Map<number, number>(),
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  setUserVolume: vi.fn(),
-  getUserVolume: (userId: number) => volumes.get(userId) ?? 1,
-  getUserLocalMute: (userId: number) => localMuted.has(userId),
-  rePinPeerIdentity: vi.fn(() => Promise.resolve(true)),
-}));
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getUserVolume: (userId: number) => volumes.get(userId) ?? 1,
+    getUserLocalMute: (userId: number) => localMuted.has(userId),
+  }),
+);
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return {
     ...actual,
     fetchImageAsObjectUrl: vi.fn((url: string) =>
@@ -45,7 +46,7 @@ import { membersStore, type Member } from "../../src/stores/members.store";
 import { voiceStore, type PeerVerification, type VoiceUser } from "../../src/stores/voice.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
 import { markVoiceDropTarget } from "../../src/features/voice/dragMove";
-import { createAvatarElement, pickAvatarColor } from "../../src/components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../../src/features/profiles/avatar";
 import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
 import {
   drawVoiceChannelChrome,
@@ -58,6 +59,7 @@ import {
   type VoiceRowInputs,
 } from "../../src/features/channels/voiceRowModel";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CH = 10;
 const SELF = 1;
@@ -169,19 +171,8 @@ describe("voice row view matches today's renderVoiceChannelItem", () => {
     localMuted.clear();
     volumes.clear();
     resetSafetyStore();
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: SELF, username: "user1", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    resetChannelsState();
+    signInAs({ id: SELF, username: "user1", avatar: null, role: "member" });
     uiStore.setState((prev) => ({
       ...prev,
       connectionStatus: "connected",

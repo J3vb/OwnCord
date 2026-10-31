@@ -40,7 +40,7 @@ import {
   closeActiveLightbox,
   openImageLightbox,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import { desktop } from "../../src/platform/desktop";
 import {
   resetExternalConsent,

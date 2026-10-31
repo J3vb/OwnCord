@@ -3,6 +3,7 @@
  * graph so the grid's import can be held open and released.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const h = vi.hoisted(() => ({
   gate: null as null | { promise: Promise<void>; open: () => void; fail: () => void },
@@ -26,16 +27,11 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  muteScreenshareAudio: vi.fn(),
-  setScreenshareAudioVolume: vi.fn(),
-  setUserVolume: vi.fn(),
-  getScreenshareAudioMuted: vi.fn(() => false),
-  getScreenshareAudioVolume: vi.fn(() => 1),
-  getUserVolume: vi.fn(() => 100),
-  getUserLocalMute: vi.fn(() => false),
-  setUserLocalMute: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getUserVolume: vi.fn(() => 100),
+  }),
+);
 
 import type { LazyVideoGrid } from "../../src/pages/main-page/lazyVideoGrid";
 import type { VideoGridCallbacks, TileConfig } from "../../src/components/VideoGrid";

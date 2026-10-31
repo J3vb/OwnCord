@@ -485,7 +485,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 		err  error
 	)
 	if before > 0 {
-		rows, err = d.reader.QueryContext(ctx,
+		rows, err = d.queryCached(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        m.mentions_everyone, m.kind
@@ -495,7 +495,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 			channelID, before, limit,
 		)
 	} else {
-		rows, err = d.reader.QueryContext(ctx,
+		rows, err = d.queryCached(ctx,
 			`SELECT m.id, m.channel_id, m.user_id, u.username, u.avatar,
 			        m.content, m.reply_to, m.edited_at, m.deleted, m.pinned, m.timestamp,
 			        m.mentions_everyone, m.kind
@@ -510,7 +510,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // GetMessagesAfterForAPI returns up to limit messages with id > after in the
@@ -531,7 +531,7 @@ func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64,
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // GetMessagesAroundForAPI returns a window of messages centred on centerID in
@@ -575,7 +575,7 @@ func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID in
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // getReactionsBatch returns aggregated reactions for multiple messages.
@@ -584,28 +584,14 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 		return map[int64][]ReactionInfo{}, nil
 	}
 
-	args := make([]any, 0, len(msgIDs)+1)
-	var sb strings.Builder
-	for i, id := range msgIDs {
-		if i > 0 {
-			sb.WriteByte(',')
-		}
-		sb.WriteByte('?')
-		args = append(args, id)
-	}
-	placeholders := sb.String()
-
-	query := fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
+	rows, err := d.queryCached(ctx,
 		`SELECT r.message_id, r.emoji, COUNT(*) as cnt,
 		        MAX(CASE WHEN r.user_id = ? THEN 1 ELSE 0 END) as me
 		 FROM reactions r
-		 WHERE r.message_id IN (%s)
+		 WHERE r.message_id IN (SELECT value FROM json_each(?))
 		 GROUP BY r.message_id, r.emoji`,
-		placeholders,
+		requestingUserID, idsJSON(msgIDs),
 	)
-	args = append([]any{requestingUserID}, args...)
-
-	rows, err := d.reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("getReactionsBatch: %w", err)
 	}
@@ -678,32 +664,34 @@ func (d *DB) UpdateReadState(ctx context.Context, userID, channelID, lastReadMes
 	return nil
 }
 
+// channelUnreadCountsSQL reads, per visible channel, the newest live message,
+// up to 100 live messages after the read marker, and the mention count. Both
+// message subqueries are answered from idx_messages_channel_live alone.
+const channelUnreadCountsSQL = `SELECT c.id,
+        (SELECT COALESCE(MAX(m.id), 0) FROM messages m
+          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
+        (SELECT COUNT(*) FROM (SELECT 1 FROM messages m
+          WHERE m.channel_id = c.id AND m.deleted = 0
+            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
+                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
+          LIMIT 100)) AS unread,
+        COALESCE((SELECT rs.mention_count FROM read_states rs
+                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions,
+        COALESCE((SELECT rs.last_message_id FROM read_states rs
+                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
+ FROM channels c
+ WHERE c.import_pending = 0
+   AND (c.type IN ('text', 'announcement', 'voice')
+        OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
+                                       WHERE dp.channel_id = c.id AND dp.user_id = ?)))`
+
 // GetChannelUnreadCounts returns per-channel unread counts and last message
 // IDs for a user, with 0,0 for empty channels. Text, announcement and voice
 // channels are included, and DM channels only for this user's participation;
 // the ready payload's dm_channels[] takes its mention_count from
-// GetUserDMChannels instead. Correlated subqueries range-scan
-// idx_messages_channel per channel, and the DM predicate hits
-// idx_dm_participants_user.
+// GetUserDMChannels instead. The DM predicate hits idx_dm_participants_user.
 func (d *DB) GetChannelUnreadCounts(ctx context.Context, userID int64) (map[int64]ChannelUnread, error) {
-	rows, err := d.reader.QueryContext(ctx,
-		`SELECT c.id,
-		        (SELECT COALESCE(MAX(m.id), 0) FROM messages m
-		          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_msg_id,
-		        (SELECT COUNT(*) FROM (SELECT 1 FROM messages m
-		          WHERE m.channel_id = c.id AND m.deleted = 0
-		            AND m.id > COALESCE((SELECT rs.last_message_id FROM read_states rs
-		                                  WHERE rs.channel_id = c.id AND rs.user_id = ?), 0)
-		          LIMIT 100)) AS unread,
-		        COALESCE((SELECT rs.mention_count FROM read_states rs
-		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS mentions,
-		        COALESCE((SELECT rs.last_message_id FROM read_states rs
-		                   WHERE rs.channel_id = c.id AND rs.user_id = ?), 0) AS last_read
-		 FROM channels c
-		 WHERE c.import_pending = 0
-		   AND (c.type IN ('text', 'announcement', 'voice')
-		        OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM dm_participants dp
-		                                       WHERE dp.channel_id = c.id AND dp.user_id = ?)))`,
+	rows, err := d.reader.QueryContext(ctx, channelUnreadCountsSQL,
 		userID, userID, userID, userID,
 	)
 	if err != nil {
@@ -762,11 +750,13 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 	}
 	defer rows.Close() //nolint:errcheck
 
-	return d.scanAndEnrichMessages(ctx, rows, requestingUserID)
+	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
 
 // scanAndEnrichMessages scans rows into MessageAPIResponse and batch-fetches
 // reactions, attachments and mentions. The caller must defer rows.Close().
+// Callers pass withCachedReads(ctx): every sqlc read here binds constant SQL
+// or ids padded with padIDs.
 func (d *DB) scanAndEnrichMessages(ctx context.Context, rows *sql.Rows, requestingUserID int64) ([]MessageAPIResponse, error) {
 	var msgs []MessageAPIResponse
 	var msgIDs []int64

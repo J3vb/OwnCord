@@ -171,16 +171,7 @@ export const { mockBlocksGetState, mockDmComposerBlockReason, blocksSubscribers 
 
 export const { mockThreadOpenById } = { mockThreadOpenById: vi.fn() };
 
-export function loggerMock() {
-  return {
-    createLogger: () => ({
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    }),
-  };
-}
+export { loggerMock } from "./loggerMock";
 
 export function domMock() {
   return {
@@ -342,7 +333,7 @@ export async function dmStoreMock() {
 
 export async function listAttachmentsMock(importOriginal: <T>() => Promise<T>) {
   return {
-    ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+    ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
     fetchImageAsObjectUrl,
   };
 }

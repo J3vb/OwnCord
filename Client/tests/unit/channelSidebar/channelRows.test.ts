@@ -7,14 +7,14 @@ import {
   setChannels,
   updateChannel,
 } from "../../../src/stores/channels.store";
-import { authStore } from "../../../src/stores/auth.store";
 import { voiceStore, updateVoiceState } from "../../../src/stores/voice.store";
 import { resetStores, addVoiceUser, testChannels } from "../../helpers/channelSidebarHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/net/e2eeCrypto", (importOriginal) => mocks.netE2eeCryptoMock(importOriginal));
-vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
 vi.mock("../../../src/features/profiles/openUserProfilePopup", () =>
@@ -480,13 +480,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders", () => {
   });
 
   it("keeps the voice-user volume menu open when an unrelated peer's voice state changes", async () => {
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 99, username: "Me", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 99, username: "Me", avatar: null, role: "member" });
     setChannels(testChannels);
     updateVoiceState({
       channel_id: 3,

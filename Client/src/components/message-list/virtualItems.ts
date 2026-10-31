@@ -13,9 +13,14 @@ import {
   isVideoAttachment,
   resolveServerUrl,
   thumbnailUrl,
-} from "./attachments";
-import { ATTACHMENT_BOX_MAX_H, fitImageBox, getImageBox, knownImageHeight } from "./imageSizes";
-import { extractUrls, isDirectImageUrl } from "./media";
+} from "../../features/messaging/content/attachments";
+import {
+  ATTACHMENT_BOX_MAX_H,
+  fitImageBox,
+  getImageBox,
+  knownImageHeight,
+} from "../../features/messaging/content/imageSizes";
+import { extractUrls, isDirectImageUrl } from "../../features/messaging/content/media";
 
 /** Regex for direct image URLs in message content. */
 const IMAGE_URL_RE = /\.(?:png|jpe?g|gif|webp)(?:\?[^\s]*)?(?:\s|$)/i;

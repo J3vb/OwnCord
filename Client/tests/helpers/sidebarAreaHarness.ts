@@ -1,10 +1,8 @@
 import { vi } from "vitest";
 import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { authStore } from "../../src/stores/auth.store";
-import { membersStore } from "../../src/stores/members.store";
 import { voiceStore, joinVoiceChannel } from "../../src/stores/voice.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
@@ -15,6 +13,8 @@ import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
 import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
+import { resetMembersState } from "./storeResets";
+import { resetChannelsState } from "./storeSeeds";
 
 // ---------------------------------------------------------------------------
 // Helpers to access mock internals
@@ -42,12 +42,7 @@ export function getMockUpdate(factory: MockedFn): MockedFn {
 // ---------------------------------------------------------------------------
 
 export function resetStores(): void {
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
+  resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
   uiStore.setState(() => ({
     sidebarCollapsed: false,
@@ -74,10 +69,7 @@ export function resetStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   voiceStore.setState(() => ({
     currentChannelId: null,
     voiceUsers: new Map(),

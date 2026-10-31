@@ -5,16 +5,9 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 // The emoji image is behind the session token, so buildCustomEmojiImage goes
 // through the same authenticated fetch attachments use. Stub just that call —
@@ -22,9 +15,9 @@ vi.mock("@lib/voice/livekitSession", () => ({
 const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
   fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),
 }));
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
@@ -33,11 +26,11 @@ import {
   MAX_JUMBO_EMOJI,
   buildCustomEmojiNode,
   isEmojiOnlyMessage,
-} from "../../src/components/message-list/customEmoji";
+} from "../../src/features/messaging/content/customEmoji";
 import {
   renderMessageContent,
   clearContentParseCache,
-} from "../../src/components/message-list/contentParser";
+} from "../../src/features/messaging/content/contentParser";
 import { renderReactions } from "../../src/components/message-list/reactions";
 import {
   emojiStore,

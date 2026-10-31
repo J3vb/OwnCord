@@ -402,12 +402,14 @@ export function handlePresence(payload: Payload<"presence">): void {
     undefined,
     activity,
     listening,
+    payload.mobile === true,
   );
   // dmStore keeps its own frozen copy of a DM partner's status for the
   // sidebar row (see buildDmConversations) — membersStore alone does not
   // reach it.
   updateDmParticipant(payload.user_id, {
     status: payload.status,
+    mobile: payload.mobile === true,
     ...(activity === undefined ? {} : { activity: toMemberActivity(activity) }),
     ...(listening === undefined ? {} : { listening: toMemberListening(listening) }),
   });
@@ -426,6 +428,7 @@ export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
   const statuses = new Map(updates.map((u) => [u.user_id, u.status]));
   const activities = new Map(updates.map((u) => [u.user_id, u.activity]));
   const songs = new Map(updates.map((u) => [u.user_id, u.listening]));
+  const phones = new Set(updates.filter((u) => u.mobile === true).map((u) => u.user_id));
   const partners = new Set<number>();
   for (const c of dmStore.getState().channels) {
     partners.add(c.recipient.id);
@@ -439,7 +442,7 @@ export function handlePresenceBatch(payload: Payload<"presence_batch">): void {
     const song = songs.get(id);
     // A partner the snapshot leaves out plays and listens to nothing; an entry
     // without the field (an older server) leaves what is shown alone.
-    const patch: Partial<DmUser> = { status };
+    const patch: Partial<DmUser> = { status, mobile: phones.has(id) };
     if (!listed) {
       updateDmParticipant(id, { ...patch, activity: null, listening: null });
       continue;

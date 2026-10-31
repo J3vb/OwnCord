@@ -8,18 +8,21 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const setUserVolume = vi.fn();
 const getUserVolume = vi.fn();
 const setUserLocalMute = vi.fn();
 const getUserLocalMute = vi.fn((..._args: unknown[]) => false);
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
-  getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,
-  setUserLocalMute: (...args: unknown[]) => setUserLocalMute(...args) as unknown,
-  getUserLocalMute: (...args: unknown[]) => getUserLocalMute(...args) as unknown,
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
+    getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,
+    setUserLocalMute: (...args: unknown[]) => setUserLocalMute(...args) as unknown,
+    getUserLocalMute: (...args: unknown[]) => getUserLocalMute(...args) as unknown,
+  }),
+);
 
 const { showUserVolumeMenu } = await import("@components/channel-sidebar/volumeMenu");
 

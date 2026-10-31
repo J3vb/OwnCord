@@ -23,7 +23,7 @@ vi.mock("@lib/net/updater", async (importOriginal) => {
   };
 });
 
-import { buildAboutTab } from "../../src/components/settings/AboutTab";
+import { buildAboutTab } from "../../src/features/settings/AboutTab";
 import { setAvailableUpdate } from "../../src/features/updates/availableUpdate";
 import type { UpdateInstallState } from "../../src/lib/net/updater";
 import { expectConsole } from "../helpers/console";

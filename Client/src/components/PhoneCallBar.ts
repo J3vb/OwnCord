@@ -9,6 +9,8 @@
  *
  * Mute and Leave are the voice widget's own callbacks, so the rate limits and
  * the moderator guards are the same. The timer runs only while the bar shows.
+ * In the Android app's Push to Talk mode the bar also holds a hold-to-talk
+ * button.
  */
 
 import { Disposable } from "@lib/disposable";
@@ -22,13 +24,14 @@ import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";
 import { voiceText as t } from "../i18n/voice";
+import { createTalkSlot } from "../features/voice/talkSlot";
 import {
   formatElapsed,
   headerStatusText,
   isConnecting,
   micControlKey,
   micControlState,
-} from "./voiceStatusText";
+} from "../features/voice/voiceStatusText";
 import { callParticipants, participantAvatar, participantKey } from "./callParticipants";
 
 export interface PhoneCallBarOptions {
@@ -184,6 +187,10 @@ export function createPhoneCallBar(options: PhoneCallBarOptions): PhoneCallBar {
 
     appendChildren(root, openBtn, muteBtn, leaveBtn);
     container.appendChild(root);
+    // Push to Talk in the Android app: a hold-to-talk button before Mute.
+    const talkSlot = createTalkSlot("bar");
+    disposable.addCleanup(() => talkSlot.clear());
+    talkSlot.attach(root, muteBtn);
 
     disposable.onStoreChange(
       voiceStore,

@@ -27,6 +27,9 @@ type presenceBatchEntry struct {
 	CustomStatus *string            `json:"custom_status"`
 	Activity     *gameActivity      `json:"activity"`
 	Listening    *listeningActivity `json:"listening"`
+	// Mobile is true when the member is on the Android app; omitted when false and
+	// always blank on an entry whose status was mapped to offline.
+	Mobile bool `json:"mobile,omitempty"`
 }
 
 // memberPayloadFor is the member_join user object.
@@ -155,7 +158,14 @@ type pendingPresence struct {
 	// disconnect ends it. An activity change is a live presence frame, not a coalesced entry.
 	activity  *gameActivity
 	listening *listeningActivity // nil from every caller, like activity
-	member    *memberJoinUser
+	// mobile is the connecting user's merged phone flag (mergeLivePresence); false
+	// for a disconnect.
+	mobile bool
+	// connecting, when set, is the connection this entry announces: queuePresence
+	// reads its phone flag under presenceMu, so a presence_update that landed
+	// first is not overtaken by a flag read before the lock.
+	connecting *Client
+	member     *memberJoinUser
 }
 
 // QueuePresence coalesces connect/disconnect presence: the latest state per user
@@ -175,6 +185,10 @@ func (h *Hub) queuePresence(userID int64, p pendingPresence) {
 	}
 	if p.member == nil {
 		p.member = h.presenceQueue[userID].member
+	}
+	if p.connecting != nil {
+		p.mobile = h.connectMobile(p.connecting, p.status)
+		p.connecting = nil
 	}
 	h.presenceQueue[userID] = p
 	armed := h.presenceFlushArmed
@@ -318,9 +332,9 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 		if h.tombstones.erased(uid) {
 			continue
 		}
-		e := presenceBatchEntry{UserID: uid, Status: db.BroadcastStatus(p.status), CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening}
+		e := presenceBatchEntry{UserID: uid, Status: db.BroadcastStatus(p.status), CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening, Mobile: p.mobile}
 		if e.Status != p.status {
-			e.CustomStatus, e.Activity, e.Listening = nil, nil, nil
+			e.CustomStatus, e.Activity, e.Listening, e.Mobile = nil, nil, nil, false
 		}
 		entries = append(entries, e)
 	}
@@ -335,7 +349,7 @@ func (h *Hub) buildPresenceBatch(queued map[int64]pendingPresence) ([]byte, map[
 			continue
 		}
 		own := slices.Clone(entries)
-		own[i].Status, own[i].CustomStatus, own[i].Activity, own[i].Listening = p.status, p.customStatus, p.activity, p.listening
+		own[i].Status, own[i].CustomStatus, own[i].Activity, own[i].Listening, own[i].Mobile = p.status, p.customStatus, p.activity, p.listening, p.mobile
 		if private == nil {
 			private = make(map[int64][]byte)
 		}
@@ -411,7 +425,7 @@ func (h *Hub) deliverPresenceSnapshots() {
 	public := make([]presenceBatchEntry, 0, len(live))
 	for uid, p := range live {
 		if s := db.BroadcastStatus(p.status); s != "" && s != db.StatusOffline {
-			public = append(public, presenceBatchEntry{UserID: uid, Status: s, CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening})
+			public = append(public, presenceBatchEntry{UserID: uid, Status: s, CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening, Mobile: p.mobile})
 		}
 	}
 	slices.SortFunc(public, func(a, b presenceBatchEntry) int { return cmp.Compare(a.UserID, b.UserID) })
@@ -421,7 +435,7 @@ func (h *Hub) deliverPresenceSnapshots() {
 		msg := shared
 		i, listed := slices.BinarySearchFunc(public, c.userID, func(e presenceBatchEntry, uid int64) int { return cmp.Compare(e.UserID, uid) })
 		if p := live[c.userID]; !listed && p.status != "" && p.status != db.StatusOffline {
-			own := slices.Insert(slices.Clone(public), i, presenceBatchEntry{UserID: c.userID, Status: p.status, CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening})
+			own := slices.Insert(slices.Clone(public), i, presenceBatchEntry{UserID: c.userID, Status: p.status, CustomStatus: p.customStatus, Activity: p.activity, Listening: p.listening, Mobile: p.mobile})
 			msg = buildPresenceBatchMsg(own, true)
 		}
 		c.sendPresenceMsg(msg)
@@ -444,19 +458,21 @@ func (h *Hub) applyPresenceChoice(c *Client, p *livePresence, events []Event) []
 	if !isIdleStatus(p.status) {
 		for _, o := range h.clientsOf(c.userID) {
 			if o != c {
-				o.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
+				o.stampChosenStatus(p.status, p.customStatus, p.customStatusExpiresAt)
 			}
 		}
 	}
 	c.setLivePresence(p.status, p.customStatus, p.customStatusExpiresAt)
 	merged := mergeLivePresence(h.clientsOf(c.userID))
-	if isIdleStatus(p.status) && merged.status == before.status && sameText(merged.customStatus, before.customStatus) {
+	if isIdleStatus(p.status) && merged.status == before.status && merged.mobile == before.mobile && sameText(merged.customStatus, before.customStatus) {
 		return nil
 	}
-	if merged.status == p.status && sameText(merged.customStatus, p.customStatus) {
+	// The handler's events are built from the sender's raw status and never carry the
+	// phone flag, so they stand only when the merged presence is not on the phone.
+	if merged.status == p.status && !merged.mobile && sameText(merged.customStatus, p.customStatus) {
 		return events // the update is what is shown: the handler's events stand
 	}
-	return presenceEvents(c.userID, merged.status, merged.customStatus, merged.activity, merged.listening)
+	return presenceEvents(c.userID, merged.status, merged.customStatus, merged.activity, merged.listening, merged.mobile)
 }
 
 func sameText(a, b *string) bool {

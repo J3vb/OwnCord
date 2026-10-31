@@ -6,7 +6,7 @@
 
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import { shellText } from "../i18n/shell";
 
 export interface CallParticipant {
