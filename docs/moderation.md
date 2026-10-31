@@ -2,9 +2,7 @@
 
 This page is for the owner, admins and moderators of an OwnCord server. It
 explains who can do what, how to handle a report, which action to pick, and
-what each action does to the member. It describes what the server and the
-desktop app do today. For the exact routes and error codes, see
-[api.md](api.md#reports-and-the-moderation-queue).
+what each action does to the member.
 
 OwnCord is one community per server. There is no central service: reports,
 actions and appeals stay on your server, and only your own moderators see
@@ -22,8 +20,8 @@ You moderate from two places.
 - **The admin panel** at `https://<your server>/admin`. It has the Members
   list (with pending registrations and bans), Roles & permissions, Channels,
   Invites, Settings, Message retention and the Audit log. By default it only
-  opens from this machine and private networks; see
-  [Reaching `/admin` on a headless server](deployment.md#first-run).
+  opens from the server itself and your home network; see
+  [First run](deployment.md#first-run).
 
 Each item in a menu or the admin panel only shows when your role has the
 permission it needs.
@@ -146,8 +144,7 @@ Some details worth knowing:
   list, or with **Unban** in admin panel › Members, which also shows the
   reason and end date.
 - **Warnings need a report in the app.** The desktop app offers a warning from
-  a report's Actions. The server also takes a warning without a report through
-  [`POST /api/v1/moderation/users/{id}/warn`](api.md#post-apiv1moderationusersidwarn).
+  a report's Actions.
 - **Reasons are shown to the member.** The reason you type for a warning or
   timeout is what the member reads. Keep report details and other members'
   names out of it.
@@ -202,15 +199,14 @@ Things to know:
 
 - One import runs at a time. If the server restarts mid-import the half-built
   channel is removed and you start again.
-- The file is held under `data/import-tmp` while it imports and is deleted
-  afterwards. The largest file accepted is `upload.import_max_mb` (500 MB by
-  default).
+- The uploaded file is deleted when the import ends. The largest file
+  accepted is 500 MB by default, and the owner can change that. The server
+  needs that much free disk space while it imports.
 - [Message retention](#records-and-how-long-they-are-kept) treats imported
   messages like any other: with a retention window on, history older than the
   window is deleted by the next sweep, so the panel warns you. Pinned messages
   are kept.
-- Starting and publishing an import are in the audit log
-  (`discord_import_start`, `discord_import_publish`).
+- Starting and finishing an import are in the audit log.
 
 ## Appeals
 
@@ -268,26 +264,23 @@ can send them direct messages and message requests.
 ## Records and how long they are kept
 
 - **Report history** and **moderator actions** are recorded by the server and
-  cannot be edited. A member's full action history is available to Moderate
-  Members holders through
-  [`GET /api/v1/moderation/users/{id}/actions`](api.md#get-apiv1moderationusersidactions).
+  cannot be edited. The server keeps each member's full action history for
+  holders of Moderate Members.
 - **The audit log** (admin panel › **Audit log**, needs View Audit Log)
   records role, channel, member, settings and other admin changes, with
   search and an action filter. Report notes and history are not in it; they
   stay in the Moderation Center.
 - **Closed reports** keep their evidence, notes and detail for 180 days, then
-  that content is deleted and the report row stays
-  (`moderation.report_retention_days`).
+  that content is deleted and only the report itself stays.
 - **Finished warnings and timeouts** retire 90 days after they were
-  acknowledged, ended or lifted, unless an appeal points at them
-  (`moderation.action_retention_days`). Bans and removals are never retired.
+  acknowledged, ended or lifted, unless an appeal points at them. Bans and removals are never retired.
 - **Messages** are kept forever by default. Admin panel › **Message
   retention** can delete old messages after a number of days, for the whole
   server or per channel, and shows what would go before it changes anything.
   Pinned messages and direct messages are never deleted by retention.
 
-Both moderation settings are in [server-configuration.md](server-configuration.md).
-`0` keeps everything.
+You can change both lengths in [Server configuration](server-configuration.md).
+Zero keeps everything.
 
 ## Before you need it
 

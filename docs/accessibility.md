@@ -125,7 +125,7 @@ the same way, so a dark role colour on a dark theme stays readable.
 - **Linux on Wayland limits global keys.** Global push to talk, mute and
   deafen need a desktop with the GlobalShortcuts portal, and push to talk
   then takes function keys only. See
-  [known-limitations.md](known-limitations.md#client).
+  [known-limitations.md](known-limitations.md#desktop-app).
 
 ## Tell us about a problem
 

@@ -501,7 +501,7 @@ follows the `audioOutputDevice` chosen in Settings › Voice & Audio through
 `setSinkId`.
 Where the webview cannot route an `AudioContext` (WebKitGTK, the Linux webview),
 those sounds fall back to the system default — see
-[known limitations](../../known-limitations.md#client).
+[known limitations](../../known-limitations.md#desktop-app).
 
 `features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
 leave and move; on another member joining or leaving the channel you are in;
