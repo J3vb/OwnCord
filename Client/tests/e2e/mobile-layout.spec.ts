@@ -7,6 +7,11 @@
  * Phone layout (WP 6.13f1): no horizontal scroll, a reachable drawer, a
  * full-width member overlay and 44 px touch targets in the user bar. Both
  * profiles run on Chromium (the iPhone profile's default WebKit is dropped).
+ *
+ * The drawer on a phone: the server rail on its left, a search
+ * button, the Back button (the Pixel 7 profile has an Android user agent and
+ * the Tauri mock, which is the Android app; the iPhone profile is a phone
+ * browser) and swipes made with touch pointer events.
  */
 import { devices, type Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
@@ -40,6 +45,46 @@ async function holdFinger(page: Page, selector: string, holdMs: number): Promise
   await page.waitForTimeout(holdMs);
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await cdp.detach();
+}
+
+/**
+ * A one-finger swipe made of touch pointer events dispatched on the element,
+ * the way the app's own gesture code listens for them (no browser gesture or
+ * hit-testing involved).
+ */
+async function swipeOn(
+  page: Page,
+  selector: string,
+  dx: number,
+  dy = 0,
+  start: { x: number; y: number } | null = null,
+): Promise<void> {
+  await page.evaluate(
+    ({ selector, dx, dy, start }) => {
+      const el = document.querySelector(selector);
+      if (el === null) throw new Error(`no element for ${selector}`);
+      const box = el.getBoundingClientRect();
+      const x0 = start?.x ?? box.left + box.width / 2;
+      const y0 = start?.y ?? box.top + box.height / 2;
+      const fire = (type: string, x: number, y: number): void => {
+        el.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            pointerId: 7,
+            pointerType: "touch",
+            isPrimary: true,
+            clientX: x,
+            clientY: y,
+          }),
+        );
+      };
+      fire("pointerdown", x0, y0);
+      for (let i = 1; i <= 6; i++) fire("pointermove", x0 + (dx * i) / 6, y0 + (dy * i) / 6);
+      fire("pointerup", x0 + dx, y0 + dy);
+    },
+    { selector, dx, dy, start },
+  );
 }
 
 async function noHorizontalScroll(page: Page): Promise<void> {
@@ -178,8 +223,9 @@ for (const profile of PROFILES) {
     test("user bar touch targets measure at least 44 px", async ({ page }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").click();
+      // The Switch server button is not shown on a phone: the rail replaces it.
       const targets = page.locator(
-        "[data-testid='user-bar'] .ub-controls button, [data-testid='user-bar-profile']",
+        "[data-testid='user-bar'] .ub-controls button:visible, [data-testid='user-bar-profile']",
       );
       const count = await targets.count();
       expect(count).toBeGreaterThan(1);
@@ -245,6 +291,283 @@ for (const profile of PROFILES) {
       await overlay.locator(".settings-nav-item[role='tab']", { hasText: "My uploads" }).click();
       await expect(overlay.locator(".settings-content h1")).toHaveText("My uploads");
       await expect(overlay.locator("[data-testid='settings-back']")).toBeVisible();
+    });
+
+    const android = profile.name === "Pixel 7";
+    const drawer = (page: Page) => page.locator("[data-testid='unified-sidebar']");
+    const rail = (page: Page) => page.locator("[data-testid='server-rail']");
+
+    test("the drawer shows the server rail on its left, and the rail is not there when it is closed", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await expect(rail(page)).toBeHidden();
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+      await expect(rail(page)).toBeVisible();
+
+      const railBox = await page.locator(".server-rail-slot").boundingBox();
+      const sidebarBox = await drawer(page).boundingBox();
+      expect(Math.round(railBox?.x ?? -1)).toBe(0);
+      expect(Math.round(railBox?.width ?? 0)).toBe(72);
+      // The channel list starts where the rail ends, and the pair fits the screen.
+      expect(Math.round(sidebarBox?.x ?? 0)).toBe(72);
+      expect((sidebarBox?.x ?? 0) + (sidebarBox?.width ?? 0)).toBeLessThanOrEqual(
+        page.viewportSize()?.width ?? 0,
+      );
+
+      // Direct Messages first, then the servers, then Add a server.
+      const home = rail(page).locator("[data-testid='server-rail-home']");
+      const server = rail(page).locator("[data-testid='server-rail-server']").first();
+      const add = rail(page).locator("[data-testid='server-rail-add']");
+      for (const button of [home, server, add]) {
+        await expect(button).toBeVisible();
+        const box = await button.boundingBox();
+        expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+        expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      }
+      const homeY = (await home.boundingBox())?.y ?? 0;
+      const serverY = (await server.boundingBox())?.y ?? 0;
+      const addY = (await add.boundingBox())?.y ?? 0;
+      expect(homeY).toBeLessThan(serverY);
+      expect(serverY).toBeLessThan(addY);
+      await noHorizontalScroll(page);
+    });
+
+    test("the rail's Direct Messages button opens the DM list in the open drawer", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      const home = rail(page).locator("[data-testid='server-rail-home']");
+      await home.tap();
+      await expect(home).toHaveAttribute("aria-current", "true");
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+      // Tapping the connected server's icon goes back to its channels.
+      await rail(page).locator("[data-testid='server-rail-server']").first().tap();
+      await expect(home).not.toHaveAttribute("aria-current", "true");
+      await expect(drawer(page).locator(".channel-list .channel-item").first()).toBeVisible();
+    });
+
+    test("the user bar's Switch server button gives way to the rail", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(rail(page)).toBeVisible();
+      await expect(page.locator("[data-testid='disconnect-btn']")).toBeHidden();
+    });
+
+    test("the search button sits under the server name and opens the quick switcher", async ({
+      page,
+    }) => {
+      await signIn(page);
+      const search = page.locator("[data-testid='sidebar-drawer-search']");
+      await expect(search).toBeHidden();
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(search).toBeVisible();
+      await expect(search).toHaveText("Find or start a conversation");
+
+      const header = await page.locator(".unified-sidebar-header").boundingBox();
+      const box = await search.boundingBox();
+      const sidebar = await drawer(page).boundingBox();
+      expect(box?.y ?? 0).toBeGreaterThanOrEqual((header?.y ?? 0) + (header?.height ?? 0) - 1);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      // Full width of the channel column, less its margins.
+      expect(box?.width ?? 0).toBeGreaterThan((sidebar?.width ?? 0) - 32);
+
+      await search.tap();
+      await expect(page.locator(".quick-switcher-overlay")).toBeVisible();
+      await expect(page.locator(".quick-switcher__input")).toBeFocused();
+      // The drawer made way for it.
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await noHorizontalScroll(page);
+    });
+
+    test("Back closes the drawer opened with the menu button", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+      await page.goBack();
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
+    });
+
+    test("Back closes the member list", async ({ page }) => {
+      await signIn(page);
+      await page.locator("[data-testid='member-list-toggle']").tap();
+      await expect(page.locator("#member-column")).toBeVisible();
+      await page.goBack();
+      await expect(page.locator("#member-column")).toBeHidden();
+      await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
+    });
+
+    test("Back closes the sheet before the member list behind it, one press each", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await page.locator("[data-testid='member-list-toggle']").tap();
+      await page.locator("#member-column .member-item").first().tap();
+      const sheet = page.locator("[data-testid='profile-sheet']");
+      await expect(sheet).toBeVisible();
+      await page.goBack();
+      await expect(sheet).toHaveCount(0);
+      await expect(page.locator("#member-column")).toBeVisible();
+      await page.goBack();
+      await expect(page.locator("#member-column")).toBeHidden();
+      await expect(page.locator("[data-testid='app-layout']")).toBeVisible();
+    });
+
+    test("Back on a chat opens the channel list in the Android app only", async ({ page }) => {
+      await signIn(page);
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await page.goBack();
+      if (android) {
+        await expect(drawer(page)).toHaveClass(/drawer-open/);
+        await expect(rail(page)).toBeVisible();
+        // A further Back with the drawer open leaves the app.
+        await page.goBack();
+        await expect(page).toHaveURL("about:blank");
+      } else {
+        // A phone browser has no guard: Back leaves the page at once.
+        await expect(page).toHaveURL("about:blank");
+      }
+    });
+
+    test("in the Android app, Back after reaching a channel from the drawer opens the drawer again", async ({
+      page,
+    }) => {
+      test.skip(!android, "the Back guard is the Android app's");
+      await signIn(page);
+      await page.goBack();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+      await drawer(page).locator(".channel-item", { hasText: "random" }).tap();
+      await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("random");
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      // The guard is back: Back opens the drawer, it does not leave.
+      await page.goBack();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+    });
+
+    test("in the Android app, a menu-opened drawer closes on Back and leaves the guard intact", async ({
+      page,
+    }) => {
+      test.skip(!android, "the Back guard is the Android app's");
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+      await page.goBack();
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await expect(page).not.toHaveURL("about:blank");
+      await page.goBack();
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+    });
+
+    test("in the Android app, Back closes Settings before anything else", async ({ page }) => {
+      test.skip(!android, "the Back guard is the Android app's");
+      await signIn(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await page.locator("button[aria-label='Settings']").tap();
+      const overlay = page.locator("[data-testid='settings-overlay']");
+      await expect(overlay).toHaveClass(/open/);
+      // An open section goes back to the list first, as Escape does.
+      await page.locator("#settings-tab-appearance").tap();
+      await expect(overlay.locator(".settings-panel")).toHaveClass(/settings-panel--section/);
+      await page.goBack();
+      await expect(overlay).toHaveClass(/open/);
+      await expect(overlay.locator(".settings-panel")).not.toHaveClass(/settings-panel--section/);
+      await page.goBack();
+      await expect(overlay).not.toHaveClass(/open/);
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+    });
+
+    test("swiping right on the chat opens the drawer, and swiping it left closes it", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await swipeOn(page, ".chat-header", 120, 4);
+      await expect(drawer(page)).toHaveClass(/drawer-open/);
+      await expect(rail(page)).toBeVisible();
+      await swipeOn(page, "[data-testid='unified-sidebar'] .channel-list", -120, 4);
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+    });
+
+    test("swiping left on the chat opens the member list, and swiping it right closes it", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await swipeOn(page, ".chat-header", -120, 4);
+      await expect(page.locator("#member-column")).toBeVisible();
+      await swipeOn(page, "#member-column .member-item", 120, 4);
+      await expect(page.locator("#member-column")).toBeHidden();
+    });
+
+    test("a short swipe, a mostly vertical one and one from the composer open nothing", async ({
+      page,
+    }) => {
+      await signIn(page);
+      await swipeOn(page, ".chat-header", 30, 2);
+      await swipeOn(page, ".chat-header", 100, 100);
+      await swipeOn(page, ".msg-textarea", 140, 0);
+      await swipeOn(page, ".msg-textarea", -140, 0);
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await expect(page.locator("#member-column")).toBeHidden();
+    });
+
+    test("swiping a message left starts a reply once past the threshold", async ({ page }) => {
+      await signIn(page);
+      const replyBar = page.locator(".reply-bar");
+      await expect(replyBar).not.toHaveClass(/visible/);
+
+      // Short of the threshold: the message follows the finger, then springs back.
+      await swipeOn(page, "[data-testid='message-101'] .msg-text", -30, 2);
+      await expect(page.locator("[data-testid='message-101']")).toHaveCSS("transform", "none");
+      await expect(replyBar).not.toHaveClass(/visible/);
+
+      // Mid-swipe the row has moved and the icon is showing.
+      await page.evaluate(() => {
+        const el = document.querySelector("[data-testid='message-101'] .msg-text");
+        if (el === null) throw new Error("no message");
+        const box = el.getBoundingClientRect();
+        const fire = (type: string, x: number): void => {
+          el.dispatchEvent(
+            new PointerEvent(type, {
+              bubbles: true,
+              pointerId: 8,
+              pointerType: "touch",
+              isPrimary: true,
+              clientX: x,
+              clientY: box.top + 4,
+            }),
+          );
+        };
+        fire("pointerdown", box.left + 200);
+        fire("pointermove", box.left + 160);
+        (window as unknown as { __swipeLeft: () => void }).__swipeLeft = () =>
+          fire("pointerup", box.left + 160);
+      });
+      await expect(page.locator("[data-testid='msg-swipe-reply']")).toHaveCount(1);
+      const moved = await page
+        .locator("[data-testid='message-101']")
+        .evaluate((el) => (el as HTMLElement).style.transform);
+      expect(moved).toBe("translateX(-40px)");
+      await page.evaluate(() => (window as unknown as { __swipeLeft: () => void }).__swipeLeft());
+      await expect(page.locator("[data-testid='msg-swipe-reply']")).toHaveCount(0);
+      await expect(replyBar).not.toHaveClass(/visible/);
+
+      await swipeOn(page, "[data-testid='message-101'] .msg-text", -100, 3);
+      await expect(replyBar).toHaveClass(/visible/);
+      await expect(page.locator("[data-testid='msg-swipe-reply']")).toHaveCount(0);
+    });
+
+    test("a vertical scroll over the messages keeps working", async ({ page }) => {
+      await signIn(page);
+      await swipeOn(page, "[data-testid='message-101'] .msg-text", 4, -120);
+      await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+      await expect(page.locator("#member-column")).toBeHidden();
+      await expect(page.locator(".reply-bar")).not.toHaveClass(/visible/);
+      await expect(page.locator(".messages-container")).toHaveCSS(
+        "touch-action",
+        "pan-y pinch-zoom",
+      );
     });
 
     test("long-press on a message opens the actions sheet, and only one", async ({ page }) => {

@@ -6,8 +6,9 @@
  * One sheet at a time: opening a second closes the first and inherits its
  * focus return, so a sheet that hands over to another (Add Reaction) sends
  * focus back to what opened the first. A sheet closes on a backdrop tap, a
- * swipe down from its handle, Escape, the Back button (one history entry per
- * open sheet chain), its owner's signal, or a session reset.
+ * swipe down from its handle, Escape, the Back button (it claims Back through
+ * backHistory, which keeps one history entry for a whole chain of sheets), its
+ * owner's signal, or a session reset.
  */
 
 import { Disposable } from "../disposable";
@@ -15,6 +16,7 @@ import { createElement } from "../dom";
 import { isImeCommit } from "../text/ime";
 import { registerSessionReset } from "../net/sessionRegistry";
 import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
+import { claimBack } from "./backHistory";
 import { closeOnBackdropClick } from "./modalFactory";
 
 /** The drawer's gate: a narrow window driven by touch. */
@@ -26,7 +28,6 @@ export function isPhoneLayout(): boolean {
 
 /** How far down a swipe must travel before the lift closes the sheet. */
 const SWIPE_CLOSE_PX = 80;
-const HISTORY_KEY = "owncordSheet";
 
 export interface BottomSheetOptions {
   readonly label: string;
@@ -60,46 +61,13 @@ interface OpenSheet {
 }
 
 let current: OpenSheet | null = null;
-/** True from our own history.back() until its popstate arrives. */
-let backPending = false;
-/** Whether the history entry on top is the one an open sheet pushed. */
-let entryPushed = false;
 
 // Module lifetime: a sheet from the old server never outlives a switch.
 void registerSessionReset("bottomSheet:open", () => closeBottomSheet());
 
-function onSheetEntry(): boolean {
-  const state: unknown = history.state;
-  return typeof state === "object" && state !== null && HISTORY_KEY in state;
-}
-
-function pushEntry(signal: AbortSignal): void {
-  const push = (): void => {
-    if (signal.aborted || entryPushed) return;
-    history.pushState({ [HISTORY_KEY]: true }, "");
-    entryPushed = true;
-  };
-  if (!backPending) {
-    push();
-    return;
-  }
-  // A back from the previous sheet is still on its way: pushing now would put
-  // our entry on top and that back would pop it, closing this sheet at once.
-  window.addEventListener("popstate", push, { once: true, signal });
-}
-
-function popEntry(): void {
-  if (!entryPushed) return;
-  entryPushed = false;
-  backPending = true;
-  window.addEventListener(
-    "popstate",
-    () => {
-      backPending = false;
-    },
-    { once: true },
-  );
-  history.back();
+/** Whether a sheet is open (the swipes stay out of the way while one is). */
+export function isBottomSheetOpen(): boolean {
+  return current !== null;
 }
 
 /** Close the open sheet, if any. */
@@ -115,6 +83,11 @@ export function openBottomSheet(options: BottomSheetOptions): BottomSheet {
     return { panel: options.content, signal: dead.signal, close: () => undefined };
   }
   const previous = current;
+  const owner = new Disposable();
+  const signal = owner.signal;
+  // Claimed before the previous sheet lets go, so a hand-over keeps the one
+  // history entry the chain already has.
+  claimBack(() => owner.destroy(), signal);
   let inherited: (() => void) | null = null;
   if (previous !== null) {
     inherited = previous.restoreFocus;
@@ -123,8 +96,6 @@ export function openBottomSheet(options: BottomSheetOptions): BottomSheet {
     previous.owner.destroy();
   }
 
-  const owner = new Disposable();
-  const signal = owner.signal;
   const entry: OpenSheet = { owner, restoreFocus: null, handedOver: false };
   current = entry;
 
@@ -150,7 +121,6 @@ export function openBottomSheet(options: BottomSheetOptions): BottomSheet {
     overlay.remove();
     if (current === entry) current = null;
     if (!entry.handedOver) {
-      popEntry();
       // Only focus the sheet left behind: an action that moved focus on
       // purpose (a pick that returns to the composer) keeps it.
       const active = document.activeElement;
@@ -224,20 +194,6 @@ export function openBottomSheet(options: BottomSheetOptions): BottomSheet {
     "pointercancel",
     (e) => {
       if (e.pointerId === dragPointer) endDrag(false);
-    },
-    { signal },
-  );
-
-  // Back closes the sheet. A hand-over keeps the entry the first sheet pushed.
-  if (previous === null || !entryPushed) pushEntry(signal);
-  window.addEventListener(
-    "popstate",
-    () => {
-      // Our own back, or the popstate that let a deferred push land: the
-      // entry on top is still a sheet's.
-      if (backPending || !entryPushed || onSheetEntry()) return;
-      entryPushed = false;
-      close();
     },
     { signal },
   );

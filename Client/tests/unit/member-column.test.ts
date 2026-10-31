@@ -569,6 +569,99 @@ describe("MemberColumn", () => {
       expect(column.hidden).toBe(true);
     });
 
+    describe("openOverlay and Back", () => {
+      const guarded = (): boolean => {
+        const state: unknown = history.state;
+        return typeof state === "object" && state !== null && "owncordBack" in state;
+      };
+      const settle = async (): Promise<void> => {
+        for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+      };
+
+      afterEach(async () => {
+        ctrl?.destroy();
+        await settle();
+      });
+
+      it("openOverlay opens it for the moment without saving, and does not move focus", () => {
+        ctrl = make();
+        const before = document.activeElement;
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(ctrl.openOverlay()).toBe(true);
+        expect(ctrl.isOverlayOpen()).toBe(true);
+        expect(column.hidden).toBe(false);
+        expect(button.getAttribute("aria-pressed")).toBe("true");
+        expect(localStorage.getItem(MEMBER_OPEN_PREF)).toBeNull();
+        // The search box is the keyboard's: a swipe must not bring it up.
+        expect(document.activeElement).toBe(before);
+        // Opening what is open changes nothing.
+        expect(ctrl.openOverlay()).toBe(true);
+        expect(buildPanel).toHaveBeenCalledTimes(1);
+      });
+
+      it("openOverlay does nothing where there is no overlay to open", () => {
+        ctrl = make();
+        setActive(2);
+        ctrl.sync();
+        expect(ctrl.openOverlay()).toBe(false);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        setActive(1);
+        savePref(MEMBER_LAYOUT_PREF, "left");
+        ctrl.sync();
+        expect(ctrl.openOverlay()).toBe(false);
+        expect(column.hidden).toBe(true);
+        mq.matches = false;
+        savePref(MEMBER_LAYOUT_PREF, "right");
+        expect(ctrl.openOverlay()).toBe(false);
+      });
+
+      it("closeOverlay ends isOverlayOpen", () => {
+        ctrl = make();
+        ctrl.openOverlay();
+        ctrl.closeOverlay();
+        expect(ctrl.isOverlayOpen()).toBe(false);
+      });
+
+      it("on a phone the overlay claims Back: Back closes it", async () => {
+        vi.stubGlobal(
+          "matchMedia",
+          vi.fn(() => mq),
+        );
+        ctrl = make();
+        ctrl.openOverlay();
+        expect(guarded()).toBe(true);
+        history.back();
+        await settle();
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(column.hidden).toBe(true);
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(guarded()).toBe(false);
+      });
+
+      it("closing the overlay another way gives Back up, with one pop", async () => {
+        ctrl = make();
+        const back = vi.spyOn(history, "back");
+        ctrl.toggle();
+        expect(guarded()).toBe(true);
+        ctrl.toggle();
+        await settle();
+        expect(back).toHaveBeenCalledTimes(1);
+        expect(guarded()).toBe(false);
+        back.mockRestore();
+      });
+
+      it("a window that is not a phone leaves Back alone", () => {
+        vi.stubGlobal(
+          "matchMedia",
+          vi.fn((q: string) => (q.includes("pointer: coarse") ? { matches: false } : mq)),
+        );
+        ctrl = make();
+        ctrl.openOverlay();
+        expect(ctrl.isOverlayOpen()).toBe(true);
+        expect(guarded()).toBe(false);
+      });
+    });
+
     it("destroy stops listening to the media query", () => {
       const add = vi.spyOn(mq, "addEventListener");
       ctrl = make();
