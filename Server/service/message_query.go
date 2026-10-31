@@ -18,7 +18,7 @@ import (
 // channel, the caller's own acknowledgement (permissions.CanReadContent). A DM
 // the user is not in is ErrNotFound, not ErrForbidden: its existence is not for an
 // outsider to learn. Every REST read of channel content shares this gate.
-func (s *MessageService) requireChannelRead(ctx context.Context, userID, channelID int64) error {
+func (s *messageReads) requireChannelRead(ctx context.Context, userID, channelID int64) error {
 	if channelID <= 0 {
 		return fmt.Errorf("%w: channel_id must be positive", ErrBadRequest)
 	}
@@ -31,7 +31,7 @@ func (s *MessageService) requireChannelRead(ctx context.Context, userID, channel
 }
 
 // GetMessages retrieves paginated messages for a channel with permission checks.
-func (s *MessageService) GetMessages(ctx context.Context, userID, channelID, before int64, limit int) ([]db.MessageAPIResponse, bool, error) {
+func (s *messageReads) GetMessages(ctx context.Context, userID, channelID, before int64, limit int) ([]db.MessageAPIResponse, bool, error) {
 	if err := s.requireChannelRead(ctx, userID, channelID); err != nil {
 		return nil, false, err
 	}
@@ -61,7 +61,7 @@ func (s *MessageService) GetMessages(ctx context.Context, userID, channelID, bef
 // GetMessagesAfter retrieves the page of messages newer than `after`, oldest
 // first, with GetMessages' read gate. hasMore is false once the page reaches the
 // newest message, the client's cue to re-attach to the live tail.
-func (s *MessageService) GetMessagesAfter(ctx context.Context, userID, channelID, after int64, limit int) ([]db.MessageAPIResponse, bool, error) {
+func (s *messageReads) GetMessagesAfter(ctx context.Context, userID, channelID, after int64, limit int) ([]db.MessageAPIResponse, bool, error) {
 	if after <= 0 {
 		return nil, false, fmt.Errorf("%w: after must be positive", ErrBadRequest)
 	}
@@ -94,7 +94,7 @@ func (s *MessageService) GetMessagesAfter(ctx context.Context, userID, channelID
 // its own access checks and error codes (a DM non-participant is ErrForbidden
 // here, ErrNotFound elsewhere), so the NSFW check is repeated here or search
 // becomes a leak path.
-func (s *MessageService) requireSearchChannelAccess(ctx context.Context, userID, channelID int64) error {
+func (s *messageReads) requireSearchChannelAccess(ctx context.Context, userID, channelID int64) error {
 	ch, err := s.st.GetChannel(ctx, channelID)
 	if err != nil || ch == nil {
 		return fmt.Errorf("%w: channel not found", ErrNotFound)
@@ -127,7 +127,7 @@ type MessageWindow struct {
 // messageID, oldest first, with GetMessages' read gate. The centre must be a live
 // message in this channel; one from another channel, nonexistent, or soft-deleted
 // (history omits it, so there is no row to centre on) is ErrNotFound.
-func (s *MessageService) GetMessagesAround(ctx context.Context, userID, channelID, messageID int64, limit int) (*MessageWindow, error) {
+func (s *messageReads) GetMessagesAround(ctx context.Context, userID, channelID, messageID int64, limit int) (*MessageWindow, error) {
 	if messageID <= 0 {
 		return nil, fmt.Errorf("%w: message_id must be positive", ErrBadRequest)
 	}
@@ -182,7 +182,7 @@ func (s *MessageService) GetMessagesAround(ctx context.Context, userID, channelI
 }
 
 // GetPinnedMessages retrieves pinned messages for a channel.
-func (s *MessageService) GetPinnedMessages(ctx context.Context, userID, channelID int64) ([]db.MessageAPIResponse, error) {
+func (s *messageReads) GetPinnedMessages(ctx context.Context, userID, channelID int64) ([]db.MessageAPIResponse, error) {
 	if err := s.requireChannelRead(ctx, userID, channelID); err != nil {
 		return nil, err
 	}

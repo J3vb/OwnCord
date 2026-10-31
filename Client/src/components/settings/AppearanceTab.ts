@@ -3,7 +3,8 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { loadPref, savePref, createToggle } from "./helpers";
+import { loadPref, savePref, createToggle, platformText } from "./helpers";
+import { isAndroidApp } from "../../features/voice/native/platform";
 import { readStored } from "@lib/prefs/preferences";
 import {
   THEMES,
@@ -64,7 +65,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     const isActive = name === currentTheme;
     const label =
       name === SYSTEM_THEME
-        ? t("appearance.theme.system")
+        ? platformText(t("appearance.theme.system"), t("appearance.theme.system.android"))
         : name.charAt(0).toUpperCase() + name.slice(1);
     const btn = createElement(
       "button",
@@ -193,7 +194,8 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
   zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
   appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
-  appendChildren(section, zoomHeader, zoomRow);
+  // The Android app has no webview zoom to set.
+  if (!isAndroidApp()) appendChildren(section, zoomHeader, zoomRow);
 
   // Compact mode toggle
   const compactRow = createElement("div", { class: "setting-row" });
@@ -327,7 +329,8 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   setRovingTabindex(memberLayoutGroup, "[role='radio']");
   enableRovingNavigation(memberLayoutGroup, "[role='radio']", signal);
   appendChildren(memberLayoutRow, memberLayoutInfo, memberLayoutGroup);
-  section.appendChild(memberLayoutRow);
+  // A phone shows the member list as an overlay, so it has no side to pick.
+  if (!isAndroidApp()) section.appendChild(memberLayoutRow);
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [

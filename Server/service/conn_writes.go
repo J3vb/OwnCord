@@ -23,6 +23,14 @@ const (
 	TouchFlushInterval = 60 * time.Second
 )
 
+// connWritesStore is what ConnWrites reads and writes. *db.DB satisfies it.
+type connWritesStore interface {
+	StampConnections(ctx context.Context, connected, disconnected []int64) error
+	TouchAPIToken(ctx context.Context, tokenHash string) error
+	DeleteSession(ctx context.Context, tokenHash string) error
+	TouchSessions(ctx context.Context, tokenHashes []string) error
+}
+
 // ConnWrites batches the writes a live connection makes about itself (the session
 // touch on connect and ping, and the connect and disconnect status stamps) so they
 // share one writer transaction per interval instead of queueing behind message
@@ -36,7 +44,7 @@ const (
 // boot-time ResetAllUserStatuses clears the "online" a lost disconnect stamp
 // leaves behind.
 type ConnWrites struct {
-	st      Store
+	st      connWritesStore
 	mu      syncutil.Mutex
 	touches map[string]struct{} // session token hashes touched since the last flush
 	stamps  map[int64]bool      // user ID -> connected; the latest stamp wins
@@ -61,7 +69,7 @@ func (s *Services) BatchConnWrites() *ConnWrites {
 
 // NewConnWrites returns an empty batch writing through st. Run flushes it;
 // install it with SessionService.SetConnWrites and UserService.SetConnWrites.
-func NewConnWrites(st Store) *ConnWrites {
+func NewConnWrites(st connWritesStore) *ConnWrites {
 	return &ConnWrites{
 		st: st, touches: map[string]struct{}{}, stamps: map[int64]bool{},
 		apiTouches: map[string]struct{}{}, discards: map[string]struct{}{},

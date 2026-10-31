@@ -452,6 +452,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     const saved = new Map<string, PropertyDescriptor | undefined>();
 
     beforeEach(() => {
+      // The mark_read throttle runs on the fake clock; vi.waitFor advances it.
+      vi.useFakeTimers();
       for (const [prop, value] of [
         ["scrollHeight", SCROLL_HEIGHT],
         ["clientHeight", CLIENT_HEIGHT],
@@ -465,6 +467,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     afterEach(() => {
+      vi.useRealTimers();
       for (const [prop, descriptor] of saved) {
         if (descriptor) Object.defineProperty(HTMLElement.prototype, prop, descriptor);
         else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
@@ -556,7 +559,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       scrollToEnd();
       setMessages([1, 2, 3, 4].map(msg));
       messagesStore.flush();
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 4]]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toEqual([[CHANNEL_ID, 4]]);
     });
 
     it("six live arrivals at the bottom within a second send at most one mark_read", async () => {
@@ -571,7 +575,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
         root().dispatchEvent(new Event("scroll"));
       }
       expect(marks.length).toBeLessThanOrEqual(0);
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 9]]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toEqual([[CHANNEL_ID, 9]]);
       expect(marks).toHaveLength(1);
     });
 
@@ -589,7 +594,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       expect(channelsStore.getState().channels.get(CHANNEL_ID)?.unreadCount).toBe(0);
       setMessages([1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
-      await vi.waitFor(() => expect(marks).toContainEqual([CHANNEL_ID, 6]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toContainEqual([CHANNEL_ID, 6]);
     });
 
     it("a live arrival that releases the hold at the bottom is marked read", async () => {
@@ -605,7 +611,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       scrollToEnd();
       setMessages([1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 6]]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toEqual([[CHANNEL_ID, 6]]);
     });
 
     it("Mark Unread is not undone by reaching the bottom or by a live arrival", async () => {
@@ -620,7 +627,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       scrollToEnd();
       setMessages([1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
-      await new Promise((r) => setTimeout(r, 1300));
+      await vi.advanceTimersByTimeAsync(1300);
       expect(marks).toEqual([]);
       expect(channelsStore.getState().channels.get(CHANNEL_ID)?.lastReadMessageId).toBe(2);
     });

@@ -717,3 +717,51 @@ video[hidden] + .video-surface {
 .video-focus-strip .video-cell:hover {
   border-color: var(--accent);
 }
+
+/* ── The call view on a phone ── */
+/* Chat in the control bar is the phone's way back to the text channel: off a
+   phone the view bar's own chat control does that. */
+.video-fs-btn--chat {
+  display: none;
+}
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  /* Thumb-sized controls in one row: mic, deafen, camera, flip, chat, leave.
+     The camera menu is the desktop's choice of device; flip is the phone's. */
+  .video-fs-calls {
+    bottom: max(12px, env(safe-area-inset-bottom));
+    max-width: calc(100% - 16px);
+  }
+  .video-fs-btn {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+  }
+  .video-fs-btn--leave {
+    width: 64px;
+  }
+  .video-fs-btn--device {
+    display: none;
+  }
+  .video-fs-btn--chat {
+    display: inline-flex;
+  }
+  /* The view toggles ride above the control row (see CALL_BAR_SPACE_PHONE). */
+  .video-grid--call {
+    padding-bottom: 112px;
+  }
+  .video-grid .video-grid__views {
+    bottom: 68px;
+  }
+  .video-grid__exit,
+  .video-grid__view {
+    width: 44px;
+    height: 44px;
+  }
+  .video-grid--call .video-grid__exit {
+    display: none;
+  }
+  .video-tile-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

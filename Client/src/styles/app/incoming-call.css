@@ -102,3 +102,163 @@
 .call-btn:hover {
   color: var(--green);
 }
+
+/* On a phone the banner is what Back leaves behind the full-screen ring, so
+   its three buttons wrap under the caller instead of running off the edge. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .incoming-call-banner {
+    box-sizing: border-box;
+    flex-wrap: wrap;
+    width: calc(100vw - 16px);
+    max-width: none;
+  }
+  .incoming-call-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+  .incoming-call-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+  }
+}
+
+/* ── Incoming call, full screen on a phone ─────────────────────────────── */
+
+/* features/voice/incomingCallScreen.ts: the ring takes the whole screen, above the
+   banner, with big round Decline and Accept buttons. It is only ever opened on
+   the phone layout, so it carries no media query of its own. */
+.incoming-call-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: max(48px, env(safe-area-inset-top)) var(--space-4) max(32px, env(safe-area-inset-bottom));
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  text-align: center;
+}
+.incoming-call-screen__who {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  max-width: 100%;
+}
+/* A fixed box, so the initial keeps literal px. The ring is a box-shadow, so
+   the pulse never moves the layout. */
+.incoming-call-screen__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 160px;
+  height: 160px;
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-circle);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 64px;
+  animation: incoming-call-pulse 1.6s ease-out infinite;
+}
+.incoming-call-screen__avatar .avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+@media (prefers-reduced-motion: reduce) {
+  .incoming-call-screen__avatar {
+    animation: none;
+  }
+}
+.incoming-call-screen__title {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--header-primary);
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+}
+.incoming-call-screen__subtitle {
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+.incoming-call-screen__choices {
+  display: flex;
+  justify-content: center;
+  gap: 72px;
+}
+.incoming-call-screen__choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+.incoming-call-screen__round {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-circle);
+  color: var(--on-fill);
+}
+.incoming-call-screen__round--decline {
+  background: var(--danger-fill);
+}
+.incoming-call-screen__round--accept {
+  background: var(--green);
+}
+.incoming-call-screen__label {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.incoming-call-screen__video {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-pill);
+  background: var(--bg-active);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
+/* A phone on its side is too short for the stacked layout: the caller goes
+   left, the answer buttons right, and the view scrolls if it still runs out. */
+@media (orientation: landscape) and (max-height: 560px) {
+  .incoming-call-screen {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 1fr auto;
+    align-items: center;
+    gap: var(--space-3) var(--space-6);
+    padding: max(16px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+    overflow-y: auto;
+  }
+  .incoming-call-screen__who {
+    grid-row: 1 / 3;
+    gap: var(--space-2);
+  }
+  .incoming-call-screen__avatar {
+    width: 96px;
+    height: 96px;
+    margin-bottom: 0;
+    font-size: 40px;
+  }
+  .incoming-call-screen__choices {
+    align-self: end;
+    gap: 48px;
+  }
+  .incoming-call-screen__video {
+    align-self: start;
+    justify-self: center;
+  }
+}

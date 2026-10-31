@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoGridMocks";
 import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
+import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 import { registerVideoSurface } from "../../../src/lib/voice/videoSurface";
 import {
   createVideoGrid,
@@ -558,6 +559,25 @@ describe("VideoGrid", () => {
       grid.setExitVisible(true);
       expect(popButton().getAttribute("aria-label")).toBe("Pop out call");
       expect(popButton().getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("builds no Pop out button in the Android app, and the rest of the bar still works", () => {
+      hostAndroidApp();
+      try {
+        const { cc } = startCall();
+        expect(container.querySelector("[data-grid-control='popout']")).toBeNull();
+        expect(root().querySelectorAll(".video-grid__views [data-view-toggle]")).toHaveLength(3);
+        expect(exit().hidden).toBe(false);
+        // The state sync and a call-state change have no button to touch.
+        grid.setCallState({ muted: true, deafened: false, listenOnly: false });
+        barButton("mute").click();
+        expect(cc.onMuteToggle).toHaveBeenCalledTimes(1);
+        grid.setExitVisible(false);
+        expect(exit().hidden).toBe(true);
+        expect(open).not.toHaveBeenCalled();
+      } finally {
+        clearHost();
+      }
     });
 
     it("moves the grid, its toggles and the control bar into a window of its own", () => {

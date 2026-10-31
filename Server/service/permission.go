@@ -37,10 +37,20 @@ const permCacheTTL = 30 * time.Second
 // one caller's cancellation (so one canceled request cannot fail the waiters).
 const permLoadTimeout = 10 * time.Second
 
+// permissionStore is what PermissionService reads and writes. *db.DB satisfies it.
+type permissionStore interface {
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetMemberGrants(ctx context.Context, userID int64) (permissions.MemberGrants, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
+	// ListActiveTimeoutExpiries loads PermissionService's in-memory mirror of every
+	// active timeout.
+	ListActiveTimeoutExpiries(ctx context.Context) ([]db.ActiveTimeoutExpiry, error)
+}
+
 // PermissionService wraps the stateless permissions.Checker with per-user
 // caching, populated lazily and invalidated on role or channel override changes.
 type PermissionService struct {
-	st      Store
+	st      permissionStore
 	checker *permissions.Checker
 
 	mu    syncutil.RWMutex
@@ -77,7 +87,7 @@ type PermissionService struct {
 }
 
 // NewPermissionService creates a PermissionService backed by the given DB.
-func NewPermissionService(st Store, checker *permissions.Checker) *PermissionService {
+func NewPermissionService(st permissionStore, checker *permissions.Checker) *PermissionService {
 	return &PermissionService{
 		st:      st,
 		checker: checker,

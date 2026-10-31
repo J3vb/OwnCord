@@ -29,7 +29,7 @@ import { isBannerColor, paintBanner } from "../../features/profiles/banner";
 import { bannerImages } from "../bannerImages";
 import type { SettingsOverlayOptions } from "../SettingsOverlay";
 import { buildRecoveryKitSection, buildRegenerateCodes, buildShownOnce } from "./RecoverySections";
-import { outcomeEl, showOutcome } from "./helpers";
+import { outcomeEl, platformText, showOutcome } from "./helpers";
 import {
   createDisclosure,
   createRevealToggle,
@@ -1214,7 +1214,11 @@ function buildStatusSelector(options: SettingsOverlayOptions, signal: AbortSigna
   appendChildren(
     info,
     createElement("label", { class: "setting-label", for: "status-select" }, t("status.showMeAs")),
-    createElement("div", { class: "setting-desc" }, t("status.hint")),
+    createElement(
+      "div",
+      { class: "setting-desc" },
+      platformText(t("status.hint"), t("status.hint.android")),
+    ),
   );
   const select = createElement("select", {
     class: "settings-select",

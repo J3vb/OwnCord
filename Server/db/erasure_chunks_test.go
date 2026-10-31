@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync/atomic"
@@ -19,6 +21,9 @@ import (
 // show.
 func openErasureFile(tb testing.TB, path string) *db.DB {
 	tb.Helper()
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		db.WriteMigratedFileForTest(tb, path)
+	}
 	database, err := db.Open(path)
 	if err != nil {
 		tb.Fatalf("db.Open: %v", err)
@@ -205,14 +210,15 @@ func TestEraseAccount_GuardExcludesAccountsUnderErasure(t *testing.T) {
 }
 
 // The writer is handed back after every chunk: an unrelated insert issued
-// while a 10k-message erasure is under way returns before the erasure does.
-// The ordering is what is asserted, never a duration.
+// while a 1,000-message erasure is under way returns before the erasure does.
+// Chunks are a tenth of production size, so the drain still takes about twenty
+// of them. The ordering is what is asserted, never a duration.
 func TestEraseAccount_WriterInterleavesBetweenChunks(t *testing.T) {
-	defer db.SetErasureChunkSizesForTest(500, 5000)()
+	defer db.SetErasureChunkSizesForTest(50, 500)()
 	database := openErasureFile(t, filepath.Join(t.TempDir(), "interleave.sqlite"))
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
-	seedBulkErasure(t, database, sub.id, sub.other, sub.channel, 10000)
+	seedBulkErasure(t, database, sub.id, sub.other, sub.channel, 1000)
 	bystander := seedUser(t, database, "bystander")
 
 	inserted := make(chan error, 1)

@@ -83,7 +83,8 @@ describe("member column CSS (3C-6b)", () => {
   it("the narrow overlay starts below the chat header, leaving its toggle clickable", () => {
     const css = readFileSync(join(process.cwd(), "src/styles/app/member-list.css"), "utf8");
     const block =
-      /@media \(max-width: 899px\)\s*\{\s*\.member-column\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+      /@media \(max-width: 899px\)(?:,[^{]*)?\{\s*\.member-column\s*\{([^}]*)\}/.exec(css)?.[1] ??
+      "";
     expect(block).toMatch(/position:\s*fixed/);
     // Plus the notch inset the shell now pads above the header (6.13f1).
     expect(block).toMatch(

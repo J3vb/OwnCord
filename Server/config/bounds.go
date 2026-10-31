@@ -45,6 +45,12 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute", false},
 		{"attention.delivery_drops_per_min", &cfg.Attention.DeliveryDropsPerMin, 1, 1_000_000, def.Attention.DeliveryDropsPerMin, "the default, 1 per minute", false},
 		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days", false},
+		{"event_persistence.retention_hours", &cfg.EventPersistence.RetentionHours, 1, 8_760, def.EventPersistence.RetentionHours, "the default, 24 hours", false},
+		{"event_persistence.batch_size", &cfg.EventPersistence.BatchSize, 1, 10_000, def.EventPersistence.BatchSize, "the default, 50 events", false},
+		{"event_persistence.batch_flush_ms", &cfg.EventPersistence.BatchFlushMs, 1, 60_000, def.EventPersistence.BatchFlushMs, "the default, 100 ms", false},
+		{"event_persistence.pruner_interval_minutes", &cfg.EventPersistence.PrunerIntervalMinutes, 1, 10_080, def.EventPersistence.PrunerIntervalMinutes, "the default, 60 minutes", false},
+		{"event_persistence.replay_ring_size", &cfg.EventPersistence.ReplayRingSize, 1, 1_000_000, def.EventPersistence.ReplayRingSize, "the default, 1000 events", false},
+		{"event_persistence.replay_cold_limit", &cfg.EventPersistence.ReplayColdLimit, 0, 1_000_000, def.EventPersistence.ReplayColdLimit, "the default, 5000 events", false},
 		{"voice.udp_port", &cfg.Voice.UDPPort, 0, 65535, def.Voice.UDPPort, "0, which uses the 50000-60000 range", true},
 	}
 }

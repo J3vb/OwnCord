@@ -1879,3 +1879,49 @@ func TestSubmit_OpenBroadcastPrecedesConcurrentAssign(t *testing.T) {
 		t.Fatalf("broadcast order = %v, want %v", got, want)
 	}
 }
+
+// failingDecideStore makes DecideAppealTx return a fixed outcome and error.
+type failingDecideStore struct {
+	*db.DB
+	result db.AppealWriteOutcome
+	err    error
+}
+
+func (s *failingDecideStore) DecideAppealTx(context.Context, int64, string, int64, string, int64, string,
+	bool, int64, int64, int64, db.AppealedAction, func(int64, bool, *string) error,
+) (db.AppealWriteOutcome, bool, bool, error) {
+	return s.result, false, false, s.err
+}
+
+func decideWithStore(t *testing.T, st *failingDecideStore) error {
+	t.Helper()
+	f := newAppealFixture(t)
+	ctx := context.Background()
+	actionID, err := f.mod.Warn(ctx, fixtureMod, fixtureMember, "x", nil)
+	if err != nil {
+		t.Fatalf("Warn: %v", err)
+	}
+	publicID, err := f.appeals.Submit(ctx, fixtureMember, actionID, "please")
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	st.DB = f.database
+	appeals := NewAppealService(st, f.mod.perms, f.mod, auth.NewRateLimiter())
+	return appeals.Decide(ctx, fixturePeerMod, publicID, "upheld", "no")
+}
+
+// A database error while deciding is a server error, not "already decided".
+func TestAppeal_DecideDatabaseErrorIsInternal(t *testing.T) {
+	err := decideWithStore(t, &failingDecideStore{result: db.AppealWriteConflict, err: errors.New("disk I/O error")})
+	if !errors.Is(err, ErrInternal) || errors.Is(err, ErrConflict) {
+		t.Fatalf("Decide with a failing transaction: want ErrInternal and not ErrConflict, got %v", err)
+	}
+}
+
+// A failed reversal still reports its own conflict, with the transaction error attached.
+func TestAppeal_DecideReversalFailureStaysAConflict(t *testing.T) {
+	err := decideWithStore(t, &failingDecideStore{result: db.AppealWriteReversalFailed, err: errors.New("reversal broke")})
+	if !errors.Is(err, ErrReversalFailed) {
+		t.Fatalf("Decide with a failed reversal: want ErrReversalFailed, got %v", err)
+	}
+}

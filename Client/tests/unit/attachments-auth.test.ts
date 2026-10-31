@@ -110,7 +110,7 @@ describe("attachment fetch authentication", () => {
   it("omits the token for a same-host path that is not server content", async () => {
     // A same-host avatar URL must not make every viewer issue an authenticated
     // request to an arbitrary path on the server's own origin. Only the
-    // server-generated content routes (/api/v1/files/, /api/v1/emoji/) carry
+    // server-generated content routes (files, emoji and stickers) carry
     // the bearer token.
     getTokenMock.mockReturnValue("session-token");
     ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
@@ -131,6 +131,21 @@ describe("attachment fetch authentication", () => {
     await fetchImageAsObjectUrl("https://chat.example.com/api/v1/emoji/1/image");
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/emoji/1/image", {
+      headers: { Authorization: "Bearer session-token" },
+    });
+  });
+
+  it("attaches the token to the server sticker image route", async () => {
+    // The sticker image route needs a session like the emoji one; without the
+    // token it answers 401 and every sticker shows as deleted.
+    getTokenMock.mockReturnValue("session-token");
+    ensureHttpProxyMock.mockResolvedValue("http://127.0.0.1:49812");
+    fetchMock.mockResolvedValue(imageResponse());
+
+    const result = await fetchImageAsObjectUrl("https://chat.example.com/api/v1/stickers/7/image");
+
+    expect(result).not.toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/stickers/7/image", {
       headers: { Authorization: "Bearer session-token" },
     });
   });

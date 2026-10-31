@@ -15,10 +15,14 @@ import {
   type ContextMenuItem,
   type ContextMenuSeparator,
 } from "@lib/ui/contextMenu";
+import { createLogger } from "@lib/logger";
 import { canManageChannels, canManageInvites, canViewAuditLog } from "@lib/permissions";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { unreadChannelIds } from "@lib/readState";
 import { shellText } from "../../i18n/shell";
+
+const log = createLogger("server-menu");
 
 export interface ServerMenuActions {
   /** Open the invite manager (the header's Invite). */
@@ -139,6 +143,25 @@ export function attachServerMenu(
       // hands focus back to whatever held it when it opened.
       button.focus();
       openAtPress = false;
+      if (isPhoneLayout()) {
+        // A phone gets the same rows as a bottom sheet, loaded on first use.
+        import("../../features/menus/menuSheet").then(
+          ({ openMenuSheet }) => {
+            if (signal.aborted) return;
+            openMenuSheet({
+              items,
+              label: shellText("serverMenu.items"),
+              testId: "server-sheet",
+              signal,
+              fallbackFocus: () => (button.isConnected ? button : null),
+              onClosed: () => setExpanded(false),
+            });
+            setExpanded(true);
+          },
+          (err: unknown) => log.warn("Server sheet failed to open", { error: String(err) }),
+        );
+        return;
+      }
       showContextMenu({
         x: rect.left,
         y: rect.bottom + 4,

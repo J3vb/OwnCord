@@ -34,7 +34,7 @@ const registrationModeKey = "registration_mode"
 
 // RegistrationModeOf reads the live registration mode with the service's
 // default and fail-closed parsing. Storage errors are returned to the caller.
-func RegistrationModeOf(ctx context.Context, st Store) (RegistrationMode, error) {
+func RegistrationModeOf(ctx context.Context, st settingGetter) (RegistrationMode, error) {
 	return registrationModeSetting(ctx, st)
 }
 
@@ -51,7 +51,7 @@ func ParseRegistrationMode(v string) (RegistrationMode, bool) {
 // registrationModeSetting reads the live mode. A missing row is the default;
 // an unparseable value fails closed and is logged, since it can only come
 // from a hand-edited database.
-func registrationModeSetting(ctx context.Context, st Store) (RegistrationMode, error) {
+func registrationModeSetting(ctx context.Context, st settingGetter) (RegistrationMode, error) {
 	v, err := st.GetSetting(ctx, registrationModeKey)
 	if errors.Is(err, db.ErrNotFound) {
 		return DefaultRegistrationMode, nil

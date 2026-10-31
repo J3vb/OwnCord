@@ -116,7 +116,7 @@ func TestReadyAdmission_1000FreshConnects_BoundedBuilds(t *testing.T) {
 	go h.Run()
 	t.Cleanup(h.Stop)
 
-	const n = 1000
+	n := raceScaled(1000)
 	tokens := seedSessions(t, database, n)
 	srv := httptest.NewServer(ServeWS(h, []string{"*"}, 0))
 	t.Cleanup(srv.Close)
@@ -146,7 +146,7 @@ func TestReadyAdmission_1000FreshConnects_BoundedBuilds(t *testing.T) {
 	for err := range errs {
 		t.Fatalf("fresh connect: %v", err)
 	}
-	if got := reader.done.Load(); got != n {
+	if got := reader.done.Load(); got != int64(n) {
 		t.Fatalf("ready builds completed = %d, want %d", got, n)
 	}
 	if peak := reader.peak.Load(); peak > k {

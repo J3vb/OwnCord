@@ -102,7 +102,7 @@ test.describe("Server profiles — Add Server modal", () => {
   test("rejects an invalid host and keeps the modal open", async ({ page }) => {
     await openModal(page);
     await nameInput(page).fill("Bad Server");
-    await hostInput(page).fill("http://example.com/path");
+    await hostInput(page).fill("example.com:80!<x>");
     await saveButton(page).click();
 
     // The validator marked the field invalid, the modal stayed up, and no

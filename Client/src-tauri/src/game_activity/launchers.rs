@@ -23,12 +23,14 @@ const MAX_JSON_BYTES: u64 = 16 * 1024 * 1024;
 /// A registry key and its string values, as read from the Windows registry or
 /// parsed from a Wine `system.reg`. `path` has single backslashes and no hive
 /// (`Software\GOG.com\Games\1207658930`).
+#[cfg(desktop)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RegKey {
     pub path: String,
     pub values: Vec<(String, String)>,
 }
 
+#[cfg(desktop)]
 impl RegKey {
     /// A string value by name, ignoring case; `None` when absent or blank.
     fn value(&self, name: &str) -> Option<&str> {
@@ -319,6 +321,7 @@ pub(super) fn is_game_registry_key(path: &str) -> bool {
         || key_under(path, "Microsoft\\Windows\\CurrentVersion\\Uninstall").is_some()
 }
 
+#[cfg(desktop)]
 fn key_under<'a>(path: &'a str, parent: &str) -> Option<&'a str> {
     let rest = strip_prefix_ignore_case(path, "software\\")?;
     let rest = strip_prefix_ignore_case(rest, "wow6432node\\").unwrap_or(rest);
@@ -327,6 +330,7 @@ fn key_under<'a>(path: &'a str, parent: &str) -> Option<&'a str> {
     (!name.is_empty() && !name.contains('\\')).then_some(name)
 }
 
+#[cfg(desktop)]
 fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
     let head = text.get(..prefix.len())?;
     head.eq_ignore_ascii_case(prefix)
@@ -335,6 +339,7 @@ fn strip_prefix_ignore_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> 
 
 /// GOG Galaxy games from `Software\[Wow6432Node\]GOG.com\Games\<id>` keys, with
 /// their `gameName` and `path` values.
+#[cfg(desktop)]
 pub(super) fn gog_games(keys: &[RegKey], prefix_roots: &[String]) -> Vec<GameDir> {
     keys.iter()
         .filter(|key| key_under(&key.path, "GOG.com\\Games").is_some())
@@ -348,6 +353,7 @@ pub(super) fn gog_games(keys: &[RegKey], prefix_roots: &[String]) -> Vec<GameDir
 }
 
 /// Whether an install location is the Battle.net app itself.
+#[cfg(desktop)]
 fn is_battlenet_app(display_name: &str, location: &str) -> bool {
     display_name.trim().eq_ignore_ascii_case("battle.net")
         || last_segment(location).eq_ignore_ascii_case("battle.net")
@@ -358,6 +364,7 @@ fn is_battlenet_app(display_name: &str, location: &str) -> bool {
 /// whose `Publisher` is Blizzard or whose `UninstallString` runs the Blizzard
 /// uninstaller (Activision titles). The Battle.net app itself is left out: it
 /// runs all the time and is not a game.
+#[cfg(desktop)]
 pub(super) fn battlenet_games(keys: &[RegKey], prefix_roots: &[String]) -> Vec<GameDir> {
     keys.iter()
         .filter(|key| {
@@ -389,6 +396,7 @@ pub(super) fn battlenet_games(keys: &[RegKey], prefix_roots: &[String]) -> Vec<G
 
 /// GOG and Battle.net games from a set of registry keys. `prefix_roots` are
 /// the normalised Wine prefix folders the keys came from (none on Windows).
+#[cfg(desktop)]
 pub(super) fn registry_games(keys: &[RegKey], prefix_roots: &[String]) -> Vec<GameDir> {
     let mut games = gog_games(keys, prefix_roots);
     games.extend(battlenet_games(keys, prefix_roots));

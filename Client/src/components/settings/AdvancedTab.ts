@@ -15,10 +15,15 @@ import {
 import { clearEmbedCaches } from "@components/message-list/embeds";
 import { clearMediaCaches } from "@components/message-list/media";
 import { appendToggleRows, createToggle } from "./helpers";
+import { isAndroidApp } from "../../features/voice/native/platform";
 import { removeStored, storedKeys } from "@lib/prefs/preferences";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
 import { settingsText as t } from "../../i18n/settings";
+import {
+  CONFIRM_SERVER_SWITCH_DEFAULT,
+  CONFIRM_SERVER_SWITCH_PREF,
+} from "../../features/server-rail/switchConfirmPref";
 
 const log = createLogger("AdvancedTab");
 const IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS = 1000;
@@ -40,17 +45,27 @@ export function buildAdvancedTab(signal: AbortSignal): HTMLDivElement {
       desc: t("advanced.developerMode.desc"),
       fallback: false,
     },
+    {
+      key: CONFIRM_SERVER_SWITCH_PREF,
+      label: t("advanced.confirmServerSwitch.label"),
+      desc: t("advanced.confirmServerSwitch.desc"),
+      fallback: CONFIRM_SERVER_SWITCH_DEFAULT,
+    },
   ];
 
   appendToggleRows(section, toggles, signal);
 
+  // Launch on login, close to tray and start minimized are desktop window
+  // features: the Android app has no login item, tray or window to hide.
+  const android = isAndroidApp();
+
   // Launch on login — OS-level state via the autostart plugin, not a stored pref.
   // Not drawn where the platform has no autostart (the web build).
-  if (desktop.autostart.available) section.appendChild(buildAutostartRow(signal));
+  if (!android && desktop.autostart.available) section.appendChild(buildAutostartRow(signal));
 
   // Close to tray / Start minimized — owned by the native host, which reads
   // both before the webview exists. Not drawn where there is no host window.
-  if (desktop.window.available) {
+  if (!android && desktop.window.available) {
     for (const row of buildWindowPrefRows(signal)) section.appendChild(row);
   }
 

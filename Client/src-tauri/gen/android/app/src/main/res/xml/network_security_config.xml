@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The WebView reaches servers only through the app's own loopback proxies
+     (ws_proxy, http_proxy, livekit_proxy on 127.0.0.1), so plain http is
+     allowed to the loopback host and nowhere else. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="true">tauri.localhost</domain>
+    </domain-config>
+</network-security-config>

@@ -119,8 +119,8 @@ func requireGrantable(bits int64) bool { return permissions.HasPerm(bits, 1) }
 			name: "fewer calls than the row binds is not the rule's business",
 			path: "service/mentions.go",
 			src: "package service\n" + importPerms + `
-type MessageService struct{}
-func (s *MessageService) mentionReaders(bits int64) bool { return permissions.HasAdmin(bits) }
+type mentionState struct{}
+func (s *mentionState) mentionReaders(bits int64) bool { return permissions.HasAdmin(bits) }
 `,
 			want: 0,
 		},
@@ -128,8 +128,8 @@ func (s *MessageService) mentionReaders(bits int64) bool { return permissions.Ha
 			name: "the multi-call row is satisfied only by its exact multiset",
 			path: "service/mentions.go",
 			src: "package service\n" + importPerms + `
-type MessageService struct{}
-func (s *MessageService) mentionReaders(bits, a, d int64) bool {
+type mentionState struct{}
+func (s *mentionState) mentionReaders(bits, a, d int64) bool {
 	_ = permissions.EffectivePerms(bits, a, d)
 	return permissions.HasAdmin(bits) || permissions.HasAdmin(a)
 }
@@ -414,11 +414,11 @@ func fileScopeRow(sym string) bool { return strings.HasSuffix(sym, "."+fileScope
 
 func TestFileScopeRowsAreRejected(t *testing.T) {
 	for sym, want := range map[string]bool{
-		"api.<file-scope>":                         true,
-		".<file-scope>":                            true, // a root-level file
-		"service.requireGrantable":                 false,
-		"ws.(*Hub).readyVisibleChannels":           false,
-		"service.(*MessageService).mentionReaders": false,
+		"api.<file-scope>":                       true,
+		".<file-scope>":                          true, // a root-level file
+		"service.requireGrantable":               false,
+		"ws.(*Hub).readyVisibleChannels":         false,
+		"service.(*mentionState).mentionReaders": false,
 	} {
 		if got := fileScopeRow(sym); got != want {
 			t.Errorf("fileScopeRow(%q) = %v, want %v", sym, got, want)
