@@ -92,6 +92,10 @@ if (isAndroidHost()) {
   void import("./features/voice/talkButton")
     .then((m) => m.startTalkButton(new Disposable().signal))
     .catch((e: unknown) => log.warn("Talk button failed to start", e));
+  // Android silences a background app's mic unless a call service runs.
+  void import("./features/voice/backgroundCall")
+    .then((m) => m.startBackgroundCall(new Disposable().signal))
+    .catch((e: unknown) => log.warn("Background call service failed to start", e));
 }
 
 const appEl = document.getElementById("app");

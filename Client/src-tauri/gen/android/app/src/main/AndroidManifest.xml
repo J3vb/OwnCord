@@ -9,6 +9,14 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- A short buzz when a long-press opens a sheet (navigator.vibrate in the WebView). -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Keeps a call running in the background (CallService.kt): the service,
+         its microphone and camera types, the "in a call" notification, and a
+         CPU lock while the screen is off. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
@@ -34,6 +42,12 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+          android:name=".CallService"
+          android:exported="false"
+          android:stopWithTask="true"
+          android:foregroundServiceType="microphone|camera" />
 
         <provider
           android:name="androidx.core.content.FileProvider"

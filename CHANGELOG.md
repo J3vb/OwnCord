@@ -47,6 +47,12 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Fixed
+
+**Android**
+
+- Calls stopped (no mic, then no sound) once the Android app went to the background or the screen turned off. A call now shows an "In a call" notification and keeps your mic, sound and camera running in the background until you leave.
+
 ## v2.7.0
 
 **OwnCord 2.7** (the eighth public beta) is the first release with an **Android app**: download the APK from the release page and it updates itself after that. On phones, OwnCord now works like a phone app, with a server drawer, a call bar, a full-screen call view, Push to Talk and a phone-shaped status dot. Admins get a Storage page, per-member upload limits, a health row and saved server logs, and the voice gate now works in decibels like Discord's.

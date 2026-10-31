@@ -22,6 +22,7 @@ import type {
   AppProcess,
   AppUpdater,
   Autostart,
+  CallService,
   CredentialStore,
   DevTools,
   ExternalContentBroker,
@@ -64,6 +65,11 @@ const appAudio: AppAudio = {
   available: async () => false,
   start: async () => ({ ok: false, code: "unavailable" }),
   stop: async () => undefined,
+};
+
+// A browser tab has no service to keep a call alive in the background.
+const callService: CallService = {
+  update: () => undefined,
 };
 
 // The version is the one the bundle was built from: the server embeds the
@@ -296,6 +302,7 @@ export const browser: Platform = {
   appMetadata,
   appProcess,
   autostart,
+  callService,
   deepLinks,
   devTools,
   fileSaver,

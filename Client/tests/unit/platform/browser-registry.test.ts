@@ -19,6 +19,7 @@ describe("browser platform registry", () => {
         "appMetadata",
         "appProcess",
         "autostart",
+        "callService",
         "credentials",
         "deepLinks",
         "devTools",
@@ -161,6 +162,7 @@ describe("browser platform registry", () => {
     expect(b.mediaDetector.available).toBe(false);
     expect(await b.mediaDetector.detect({ hidden: [] })).toEqual({ state: "none" });
     expect(() => b.trayStatus.onStatusChange(() => undefined)()).not.toThrow();
+    expect(b.callService.update({ active: true, camera: true })).toBeUndefined();
 
     // The four contracts a Settings control sits on say they are unavailable.
     expect(b.updater.available).toBe(false);

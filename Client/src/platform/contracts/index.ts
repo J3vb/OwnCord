@@ -31,6 +31,7 @@ export type { GameDetector } from "./gameDetector";
 export type { MediaDetector } from "./mediaDetector";
 export type { WindowPrefs } from "./windowPrefs";
 export type { AppAudio } from "./appAudio";
+export type { CallService } from "./callService";
 export type { ServerScope } from "./serverScope";
 
 import type { HttpClient } from "./http";
@@ -60,6 +61,7 @@ import type { GameDetector } from "./gameDetector";
 import type { MediaDetector } from "./mediaDetector";
 import type { WindowPrefs } from "./windowPrefs";
 import type { AppAudio } from "./appAudio";
+import type { CallService } from "./callService";
 import type { ServerScope } from "./serverScope";
 
 /** Every platform capability, one readonly member per contract interface. */
@@ -92,5 +94,6 @@ export interface Platform {
   readonly mediaDetector: MediaDetector;
   readonly windowPrefs: WindowPrefs;
   readonly appAudio: AppAudio;
+  readonly callService: CallService;
   readonly serverScope: ServerScope;
 }

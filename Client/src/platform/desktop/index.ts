@@ -9,6 +9,7 @@ import { appAudio } from "./appAudio";
 import { appMetadata } from "./appMetadata";
 import { appProcess } from "./appProcess";
 import { autostart } from "./autostart";
+import { callService } from "./callService";
 import { credentials } from "./credentials";
 import { deepLinks } from "./deepLinks";
 import { devTools } from "./devTools";
@@ -41,6 +42,7 @@ export const desktop: Platform = {
   appMetadata,
   appProcess,
   autostart,
+  callService,
   credentials,
   deepLinks,
   devTools,
