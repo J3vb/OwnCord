@@ -32,6 +32,10 @@ type presencePayload struct {
 	Activity *gameActivity `json:"activity"`
 	// Listening is the song being listened to; same rules as Activity.
 	Listening *listeningActivity `json:"listening"`
+	// Mobile is true when the user is on the Android app (see mergeLivePresence).
+	// Omitted when false, and never set on a frame that stands for an invisible
+	// user's "offline".
+	Mobile bool `json:"mobile,omitempty"`
 }
 
 type memberUserPayload struct {
@@ -382,10 +386,10 @@ func buildProtocolEpochError(clientEpoch int) []byte {
 // buildPresenceMsg constructs a presence broadcast. status is taken verbatim:
 // callers pass db.BroadcastStatus(status) for everyone but the owner. A builder
 // that always collapsed invisible could never produce the owner's own message.
-func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []byte {
+func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity, mobile bool) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypePresence,
-		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus, Activity: activity, Listening: listening},
+		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus, Activity: activity, Listening: listening, Mobile: mobile},
 	})
 }
 

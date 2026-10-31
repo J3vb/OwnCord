@@ -36,6 +36,7 @@ import { voiceText } from "../i18n/voice";
 import { getChannelMute } from "@lib/prefs/channelMutes";
 import { openDmContextMenu, openLeaveConfirm, type DmMenuConvo } from "./dmContextMenu";
 import { onPrefChange } from "@lib/prefs/preferences";
+import { applyStatusIndicator } from "@lib/ui/statusIndicator";
 
 /** One member of a group DM, as far as the sidebar needs to draw them. */
 export interface DmParticipant {
@@ -54,6 +55,8 @@ export interface DmConversation {
   readonly avatar: string | null;
   readonly avatarColor?: string;
   readonly status?: "online" | "idle" | "dnd" | "offline";
+  /** The other party of a 1:1 DM is on the Android app (draws the phone shape). */
+  readonly mobile?: boolean;
   /** The game the other party of a 1:1 DM is playing, or else the
    *  music they listen to; never set for a group. Drawn as "Playing
    *  <game>" or "Listening to <player>" under the name. */
@@ -116,13 +119,6 @@ export interface DmSidebarOptions {
   readonly onBack?: () => void;
   readonly serverName?: string;
 }
-
-const STATUS_COLORS: Record<string, string> = {
-  online: "var(--green)",
-  idle: "var(--yellow)",
-  dnd: "var(--red)",
-  offline: "var(--text-micro)",
-};
 
 /**
  * Fill one avatar circle: the letter immediately, the picture swapped in once
@@ -238,9 +234,8 @@ function buildAvatar(convo: DmConversation): HTMLDivElement {
   avatar.style.background = avatarBg;
   paintAvatar(avatar, convo.avatar, convo.username);
 
-  const statusKey = convo.status ?? "offline";
   const statusDot = createElement("span", { class: "dm-status" });
-  statusDot.style.background = STATUS_COLORS[statusKey] ?? "var(--text-micro)";
+  applyStatusIndicator(statusDot, convo.status ?? "offline", convo.mobile === true);
   avatar.appendChild(statusDot);
   return avatar;
 }
@@ -475,6 +470,7 @@ function convoSignature(convo: DmConversation): string {
     convo.avatar ?? "",
     convo.avatarColor ?? "",
     convo.status ?? "",
+    convo.mobile === true && convo.isGroup !== true ? "p" : "",
     convo.isGroup === true ? "" : `${convo.activityIcon ?? ""}|${convo.activity ?? ""}`,
     convo.isGroup === true ? "g" : "",
     convo.icon ?? "",

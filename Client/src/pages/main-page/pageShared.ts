@@ -76,6 +76,7 @@ export function buildDmProfileUser(channelId: number): DmProfileData | null {
     displayName: recipient.displayName ?? null,
     avatar: recipient.avatar || null,
     status,
+    mobile: member === undefined ? recipient.mobile === true : member.mobile === true,
     // The live copy first, as for the status; the DM list's own copy covers a
     // partner who is not a member of this server.
     activity: member === undefined ? (recipient.activity ?? null) : (member.activity ?? null),

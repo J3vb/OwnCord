@@ -201,6 +201,7 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     username: dmDisplayName(dm),
     avatar: dm.recipient.avatar || null,
     status: (dm.recipient.status as DmConversation["status"]) ?? "offline",
+    ...(dm.recipient.mobile === true && !dm.isGroup && { mobile: true }),
     ...dmActivityFields(dm),
     isGroup: dm.isGroup,
     ...(dm.ownerId !== undefined && { hasOwner: true }),

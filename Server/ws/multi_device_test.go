@@ -1021,7 +1021,7 @@ func TestMultiDevice_AutoIdleFromOneDeviceDoesNotShowUserIdle(t *testing.T) {
 	obs := f.observer(f.text)
 	apply := func(d *mdDev, status string) {
 		env := envelope{Type: MsgTypePresenceUpdate}
-		res := Result{Events: presenceEvents(f.uid, status, nil, nil, nil), SetPresence: &livePresence{status: status}}
+		res := Result{Events: presenceEvents(f.uid, status, nil, nil, nil, false), SetPresence: &livePresence{status: status}}
 		f.hub.handleMessageApply(context.Background(), context.Background(), d.c, env, "", res, time.Now())
 	}
 

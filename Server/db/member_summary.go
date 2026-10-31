@@ -58,6 +58,11 @@ type MemberSummary struct {
 	DisplayName *string `json:"display_name"`
 	// About is the profile bio (About Me). Null when unset.
 	About *string `json:"about"`
+	// Mobile is the live "on the Android app" flag, set only by the ws ready
+	// presentation (never read from the database) and omitted when false. A
+	// ready encodes it after custom_status, so encodeRoster's cached bytes do not
+	// carry it.
+	Mobile bool `json:"mobile,omitempty"`
 	// CreatedAt is the account creation instant, "2006-01-02T15:04:05Z".
 	CreatedAt string `json:"created_at"`
 	// MemberBanner is nil for a member with no banner, which omits both keys. An
@@ -80,6 +85,11 @@ func (m MemberSummary) ForViewer(viewerID int64) MemberSummary {
 	// the member is online. Blank it at the same choke point.
 	if m.ID != viewerID && m.Status == StatusOffline {
 		m.CustomStatus = nil
+	}
+	// An offline member is on no phone, and a phone on an invisible member would
+	// give them away the same way.
+	if m.Status == StatusOffline {
+		m.Mobile = false
 	}
 	return m
 }

@@ -91,6 +91,7 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 		for i, m := range members {
 			if lp := live[m.ID]; lp.status != "" {
 				m.Status = lp.status
+				m.Mobile = lp.mobile
 				if visibleCustomStatus(lp.customStatus, lp.customStatusExpiresAt, now) == nil {
 					// Only ever to nil (the splice contract); m is this iteration's copy.
 					m.CustomStatus = nil
@@ -112,7 +113,16 @@ func (h *Hub) presentableMembers(members []db.MemberSummary, viewerID int64) ite
 // a copy of Recipients[0], not a shared reference.
 func (h *Hub) presentableDMChannels(dmChannels []db.DMChannelInfo, viewerID int64) []db.DMChannelInfo {
 	live := h.livePresences()
-	return presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id].status })
+	dmChannels = presentDMStatuses(dmChannels, viewerID, func(id int64) string { return live[id].status })
+	for i := range dmChannels {
+		ch := &dmChannels[i]
+		ch.Recipient.Mobile = ch.Recipient.Status != db.StatusOffline && live[ch.Recipient.ID].mobile
+		for j := range ch.Recipients {
+			r := &ch.Recipients[j]
+			r.Mobile = r.Status != db.StatusOffline && live[r.ID].mobile
+		}
+	}
+	return dmChannels
 }
 
 // presentDMStatuses is presentableDMChannels over any live-status lookup ("" for

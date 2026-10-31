@@ -114,7 +114,7 @@ func handlePresenceV2(ctx context.Context, cmd Command, info ClientInfo, deps an
 		live.customStatusExpiresAt = res.ExpiresAt
 	}
 	// The game and the song follow the connection, not the status: the frame carries them.
-	return Result{Events: presenceEvents(userID, status, customStatus, info.Activity, info.Listening), SetPresence: live}
+	return Result{Events: presenceEvents(userID, status, customStatus, info.Activity, info.Listening, false), SetPresence: live}
 }
 
 // handleChannelFocusV2 handles channel_focus: it validates permissions, signals the

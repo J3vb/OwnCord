@@ -18,13 +18,14 @@ import "slices"
 func mergeLivePresence(conns []*Client) livePresence {
 	var out livePresence
 	var src *livePresence
+	var srcConn *Client
 	for _, c := range conns {
 		p := c.presence.Load()
 		if p == nil || p.status == "" {
 			continue
 		}
 		if src == nil {
-			src = p
+			src, srcConn = p, c
 			continue
 		}
 		// Any non-idle device beats an idle one (a background tab or a sleeping
@@ -33,11 +34,12 @@ func mergeLivePresence(conns []*Client) livePresence {
 		// connection (applyChosenPresence) and so is always the newest choice.
 		pi, si := isIdleStatus(p.status), isIdleStatus(src.status)
 		if (si && !pi) || (si == pi && !p.setAt.Before(src.setAt)) {
-			src = p
+			src, srcConn = p, c
 		}
 	}
 	if src != nil {
 		out = *src
+		out.mobile = mobileShown(conns, srcConn, src)
 	}
 	// The song follows the same rule as the game: the status source's own,
 	// else the newest connection reporting one.
@@ -56,6 +58,27 @@ func mergeLivePresence(conns []*Client) livePresence {
 		}
 	}
 	return out
+}
+
+// mobileShown reports whether the merged presence, whose status comes from srcConn,
+// shows the phone: srcConn is the Android app and every other stamped connection in
+// the same idle class (all active, or all idle) is a phone too. A desktop that is as
+// active as the phone wins, and a phone beside an idle desktop shows, since the idle
+// desktop is not what the user is using.
+func mobileShown(conns []*Client, srcConn *Client, src *livePresence) bool {
+	if !srcConn.features.mobile {
+		return false
+	}
+	srcIdle := isIdleStatus(src.status)
+	for _, c := range conns {
+		if c == srcConn || c.features.mobile {
+			continue
+		}
+		if p := c.presence.Load(); p != nil && p.status != "" && isIdleStatus(p.status) == srcIdle {
+			return false
+		}
+	}
+	return true
 }
 
 // livePresences snapshots each connected user's live presence
@@ -170,9 +193,10 @@ func (h *Hub) rebroadcastAfterDeviceLeft(c *Client) {
 }
 
 // sameShownPresence reports whether two merged presences render the same to
-// other members: status, custom status text, game and song.
+// other members: status, phone, custom status text, game and song.
 func sameShownPresence(a, b livePresence) bool {
 	return a.status == b.status &&
+		a.mobile == b.mobile &&
 		a.customStatusExpiresAt == b.customStatusExpiresAt &&
 		sameText(a.customStatus, b.customStatus) &&
 		sameActivity(a.activity, b.activity) &&

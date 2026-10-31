@@ -106,7 +106,7 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
 	h.dropQueuedPresenceLocked(userID)
-	for _, ev := range presenceEvents(userID, shown.status, nil, shown.activity, shown.listening) {
+	for _, ev := range presenceEvents(userID, shown.status, nil, shown.activity, shown.listening, shown.mobile) {
 		h.enqueueExpiredPresence(first, ev)
 	}
 }

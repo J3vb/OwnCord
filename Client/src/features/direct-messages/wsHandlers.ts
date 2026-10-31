@@ -25,6 +25,7 @@ function mapDmUser(u: DmChannelPayload["recipient"]): DmChannel["recipient"] {
     username: u.username,
     avatar: u.avatar,
     status: u.status,
+    ...(u.mobile === true ? { mobile: true } : {}),
     displayName: u.display_name ?? "",
   };
 }

@@ -71,14 +71,16 @@
   color: var(--on-fill);
 }
 .upp-status-dot {
+  --sd: 20px;
+  --status-ring: var(--bg-primary);
   position: absolute;
   right: -2px;
   bottom: -2px;
   box-sizing: border-box;
-  width: 20px;
-  height: 20px;
-  border-radius: var(--radius-circle);
-  border: 4px solid var(--bg-primary);
+  width: calc(var(--sd) * var(--phone-w, 1));
+  height: calc(var(--sd) * var(--phone-h, 1));
+  border-radius: var(--status-shape, var(--radius-circle));
+  border: 4px solid var(--status-ring);
 }
 .upp-username {
   font-size: var(--font-size-xl);
@@ -192,6 +194,13 @@
   width: 8px;
   height: 8px;
   border-radius: var(--radius-circle);
+}
+/* A member on the phone app: the marker is the muted phone stroke icon, not a dot. */
+.upp-status-dot-inline.status-line-phone {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  border-radius: 0;
 }
 /* Both sections are always built and left empty when the user has no data for
    them, so they have to collapse rather than render as blank panels. */

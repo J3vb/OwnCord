@@ -181,6 +181,11 @@ type livePresence struct {
 	activity *gameActivity
 	// listening is the song this connection reports; same rules as activity.
 	listening *listeningActivity
+	// mobile is set only on a merged presence (mergeLivePresence): the shown
+	// status comes from a phone-app connection and no desktop connection that is
+	// equally active backs it. A connection's own stored value is always false;
+	// whether it is a phone is a fact of the socket (Client.features).
+	mobile bool
 }
 
 // noActivity reports whether the connection shows neither a game nor a song.
