@@ -45,6 +45,7 @@
     "test:mutate": "stryker run",
     "test:mutate:dry": "stryker run --dryRunOnly",
     "test:e2e:build-server": "node tests/e2e/scripts/build-server.mjs",
+    "screenshots:readme": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.screenshots.ts",
     "test:e2e:web": "node tests/e2e/scripts/build-server.mjs --web && playwright test --config tests/e2e/config/playwright.config.web.ts",
     "test:e2e:fullstack": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.fullstack.ts",
     "test:e2e:soak": "npm run test:e2e:build-server && npm run build && playwright test --config tests/e2e/config/playwright.config.soak.ts"

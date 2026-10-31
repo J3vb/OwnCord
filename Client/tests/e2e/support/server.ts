@@ -20,6 +20,9 @@ export async function startTestServer(
     browserClient?: boolean;
     binary?: string;
     env?: NodeJS.ProcessEnv;
+    /** `security.auth_rate_limit_multiplier`, for a seed that signs up and
+     *  signs in more accounts than the per-minute auth limits allow. */
+    authRateLimitMultiplier?: number;
   } = {},
 ) {
   const livekit = process.env.OWNCORD_E2E_LIVEKIT_BINARY;
@@ -70,6 +73,9 @@ export async function startTestServer(
     },
     database: { path: join(dataDir, "chatserver.db") },
     tls: { mode: options.tls ? "self_signed" : "off" },
+    ...(options.authRateLimitMultiplier
+      ? { security: { auth_rate_limit_multiplier: options.authRateLimitMultiplier } }
+      : {}),
     voice: {
       auto_download_livekit: false,
       livekit_binary: options.livekit ? resolve(livekit!) : "",

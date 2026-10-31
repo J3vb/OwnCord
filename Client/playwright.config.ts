@@ -10,6 +10,7 @@ export default defineConfig({
     "**/fullstack/**",
     "**/web/**",
     "**/artifact-smoke/**",
+    "**/screenshots/**",
   ],
   // Known flakes tracked in tests/e2e/quarantine.json are excluded from the
   // required run; `OWNCORD_FLAKES=1` runs them again. Policy and guard:
