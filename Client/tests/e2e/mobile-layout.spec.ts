@@ -940,6 +940,27 @@ for (const profile of PROFILES) {
 
       await bar.locator("[data-testid='pcb-leave']").tap();
       await expect(bar).toBeHidden();
+
+      // The Android app keeps the call alive in the background with a host
+      // service from join to leave; a phone browser has no host to ask.
+      const callService = (): Promise<Array<{ active: boolean; camera: boolean }>> =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __invokeLog: Array<{ cmd: string; args?: { active: boolean; camera: boolean } }>;
+            }
+          ).__invokeLog
+            .filter((e) => e.cmd === "set_call_service")
+            .map((e) => ({ active: e.args!.active, camera: e.args!.camera })),
+        );
+      const expected =
+        profile.name === "Pixel 7"
+          ? [
+              { active: true, camera: false },
+              { active: false, camera: false },
+            ]
+          : [];
+      await expect.poll(callService).toEqual(expected);
     });
 
     test("the join sheet and the call bar meet the shared accessibility checks", async ({
