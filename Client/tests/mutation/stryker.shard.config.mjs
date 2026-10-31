@@ -62,7 +62,8 @@ export const shards = {
     "src/lib/voice/h264Profile.ts",
     "src/lib/voice/shareFps.ts",
     "src/lib/voice/videoSurface.ts",
-  ],
+    "src/lib/ui/imageHeader.ts",
+  ], // ~220 mutants moved in on 2026-10-31 run 41152526555: imageHeader.ts (220, from lib-rest-9)
   "livekit-4": [
     "src/lib/voice/livekitE2EE.ts",
     "src/features/voice/sessionState.ts",
@@ -105,7 +106,8 @@ export const shards = {
     "src/lib/voice/noiseFloor.ts",
     "src/lib/voice/gateScale.ts",
     "src/lib/prefs/mediaVisibility.ts",
-  ],
+    "src/features/voice-messages/recorder.ts",
+  ], // ~431 mutants moved in on 2026-10-31 run 41152526555: recorder.ts (431, from audio-media-3)
   "audio-media-2": [
     "src/lib/voice/audioPipeline.ts",
     "src/lib/ui/virtualRange.ts",
@@ -116,7 +118,10 @@ export const shards = {
     "src/features/members/listeningCard.ts",
     "src/features/voice/miniPlayer.ts",
     "src/lib/voice/noiseSuppression.ts",
-  ],
+    "src/features/voice-messages/voiceComposer.ts",
+    "src/features/voice-messages/player.ts",
+    "src/lib/media/notificationSound.ts",
+  ], // ~1091 mutants moved in on 2026-10-31 run 41152526555: voiceComposer.ts (512, from audio-media-3), player.ts (341, from audio-media-3), notificationSound.ts (238, from lib-rest-4)
   "audio-media-3": [
     "src/lib/media/publicAssets.ts",
     "src/lib/voice/deviceManager.ts",
@@ -134,11 +139,8 @@ export const shards = {
     "src/features/voice-messages/waveform.ts",
     "src/features/voice-messages/wav.ts",
     "src/features/voice-messages/mime.ts",
-    "src/features/voice-messages/recorder.ts",
     "src/features/voice-messages/linuxMic.ts",
-    "src/features/voice-messages/voiceComposer.ts",
-    "src/features/voice-messages/player.ts",
-  ],
+  ], // moved out on 2026-10-31 run 41152526555 after the 90 min timeout: voiceComposer.ts (512, to audio-media-2), player.ts (341, to audio-media-2), recorder.ts (431, to audio-media-1)
   "transport-auth-1": [
     "src/lib/api.ts",
     "src/lib/apiAccount.ts",
@@ -153,11 +155,8 @@ export const shards = {
     "src/lib/ws.ts",
     "src/lib/wsConfig.ts",
     "src/lib/net/rateLimiter.ts",
-    "src/lib/pendingMessages.ts",
     "src/features/connection/dispatchContext.ts",
-    "src/features/connection/wsHandlers.ts",
-    "src/features/messaging/reactionUsers.ts",
-  ],
+  ], // moved out on 2026-10-31 run 41152526555 after the 90 min timeout: pendingMessages.ts (280, to lib-rest-6), wsHandlers.ts (201, to lib-rest-6), reactionUsers.ts (49, to stores-3)
   "transport-auth-3": [
     "src/lib/net/identity.ts",
     "src/lib/net/identityPins.ts",
@@ -191,7 +190,8 @@ export const shards = {
     "src/features/channels/channelRow.view.ts",
     "src/features/channels/channelRowModel.ts",
     "src/lib/text/nameLimits.ts",
-  ], // timed out at 90 min on run 38926807609 while it still held icons.ts; the 5.4d channel row view and builders (about 525 non-comment lines) joined once icons.ts left
+    "src/features/custom-themes/customThemeSection.ts",
+  ], // timed out at 90 min on run 38926807609 while it still held icons.ts; the 5.4d channel row view and builders (about 525 non-comment lines) joined once icons.ts left; ~375 mutants moved in on 2026-10-31 run 41152526555: customThemeSection.ts (375, from lib-rest-4)
   "lib-rest-7": [
     "src/lib/text/markdown.ts",
     "src/features/updates/availableUpdate.ts",
@@ -215,7 +215,8 @@ export const shards = {
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/features/whats-new/whatsNewPrompt.ts",
     "src/lib/voice/voiceDeafened.ts",
-  ],
+    "src/features/forums/NewPostDialog.ts",
+  ], // ~559 mutants moved in on 2026-10-31 run 41152526555: NewPostDialog.ts (559, from lib-rest-4)
   "lib-rest-3": [
     "src/lib/voice/callRing.ts",
     "src/features/direct-messages/callAlerts.ts",
@@ -240,22 +241,19 @@ export const shards = {
     "src/lib/text/colorContrast.ts",
     "src/lib/constants.ts",
     "src/features/custom-themes/customTheme.ts",
-    "src/features/custom-themes/customThemeSection.ts",
     "src/lib/nav/deepLink.ts",
     "src/lib/net/hostNormalize.ts",
     "src/lib/nav/inviteNavigation.ts",
     "src/lib/nav/messageNavigation.ts",
     "src/features/dialogs/confirmModal.ts",
     "src/lib/ui/modalFactory.ts",
-    "src/lib/media/notificationSound.ts",
     "src/lib/net/serverCapabilities.ts",
     "src/lib/ui/imageCrop.ts",
     "src/lib/store.ts",
     "src/features/updates/updateChecker.ts",
     "src/features/whats-new/changelogSource.ts",
     "src/lib/prefs/windowState.ts",
-    "src/features/forums/NewPostDialog.ts",
-  ],
+  ], // moved out on 2026-10-31 run 41152526555 after the 90 min timeout: notificationSound.ts (238, to audio-media-2), NewPostDialog.ts (559, to lib-rest-2), customThemeSection.ts (375, to lib-rest-1)
   "lib-rest-5": [
     "src/lib/ui/avatar.ts",
     "src/lib/ui/animatedStill.ts",
@@ -313,7 +311,9 @@ export const shards = {
     "src/lib/prefs/keybinds.ts",
     "src/lib/prefs/keybindLabels.ts",
     "src/lib/ui/globalKeys.ts",
-  ],
+    "src/lib/pendingMessages.ts",
+    "src/features/connection/wsHandlers.ts",
+  ], // ~481 mutants moved in on 2026-10-31 run 41152526555: pendingMessages.ts (280, from transport-auth-2), wsHandlers.ts (201, from transport-auth-2)
   // icons.ts is a table of Lucide SVG path strings at module level. Every
   // mutant there is static, so each one re-runs the whole suite; on runs
   // 38902717516 and 38926807609 they used most of lib-rest-1's 90 minutes.
@@ -325,16 +325,11 @@ export const shards = {
     "src/features/server-rail/switchServer.ts",
     "src/features/server-rail/switchConfirmPref.ts",
     "src/features/server-rail/switchConfirmDialog.ts",
-    "src/lib/ui/imageHeader.ts",
-    "src/features/channels/categoryActions.ts",
-    "src/features/channels/collapsedMigration.ts",
     "src/features/forums/forumModel.ts",
     "src/features/threads/threadAgo.ts",
     "src/features/forums/view.ts",
     "src/features/forums/ForumView.ts",
-    "src/features/forums/forumSettingsModel.ts",
-    "src/features/forums/ForumSettingsSection.ts",
-  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard; the WP 6.9d forum view joined it too, its icons.ts mutants being static and skipped (NewPostDialog.ts moved to lib-rest-4 on 2026-10-23)
+  ], // the 6.5b category calls and the collapsed-name migration (about 100 lines together) joined the smallest shard; the WP 6.9d forum view joined it too, its icons.ts mutants being static and skipped (NewPostDialog.ts moved to lib-rest-4 on 2026-10-23); moved out on 2026-10-31 run 41152526555 after the 90 min timeout: categoryActions.ts (100, to stores-3), collapsedMigration.ts (21, to stores-3), ForumSettingsSection.ts (410, to stores-2), forumSettingsModel.ts (247, to safety-moderation-2), imageHeader.ts (220, to livekit-3)
   "stores-1": [
     "src/stores/auth.store.ts",
     "src/stores/emoji.store.ts",
@@ -363,7 +358,8 @@ export const shards = {
     "src/stores/ui.store.ts",
     "src/features/messaging/messageEdits.ts",
     "src/features/messaging/markdownMarkers.ts",
-  ],
+    "src/features/forums/ForumSettingsSection.ts",
+  ], // ~410 mutants moved in on 2026-10-31 run 41152526555: ForumSettingsSection.ts (410, from lib-rest-9)
   "stores-3": [
     "src/stores/dm.store.ts",
     "src/features/messaging/messageModel.ts",
@@ -375,7 +371,10 @@ export const shards = {
     "src/features/messaging/historyWindows.ts",
     "src/features/messaging/reactionState.ts",
     "src/features/messaging/activeComposer.ts",
-  ],
+    "src/features/messaging/reactionUsers.ts",
+    "src/features/channels/categoryActions.ts",
+    "src/features/channels/collapsedMigration.ts",
+  ], // ~170 mutants moved in on 2026-10-31 run 41152526555: reactionUsers.ts (49, from transport-auth-2), categoryActions.ts (100, from lib-rest-9), collapsedMigration.ts (21, from lib-rest-9)
   "safety-moderation-1": [
     "src/features/content-consent/nsfw.ts",
     "src/features/moderation/Queue.ts",
@@ -395,7 +394,8 @@ export const shards = {
     "src/features/safety/store.ts",
     "src/features/zoom/zoom.ts",
     "src/features/safety/BlockedUsers.ts",
-  ],
+    "src/features/forums/forumSettingsModel.ts",
+  ], // ~247 mutants moved in on 2026-10-31 run 41152526555: forumSettingsModel.ts (247, from lib-rest-9)
   "safety-moderation-3": [
     "src/features/content-consent/external.ts",
     "src/features/message-requests/sync.ts",
