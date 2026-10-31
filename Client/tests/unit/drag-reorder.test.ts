@@ -197,6 +197,17 @@ function hasDropIndicator(rig: Rig, id: number): boolean | undefined {
   return rig.items.get(id)?.classList.contains("channel-drop-indicator");
 }
 
+function twoRowRig(): { rig: Rig; el: HTMLElement | undefined } {
+  signIn("owner");
+  const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
+  return { rig, el: rig.items.get(1) };
+}
+
+function expectSingleReorder(rig: Rig, positions: Record<number, number>): void {
+  expect(rig.onReorder).toHaveBeenCalledTimes(1);
+  expect(positionsOf(firstReorder(rig))).toEqual(positions);
+}
+
 beforeEach(() => {
   resetAuthState();
   resetChannelsState();
@@ -322,9 +333,7 @@ describe("attachDragHandlers permission gate", () => {
 
 describe("drag activation threshold", () => {
   it("does not start a drag below the 5px threshold", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mousemove", 2, 6)); // dx+dy = 4
@@ -334,9 +343,7 @@ describe("drag activation threshold", () => {
   });
 
   it("starts a drag once movement exceeds the threshold", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mousemove", 3, 10)); // dx+dy = 9
@@ -346,9 +353,7 @@ describe("drag activation threshold", () => {
   });
 
   it("ignores non-left mouse buttons", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(new MouseEvent("mousedown", { clientX: 0, clientY: 4, button: 2 }));
     el?.dispatchEvent(mouse("mousemove", 0, 40));
@@ -357,9 +362,7 @@ describe("drag activation threshold", () => {
   });
 
   it("a mouseup before the threshold cancels the pending drag", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mouseup", 0, 4));
@@ -409,8 +412,7 @@ describe("reorder index arithmetic", () => {
 
     drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    expect(positionsOf(firstReorder(rig))).toEqual({ 3: 0, 1: 1, 2: 2 });
+    expectSingleReorder(rig, { 3: 0, 1: 1, 2: 2 });
   });
 
   it("dropping on the bottom half inserts after the target", () => {
@@ -485,10 +487,8 @@ describe("reorder index arithmetic", () => {
 
     drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
     // ch3 keeps position 0 (unchanged, so unreported); ch1 and ch2 move up.
-    expect(positionsOf(reorders)).toEqual({ 1: 1, 2: 2 });
+    expectSingleReorder(rig, { 1: 1, 2: 2 });
   });
 
   it("gives partially tied positions a deterministic order after the drop", () => {
@@ -498,11 +498,9 @@ describe("reorder index arithmetic", () => {
 
     drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
     // Slots [0, 0, 5] become the strictly increasing [0, 1, 5]: every channel
     // ends at a distinct position, so the rendered order matches the drop.
-    expect(positionsOf(reorders)).toEqual({ 3: 0, 1: 1, 2: 5 });
+    expectSingleReorder(rig, { 3: 0, 1: 1, 2: 5 });
   });
 
   it("does not fire when dropped on itself", () => {
@@ -515,9 +513,7 @@ describe("reorder index arithmetic", () => {
   });
 
   it("does not fire when dropped outside any row", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { rig, el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mousemove", 0, 30));
@@ -555,8 +551,7 @@ describe("drop indicator", () => {
     const rig = ownerRig();
     const source = rig.items.get(1);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     document.dispatchEvent(mouse("mousemove", 0, yInRow(2, "top")));
     expect(hasDropIndicator(rig, 3)).toBe(true);
@@ -571,8 +566,7 @@ describe("drop indicator", () => {
     const rig = ownerRig();
     const source = rig.items.get(1);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     document.dispatchEvent(mouse("mousemove", 0, yInRow(1, "top")));
     expect(hasDropIndicator(rig, 2)).toBe(true);
@@ -630,8 +624,7 @@ describe("mid-drag sidebar re-render", () => {
     // Release over the bottom half of row 1 (ch2): ch1 lands after ch2.
     document.dispatchEvent(mouse("mouseup", 0, yInRow(1, "bottom")));
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    expect(positionsOf(firstReorder(rig))).toEqual({ 2: 0, 1: 1 });
+    expectSingleReorder(rig, { 2: 0, 1: 1 });
     expect(channelsStore.select((s) => s.channels.get(1)?.position)).toBe(1);
     expect(channelsStore.select((s) => s.channels.get(2)?.position)).toBe(0);
     expect(live.container.querySelectorAll(".channel-drop-indicator")).toHaveLength(0);
@@ -812,8 +805,7 @@ describe("global listener ownership", () => {
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
     const source = rig.items.get(1);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
     expect(source?.classList.contains("dragging")).toBe(true);
 
     rig.abort.abort();
@@ -831,8 +823,7 @@ describe("global listener ownership", () => {
     const other = new AbortController();
     ensureGlobalDragListeners(other.signal);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     other.abort();
 

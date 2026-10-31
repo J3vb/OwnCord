@@ -12,6 +12,7 @@ import type { DmConversation } from "@components/DmSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import { dmDisplayName, dmStore } from "@stores/dm.store";
 import type { DmChannel, DmUser } from "@stores/dm.store";
+import { openContextMenuOn } from "../helpers/dmHarness";
 import { useMountContainer } from "../helpers/mountContainer";
 
 // ---------------------------------------------------------------------------
@@ -53,6 +54,16 @@ const convo = (overrides: Partial<DmConversation> = {}): DmConversation => ({
   unread: false,
   ...overrides,
 });
+
+const bobCatGroup = (): DmConversation =>
+  convo({
+    channelId: 7,
+    isGroup: true,
+    participants: [
+      { id: 2, username: "bob", avatar: null },
+      { id: 3, username: "cat", avatar: null },
+    ],
+  });
 
 // ---------------------------------------------------------------------------
 // dmDisplayName
@@ -143,16 +154,7 @@ describe("DmSidebar — group rows", () => {
   }
 
   it("draws stacked avatars for a group", () => {
-    const sidebar = mount([
-      convo({
-        channelId: 7,
-        isGroup: true,
-        participants: [
-          { id: 2, username: "bob", avatar: null },
-          { id: 3, username: "cat", avatar: null },
-        ],
-      }),
-    ]);
+    const sidebar = mount([bobCatGroup()]);
 
     const stack = container.querySelector('[data-testid="dm-avatar-stack-7"]');
     expect(stack).not.toBeNull();
@@ -186,16 +188,7 @@ describe("DmSidebar — group rows", () => {
   });
 
   it("renders the participant count including the current user", () => {
-    const sidebar = mount([
-      convo({
-        channelId: 7,
-        isGroup: true,
-        participants: [
-          { id: 2, username: "bob", avatar: null },
-          { id: 3, username: "cat", avatar: null },
-        ],
-      }),
-    ]);
+    const sidebar = mount([bobCatGroup()]);
 
     expect(container.querySelector('[data-testid="dm-members-7"]')!.textContent).toBe("3");
 
@@ -280,8 +273,7 @@ describe("DmSidebar — muted rows", () => {
     const onToggleMute = vi.fn();
     const sidebar = mount([convo({ channelId: 7 })], { onToggleMute });
 
-    const item = container.querySelector(".dm-item") as HTMLElement;
-    item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+    openContextMenuOn(container.querySelector(".dm-item"));
 
     const entry = document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
     expect(entry.textContent).toBe("Mute Conversation");
@@ -296,8 +288,7 @@ describe("DmSidebar — muted rows", () => {
     const onMuteFor = vi.fn();
     const sidebar = mount([convo({ channelId: 7 })], { onToggleMute, onMuteFor });
 
-    const item = container.querySelector(".dm-item") as HTMLElement;
-    item.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));
+    openContextMenuOn(container.querySelector(".dm-item"));
 
     const entry = document.querySelector('[data-testid="dm-mute-7"]') as HTMLElement;
     const flyout = entry.nextElementSibling as HTMLElement;
