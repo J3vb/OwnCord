@@ -55,6 +55,23 @@ test.describe("Server rail", () => {
     await expect(joinDialog(page)).toBeHidden();
   });
 
+  test("the first icon's selected ring and hover lift are not clipped at the top", async ({
+    page,
+  }) => {
+    await mockTauriFullSession(page);
+    await page.goto("/");
+    await navigateToMainPageReady(page);
+    await home(page).click();
+    await home(page).hover();
+    const room = await home(page).evaluate((btn) => {
+      const scroll = btn.closest(".server-rail-scroll");
+      if (scroll === null) return Number.NaN;
+      return btn.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+    });
+    // The selected ring reaches 4px past the icon and hover lifts it 1px more.
+    expect(room).toBeGreaterThanOrEqual(5);
+  });
+
   test("the rail steps aside at narrow widths", async ({ page }) => {
     await mockTauriFullSession(page);
     await page.setViewportSize({ width: 760, height: 760 });

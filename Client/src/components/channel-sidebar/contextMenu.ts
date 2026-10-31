@@ -11,7 +11,9 @@
  */
 
 import { createElement } from "@lib/dom";
-import { channelsStore, updateChannelPosition, type Channel } from "@stores/channels.store";
+import { createLogger } from "@lib/logger";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import type { Channel } from "@stores/channels.store";
 import {
   hasPermission,
   currentUserPermissions,
@@ -46,7 +48,10 @@ import { appendPurgeSection } from "@components/purgePrompt";
 import { copyWithToast, isDeveloperMode } from "../../features/developer-mode/developerTools";
 import type { ChannelReorderData } from "../ChannelSidebar";
 import { shellText } from "../../i18n/shell";
-import { muteChoices, mutedUntilLabel } from "../muteMenu";
+import { muteChoices, mutedUntilLabel } from "../../features/channels/muteMenu";
+import { channelMoves } from "../../features/channels/channelMoves";
+
+const log = createLogger("channel-menu");
 
 const LEVEL_KEYS = {
   all: "channel.notify.all",
@@ -125,8 +130,44 @@ export function attachChannelContextMenu(
     showCopyLink ||
     showInvite;
 
+  /** A phone gets the menu as a bottom sheet, loaded on the first long-press. */
+  function openSheet(): void {
+    import("./channelSheet").then(
+      ({ openChannelSheet }) => {
+        if (lifetimeSignal.aborted) return;
+        openChannelSheet({
+          channel,
+          show: {
+            openChat: showOpenChat,
+            markRead: showMarkRead,
+            mute: showMute,
+            copyLink: showCopyLink,
+            invite: showInvite,
+            move: showMove,
+            edit: showEdit,
+            delete: showDelete,
+            purge: canPurge,
+          },
+          ...(onEdit !== undefined ? { onEdit } : {}),
+          ...(onDelete !== undefined ? { onDelete } : {}),
+          ...(onPurge !== undefined ? { onPurge } : {}),
+          ...(onInvite !== undefined ? { onInvite } : {}),
+          ...(channels !== undefined ? { channels } : {}),
+          ...(onReorder !== undefined ? { onReorder } : {}),
+          signal: lifetimeSignal,
+          fallbackFocus: () => (el.isConnected ? el : null),
+        });
+      },
+      (err: unknown) => log.warn("Channel sheet failed to open", { error: String(err) }),
+    );
+  }
+
   /** Build, mount and wire the menu at a viewport anchor. */
   function openMenu(anchorX: number, anchorY: number): void {
+    if (isPhoneLayout()) {
+      openSheet();
+      return;
+    }
     // lifetimeSignal (not the per-render `signal`): the menu is mounted on
     // document.body, independent of the row that opened it, so an unrelated
     // re-render must not close it.
@@ -291,44 +332,9 @@ export function attachChannelContextMenu(
     }
 
     if (showMove && channels !== undefined && onReorder !== undefined) {
-      const live = channelsStore.getState().channels;
-      // Text rows sit above voice rows in a category, so a move only swaps
-      // with the neighbour of the same kind; crossing the boundary would swap
-      // positions without changing what the user sees.
-      const isVoice = channel.type === "voice";
-      const group = channels
-        .map((c) => live.get(c.id))
-        .filter((c): c is Channel => c !== undefined && (c.type === "voice") === isVoice);
-      const index = group.findIndex((c) => c.id === channel.id);
-      // Swap positions with the adjacent row. `group` is position-sorted, so
-      // this is the same visual move a drag onto that row produces. Equal
-      // positions (newly created channels share 0) get nudged apart.
-      const move = (delta: number): void => {
-        const self = group[index];
-        const other = group[index + delta];
-        if (self === undefined || other === undefined) return;
-        const mine = self.position;
-        let theirs = other.position;
-        if (theirs === mine) theirs = mine + delta;
-        updateChannelPosition(self.id, theirs);
-        updateChannelPosition(other.id, mine);
-        onReorder([
-          { channelId: self.id, newPosition: theirs, previousPosition: mine },
-          { channelId: other.id, newPosition: mine, previousPosition: other.position },
-        ]);
-      };
-      addItem(
-        shellText("channel.moveUp"),
-        "context-menu-item",
-        "ctx-move-up",
-        index > 0 ? () => move(-1) : null,
-      );
-      addItem(
-        shellText("channel.moveDown"),
-        "context-menu-item",
-        "ctx-move-down",
-        index !== -1 && index < group.length - 1 ? () => move(1) : null,
-      );
+      const { up, down } = channelMoves(channel, channels, onReorder);
+      addItem(shellText("channel.moveUp"), "context-menu-item", "ctx-move-up", up);
+      addItem(shellText("channel.moveDown"), "context-menu-item", "ctx-move-down", down);
     }
 
     if (isDeveloperMode()) {

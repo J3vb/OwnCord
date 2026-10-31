@@ -19,7 +19,7 @@ import {
   patchVoiceUserRow,
   VOICE_USER_PATCH_FIELDS,
 } from "../../src/features/channels/voiceRow.view";
-import { createAvatarElement } from "../../src/components/message-list/avatar";
+import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { reconcileModels, sameModel } from "../../src/lib/net/reconcile";
 import type { Channel } from "../../src/stores/channels.store";
 import type { Member } from "../../src/stores/members.store";

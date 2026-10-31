@@ -56,7 +56,7 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 
 	raced := make(chan struct{})
 	var hookRan bool
-	presenceFlushRaceHook = func(flushed *Hub) {
+	hook := func(flushed *Hub) {
 		if flushed != h {
 			// A sibling test's leaked AfterFunc: QueuePresence arms a 300ms
 			// flush that nothing disarms, so TestEmitEvents_DirectPresence-
@@ -74,7 +74,7 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 		// released presenceMu for) the queue, but before it has broadcast
 		// the stale entry.
 		go func() {
-			h.EmitEvents(context.Background(), presenceEvents(42, "dnd", nil, nil, nil))
+			h.EmitEvents(context.Background(), presenceEvents(42, "dnd", nil, nil, nil, false))
 			close(raced)
 		}()
 		// Give the goroutine room to actually run: with the bug this lets
@@ -84,7 +84,8 @@ func TestFlushPresenceQueue_ConcurrentDirectPresenceOrdersLast(t *testing.T) {
 		// sleep costs nothing extra there either way.
 		time.Sleep(20 * time.Millisecond)
 	}
-	defer func() { presenceFlushRaceHook = nil }()
+	presenceFlushRaceHook.Store(&hook)
+	defer presenceFlushRaceHook.Store(nil)
 
 	h.flushPresenceQueue()
 	<-raced

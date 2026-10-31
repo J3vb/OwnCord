@@ -1,16 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 // We need to mock livekitSession before importing anything that uses auth.store
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 
 // Mock MemberList to capture the callbacks passed to it
 vi.mock("@components/MemberList", () => ({
@@ -33,6 +30,7 @@ import { createMemberList } from "@components/MemberList";
 import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { ApiClientError } from "../../src/lib/api";
+import { resetMembersState } from "../helpers/storeResets";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -49,10 +47,7 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   // Role lookups read the dispatcher-updated channels.store (see the role-source
   // unification). Seed via the same setRoles action the dispatcher calls.
   channelsStore.setState(() => ({

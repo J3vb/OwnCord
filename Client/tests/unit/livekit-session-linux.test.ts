@@ -1,4 +1,4 @@
-// The facade on the Linux native backend. `livekit-session.test.ts` is the
+// The facade on the Linux native backend. `livekitSession/` (the folder of split tests) is the
 // contract for LiveKitSession's state machine against the web Room; this
 // file runs the same facade with `isLinuxDesktop()` true, so the joins,
 // mute/deafen, teardown and reconnect below are served by the NativeRoom
@@ -354,7 +354,8 @@ describe("LiveKitSession on the Linux native backend", () => {
       ],
     ]);
     expect(host.commands[2]).toEqual(["setPttGated", [1, false]]);
-    expect(host.commands[3]).toEqual(["setVoiceGate", [1, 0.05]]);
+    // Automatic sensitivity (the default) also asks RNNoise's verdict.
+    expect(host.commands[3]).toEqual(["setVoiceGate", [1, 0.05, false, true]]);
     expect(host.commands[4]).toEqual(["setMicrophone", [1, true]]);
     expect(webKeyProvider.setKey).not.toHaveBeenCalled();
     expect(setVoiceStatus).toHaveBeenLastCalledWith("connected");
@@ -814,7 +815,20 @@ describe("LiveKitSession on the Linux native backend", () => {
     host.connectFails = true;
     const onError = vi.fn();
     session.setOnError(onError);
-    await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    vi.useFakeTimers();
+    try {
+      // The connect retries back off with timers; step through them.
+      let settled = false;
+      const join = session.handleVoiceToken("tok", "/livekit", 1, undefined, true).finally(() => {
+        settled = true;
+      });
+      for (let i = 0; i < 30 && !settled; i++) {
+        await vi.advanceTimersByTimeAsync(1000);
+      }
+      await join;
+    } finally {
+      vi.useRealTimers();
+    }
     expect(names().filter((n) => n === "connect")).toHaveLength(3);
     expect(names()).not.toContain("disconnect");
     expect(onError).toHaveBeenCalledWith("Failed to join voice — connection error");

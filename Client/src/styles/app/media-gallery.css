@@ -379,3 +379,29 @@
     animation: none;
   }
 }
+
+.media-gallery__usage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.media-gallery__usage[hidden] {
+  display: none;
+}
+.media-gallery__manage {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-link);
+  cursor: pointer;
+  font-size: inherit;
+}
+.media-gallery__manage:hover {
+  text-decoration: underline;
+}

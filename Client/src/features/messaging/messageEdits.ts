@@ -69,6 +69,8 @@ export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayloa
             mentions: payload.mentions,
             mentionsEveryone: payload.mentions_everyone,
             mentionRoles: payload.mention_roles,
+            // Present only when a file was removed; a text edit leaves them be.
+            ...(payload.attachments !== undefined && { attachments: payload.attachments }),
             // A call row's end carries the finished `call`; its edited_at is null.
             ...(payload.call !== undefined && { kind: payload.kind ?? "call", call: payload.call }),
           }

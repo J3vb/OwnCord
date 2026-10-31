@@ -21,7 +21,7 @@ import { channelsStore } from "@stores/channels.store";
 import { voiceStore, type VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "./channel-sidebar/volumeMenu";
 import { withMemberMenu } from "./memberMenuLoader";
-import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import { assignableRoleNames, outranksPosition } from "../features/moderation/roleAssignment";
 import { memberTimeoutsStore } from "../features/moderation/store";
 import { canMention, mentionInComposer } from "../features/messaging/activeComposer";
@@ -276,6 +276,7 @@ function itemModel(item: ListItem): MemberItemModel {
     activityIcon: shown === null ? "gamepad-2" : shown.icon,
     colorVar: item.colorVar,
     status: member.status,
+    mobile: member.mobile === true,
     away: isAwayStatus(member.status),
   };
 }

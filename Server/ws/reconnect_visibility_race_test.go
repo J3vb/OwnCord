@@ -107,7 +107,9 @@ func TestHandleReconnect_VisibilityChangeDuringHandshake_ForcesFullReady(t *test
 	case <-time.After(5 * time.Second):
 		t.Fatal("server never accepted the connection")
 	}
-	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	// CloseNow: the peer never reads, so a close handshake would wait out its
+	// 5 s timeout.
+	defer func() { _ = conn.CloseNow() }()
 
 	// Fires once, deep inside the handshake — after mustFullResync's initial
 	// check and after computeAllowedChannels already snapshotted the

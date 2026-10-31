@@ -5,13 +5,14 @@
  */
 
 import { getRecentEmoji } from "../emojiRecent";
-import { buildCustomEmojiNode } from "./customEmoji";
+import { buildCustomEmojiNode } from "../../features/messaging/content/customEmoji";
 
 /** How many quick-reaction emoji the message menu and the hover bar each show. */
 export const QUICK_REACTIONS = 3;
 
-/** Fixed picks that pad the quick row when fewer than `n` recents exist. */
-const DEFAULT_QUICK_EMOJI = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}"] as const;
+/** Fixed picks that pad the quick row when fewer than `n` recents exist. The
+ *  fourth only shows on the phone sheet, which has room for one more. */
+const DEFAULT_QUICK_EMOJI = ["\u{1F44D}", "\u2764\uFE0F", "\u{1F602}", "\u{1F440}"] as const;
 
 /**
  * The `n` emoji for a one-tap reaction: the most recent picks that still

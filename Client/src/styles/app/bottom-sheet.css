@@ -1,0 +1,454 @@
+/* ── Phone bottom sheet (lib/ui/bottomSheet.ts) ──
+   The overlay follows --app-height, the visual viewport touch input keeps, so
+   an open keyboard lifts the sheet instead of covering it. */
+.bottom-sheet-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100dvh);
+  z-index: 350;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: rgba(0, 0, 0, 0.5);
+  animation: sheet-fade 0.15s ease-out;
+}
+.bottom-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 48px);
+  padding-bottom: var(--safe-bottom, 0px);
+  background: var(--bg-secondary);
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+  outline: none;
+  animation: sheet-up 0.2s ease-out;
+  transition: transform 0.2s ease-out;
+}
+.bottom-sheet.bottom-sheet-dragging {
+  transition: none;
+}
+/* dvh ignores the keyboard, so the picker keeps its size and rides up with it. */
+.bottom-sheet-tall {
+  height: min(55dvh, calc(100% - 48px));
+}
+.bottom-sheet-handle {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 8px 0;
+  touch-action: none;
+}
+.bottom-sheet-grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--text-faint);
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes sheet-fade {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bottom-sheet-overlay,
+  .bottom-sheet {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Message actions: large quick reactions, then the menu's sections as cards. */
+.msg-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+}
+.msg-sheet-quick {
+  display: flex;
+  gap: 8px;
+}
+.msg-sheet-quick-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 24px;
+  background: var(--bg-input);
+  color: var(--text-normal);
+  font-size: 22px;
+  line-height: 1;
+}
+.msg-sheet-quick-btn .custom-emoji {
+  width: 26px;
+  height: 26px;
+  margin: 0;
+}
+.msg-sheet-add-reaction {
+  font-size: 26px;
+  font-weight: 600;
+}
+.msg-sheet-section {
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+.msg-sheet-action {
+  min-height: 50px;
+  padding: 0 16px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-normal);
+  font-size: var(--font-size-lg);
+  text-align: left;
+}
+.msg-sheet-action:last-child {
+  border-bottom: none;
+}
+.msg-sheet-action.danger {
+  color: var(--text-danger);
+  font-weight: 600;
+}
+.msg-sheet-action:active,
+.msg-sheet-quick-btn:active {
+  background: var(--bg-modifier-active);
+}
+.msg-sheet-action[aria-disabled="true"],
+.msg-sheet-quick-btn[aria-disabled="true"] {
+  opacity: 0.5;
+}
+.message.msg-sheet-target {
+  background: var(--bg-modifier-selected);
+}
+
+/* Menus as sheets (components/menuSheet.ts): the channel and server menus. A
+   row can carry a second line, a chevron (it opens a second page) or a check. */
+.menu-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.menu-sheet-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.menu-sheet-row:has(> .menu-sheet-detail) {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.menu-sheet-detail {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.menu-sheet-next::after {
+  content: "\203A" / "";
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 24px;
+  line-height: 1;
+}
+.menu-sheet-row.checked::after {
+  content: "\2713" / "";
+  margin-left: auto;
+  color: var(--accent-text);
+}
+.menu-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin: 0 -8px;
+}
+.menu-sheet-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius-circle);
+  background: transparent;
+  color: var(--text-normal);
+}
+.menu-sheet-back:active {
+  background: var(--bg-modifier-active);
+}
+.menu-sheet-title {
+  min-width: 0;
+  color: var(--header-primary);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+/* The purge count field keeps a 16 px font so a phone does not zoom into it;
+   the prompt sets its size inline, hence the !important. */
+.menu-sheet-footer .form-input {
+  min-height: 44px;
+  font-size: 16px !important;
+}
+
+/* The status picker as a sheet: the four statuses, then the custom status. */
+.status-sheet-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.status-sheet-option .status-picker-option-dot {
+  width: 12px;
+  height: 12px;
+}
+.status-sheet-check {
+  display: flex;
+  min-width: 18px;
+  color: var(--accent-text);
+}
+.status-sheet-custom {
+  padding: 0;
+}
+.status-sheet-custom .status-picker-custom-input {
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: var(--radius-lg);
+  font-size: 16px;
+}
+
+/* Emoji / GIF / sticker picker: the popup fills the sheet, tabs on top. */
+.picker-sheet > .expression-popup.in-sheet,
+.picker-sheet > .emoji-picker.in-sheet {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.picker-sheet .xp-panel,
+.picker-sheet > .emoji-picker.in-sheet .ep-body {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+.picker-sheet .xp-tabs {
+  padding: 0 16px;
+}
+.picker-sheet .xp-tab {
+  min-height: 44px;
+  font-size: var(--font-size-md);
+}
+.picker-sheet .ep-search,
+.picker-sheet .sp-search {
+  min-height: 40px;
+  font-size: 16px;
+}
+.picker-sheet .ep-emoji {
+  font-size: 26px;
+}
+
+/* Profile: the card is the sheet's content, the handle sits on its banner. */
+.profile-sheet {
+  position: relative;
+  max-height: min(600px, calc(100% - 48px));
+  background: var(--bg-primary);
+}
+.profile-sheet > .bottom-sheet-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+}
+.profile-sheet .bottom-sheet-grip {
+  background: rgba(255, 255, 255, 0.5);
+}
+.upp-sheet-host {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.profile-sheet .upp-popup {
+  --upp-banner-h: 110px;
+  position: relative;
+  max-height: none;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  opacity: 1;
+  transform: none;
+}
+.profile-sheet .upp-avatar {
+  width: 88px;
+  height: 88px;
+  top: calc(var(--upp-banner-h) - 44px);
+}
+.profile-sheet .upp-body {
+  padding-top: 52px;
+}
+.profile-sheet .upp-username {
+  font-size: 22px;
+}
+.upp-sheet-primary {
+  margin-top: 16px;
+}
+.upp-sheet-primary .upp-action-btn {
+  min-height: 48px;
+  border-radius: 10px;
+  font-size: var(--font-size-md);
+}
+.upp-sheet-primary .upp-action-btn + .upp-action-btn {
+  background: var(--bg-input);
+  color: var(--text-normal);
+}
+.upp-sheet-secondary .upp-action-btn {
+  min-height: 44px;
+  background: transparent;
+  color: var(--text-muted);
+}
+.upp-sheet-secondary [data-testid="upp-block-btn"] {
+  color: var(--text-danger);
+}
+
+/* Tapping a voice channel: who is in there, then Join (components/VoiceJoinSheet.ts). */
+.join-sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+}
+.js-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  color: var(--text-positive);
+}
+.js-channel {
+  max-width: 100%;
+  color: var(--header-primary);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.js-count {
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+.js-people {
+  align-self: stretch;
+  max-height: 30dvh;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+}
+.js-person {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.js-person:last-child {
+  border-bottom: none;
+}
+.js-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-circle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  color: var(--on-fill);
+  overflow: hidden;
+}
+.js-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-normal);
+  font-size: var(--font-size-md);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.js-marker {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.js-note {
+  color: var(--text-warning);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+.js-note:empty {
+  display: none;
+}
+.js-join {
+  align-self: stretch;
+  min-height: 52px;
+  border-radius: var(--radius-lg);
+  background: var(--green);
+  color: var(--on-fill);
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+}
+.js-join:disabled {
+  opacity: 0.5;
+}
+.js-cancel {
+  min-height: 44px;
+  padding: 0 24px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+
+/* The header search box becomes an icon on a phone. */
+.chat-header .ch-tools .search-btn {
+  display: none;
+}
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .chat-header .search-input {
+    display: none;
+  }
+  .chat-header .ch-tools .search-btn {
+    display: flex;
+  }
+}

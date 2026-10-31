@@ -230,13 +230,52 @@ var (
 	ErrRecoveryCodesFailed      = &authError{ErrInternal, "failed to issue recovery codes"}
 )
 
+// authStore is what AuthService reads and writes. *db.DB satisfies it.
+type authStore interface {
+	ErasureStore
+	// Second-factor state: the durable backend behind the auth service's
+	// partial-auth, pending-enrolment and used-code stores, plus the recovery-code
+	// rows. Stdlib types only, because auth cannot import db.
+	auth.SecondFactorPersister
+	db.Auditor
+	sessionCreator
+	settingGetter
+	ReplaceRecoveryCodes(ctx context.Context, userID int64, codeHashes []string) error
+	ListUnusedRecoveryCodes(ctx context.Context, userID int64) (ids []int64, hashes []string, err error)
+	MarkRecoveryCodeUsed(ctx context.Context, id int64) (consumed bool, err error)
+	CountUnusedRecoveryCodes(ctx context.Context, userID int64) (int, error)
+	DeleteRecoveryCodes(ctx context.Context, userID int64) error
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	GetUserByUsername(ctx context.Context, username string) (*db.User, error)
+	CreateUserWithInvite(ctx context.Context, username, passwordHash string, roleID int, inviteCode, sessionTokenHash, device, ip string) (int64, error)
+	CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error)
+	// Recovery kit.
+	UpsertRecoveryKit(ctx context.Context, userID int64, verifier string) error
+	GetRecoveryKit(ctx context.Context, userID int64) (*db.RecoveryKit, error)
+	RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (int64, error)
+	// Owner-issued recovery credential.
+	UpsertRecoveryAssist(ctx context.Context, userID int64, verifier string, issuedBy int64, verification string, expiresAt time.Time) error
+	GetRecoveryAssist(ctx context.Context, userID int64) (*db.RecoveryAssist, error)
+	RedeemRecoveryAssist(ctx context.Context, userID int64, verifier, newPasswordHash, auditAction, auditDetail string) (int64, error)
+	// Approval-mode registration.
+	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error)
+	CountPendingUsers(ctx context.Context) (int64, error)
+
+	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
+	UpdateUserTOTPSecret(ctx context.Context, id int64, secret *string) error
+	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteOtherSessions(ctx context.Context, userID, keepSessionID int64) (int64, error)
+	GetMemberRoles(ctx context.Context, userID int64) (*db.MemberRoles, error)
+	GetInvite(ctx context.Context, code string) (*db.Invite, error)
+}
+
 // AuthService owns the auth slice's orchestration: lockout and enumeration
 // guards, password and second-factor checks, session issue and revoke, audit
 // writes and the member_ban broadcast on self-erasure.
 type AuthService struct {
 	// issueMu serializes the two-budget reservation of IssueRecoveryAssist.
 	issueMu     syncutil.Mutex
-	st          Store
+	st          authStore
 	limiter     *auth.RateLimiter
 	partial     *auth.PartialAuthStore
 	pending     *auth.PendingTOTPStore
@@ -257,7 +296,7 @@ type AuthService struct {
 // partial-login, pending-enrolment and used-code stores persist through st, so a
 // restart keeps in-flight challenges and the replay window and a store fault
 // fails closed.
-func NewAuthService(st Store, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
+func NewAuthService(st authStore, limiter *auth.RateLimiter, totpKey []byte, broadcaster AuthBroadcaster) *AuthService {
 	return &AuthService{
 		st:            st,
 		limiter:       limiter,
@@ -1112,7 +1151,12 @@ func sessionIssueError(err error) error {
 	return ErrSessionIssue
 }
 
-func issueSession(ctx context.Context, st Store, userID int64, device, ip string) (string, error) {
+// sessionCreator writes a new session row.
+type sessionCreator interface {
+	CreateSession(ctx context.Context, userID int64, tokenHash, device, ip string) (int64, error)
+}
+
+func issueSession(ctx context.Context, st sessionCreator, userID int64, device, ip string) (string, error) {
 	return newSessionToken(func(tokenHash string) error {
 		_, err := st.CreateSession(ctx, userID, tokenHash, device, ip)
 		return err

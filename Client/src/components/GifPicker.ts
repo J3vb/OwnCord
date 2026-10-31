@@ -2,6 +2,7 @@
 // (which proxies Klipy). Uses @lib/dom helpers exclusively. Never sets
 // innerHTML with user content.
 
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
@@ -15,7 +16,7 @@ import {
   fetchExternalImage,
   recoverEvictedImage,
   renderFailureStatus,
-} from "@components/message-list/attachments";
+} from "../features/messaging/content/attachments";
 import {
   admitDerived,
   externalAllowed,
@@ -529,7 +530,10 @@ export function createGifPicker(options: GifPickerOptions): {
   );
 
   // Focus search on mount
-  requestAnimationFrame(() => searchInput.focus());
+  // On a phone the keyboard would cover half the sheet before anyone asked to search.
+  requestAnimationFrame(() => {
+    if (!isPhoneLayout()) searchInput.focus();
+  });
 
   // Load trending on init
   void loadGifs("");

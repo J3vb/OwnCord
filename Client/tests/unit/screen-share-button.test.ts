@@ -1,14 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
-vi.mock("@lib/voice/livekitSession", () => ({
-  getRoomForStats: vi.fn().mockReturnValue(null),
-  retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
-  joinVoice: vi.fn(),
-  leaveVoice: vi.fn(),
-  toggleMute: vi.fn(),
-  toggleDeafen: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
+  }),
+);
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
@@ -34,8 +32,9 @@ vi.mock("@lib/voice/connectionStats", () => ({
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { voiceStore } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
-import { membersStore } from "@stores/members.store";
 import { setConnectionStatus } from "@stores/ui.store";
+import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -50,16 +49,8 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "idle",
   }));
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetChannelsState();
+  resetMembersState();
   // Voice controls freeze while the socket is down; an active call is live.
   setConnectionStatus("connected");
 }

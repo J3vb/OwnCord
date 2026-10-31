@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   createInviteManager,
   type InviteItem,
   type InviteManagerOptions,
 } from "@components/InviteManager";
+import { useMountContainer } from "../helpers/mountContainer";
 
 function makeInvite(overrides: Partial<InviteItem> = {}): InviteItem {
   return {
@@ -31,14 +32,8 @@ function makeOptions(overrides: Partial<InviteManagerOptions> = {}): InviteManag
 
 describe("InviteManager", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("mounts with overlay class and modal", () => {

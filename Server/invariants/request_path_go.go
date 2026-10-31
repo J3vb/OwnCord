@@ -31,6 +31,7 @@ var GoAllow = map[string]GoEntry{
 	"admin/setup_handler.go":             {1, "restart hand-off, as in handlers_backup.go"},
 	"api/livekit_proxy.go":               {2, "proxy copy pair, joined inside the handler"},
 	"service/push_dispatch.go":           {1, "per-round sends, joined by the WaitGroup inside Notify"},
+	"admin/logfile.go":                   {1, "saved log history writer, a lifecycle worker joined by its close step"},
 	"service/mention_worker.go":          {1, "lifecycle worker, joined by its close step"},
 	"service/call_log_worker.go":         {1, "lifecycle worker, joined by its close step"},
 	"ws/event_persister.go":              {1, "lifecycle worker, joined by its close step"},

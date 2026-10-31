@@ -3,7 +3,7 @@
 // (`components/`, `pages/`). When they did, a `lib/` module pulled a component
 // file (and whatever it statically reaches) into the startup closure, and a
 // store writer could live in `pages/` where the single-writer rule cannot see
-// it. `SidebarDmHelpers`' DM mutator and `components/settings/helpers`'
+// it. `SidebarDmHelpers`' DM mutator and `features/settings/helpers`'
 // preferences/theme helpers were moved down for exactly this reason.
 //
 // The check is lexical: an `import type` has no runtime edge, and a dynamic

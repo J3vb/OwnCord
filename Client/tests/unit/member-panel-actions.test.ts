@@ -49,6 +49,7 @@ import { membersStore } from "../../src/stores/members.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { Permission } from "../../src/lib/types";
 import type { MemberListOptions } from "../../src/components/MemberList";
+import { resetMembersState } from "../helpers/storeResets";
 
 interface Harness {
   panel: MemberPanel;
@@ -81,7 +82,7 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
   channelsStore.setState(() => ({
     categories: [],
     channels: new Map(),
@@ -191,8 +192,6 @@ describe("member panel dialog chunks that cannot load", () => {
     h.list.onChangeNickname?.(5, "bob", null);
     await h.list.onToggleBlock?.(5, "bob", true);
     h.list.onBlockFromPopup?.(5, "bob", false);
-    await new Promise((r) => setTimeout(r, 300));
-    console.log(JSON.stringify(h.show.mock.calls));
     await vi.waitFor(() => expect(h.show).toHaveBeenCalledTimes(5));
     const shown = h.show.mock.calls.map((c) => c.join("|"));
     expect(

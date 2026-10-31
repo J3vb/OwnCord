@@ -511,6 +511,7 @@ func TestListeningUpdate_ReplacedConnectionCannotTouchTheNewOne(t *testing.T) {
 // A real disconnect drops the song with the connection: the offline entry the
 // others get carries null.
 func TestListeningUpdate_DisconnectClearsIt(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	player := connect("lisleaver", true)
 	watcher := connect("lisleavewatch", true)
@@ -962,8 +963,8 @@ func TestListeningPolicy_PresenceUpdateAfterSweepCarriesNoSong(t *testing.T) {
 		t.Fatal("setup: no song stored")
 	}
 
-	pubEvents := presenceEvents(player.userID, db.StatusDND, nil, nil, stale)
-	ghostEvents := presenceEvents(ghost.userID, db.StatusInvisible, nil, nil, staleGhost)
+	pubEvents := presenceEvents(player.userID, db.StatusDND, nil, nil, stale, false)
+	ghostEvents := presenceEvents(ghost.userID, db.StatusInvisible, nil, nil, staleGhost, false)
 
 	saveGameActivitySwitch(t, h, database, false)
 	for _, c := range []*Client{player, ghost, watcher} {

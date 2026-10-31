@@ -6,59 +6,35 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
-vi.mock("@components/message-list/attachments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
   fetchImageAsObjectUrl: vi.fn(async () => "blob:sticker"),
 }));
 
 import { createMessageList } from "@components/MessageList";
 import { messagesStore, markStickersDeleted } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
+import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMessagesState();
+  resetMembersState();
   setChannels([]);
   setActiveChannel(null);
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
+  return buildMessage(overrides, {
     channelId: CHANNEL_ID,
     user: ME,
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
     timestamp: new Date(Date.UTC(2024, 0, 15, 12, overrides.id)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  });
 }
 
 function setMessages(messages: readonly Message[]): void {

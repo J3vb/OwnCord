@@ -1843,7 +1843,7 @@ connections.
 ### Logs
 
 The server writes its log to **standard output** (stdout), as `slog` text. It
-also keeps the last 2,000 lines in memory for the admin panel's live log view.
+also keeps the last 10,000 lines in memory for the admin panel's live log view.
 There is no log file and no rotation inside the server. So where the log ends
 up depends on your supervisor:
 
@@ -1858,6 +1858,11 @@ up depends on your supervisor:
 without editing `config.yaml`. An administrator can also switch a running
 server to `debug` for a while from the admin panel's **Logs** page
 ([server-configuration.md](server-configuration.md#logging-logging)).
+
+**Saved logs.** The server also keeps the last 7 days (at most 200 MB) of its
+log under `<data_dir>/logs`, searchable from the **History** tab of the
+**Logs** page. `logging.history_days` and `logging.history_max_mb` change
+that; `logging.history_days: 0` turns it off.
 
 **LiveKit's log.**
 

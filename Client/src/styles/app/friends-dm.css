@@ -146,16 +146,18 @@
   color: var(--on-fill);
 }
 .dm-item .dm-avatar .dm-status {
+  --sd: 12px;
+  --status-ring: var(--bg-secondary);
   position: absolute;
   bottom: -1px;
   right: -1px;
-  width: 12px;
-  height: 12px;
-  border-radius: var(--radius-circle);
-  border: 3px solid var(--bg-secondary);
+  width: calc(var(--sd) * var(--phone-w, 1));
+  height: calc(var(--sd) * var(--phone-h, 1));
+  border-radius: var(--status-shape, var(--radius-circle));
+  border: 3px solid var(--status-ring);
 }
 .dm-item.active .dm-avatar .dm-status {
-  border-color: var(--bg-active);
+  --status-ring: var(--bg-active);
 }
 .dm-item .dm-name {
   font-size: var(--font-size-md);

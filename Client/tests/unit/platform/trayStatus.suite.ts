@@ -2,7 +2,7 @@
 // (`src/platform/contracts/trayStatus.ts`), added in B7-5. There is no legacy
 // binding: the subscription was inline in `main.ts`, an entry module with
 // side effects that cannot be imported on its own. What `main.ts` does with a
-// pick stays pinned by `tests/unit/main.test.ts` (OC-0037, OC-0176), which
+// pick stays pinned by `tests/unit/main/lifecycle.test.ts` (OC-0037, OC-0176), which
 // drives the same native event before and after the move.
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import type { TrayStatus } from "../../../src/platform/contracts/trayStatus";

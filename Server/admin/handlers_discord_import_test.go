@@ -179,6 +179,16 @@ func (f *importFixture) waitStatus(t *testing.T, id int64) jobBody {
 	return jobBody{}
 }
 
+// waitAnnounced waits for the channel announcement, which the runner sends
+// right after the job row already reads done.
+func (f *importFixture) waitAnnounced(want int) int {
+	deadline := time.Now().Add(5 * time.Second)
+	for f.ann.count() < want && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	return f.ann.count()
+}
+
 // waitEmptyDir waits for the background clean-up to remove the upload.
 func (f *importFixture) waitEmptyDir(t *testing.T) {
 	t.Helper()
@@ -213,8 +223,8 @@ func TestDiscordImport_JSONUploadEndsInAPublishedChannel(t *testing.T) {
 	if err != nil || ch == nil || ch.Name != "general" {
 		t.Fatalf("published channel = %+v, %v", ch, err)
 	}
-	if f.ann.count() != 1 {
-		t.Errorf("announced %d channels, want exactly 1", f.ann.count())
+	if n := f.waitAnnounced(1); n != 1 {
+		t.Errorf("announced %d channels, want exactly 1", n)
 	}
 	f.waitEmptyDir(t)
 

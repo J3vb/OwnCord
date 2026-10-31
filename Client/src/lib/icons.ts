@@ -26,6 +26,7 @@ export type IconName =
   | "monitor"
   | "monitor-off"
   | "phone"
+  | "smartphone"
   | "phone-off"
   | "volume-2"
   | "audio-lines"
@@ -34,6 +35,7 @@ export type IconName =
   | "menu"
   | "pin"
   | "pin-off"
+  | "search"
   | "settings"
   | "smile"
   | "send"
@@ -102,6 +104,9 @@ const ICON_PATHS: Record<IconName, string> = {
   // Game controller (a member's "Playing <game>" line)
   "gamepad-2": `<line x1="6" x2="10" y1="11" y2="11"/><line x1="8" x2="8" y1="9" y2="13"/><line x1="15" x2="15.01" y1="12" y2="12"/><line x1="18" x2="18.01" y1="10" y2="10"/><path d="M17.32 5H6.68a4 4 0 0 0-3.978 3.59c-.006.052-.01.101-.017.152C2.604 9.416 2 14.456 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.414-1.414A2 2 0 0 1 9.828 16h4.344a2 2 0 0 1 1.414.586L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.545-.604-6.584-.685-7.258-.007-.05-.011-.1-.017-.151A4 4 0 0 0 17.32 5z"/>`,
 
+  // Smartphone (a member who is on the phone app)
+  smartphone: `<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>`,
+
   // Microphone
   mic: `<path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>`,
 
@@ -146,6 +151,7 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Map pin / thumbtack
   pin: `<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>`,
+  search: `<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>`,
 
   // Pin with slash
   "pin-off": `<line x1="2" x2="22" y1="2" y2="22"/><path d="M12 17.001V22"/><path d="M9 9a3 3 0 0 0 5.12 2.12"/><path d="M20 10a8 8 0 0 0-8-8 8 8 0 0 0-5.46 2.13"/>`,
@@ -295,40 +301,60 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @returns An SVGSVGElement ready to be appended to the DOM.
  */
 export function createIcon(name: IconName, size = 24): SVGSVGElement {
-  let tpl = ICON_TEMPLATES.get(name);
-  if (tpl === undefined) {
-    tpl = buildTemplate(name);
-    ICON_TEMPLATES.set(name, tpl);
-  }
-  const svg = tpl.cloneNode(true) as SVGSVGElement;
+  const svg = svgElement("svg", ROOT_ATTRS) as SVGSVGElement;
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));
+  svg.setAttribute("data-icon", name);
+  svg.classList.add("icon");
+  for (const [tag, attrs] of ICON_SHAPES.get(name) ?? parseShapes(name)) {
+    svg.appendChild(svgElement(tag, attrs));
+  }
   return svg;
 }
 
-/** One parsed template per icon name; innerHTML runs once per name per session. */
-const ICON_TEMPLATES = new Map<IconName, SVGSVGElement>();
+type Attrs = Readonly<Record<string, string>>;
 
-function buildTemplate(name: IconName): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "24");
-  svg.setAttribute("height", "24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "2");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("data-icon", name);
-  svg.classList.add("icon");
+/** One child element of an icon, kept as plain data rather than as a node. */
+type IconShape = readonly [tag: string, attrs: Attrs];
 
+const ROOT_ATTRS: Attrs = {
+  viewBox: "0 0 24 24",
+  width: "24",
+  height: "24",
+  fill: "none",
+  stroke: "currentColor",
+  "stroke-width": "2",
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round",
+  "aria-hidden": "true",
+};
+
+function svgElement(tag: string, attrs: Attrs): SVGElement {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const key in attrs) el.setAttribute(key, attrs[key]!);
+  return el;
+}
+
+/**
+ * The parsed shapes of each icon name, so innerHTML runs once per name per
+ * session. They are stored as data, not as a template element to clone: a
+ * cached element is a detached DOM node that lives as long as the page, and
+ * the soak test counts every node.
+ */
+const ICON_SHAPES = new Map<IconName, readonly IconShape[]>();
+
+function parseShapes(name: IconName): readonly IconShape[] {
   // INVARIANT: ICON_PATHS values are static SVG path strings from Lucide.
   // They must NEVER contain user data or dynamically-loaded content.
   // This is the only safe use of innerHTML in the codebase — do not copy this pattern.
-  const pathData = ICON_PATHS[name];
-  if (pathData !== undefined) svg.innerHTML = pathData;
-  return svg;
+  const scratch = document.createElementNS(SVG_NS, "svg");
+  scratch.innerHTML = ICON_PATHS[name] ?? "";
+  const shapes = [...scratch.children].map((el): IconShape => [
+    el.localName,
+    Object.fromEntries([...el.attributes].map((a) => [a.name, a.value])),
+  ]);
+  ICON_SHAPES.set(name, shapes);
+  return shapes;
 }
 
 /** Create a signal-strength icon with per-bar coloring based on quality level.

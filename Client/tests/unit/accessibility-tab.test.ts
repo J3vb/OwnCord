@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildAccessibilityTab } from "@components/settings/AccessibilityTab";
+import { buildAccessibilityTab } from "../../src/features/settings/AccessibilityTab";
 
 // ---------------------------------------------------------------------------
 // Mock os-motion module

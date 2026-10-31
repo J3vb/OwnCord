@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
+import * as voiceSession from "../helpers/voiceSessionMock";
+import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
+import { buildMyUploadsTab } from "../../src/features/uploads/myUploadsTab";
 
 const mockAppVersion = vi.hoisted(() => vi.fn());
 vi.mock("../../src/features/whats-new/appVersion", () => ({
@@ -36,15 +38,12 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 
 // Held in a mutable object (rather than baked into the factory literal) so
 // individual tests can simulate the store having a display_name set — e.g.
@@ -70,12 +69,13 @@ import {
   SETTINGS_SEARCH_INDEX,
   highlightMatches,
   clearHighlights,
-} from "@components/settings/settingsSearch";
+} from "../../src/features/settings/settingsSearch";
 import { settingsText } from "../../src/i18n/settings";
 import { whatsNewText } from "../../src/i18n/whatsNew";
 import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
-import type { SearchableTab } from "@components/settings/settingsSearch";
+import type { SearchableTab } from "../../src/features/settings/settingsSearch";
+import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
 
 const options = {
   onClose: vi.fn(),
@@ -98,6 +98,12 @@ const options = {
   onRevokeAllSessions: vi
     .fn()
     .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
+};
+
+const uploadsApi = {
+  getUserStorage: vi.fn().mockResolvedValue({ used_bytes: 1, quota_bytes: 0 }),
+  listUserUploads: vi.fn().mockResolvedValue({ items: [] }),
+  removeUserUpload: vi.fn().mockResolvedValue(undefined),
 };
 
 const TAB_SELECTOR = ".settings-sidebar > button.settings-nav-item[role='tab']";
@@ -175,10 +181,28 @@ describe("settings search", () => {
     // it; this renders each one and checks both directions: every indexed
     // string is really on screen, and every row label / section heading on
     // screen is indexed (so a new row cannot be added without its text).
-    it.each(names.filter((n) => n !== "Safety"))(
-      "matches what the %s tab renders",
-      async (name) => {
-        mountOverlay();
+    // It runs on the desktop app and on the Android app, which leaves out the
+    // Keybinds tab and the rows that only a desktop has.
+    describe.each([
+      ["desktop app", hostDesktopApp, names.filter((n) => n !== "Safety")],
+      ["Android app", hostAndroidApp, names.filter((n) => n !== "Safety" && n !== "Keybinds")],
+    ] as const)("on the %s", (_host, setHost, tabNames) => {
+      beforeEach(setHost);
+      afterEach(clearHost);
+
+      it.each(tabNames)("matches what the %s tab renders", async (name) => {
+        mountOverlay(
+          name === "My uploads"
+            ? {
+                myUploadsTab: (signal) =>
+                  buildMyUploadsTab(signal, uploadsApi, {
+                    formatFileSize: (n: number) => `${n} B`,
+                    isImage: (mime: string) => mime.startsWith("image/"),
+                    thumbnail: () => Promise.resolve(null),
+                  }),
+              }
+            : {},
+        );
         const tab = tabs().find((t) => labelFor(t) === name)!;
         tab.click();
         if (name === "About") {
@@ -200,11 +224,39 @@ describe("settings search", () => {
           .map((el) => (el.textContent ?? "").trim())
           .filter((text) => text !== "" && !known.has(text) && !STATE_TEXT.has(text));
         expect(unindexed).toEqual([]);
-      },
-    );
+      });
+    });
+
+    it("lists no Keybinds tab and no keybind text in the Android app", () => {
+      hostAndroidApp();
+      try {
+        mountOverlay({
+          safetyTab: () => document.createElement("div"),
+          myUploadsTab: () => document.createElement("div"),
+        });
+        expect(tabs().map((t) => labelFor(t))).not.toContain("Keybinds");
+        expect(SETTINGS_SEARCH_INDEX.Keybinds()).toEqual([]);
+        // The rows left out there are not searchable either.
+        type("screen share quality");
+        expect(visibleNames()).toEqual([]);
+        type("flash taskbar");
+        expect(visibleNames()).toEqual([]);
+        type("launch on login");
+        expect(visibleNames()).toEqual([]);
+        type("zoom level");
+        expect(visibleNames()).toEqual([]);
+        type("noise suppression");
+        expect(visibleNames()).toEqual(["Voice & Video"]);
+      } finally {
+        clearHost();
+      }
+    });
 
     it("lists every tab the overlay can show", () => {
-      mountOverlay({ safetyTab: () => document.createElement("div") });
+      mountOverlay({
+        safetyTab: () => document.createElement("div"),
+        myUploadsTab: () => document.createElement("div"),
+      });
       expect(
         tabs()
           .map((t) => labelFor(t))
@@ -217,6 +269,7 @@ describe("settings search", () => {
     const byId: Record<string, SearchableTab> = {
       "settings-tab-account": "Account",
       "settings-tab-safety": "Safety",
+      "settings-tab-my-uploads": "My uploads",
       "settings-tab-appearance": "Appearance",
       "settings-tab-accessibility": "Accessibility",
       "settings-tab-voice-video": "Voice & Video",

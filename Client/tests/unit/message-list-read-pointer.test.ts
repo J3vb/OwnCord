@@ -7,19 +7,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import {
   channelsStore,
   getPointerOnOpen,
@@ -39,26 +30,17 @@ import { setMarkUnreadSender } from "../../src/components/message-list/markUnrea
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNEL_ID = 1;
 
 function resetStores(): void {
   resetGateStores();
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetMessagesState();
+  resetMembersState();
+  resetChannelsState();
 }
 
 /** Spaced past the 7-minute group window, so grouping never merges rows. */
@@ -452,6 +434,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     const saved = new Map<string, PropertyDescriptor | undefined>();
 
     beforeEach(() => {
+      // The mark_read throttle runs on the fake clock; vi.waitFor advances it.
+      vi.useFakeTimers();
       for (const [prop, value] of [
         ["scrollHeight", SCROLL_HEIGHT],
         ["clientHeight", CLIENT_HEIGHT],
@@ -465,6 +449,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     afterEach(() => {
+      vi.useRealTimers();
       for (const [prop, descriptor] of saved) {
         if (descriptor) Object.defineProperty(HTMLElement.prototype, prop, descriptor);
         else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
@@ -556,7 +541,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       scrollToEnd();
       setMessages([1, 2, 3, 4].map(msg));
       messagesStore.flush();
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 4]]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toEqual([[CHANNEL_ID, 4]]);
     });
 
     it("six live arrivals at the bottom within a second send at most one mark_read", async () => {
@@ -571,7 +557,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
         root().dispatchEvent(new Event("scroll"));
       }
       expect(marks.length).toBeLessThanOrEqual(0);
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 9]]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toEqual([[CHANNEL_ID, 9]]);
       expect(marks).toHaveLength(1);
     });
 
@@ -589,7 +576,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       expect(channelsStore.getState().channels.get(CHANNEL_ID)?.unreadCount).toBe(0);
       setMessages([1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
-      await vi.waitFor(() => expect(marks).toContainEqual([CHANNEL_ID, 6]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toContainEqual([CHANNEL_ID, 6]);
     });
 
     it("a live arrival that releases the hold at the bottom is marked read", async () => {
@@ -605,7 +593,8 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       scrollToEnd();
       setMessages([1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 6]]), { timeout: 3000 });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(marks).toEqual([[CHANNEL_ID, 6]]);
     });
 
     it("Mark Unread is not undone by reaching the bottom or by a live arrival", async () => {
@@ -620,7 +609,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       scrollToEnd();
       setMessages([1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
-      await new Promise((r) => setTimeout(r, 1300));
+      await vi.advanceTimersByTimeAsync(1300);
       expect(marks).toEqual([]);
       expect(channelsStore.getState().channels.get(CHANNEL_ID)?.lastReadMessageId).toBe(2);
     });

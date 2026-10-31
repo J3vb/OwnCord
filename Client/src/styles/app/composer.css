@@ -294,14 +294,19 @@
 }
 .msg-send-failed {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   margin-top: 4px;
   font-size: var(--font-size-xs);
   color: var(--text-danger);
 }
+/* The reason ("Connection problem - delivery not confirmed") wraps on a narrow
+   row, with Retry and Delete dropping under it, instead of running off it. */
 .msg-send-failed-text {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .msg-send-retry,
 .msg-send-discard {

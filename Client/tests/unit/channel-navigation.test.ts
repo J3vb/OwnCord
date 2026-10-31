@@ -14,6 +14,7 @@ import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { muteChannel, invalidateMuteCache } from "../../src/lib/prefs/channelMutes";
 import { setHideMutedChannels } from "../../src/lib/prefs/hideMutedChannels";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function makeChannel(overrides: Partial<Channel> = {}): Channel {
   return {
@@ -54,12 +55,7 @@ function makeDm(overrides: Partial<DmChannel> = {}): DmChannel {
 
 describe("channel-navigation", () => {
   beforeEach(() => {
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
     uiStore.setState((prev) => ({ ...prev, sidebarMode: "channels", activeDmUserId: null }));
   });

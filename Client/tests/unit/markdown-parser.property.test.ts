@@ -18,11 +18,11 @@ import { parseInline, parseBlocks } from "../../src/lib/text/markdown";
 import {
   renderInlineContent,
   renderMessageContent,
-} from "../../src/components/message-list/contentParser";
+} from "../../src/features/messaging/content/contentParser";
 import { membersStore } from "../../src/stores/members.store";
-import { authStore } from "../../src/stores/auth.store";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -35,19 +35,11 @@ function seedStores(): void {
     ]),
     typingUsers: new Map(),
   }));
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 12, username: "me", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  signInAs(
+    { id: 12, username: "me", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
+  resetChannelsState();
   setChannels(CHANNELS);
 }
 
@@ -219,39 +211,61 @@ describe("renderMessageContent / renderInlineContent — never throw, always saf
 describe("bounded time on pathological input", () => {
   // Stryker's instrumentation makes the wall-clock bound meaningless, so it gets a far larger budget.
   const BUDGET_MS = process.env.OC_MUTATION_RUN ? 60_000 : 3000;
+  // The suite's 2 s test timeout would end a run before the budget is measured.
+  const TIMEOUT_MS = BUDGET_MS + 5000;
 
-  it("a long run of unmatched '[' stays within budget", () => {
-    const input = "[".repeat(5000);
-    const start = Date.now();
-    expect(() => renderMessageContent(input)).not.toThrow();
-    expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-  });
+  it(
+    "a long run of unmatched '[' stays within budget",
+    () => {
+      const input = "[".repeat(5000);
+      const start = Date.now();
+      expect(() => renderMessageContent(input)).not.toThrow();
+      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
+    },
+    TIMEOUT_MS,
+  );
 
-  it("a long run of unmatched '*' stays within budget", () => {
-    const input = "*".repeat(5000);
-    const start = Date.now();
-    expect(() => renderMessageContent(input)).not.toThrow();
-    expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-  });
+  it(
+    "a long run of unmatched '*' stays within budget",
+    () => {
+      const input = "*".repeat(5000);
+      const start = Date.now();
+      expect(() => renderMessageContent(input)).not.toThrow();
+      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
+    },
+    TIMEOUT_MS,
+  );
 
-  it("a long run of unmatched '(' stays within budget", () => {
-    const input = "[x](".repeat(5000);
-    const start = Date.now();
-    expect(() => renderMessageContent(input)).not.toThrow();
-    expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-  });
+  it(
+    "a long run of unmatched '(' stays within budget",
+    () => {
+      const input = "[x](".repeat(5000);
+      const start = Date.now();
+      expect(() => renderMessageContent(input)).not.toThrow();
+      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
+    },
+    TIMEOUT_MS,
+  );
 
-  it("deeply nested emphasis stays within budget (MAX_DEPTH guards recursion)", () => {
-    const input = "*".repeat(2000) + "x" + "*".repeat(2000);
-    const start = Date.now();
-    expect(() => renderMessageContent(input)).not.toThrow();
-    expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-  });
+  it(
+    "deeply nested emphasis stays within budget (MAX_DEPTH guards recursion)",
+    () => {
+      const input = "*".repeat(2000) + "x" + "*".repeat(2000);
+      const start = Date.now();
+      expect(() => renderMessageContent(input)).not.toThrow();
+      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
+    },
+    TIMEOUT_MS,
+  );
 
-  it("a long mix of brackets and parens stays within budget", () => {
-    const input = "[".repeat(2500) + "(".repeat(2500);
-    const start = Date.now();
-    expect(() => renderMessageContent(input)).not.toThrow();
-    expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-  });
+  it(
+    "a long mix of brackets and parens stays within budget",
+    () => {
+      const input = "[".repeat(2500) + "(".repeat(2500);
+      const start = Date.now();
+      expect(() => renderMessageContent(input)).not.toThrow();
+      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
+    },
+    TIMEOUT_MS,
+  );
 });

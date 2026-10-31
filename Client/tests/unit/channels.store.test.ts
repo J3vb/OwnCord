@@ -25,14 +25,10 @@ import {
   resetChannelsStore,
 } from "../../src/stores/channels.store";
 import type { ReadyChannel, ChannelCreatePayload, ChannelUpdatePayload } from "../../src/lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStore(): void {
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
+  resetChannelsState();
 }
 
 const readyChannels: ReadyChannel[] = [

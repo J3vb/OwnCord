@@ -7,35 +7,45 @@
 // - A native `contextmenu` (Chrome on Android, WebView2) wins: no
 //   synthetic event while it is pending or within 300 ms, and a late native one
 //   after a synthetic one is swallowed. One menu, never two.
+// - On the Android app (`haptics`), a long-press that opens a bottom sheet
+//   gives one short buzz, as Discord does. The sheet may load lazily, so the
+//   buzz waits a moment for one; a long-press that opens a popover menu or
+//   nothing is silent.
 // - The click that follows the lift is cancelled once, so the menu does not
 //   open and close, and the row under the finger is not activated.
-// - Under (hover: none) a tap on a message shows its action bar.
+// - A tap on a message does nothing: like Discord, the hold is the only way
+//   to a message's actions on a touch screen.
 // - visualViewport drives --app-height so the keyboard does not hide the composer.
 
+import { Disposable } from "../disposable";
 import { setOwnedTimeout, wantsNativeMenu } from "../dom";
+import { watchNextBottomSheet } from "./bottomSheet";
 
 const LONG_PRESS_MS = 500;
 const MOVE_TOLERANCE_PX = 10;
 const NATIVE_DEDUPE_MS = 300;
 const CLICK_SUPPRESS_MS = 600;
-const TOUCH_ACTIVE_CLASS = "msg-touch-active";
-const INTERACTIVE_SELECTOR =
-  "a, button, input, textarea, select, video, audio, canvas, img, [role='button'], [tabindex]";
+/** How long after a long-press a sheet still counts as the one it opened. */
+const SHEET_WAIT_MS = 1500;
+const BUZZ_MS = 10;
 
-export function installTouchInput(signal: AbortSignal): void {
+export interface TouchInputOptions {
+  /** Buzz when a long-press opens a sheet. The caller decides where that is wanted (the Android app). */
+  readonly haptics?: boolean;
+}
+
+export function installTouchInput(signal: AbortSignal, options: TouchInputOptions = {}): void {
   if (signal.aborted) return;
+  const haptics = options.haptics === true;
 
   let cancelTimer: (() => void) | null = null;
-  let downTarget: Element | null = null;
   let startX = 0;
   let startY = 0;
-  let moved = false;
   let fired = false;
   let touching = false;
   let nativeAt = Number.NEGATIVE_INFINITY;
   let syntheticAt = Number.NEGATIVE_INFINITY;
   let suppressClickUntil = Number.NEGATIVE_INFINITY;
-  let activeMessage: Element | null = null;
   // The events this module sent. Any other contextmenu is "native" to it: the
   // webview's own, or one the app dispatched for the Menu key. Keyed by identity
   // rather than isTrusted, which is unforgeable and so cannot be tested.
@@ -46,11 +56,23 @@ export function installTouchInput(signal: AbortSignal): void {
     cancelTimer = null;
   };
 
-  const setActive = (el: Element | null): void => {
-    if (activeMessage === el) return;
-    activeMessage?.classList.remove(TOUCH_ACTIVE_CLASS);
-    activeMessage = el;
-    el?.classList.add(TOUCH_ACTIVE_CLASS);
+  // The long-press watch: armed just before a menu handler runs, it buzzes
+  // once if a sheet opens within SHEET_WAIT_MS and is dropped otherwise.
+  let buzzWatch: Disposable | null = null;
+  const armBuzz = (): void => {
+    if (!haptics) return;
+    buzzWatch?.destroy();
+    const watch = new Disposable();
+    buzzWatch = watch;
+    watchNextBottomSheet(() => {
+      watch.destroy();
+      try {
+        navigator.vibrate(BUZZ_MS);
+      } catch {
+        // No vibrator, or the WebView lacks the permission: a buzz is a nicety.
+      }
+    }, watch.signal);
+    setOwnedTimeout(watch.signal, () => watch.destroy(), SHEET_WAIT_MS);
   };
 
   const on = <K extends keyof DocumentEventMap>(
@@ -67,19 +89,16 @@ export function installTouchInput(signal: AbortSignal): void {
     suppressClickUntil = Number.NEGATIVE_INFINITY;
     if (e.pointerType !== "touch") return;
     if (!e.isPrimary) {
-      // A second finger is a pinch or a scroll, never a long-press or a tap.
-      moved = true;
+      // A second finger is a pinch or a scroll, never a long-press.
       clearTimer();
       return;
     }
     clearTimer();
     touching = true;
-    moved = false;
     fired = false;
     startX = e.clientX;
     startY = e.clientY;
     const target = e.target instanceof Element ? e.target : null;
-    downTarget = target;
     if (target === null || wantsNativeMenu(target)) return;
     cancelTimer = setOwnedTimeout(
       signal,
@@ -97,6 +116,7 @@ export function installTouchInput(signal: AbortSignal): void {
           clientY: startY,
         });
         ours.add(menu);
+        armBuzz();
         target.dispatchEvent(menu);
       },
       LONG_PRESS_MS,
@@ -105,10 +125,7 @@ export function installTouchInput(signal: AbortSignal): void {
 
   on("pointermove", (e) => {
     if (e.pointerType !== "touch" || !e.isPrimary || !touching) return;
-    if (Math.hypot(e.clientX - startX, e.clientY - startY) > MOVE_TOLERANCE_PX) {
-      moved = true;
-      clearTimer();
-    }
+    if (Math.hypot(e.clientX - startX, e.clientY - startY) > MOVE_TOLERANCE_PX) clearTimer();
   });
 
   on("pointercancel", (e) => {
@@ -121,20 +138,8 @@ export function installTouchInput(signal: AbortSignal): void {
     if (e.pointerType !== "touch" || !e.isPrimary) return;
     touching = false;
     clearTimer();
-    if (fired) {
-      // The click comes after the lift, which can be long after the timer fired.
-      suppressClickUntil = Date.now() + CLICK_SUPPRESS_MS;
-      return;
-    }
-    if (moved || !window.matchMedia("(hover: none)").matches) return;
-    const message = downTarget?.closest(".message") ?? null;
-    if (message === null) {
-      setActive(null);
-      return;
-    }
-    const interactive = downTarget?.closest(INTERACTIVE_SELECTOR) ?? null;
-    if (interactive !== null && interactive !== message && message.contains(interactive)) return;
-    setActive(message);
+    // The click comes after the lift, which can be long after the timer fired.
+    if (fired) suppressClickUntil = Date.now() + CLICK_SUPPRESS_MS;
   });
 
   // A scroll (the capture phase sees scrolls of any inner list) cancels a pending press.
@@ -153,7 +158,10 @@ export function installTouchInput(signal: AbortSignal): void {
       nativeAt = now;
       clearTimer();
       // The webview's own long-press: its lift is not a tap either.
-      if (touching) fired = true;
+      if (touching) {
+        fired = true;
+        armBuzz();
+      }
     },
     true,
   );
@@ -203,7 +211,7 @@ export function installTouchInput(signal: AbortSignal): void {
     "abort",
     () => {
       clearTimer();
-      setActive(null);
+      buzzWatch?.destroy();
     },
     { once: true },
   );

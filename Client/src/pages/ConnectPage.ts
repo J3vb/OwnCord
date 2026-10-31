@@ -121,6 +121,8 @@ export function createConnectPage(
 
   // --- Create sub-components ---
 
+  let knownProfiles: readonly SimpleProfile[] = initialProfiles;
+
   const loginForm = createLoginForm({
     signal,
     onLogin: callbacks.onLogin,
@@ -137,9 +139,9 @@ export function createConnectPage(
     // an opted-out profile is not overridden by the defaults. Applied once per
     // match so later edits to the boxes are the user's own.
     onHostInput: (host) => applySavedFlags(host),
+    getSavedHosts: () => knownProfiles.map((p) => p.host),
     ...(__OWNCORD_WEB__ ? { fixedHost } : {}),
   });
-  let knownProfiles: readonly SimpleProfile[] = initialProfiles;
   let appliedProfileHost = "";
   function applySavedFlags(host: string): void {
     if (host === appliedProfileHost) return;
@@ -348,7 +350,7 @@ export function createConnectPage(
   // ---------------------------------------------------------------------------
 
   let settingsOverlay: ReturnType<
-    typeof import("@components/SettingsOverlay").createSettingsOverlay
+    typeof import("../features/settings/SettingsOverlay").createSettingsOverlay
   > | null = null;
   let settingsOverlayLoading = false;
   let unsubSettingsOpen: (() => void) | null = null;
@@ -360,7 +362,7 @@ export function createConnectPage(
   function ensureSettingsOverlay(): void {
     if (settingsOverlay !== null || settingsOverlayLoading) return;
     settingsOverlayLoading = true;
-    void import("@components/SettingsOverlay").then(({ createSettingsOverlay }) => {
+    void import("../features/settings/SettingsOverlay").then(({ createSettingsOverlay }) => {
       settingsOverlayLoading = false;
       // The page may have been destroyed while the chunk loaded.
       if (signal.aborted) return;

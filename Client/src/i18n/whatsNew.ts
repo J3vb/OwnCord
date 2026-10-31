@@ -5,6 +5,7 @@ export const whatsNewText = defineCatalog("whatsNew", {
   "about.appName": "OwnCord v{version}",
   "about.appNameUnknown": "OwnCord",
   "about.desktop": "Desktop app",
+  "about.android": "Android app",
   "about.github": "OwnCord on GitHub",
   "about.notesFor": "What's new in {version}",
   "about.notesLabel": "Release notes",

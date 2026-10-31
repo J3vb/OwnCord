@@ -48,9 +48,9 @@ export {
   renderMentions,
   renderMentionSegment,
   renderMessageContent,
-} from "./contentParser";
+} from "../../features/messaging/content/contentParser";
 
-export { setServerHost } from "./attachments";
+export { setServerHost } from "../../features/messaging/content/attachments";
 import { isVoiceAttachment } from "../../features/voice-messages/player";
 
 // -- Imports for composite functions ------------------------------------------
@@ -63,23 +63,27 @@ import {
 } from "@lib/text/formatting";
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
 import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
-import { createAvatarElement, pickAvatarColor } from "./avatar";
+import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 import { importedAuthorKey } from "../../features/messaging/importedAuthor";
 import { createImportedAvatar, createImportedName, createImportedTag } from "./importedAuthor";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import { renderMentions, renderMessageContent } from "./contentParser";
+import {
+  renderMentions,
+  renderMessageContent,
+} from "../../features/messaging/content/contentParser";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { highlightsCurrentUser } from "@lib/text/mentions";
 import { readableRoleColor } from "@lib/prefs/themes";
-import { isLoneImageEmbed, renderUrlEmbeds } from "./media";
+import { isLoneImageEmbed, renderUrlEmbeds } from "../../features/messaging/content/media";
 import {
   isGalleryImage,
   renderAttachment,
   resolveServerUrl,
   type LightboxGallery,
-} from "./attachments";
+} from "../../features/messaging/content/attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
 import { WsErrorCode } from "@lib/protocolTypes";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 
 /** What a row render reads beyond the list's own options. */
 export interface MessageRenderOptions extends MessageListOptions {
@@ -94,6 +98,16 @@ export interface MessageRenderOptions extends MessageListOptions {
 /** Weekday, date and time for a tooltip, in Discord's "F" style. */
 export function fullDateTimeTitle(iso: string): string {
   return formatFullDateTime(parseTimestamp(iso));
+}
+
+/**
+ * The time in a message's header. A phone shows the clock alone ("14:05"): the
+ * day separators carry the date, and the full date would cost about 90 px a
+ * row. The title keeps the full date either way. Read when the row is drawn;
+ * `relabelRenderedTimes` redraws the rows on a rotation.
+ */
+export function messageHeaderTime(iso: string): string {
+  return isPhoneLayout() ? formatClockTime(iso) : formatMessageTimestamp(iso);
 }
 
 /** The header over a run of blocked users' messages, with its Show/Hide toggle. */
@@ -735,7 +749,7 @@ export function renderMessage(
   const time = createElement(
     "span",
     { class: "msg-time", title: fullDateTimeTitle(msg.timestamp) },
-    formatMessageTimestamp(msg.timestamp),
+    messageHeaderTime(msg.timestamp),
   );
   // Compact mode shows this short clock time ahead of the name; CSS hides it
   // otherwise. The clock time never changes, so relabelRenderedTimes skips it.

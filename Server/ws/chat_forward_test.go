@@ -152,6 +152,7 @@ func firstOfType(frames []forwardFrame, typ string) *forwardFrame {
 }
 
 func TestChatForward_ChannelAndDMFanout(t *testing.T) {
+	t.Parallel()
 	h := newForwardHarness(t)
 	ctx := context.Background()
 

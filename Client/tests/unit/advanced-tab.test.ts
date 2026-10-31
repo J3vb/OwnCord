@@ -69,16 +69,16 @@ vi.mock("@lib/logPersistence", () => ({
   clearPendingPersistedLogs: mockClearPendingPersistedLogs,
 }));
 
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   clearAttachmentCaches: mockClearAttachmentCaches,
   clearExternalImageCache: mockClearExternalImageCache,
 }));
 
-vi.mock("@components/message-list/embeds", () => ({
+vi.mock("../../src/features/messaging/content/embeds", () => ({
   clearEmbedCaches: mockClearEmbedCaches,
 }));
 
-vi.mock("@components/message-list/media", () => ({
+vi.mock("../../src/features/messaging/content/media", () => ({
   clearMediaCaches: mockClearMediaCaches,
 }));
 
@@ -130,7 +130,7 @@ vi.stubGlobal("indexedDB", {
   },
 });
 
-import { buildAdvancedTab } from "@components/settings/AdvancedTab";
+import { buildAdvancedTab } from "../../src/features/settings/AdvancedTab";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import {
   getGlobalNotificationLevel,
@@ -453,6 +453,34 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
     toggle.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     expect(toggle.classList.contains("on")).toBe(false);
+  });
+
+  it("asks before switching servers by default, and turning it off is stored", () => {
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const row = Array.from(container.querySelectorAll(".setting-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Ask before switching servers",
+    );
+    const toggle = row?.querySelector(".toggle") as HTMLElement;
+    expect(toggle.classList.contains("on")).toBe(true);
+
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:confirmServerSwitch")).toBe("false");
+  });
+
+  it("shows the switch question as off after Don't ask again", () => {
+    localStorage.setItem("owncord:settings:confirmServerSwitch", "false");
+    const section = buildAdvancedTab(ac.signal);
+    container.appendChild(section);
+
+    const row = Array.from(container.querySelectorAll(".setting-row")).find(
+      (r) => r.querySelector(".setting-label")?.textContent === "Ask before switching servers",
+    );
+    const toggle = row?.querySelector(".toggle") as HTMLElement;
+    expect(toggle.classList.contains("on")).toBe(false);
+    toggle.click();
+    expect(localStorage.getItem("owncord:settings:confirmServerSwitch")).toBe("true");
   });
 
   it("renders DevTools button in Debug section", () => {

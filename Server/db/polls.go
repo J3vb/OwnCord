@@ -151,7 +151,7 @@ func (d *DB) attachPolls(ctx context.Context, msgs []MessageAPIResponse, viewerI
 // pollInfos builds the poll block of each id that is a poll. Ids that are not
 // polls are absent from the result.
 func (d *DB) pollInfos(ctx context.Context, ids []int64, viewerID int64) (map[int64]*PollInfo, error) {
-	polls, err := d.q.GetPollsByMessageIDs(ctx, ids)
+	polls, err := d.q.GetPollsByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
 		return nil, fmt.Errorf("polls: %w", err)
 	}
@@ -169,7 +169,7 @@ func (d *DB) pollInfos(ctx context.Context, ids []int64, viewerID int64) (map[in
 			Results: PollResults{Version: r.Version, Counts: []PollCount{}, Me: []int64{}},
 		}
 	}
-	answers, err := d.q.GetPollAnswersByMessageIDs(ctx, pollIDs)
+	answers, err := d.q.GetPollAnswersByMessageIDs(ctx, padIDs(pollIDs))
 	if err != nil {
 		return nil, fmt.Errorf("poll answers: %w", err)
 	}
@@ -188,7 +188,7 @@ func (d *DB) pollInfos(ctx context.Context, ids []int64, viewerID int64) (map[in
 // fillPollTallies adds the vote counts, the distinct voters and the viewer's
 // own selection to blocks whose answers are already in place.
 func (d *DB) fillPollTallies(ctx context.Context, out map[int64]*PollInfo, pollIDs []int64, viewerID int64) error {
-	counts, err := d.q.GetPollAnswerCountsByMessageIDs(ctx, pollIDs)
+	counts, err := d.q.GetPollAnswerCountsByMessageIDs(ctx, padIDs(pollIDs))
 	if err != nil {
 		return fmt.Errorf("poll counts: %w", err)
 	}
@@ -201,7 +201,7 @@ func (d *DB) fillPollTallies(ctx context.Context, out map[int64]*PollInfo, pollI
 			}
 		}
 	}
-	voters, err := d.q.GetPollVoterCountsByMessageIDs(ctx, pollIDs)
+	voters, err := d.q.GetPollVoterCountsByMessageIDs(ctx, padIDs(pollIDs))
 	if err != nil {
 		return fmt.Errorf("poll voters: %w", err)
 	}
@@ -211,7 +211,7 @@ func (d *DB) fillPollTallies(ctx context.Context, out map[int64]*PollInfo, pollI
 	if viewerID == 0 {
 		return nil
 	}
-	mine, err := d.q.GetPollVotesByUser(ctx, dbgen.GetPollVotesByUserParams{UserID: viewerID, Ids: pollIDs})
+	mine, err := d.q.GetPollVotesByUser(ctx, dbgen.GetPollVotesByUserParams{UserID: viewerID, Ids: padIDs(pollIDs)})
 	if err != nil {
 		return fmt.Errorf("poll own votes: %w", err)
 	}

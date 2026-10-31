@@ -12,6 +12,7 @@ import { createLazyScreen } from "@components/lazyScreen";
 import type { MediaUploader } from "@components/ChannelMediaGallery";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore } from "@stores/members.store";
+import { openSettings } from "@stores/ui.store";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { shellText } from "../../i18n/shell";
 import { createAsyncOverlayController } from "./OverlayManagers";
@@ -24,6 +25,11 @@ const mediaGalleryScreen = createLazyScreen(
 /** Deleted messages, as the socket reports them: one id or a purge's ids. */
 export type MessageDeleteSubscriber = (
   listener: (channelId: number, messageIds: readonly number[]) => void,
+) => () => void;
+
+/** A message's remaining attachment ids after a file was removed from it. */
+export type MessageAttachmentsSubscriber = (
+  listener: (channelId: number, messageId: number, remainingIds: readonly string[]) => void,
 ) => () => void;
 
 export interface MediaGalleryController {
@@ -44,6 +50,8 @@ export function createMediaGalleryController(opts: {
   readonly getRoot: () => HTMLDivElement | null;
   readonly getCurrentChannelId: () => number | null;
   readonly subscribeDeletes: MessageDeleteSubscriber;
+  /** Edits that removed files, so an open gallery drops those items. */
+  readonly subscribeAttachments?: MessageAttachmentsSubscriber;
   /** Jump in the channel the panel was opened for, never a later one. */
   readonly onJumpToMessage: (channelId: number, messageId: number) => void;
 }): MediaGalleryController {
@@ -67,6 +75,11 @@ export function createMediaGalleryController(opts: {
         loadPage: (query, signal) => opts.api.listChannelMedia(id, query, signal),
         loadMonths: (query, signal) => opts.api.getChannelMediaMonths(id, query, signal),
         uploaders,
+        loadStorage: (signal) => opts.api.getUserStorage(signal),
+        onManageUploads: () => {
+          openSettings("My uploads"); // i18n-exempt: TabName key, labelled by settingsText("tabs.myUploads")
+          close();
+        },
         onJumpToMessage: (messageId) => {
           opts.onJumpToMessage(id, messageId);
           close();
@@ -81,6 +94,13 @@ export function createMediaGalleryController(opts: {
               if (ch === id) panel.removeMessages(ids);
             }),
           );
+          if (opts.subscribeAttachments !== undefined) {
+            live.addCleanup(
+              opts.subscribeAttachments((ch, messageId, remaining) => {
+                if (ch === id) panel.syncMessageAttachments(messageId, remaining);
+              }),
+            );
+          }
           // Leaving the channel, losing it (deleted or no longer readable,
           // which removes it from the store) or it becoming gated closes the
           // panel; the server would refuse its next page anyway.
@@ -100,6 +120,7 @@ export function createMediaGalleryController(opts: {
     },
     errorLog: "Failed to open the media gallery", // i18n-exempt: developer log line, never shown
     errorToast: shellText("media.openFailed"),
+    outsidePress: { panel: ".media-gallery", toggle: ".media-btn" },
   });
 
   async function toggle(): Promise<void> {

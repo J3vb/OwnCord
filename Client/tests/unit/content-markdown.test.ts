@@ -5,28 +5,24 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   renderInlineContent,
   renderMessageContent,
-} from "../../src/components/message-list/contentParser";
+} from "../../src/features/messaging/content/contentParser";
 import { parseInline, parseBlocks, splitCodeFences } from "../../src/lib/text/markdown";
-import { highlightCode, resolveLanguage } from "../../src/components/message-list/syntaxHighlight";
-import { extractUrls } from "../../src/components/message-list/media";
+import {
+  highlightCode,
+  resolveLanguage,
+} from "../../src/features/messaging/content/syntaxHighlight";
+import { extractUrls } from "../../src/features/messaging/content/media";
 import { membersStore } from "../../src/stores/members.store";
-import { authStore } from "../../src/stores/auth.store";
-import { channelsStore, setChannels } from "../../src/stores/channels.store";
+import { setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -39,19 +35,11 @@ function seedStores(): void {
     ]),
     typingUsers: new Map(),
   }));
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: 12, username: "me", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  signInAs(
+    { id: 12, username: "me", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
+  resetChannelsState();
   setChannels(CHANNELS);
 }
 

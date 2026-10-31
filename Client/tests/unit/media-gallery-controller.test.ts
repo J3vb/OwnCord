@@ -4,6 +4,7 @@ const panel = vi.hoisted(() => ({
   mount: vi.fn(),
   destroy: vi.fn(),
   removeMessages: vi.fn(),
+  syncMessageAttachments: vi.fn(),
 }));
 const createChannelMediaGallery = vi.hoisted(() => vi.fn((_opts: unknown) => panel));
 
@@ -16,6 +17,7 @@ vi.mock("@lib/logger", () => ({
 import { createMediaGalleryController } from "../../src/pages/main-page/MediaGalleryController";
 import type { ChannelMediaGalleryOptions } from "@components/ChannelMediaGallery";
 import type { ApiClient } from "@lib/api";
+import { closeSettings, uiStore } from "@stores/ui.store";
 import {
   channelsStore,
   removeChannel,
@@ -29,11 +31,15 @@ type DeleteListener = (channelId: number, ids: readonly number[]) => void;
 describe("createMediaGalleryController", () => {
   let root: HTMLDivElement;
   let deleteListener: DeleteListener | null;
+  let attachmentsListener:
+    ((channelId: number, messageId: number, remaining: readonly string[]) => void) | null;
   const unsubscribeDeletes = vi.fn();
+  const unsubscribeAttachments = vi.fn();
   const onJump = vi.fn();
   const api = {
     listChannelMedia: vi.fn(() => Promise.resolve({ items: [], next_cursor: "" })),
     getChannelMediaMonths: vi.fn(() => Promise.resolve({ months: [] })),
+    getUserStorage: vi.fn(() => Promise.resolve({ used_bytes: 1, quota_bytes: 0 })),
   } as unknown as ApiClient;
 
   function make(): ReturnType<typeof createMediaGalleryController> {
@@ -45,6 +51,10 @@ describe("createMediaGalleryController", () => {
         deleteListener = listener;
         return unsubscribeDeletes;
       },
+      subscribeAttachments: (listener) => {
+        attachmentsListener = listener;
+        return unsubscribeAttachments;
+      },
       onJumpToMessage: onJump,
     });
   }
@@ -55,6 +65,7 @@ describe("createMediaGalleryController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     deleteListener = null;
+    attachmentsListener = null;
     root = document.createElement("div");
     resetChannelsStore();
     setChannels([
@@ -90,6 +101,33 @@ describe("createMediaGalleryController", () => {
     ctrl.cleanup();
   });
 
+  it("closes on a press outside it but not inside it or on its header button", async () => {
+    document.body.appendChild(root);
+    const mediaBtn = document.createElement("button");
+    mediaBtn.className = "pin-btn media-btn";
+    const outside = document.createElement("div");
+    root.append(mediaBtn, outside);
+    panel.mount.mockImplementationOnce((container: Element) => {
+      const el = document.createElement("div");
+      el.className = "media-gallery";
+      el.appendChild(document.createElement("button"));
+      container.appendChild(el);
+    });
+    const press = (el: Element): void => {
+      el.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    };
+    const ctrl = make();
+    await ctrl.toggle();
+
+    press(root.querySelector(".media-gallery button")!);
+    press(mediaBtn);
+    expect(panel.destroy).not.toHaveBeenCalled();
+
+    press(outside);
+    expect(panel.destroy).toHaveBeenCalledOnce();
+    root.remove();
+  });
+
   it("jumps in the channel it opened for and closes", async () => {
     const ctrl = make();
     await ctrl.toggle();
@@ -107,6 +145,30 @@ describe("createMediaGalleryController", () => {
     deleteListener!(5, [3, 4]);
     expect(panel.removeMessages).toHaveBeenCalledWith([3, 4]);
     ctrl.cleanup();
+  });
+
+  it("passes only this channel's attachment removals to the panel", async () => {
+    const ctrl = make();
+    await ctrl.toggle();
+    attachmentsListener!(6, 1, ["a"]);
+    expect(panel.syncMessageAttachments).not.toHaveBeenCalled();
+    attachmentsListener!(5, 1, ["a"]);
+    expect(panel.syncMessageAttachments).toHaveBeenCalledWith(1, ["a"]);
+    ctrl.cleanup();
+    expect(unsubscribeAttachments).toHaveBeenCalled();
+  });
+
+  it("reads storage through the API and opens Settings at My uploads", async () => {
+    const ctrl = make();
+    await ctrl.toggle();
+    const signal = new AbortController().signal;
+    void lastOptions().loadStorage!(signal);
+    expect(api.getUserStorage).toHaveBeenCalledWith(signal);
+    lastOptions().onManageUploads!();
+    expect(uiStore.getState().settingsOpen).toBe(true);
+    expect(uiStore.getState().settingsTab).toBe("My uploads");
+    expect(panel.destroy).toHaveBeenCalled();
+    closeSettings();
   });
 
   it("closes when the viewer switches channel or loses the channel", async () => {

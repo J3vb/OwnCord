@@ -13,7 +13,7 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
 import {
   renderInlineImage,
   setInlineImageDecorator,
-} from "../../src/components/message-list/media";
+} from "../../src/features/messaging/content/media";
 import { gifFavoriteStar } from "../../src/components/message-list/gifFavoriteStar";
 import {
   bindGifFavoritesApi,

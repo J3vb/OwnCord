@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   autoInputSensitivity,
   effectiveVoiceGate,
@@ -6,6 +6,8 @@ import {
   inputMode,
   migrateAutoInputSensitivity,
   migrateInputMode,
+  pttGates,
+  setTalkButton,
 } from "../../src/lib/ui/inputMode";
 
 const PREFIX = "owncord:settings:";
@@ -170,5 +172,26 @@ describe("effectiveVoiceGate", () => {
     expect(effectiveVoiceGate(true)).toBe("off");
     // No live poller: the automatic gate keeps gating.
     expect(effectiveVoiceGate(false)).toBe("auto");
+  });
+});
+
+describe("pttGates with the talk button", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => setTalkButton(false));
+
+  it("gates in Push to Talk mode with no key bound once the talk button is the trigger", () => {
+    set("inputMode", "ptt");
+    expect(pttGates(true)).toBe(false);
+    setTalkButton(true);
+    expect(pttGates(true)).toBe(true);
+    expect(effectiveVoiceGate(true)).toBe("off");
+  });
+
+  it("does not gate in Voice Activity mode or with no live press source", () => {
+    setTalkButton(true);
+    set("inputMode", "vad");
+    expect(pttGates(true)).toBe(false);
+    set("inputMode", "ptt");
+    expect(pttGates(false)).toBe(false);
   });
 });

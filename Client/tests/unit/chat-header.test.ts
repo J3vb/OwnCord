@@ -6,17 +6,12 @@ import {
   setChatHeaderCallChat,
   setChatHeaderTopic,
 } from "../../src/pages/main-page/ChatHeader";
+import { useMountContainer } from "../helpers/mountContainer";
 
 describe("ChatHeader", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("renders the chat header element", () => {
@@ -169,14 +164,8 @@ describe("ChatHeader", () => {
 
 describe("updateChatHeaderForDm", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("shows the partner's avatar in place of the @ prefix for a 1:1 DM", () => {

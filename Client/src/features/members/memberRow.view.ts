@@ -11,9 +11,9 @@
 import { createElement, appendChildren, setText } from "../../lib/dom";
 import { readableRoleColor } from "../../lib/prefs/themes";
 import type { UserStatus } from "../../lib/types";
-import { statusLabel } from "../../i18n/shell";
+import { applyStatusIndicator } from "../../lib/ui/statusIndicator";
 import { createIcon, type IconName } from "../../lib/icons";
-import type { createAvatarElement } from "../../components/message-list/avatar";
+import type { createAvatarElement } from "../profiles/avatar";
 
 /** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
 export type CreateAvatar = typeof createAvatarElement;
@@ -39,6 +39,8 @@ export type MemberRowModel = {
   readonly colorVar: string;
   /** Patch field with `away`: the dot and the dimmed row change in place. */
   readonly status: UserStatus;
+  /** Patch field: the dot is a phone while the member is on the Android app. */
+  readonly mobile: boolean;
   readonly away: boolean;
 };
 
@@ -54,23 +56,9 @@ export type MemberEmptyModel = { readonly kind: "empty"; readonly text: string }
 export type MemberItemModel = MemberRowModel | MemberHeaderModel | MemberEmptyModel;
 
 /** The fields `patchMemberItem` changes in place. */
-export const MEMBER_PATCH_FIELDS = ["status", "away", "text"] as const;
+export const MEMBER_PATCH_FIELDS = ["status", "mobile", "away", "text"] as const;
 
-export function statusColor(status: UserStatus): string {
-  switch (status) {
-    case "online":
-      return "var(--green)";
-    case "idle":
-      return "var(--yellow)";
-    case "dnd":
-      return "var(--red)";
-    case "invisible":
-    case "offline":
-      return "var(--text-micro)";
-    default:
-      return "var(--text-micro)";
-  }
-}
+export { statusColor } from "../../lib/ui/statusIndicator";
 
 function drawRow(model: MemberRowModel, createAvatar: CreateAvatar): HTMLDivElement {
   const item = createElement("div", {
@@ -94,13 +82,8 @@ function drawRow(model: MemberRowModel, createAvatar: CreateAvatar): HTMLDivElem
   );
 
   // Set through the style object, as the patch does, so both serialise alike.
-  const dot = createElement("div", {
-    class: "mi-status",
-    id: statusId,
-    "aria-label": statusLabel(model.status),
-    title: statusLabel(model.status),
-  });
-  dot.style.background = statusColor(model.status);
+  const dot = createElement("div", { class: "mi-status", id: statusId });
+  dot.setAttribute("aria-label", applyStatusIndicator(dot, model.status, model.mobile));
   avatar.appendChild(dot);
 
   // Name + custom status stack. The custom status is only rendered when there
@@ -181,8 +164,6 @@ export function patchMemberItem(el: Element, next: MemberItemModel): void {
   el.classList.toggle("offline", next.away);
   const dot = el.querySelector<HTMLDivElement>(".mi-status");
   if (dot !== null) {
-    dot.style.background = statusColor(next.status);
-    dot.setAttribute("aria-label", statusLabel(next.status));
-    dot.title = statusLabel(next.status);
+    dot.setAttribute("aria-label", applyStatusIndicator(dot, next.status, next.mobile));
   }
 }

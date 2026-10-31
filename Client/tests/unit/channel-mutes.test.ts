@@ -17,13 +17,15 @@ import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 // The modules in the notifications graph that install an app-lifetime window
 // listener at load. loadNotifications() re-imports against these instances,
 // so its vi.resetModules() does not install a second copy of each listener.
-import * as attachments from "@components/message-list/attachments";
+import * as attachments from "../../src/features/messaging/content/attachments";
 import * as formatting from "@lib/text/formatting";
 import * as channelMutes from "@lib/prefs/channelMutes";
 import * as appLogger from "@lib/logger";
 
+// vi.doMock resolves a relative id from the calling test file; a
+// root-relative id works from any test directory.
 const APP_LIFETIME_MODULES = [
-  ["@components/message-list/attachments", attachments],
+  ["/src/features/messaging/content/attachments", attachments],
   ["@lib/text/formatting", formatting],
   ["@lib/prefs/channelMutes", channelMutes],
   ["@lib/logger", appLogger],

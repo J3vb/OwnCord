@@ -50,8 +50,24 @@ WHERE c.thread_starter_message_id IN (sqlc.slice('starter_ids')) AND c.type = 't
 -- last row, never re-read from the table, so a post in that thread between
 -- pages cannot move the page. before_id 0 is the first page. tag_ids is a
 -- comma-wrapped list such as ',3,7,' matched any-of (forum posts), and
--- no_tag_filter 1 skips it.
+-- no_tag_filter 1 skips it. The page of ids is picked first and only those
+-- rows get their message count and last message time.
 -- name: ListThreadInfosByParent :many
+WITH page AS (
+    SELECT c.id
+    FROM channels c
+    WHERE c.parent_channel_id = sqlc.arg(parent_id) AND c.type = 'thread'
+      AND c.thread_archived = sqlc.arg(archived)
+      AND (CAST(sqlc.arg(no_tag_filter) AS INTEGER) = 1
+           OR EXISTS (SELECT 1 FROM thread_tags tt
+                      WHERE tt.thread_id = c.id AND instr(CAST(sqlc.arg(tag_ids) AS TEXT), ',' || tt.tag_id || ',') > 0))
+      AND (CAST(sqlc.arg(before_id) AS INTEGER) = 0
+           OR COALESCE(c.thread_last_activity_at, '') < CAST(sqlc.arg(before_activity) AS TEXT)
+           OR (COALESCE(c.thread_last_activity_at, '') = CAST(sqlc.arg(before_activity) AS TEXT)
+               AND c.id < CAST(sqlc.arg(before_id) AS INTEGER)))
+    ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC
+    LIMIT sqlc.arg(row_limit)
+)
 SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_owner_id,
        c.thread_starter_message_id, c.thread_archived, c.thread_locked,
        c.thread_auto_archive_minutes,
@@ -61,18 +77,9 @@ SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_own
          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_message_at,
        c.created_at,
        COALESCE(c.thread_last_activity_at, '') AS activity_at
-FROM channels c
-WHERE c.parent_channel_id = sqlc.arg(parent_id) AND c.type = 'thread'
-  AND c.thread_archived = sqlc.arg(archived)
-  AND (CAST(sqlc.arg(no_tag_filter) AS INTEGER) = 1
-       OR EXISTS (SELECT 1 FROM thread_tags tt
-                  WHERE tt.thread_id = c.id AND instr(CAST(sqlc.arg(tag_ids) AS TEXT), ',' || tt.tag_id || ',') > 0))
-  AND (CAST(sqlc.arg(before_id) AS INTEGER) = 0
-       OR COALESCE(c.thread_last_activity_at, '') < CAST(sqlc.arg(before_activity) AS TEXT)
-       OR (COALESCE(c.thread_last_activity_at, '') = CAST(sqlc.arg(before_activity) AS TEXT)
-           AND c.id < CAST(sqlc.arg(before_id) AS INTEGER)))
-ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC
-LIMIT sqlc.arg(row_limit);
+FROM page
+JOIN channels c ON c.id = page.id
+ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC;
 
 -- The same page in creation order (sort=created): newest id first, a keyset
 -- page on id alone. Ids only grow, so id order is creation order. tag_ids is

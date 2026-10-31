@@ -7,14 +7,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 const { observeMediaMock, discardMediaMock, fetchImageAsObjectUrlMock, brokerImageMock } =
   vi.hoisted(() => ({
     brokerImageMock: vi.fn(() => Promise.resolve({ ok: true, value: new Blob(["x"]) })),
@@ -38,18 +30,19 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
     image: brokerImageMock,
   },
 }));
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
+import { resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 
@@ -131,7 +124,7 @@ describe("MessageList — a history page keeps the rendered rows", () => {
       historyLoadState: new Map(),
       detachedChannels: new Set(),
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     observeMediaMock.mockClear();

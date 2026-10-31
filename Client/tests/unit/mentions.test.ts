@@ -21,6 +21,8 @@ import { applyPickedMentions, tokensToPickedText } from "../../src/lib/text/pick
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
+import { resetMembersState } from "../helpers/storeResets";
+import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
 
 function member(id: number, username: string, displayName?: string) {
   return {
@@ -57,12 +59,7 @@ beforeEach(() => {
     ]),
     typingUsers: new Map(),
   }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   setRoles([
     { id: 5, name: "Mods", color: "#ff0000", permissions: 0 },
     { id: 6, name: "Devs", color: null, permissions: 0 },
@@ -117,13 +114,7 @@ describe("role mentions", () => {
   });
 
   it("is not a user mention when nobody is signed in", () => {
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     expect(mentionsCurrentUser("<@&5> <@12>", { mentionRoles: [5] })).toBe(false);
   });
 });
@@ -166,7 +157,7 @@ describe("id mentions", () => {
   });
 
   it("highlights by id even when the member list does not hold the user", () => {
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     expect(mentionsCurrentUser("<@12>")).toBe(true);
   });
 

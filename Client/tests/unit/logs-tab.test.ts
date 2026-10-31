@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 // vi.hoisted ensures these are available when vi.mock factory runs
 const {
@@ -25,10 +26,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-  getShareDiagnostics: vi.fn().mockReturnValue(null),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 const { mockGetVersion } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,8 +59,8 @@ vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
 import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
-import { createLogsTab } from "../../src/components/settings/LogsTab";
-import type { TabName } from "../../src/components/SettingsOverlay";
+import { createLogsTab } from "../../src/features/settings/LogsTab";
+import type { TabName } from "../../src/features/settings/SettingsOverlay";
 
 /** The <details> whose summary starts with `label`. */
 function disclosure(el: HTMLElement, label: string): HTMLDetailsElement {

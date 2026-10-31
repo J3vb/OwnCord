@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildAppearanceTab } from "@components/settings/AppearanceTab";
+import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { refreshTimeFormat } from "@lib/text/timeFormat";
 
 const { mockGetActiveThemeName, mockRestoreTheme } = vi.hoisted(() => ({

@@ -26,6 +26,8 @@ export interface GroupMemberView {
   readonly username: string;
   readonly avatar: string | null;
   readonly status: string;
+  /** On the Android app (the live member entry says so). */
+  readonly mobile: boolean;
   readonly isOwner: boolean;
   readonly isSelf: boolean;
 }
@@ -87,6 +89,7 @@ export function buildGroupPanelView(channelId: number): GroupPanelView | null {
             username: viewer.username,
             avatar: live?.avatar ?? viewer.avatar,
             status: live?.status ?? viewer.status ?? "online",
+            mobile: live?.mobile === true,
             isOwner: dm.ownerId === viewer.id,
             isSelf: true,
           };
@@ -102,6 +105,7 @@ export function buildGroupPanelView(channelId: number): GroupPanelView | null {
       username: p.username,
       avatar: live?.avatar ?? (p.avatar === "" ? null : p.avatar),
       status: live?.status ?? p.status,
+      mobile: live === undefined ? p.mobile === true : live.mobile === true,
       isOwner: dm.ownerId === p.id,
       isSelf: false,
     };

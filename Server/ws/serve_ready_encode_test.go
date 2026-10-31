@@ -48,6 +48,9 @@ func TestWriteReady_MatchesLegacyEncoderByteForByte(t *testing.T) {
 			t.Fatalf("GetUserByID: %v", err)
 		}
 		c := ws.NewTestClientWithUser(hub, fresh, 0, make(chan []byte, 64))
+		if u == online || u == ghost {
+			ws.MarkMobileForTest(c) // a phone: shown for online, never for the invisible one
+		}
 		hub.Register(c)
 		waitRegistered(t, hub, c)
 		hub.ApplyConnectStatusForTest(c)
@@ -77,6 +80,11 @@ func TestWriteReady_MatchesLegacyEncoderByteForByte(t *testing.T) {
 		}
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s viewer: streamed ready differs from the legacy encoder\n got: %s\nwant: %s", v.name, got, want)
+		}
+		// One phone (online) is listed to everyone; the invisible one's flag reaches
+		// only that user.
+		if n := bytes.Count(got, []byte(`"mobile":true`)); (v.user == ghost && n != 2) || (v.user != ghost && n != 1) {
+			t.Errorf("%s viewer: ready carries %d mobile flags", v.name, n)
 		}
 	}
 }

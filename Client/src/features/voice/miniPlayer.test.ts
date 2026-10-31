@@ -6,6 +6,7 @@ import {
   type MiniPlayer,
 } from "./miniPlayer";
 import { registerVideoSurface } from "../../lib/voice/videoSurface";
+import { clearHost, hostAndroidApp } from "../../../tests/helpers/androidHost";
 
 /** jsdom lays nothing out: give the player a size. */
 function sized(player: MiniPlayer, width: number, height: number): void {
@@ -43,6 +44,19 @@ describe("mini-player", () => {
     player = open({ video }).player;
     expect(video.nextSibling).toBe(canvas);
     expect(player.element.contains(canvas)).toBe(true);
+  });
+
+  it("leaves out Pop out in the Android app, and keeps the other controls", () => {
+    hostAndroidApp();
+    try {
+      player = open().player;
+      const ids = [...player.element.querySelectorAll<HTMLElement>("button[data-testid]")].map(
+        (b) => b.dataset["testid"],
+      );
+      expect(ids).toEqual(["stream-mini-return", "stream-mini-stop"]);
+    } finally {
+      clearHost();
+    }
   });
 
   it("keeps a position inside the window", () => {

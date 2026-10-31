@@ -23,7 +23,7 @@ import {
   clearAttachmentCaches,
   closeActiveLightbox,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import { messagesStore, type Message } from "../../src/stores/messages.store";
 import type { MessageListOptions } from "../../src/components/MessageList";
 

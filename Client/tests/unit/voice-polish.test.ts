@@ -9,19 +9,13 @@
 // app.css, so the CSS-only facts (the focus-within reveal) are asserted in
 // voice-polish-css.test.ts.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  getRoomForStats: vi.fn().mockReturnValue(null),
-  retryMicPermission: vi.fn().mockResolvedValue(undefined),
-  getUserVolume: vi.fn().mockReturnValue(100),
-  setUserVolume: vi.fn(),
-  getUserLocalMute: vi.fn().mockReturnValue(false),
-  setUserLocalMute: vi.fn(),
-  getScreenshareAudioMuted: vi.fn().mockReturnValue(false),
-  getScreenshareAudioVolume: vi.fn().mockReturnValue(1),
-  muteScreenshareAudio: vi.fn(),
-  setScreenshareAudioVolume: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    getUserVolume: vi.fn().mockReturnValue(100),
+  }),
+);
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
@@ -48,9 +42,9 @@ vi.mock("@lib/voice/connectionStats", () => ({
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createVideoGrid, type TileConfig } from "../../src/components/VideoGrid";
 import { voiceStore } from "../../src/stores/voice.store";
-import { channelsStore } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
+import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -65,13 +59,8 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "idle",
   }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetChannelsState();
+  resetMembersState();
   setConnectionStatus("connected");
 }
 

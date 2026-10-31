@@ -178,6 +178,30 @@ describe("inline editor saving", () => {
     expect(session.element.querySelector<HTMLElement>(".msg-inline-edit-error")?.hidden).toBe(true);
   });
 
+  it("checks the limit on the expanded text and keeps the edit when it is too long", () => {
+    const onSave = vi.fn();
+    const session = createInlineEdit({
+      messageId: 1,
+      text: "",
+      onSave,
+      onCancel: vi.fn(),
+      onEmpty: vi.fn(),
+      expand: (c) => c.replaceAll("@Zed", "<@123456789012>"),
+    });
+    document.body.append(session.element);
+    session.textarea.value = `@Zed @Zed ${"a".repeat(3989)}`;
+    key(session.textarea, { key: "Enter" });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(session.textarea.value).toBe(`@Zed @Zed ${"a".repeat(3989)}`);
+    expect(session.element.querySelector<HTMLElement>(".msg-inline-edit-error")?.hidden).toBe(
+      false,
+    );
+    session.textarea.value = `@Zed ${"a".repeat(3984)}`;
+    key(session.textarea, { key: "Enter" });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    session.destroy();
+  });
+
   it("counts code points, as the server does, not UTF-16 units", () => {
     const { session, onSave } = make();
     session.textarea.value = "\u{1F600}".repeat(MAX_MESSAGE_LEN);

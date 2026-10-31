@@ -154,6 +154,9 @@ func (h *Hub) writeReadyMembers(w *bufio.Writer, roster *memberRoster, viewerID 
 		} else {
 			_, _ = w.Write(enc.custom)
 		}
+		if m.Mobile {
+			_, _ = w.WriteString(`,"mobile":true`)
+		}
 		_ = w.WriteByte('}')
 	}
 	_ = w.WriteByte(']')

@@ -1,7 +1,7 @@
 // Per-attachment determinate upload progress (B11b). The composer shows a
 // percentage and a fill for each chip while its upload is in flight, driven by
 // the `onProgress` callback the upload handler reports.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@components/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
@@ -12,6 +12,7 @@ vi.mock("@components/GifPicker", () => ({
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
 import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const stubGifApi: GifApi & GifFavoritesApi = {
   gifSearch: vi.fn(async () => ({ results: [] })),
@@ -40,14 +41,8 @@ function queueFile(container: HTMLElement, file: File): void {
 
 describe("MessageInput upload progress", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("shows determinate progress from a progress callback while the upload runs", async () => {

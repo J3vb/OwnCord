@@ -26,6 +26,7 @@ import { dmStore, setDmChannels } from "@stores/dm.store";
 import { closeSettings, openSettings, setActiveView } from "@stores/ui.store";
 import type { ReadyChannel } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function channel(id: number, unread: number, mentions = 0): ReadyChannel {
   return {
@@ -59,12 +60,7 @@ let sent: number[];
 beforeEach(() => {
   sent = [];
   setMarkReadSender((id) => sent.push(id));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
 });
 

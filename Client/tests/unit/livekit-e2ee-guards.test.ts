@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Behaviour of E2EEManager's session, announce, rotation and teardown guards,
 // driven through the manager with the crypto and stores mocked. The protocol
-// as a whole is covered end to end in livekit-session.test.ts and the module
-// surface in livekit-e2ee.test.ts; this file pins the individual decisions:
+// as a whole is covered end to end in the livekitSession/ tests and the module
+// surface in the livekitE2ee/ tests; this file pins the individual decisions:
 // which attempt owns the state when an async step resumes, what each log line
 // records, and what a teardown leaves behind.
 

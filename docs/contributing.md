@@ -147,17 +147,18 @@ Run these from `Client/`.
 
 **Build and dev**
 
-| Command                 | What it does                                                              |
-| ----------------------- | ------------------------------------------------------------------------- |
-| `npm run dev`           | Start the Vite dev server with hot reload (alias for `dev:desktop`)       |
-| `npm run dev:desktop`   | Vite dev server with the Tauri overlay (`vite.config.desktop.ts`)         |
-| `npm run build`         | TypeScript check and Vite production build (alias for `build:desktop`)    |
-| `npm run build:desktop` | TypeScript check and production build of the Tauri target                 |
-| `npm run build:budget`  | Scratch `--manifest` build into `dist-budget/` (input to `check:budgets`) |
-| `npm run check:budgets` | Bundle budget gate: gzip sizes against `bundle-budgets.json`              |
-| `npm run preview`       | Serve the production build with `vite preview`                            |
-| `npm run tauri dev`     | Launch the Tauri app in dev mode                                          |
-| `npm run tauri build`   | Build the release installer (NSIS on Windows, AppImage and deb on Linux)  |
+| Command                      | What it does                                                                                                           |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`                | Start the Vite dev server with hot reload (alias for `dev:desktop`)                                                    |
+| `npm run dev:desktop`        | Vite dev server with the Tauri overlay (`vite.config.desktop.ts`)                                                      |
+| `npm run build`              | TypeScript check and Vite production build (alias for `build:desktop`)                                                 |
+| `npm run build:desktop`      | TypeScript check and production build of the Tauri target                                                              |
+| `npm run build:budget`       | Scratch `--manifest` build into `dist-budget/` (input to `check:budgets`)                                              |
+| `npm run check:budgets`      | Bundle budget gate: gzip sizes against `bundle-budgets.json`                                                           |
+| `npm run preview`            | Serve the production build with `vite preview`                                                                         |
+| `npm run tauri dev`          | Launch the Tauri app in dev mode                                                                                       |
+| `npm run tauri build`        | Build the release installer (NSIS on Windows, AppImage and deb on Linux)                                               |
+| `npm run screenshots:readme` | Retake the three README images in `.github/images/` from a real server with demo data (about 3 minutes; not run by CI) |
 
 **Linux build prerequisite: native voice.** The Linux client links LiveKit's
 Rust SDK (`livekit`). Its `webrtc-sys` crate compiles C++ against Chromium's
@@ -267,6 +268,39 @@ whose Tauri build step leaves them out.
 
 The client has no format script of its own. Prettier is set up once at the
 repository root, so run `npm run format` from the root.
+
+#### Android
+
+The Android app is the same client and Rust crate, built by Tauri into an APK.
+The Gradle project is committed under `Client/src-tauri/gen/android/`; edit it
+there (the manifest, `app/build.gradle.kts`), never regenerate it with
+`tauri android init`, which would overwrite those edits.
+
+- **Get an APK:** every PR that touches the client source or the Rust shell
+  runs the `Android APK` job in CI. It builds a signed arm64 APK and uploads it
+  as the `owncord-android-<sha>` artifact (kept 14 days) on the run's Summary
+  page. Runs from a fork or from Dependabot have no signing secrets, so they
+  build an unsigned APK as a compile check and upload nothing.
+- **Local development:** JDK 17, the Android SDK with an NDK, `ANDROID_HOME`
+  and `NDK_HOME` set, and `rustup target add aarch64-linux-android` (add
+  `x86_64-linux-android` for an emulator). Then `npx tauri android dev` from
+  `Client/` runs the app on an emulator or a USB-connected phone against the
+  vite dev server. Debug builds allow plain http so the phone can reach it.
+- **Release builds** are signed in CI only, with a keystore kept in repository
+  secrets. Never build a release APK locally for distribution, and never commit
+  a keystore or `keystore.properties` (both are gitignored). `release.yml`'s
+  `release-client-android` job publishes `OwnCord_<v>_arm64.apk` and its
+  updater `.sig` on every release; the keystore must never change, or
+  installed apps can no longer take an update.
+- **Updates:** the app asks its server's client-update endpoint for the
+  `android-aarch64-apk` target, checks the `.sig` with the desktop updater
+  key, and opens Android's package installer
+  (`update_commands/android.rs` and `ApkInstallerPlugin.kt`). Android always
+  shows its own Install prompt for an app installed outside a store.
+- **Rust:** code that only exists on desktop (tray, unread badge, window
+  helpers, game detection) is behind `#[cfg(desktop)]`. CI runs
+  `cargo clippy --target aarch64-linux-android -- -D warnings`, so an item that
+  is only used from desktop code needs the same gate.
 
 ### Git hooks (recommended)
 
@@ -545,6 +579,29 @@ version string. So a `2.x` client speaks the same epoch as the
 
 Background: the merge-commit and full-release rules are owner decisions D-13
 and D-14, and the unsigned installers are decision D-08.
+
+### README screenshots
+
+Before a release that changes what the app looks like, retake the README
+images on the frozen `dev` head with `npm run screenshots:readme` (from
+`Client/`) and land them in a PR to `dev` before the release PR. The run starts
+a real server in a temporary folder, seeds a demo community through the normal
+HTTP and WebSocket routes, and writes `Client.png`, `loginpage.png` and
+`Admin_Panel.png` at 1440x900 in the default dark theme.
+
+### Update signing keys
+
+The desktop app and the server use separate update signing keys. A release
+needs these GitHub Actions secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+- `SERVER_UPDATE_SIGNING_PRIVATE_KEY`
+- `SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD`
+
+To rotate the server update key, update
+[Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt).
+Roll it over in stages so running servers keep accepting updates.
 
 ## Branch Naming
 

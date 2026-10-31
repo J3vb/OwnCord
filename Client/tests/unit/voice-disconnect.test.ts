@@ -5,19 +5,18 @@
  * - beforeunload sends voice_leave when in voice channel
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../src/stores/voice.store";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
-import { channelsStore } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
+import { resetMembersState } from "../helpers/storeResets";
+import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
 
 // clearAuth (used below to test the real logoutWasInVoice ordering fix)
 // lazily imports livekitSession when a voice session is active — mock it so
 // that stays a fire-and-forget call instead of pulling in the real SDK.
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -32,23 +31,9 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "idle",
   }));
-  authStore.setState(() => ({
-    token: null,
-    user: null,
-    serverName: null,
-    motd: null,
-    isAuthenticated: false,
-  }));
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetAuthState();
+  resetChannelsState();
+  resetMembersState();
   uiStore.setState(() => ({
     sidebarCollapsed: false,
     memberListVisible: true,

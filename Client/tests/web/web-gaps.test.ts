@@ -15,10 +15,10 @@ const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }));
 vi.mock("@lib/ui/toast", () => ({ showToast }));
 
 const { desktop } = await import("../../src/platform/desktop");
-const { renderMessageContent } = await import("../../src/components/message-list/contentParser");
+const { renderMessageContent } = await import("../../src/features/messaging/content/contentParser");
 const { setChannelMutesHost } = await import("../../src/lib/prefs/channelMutes");
 const { setInviteJoinHandler } = await import("../../src/lib/nav/inviteNavigation");
-const { createLogsTab } = await import("../../src/components/settings/LogsTab");
+const { createLogsTab } = await import("../../src/features/settings/LogsTab");
 
 describe("app version (web build)", () => {
   afterEach(() => {

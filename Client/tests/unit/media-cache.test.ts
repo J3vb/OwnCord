@@ -20,7 +20,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("../../src/components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   isSafeUrl: () => true,
   externalPartition: () => "test#0",
   previewExternal: (url: string) =>
@@ -30,12 +30,12 @@ vi.mock("../../src/components/message-list/attachments", () => ({
   recoverEvictedImage: () => {},
 }));
 
-vi.mock("../../src/components/message-list/embeds", () => ({
+vi.mock("../../src/features/messaging/content/embeds", () => ({
   renderGenericLinkPreview: vi.fn(),
   clearEmbedCaches: vi.fn(),
 }));
 
-import { clearMediaCaches, renderYouTubeEmbed } from "../../src/components/message-list/media";
+import { clearMediaCaches, renderYouTubeEmbed } from "../../src/features/messaging/content/media";
 
 function oembedResponse(title: string) {
   return { ok: true, value: { title, description: null, siteName: null, image: null } };

@@ -11,32 +11,25 @@ const { observers } = vi.hoisted(() => ({ observers: [] as Array<() => void> }))
 
 import { createMessageList } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { clearRowHeights } from "@components/message-list/rowHeights";
+import { buildMessage } from "../helpers/messageFactory";
+import { resetMembersState } from "../helpers/storeResets";
 
 const CHANNEL_ID = 1;
 const ROW = 100;
 
 function makeMessage(id: number): Message {
-  return {
-    id,
-    channelId: CHANNEL_ID,
-    user: { id: 1000 + id, username: `User${id}`, avatar: "" },
-    content: `Message ${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    // One minute apart: one day, no day dividers between the rows.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
+  return buildMessage(
+    { id },
+    {
+      channelId: CHANNEL_ID,
+      user: { id: 1000 + id, username: `User${id}`, avatar: "" },
+      // One minute apart: one day, no day dividers between the rows.
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id)).toISOString(),
+    },
+  );
 }
 
 describe("MessageList: rows resizing after they are drawn", () => {
@@ -158,7 +151,7 @@ describe("MessageList: rows resizing after they are drawn", () => {
       historyLoadState: new Map(),
       detachedChannels: new Set(),
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     container = document.createElement("div");

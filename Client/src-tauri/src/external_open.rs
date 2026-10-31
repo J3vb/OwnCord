@@ -13,6 +13,7 @@
 //! entries are dropped from every path-list variable, and the variables the
 //! launcher invents (`APPDIR`, `GTK_THEME`, ...) are removed.
 
+#[cfg(desktop)]
 use std::path::Path;
 
 /// URL schemes `open_external_url` accepts: the plugin's `opener:default` scope.
@@ -48,6 +49,7 @@ pub(crate) fn open_url(url: &str) -> Result<(), String> {
 
 /// Open `path` (a file or folder) in the default program. Like the plugin, a
 /// path that does not exist is an error.
+#[cfg(desktop)]
 pub(crate) fn open_path(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if let Some(appdir) = appimage::appimage_dir() {

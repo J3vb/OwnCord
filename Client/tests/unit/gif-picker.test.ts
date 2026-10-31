@@ -44,7 +44,7 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
 
 // Import the mocks so tests can control their return values
 import { searchGifs, getTrendingGifs } from "@lib/media/gifProvider";
-import { clearExternalImageCache } from "@components/message-list/attachments";
+import { clearExternalImageCache } from "../../src/features/messaging/content/attachments";
 
 let blobCounter = 0;
 const createObjectURLMock = vi.fn(() => `blob:test/${++blobCounter}`);

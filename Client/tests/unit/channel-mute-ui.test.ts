@@ -4,7 +4,7 @@ import {
   attachChannelContextMenu,
   CHANNEL_MUTE_CHANGED,
 } from "@components/channel-sidebar/contextMenu";
-import { buildNotificationsTab } from "@components/settings/NotificationsTab";
+import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
 import {
   isChannelMuted,
   muteChannel,

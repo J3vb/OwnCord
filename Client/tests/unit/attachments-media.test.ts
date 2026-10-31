@@ -31,7 +31,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
+vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
 vi.mock("@stores/auth.store", () => ({
   getToken: () => "session-token",
   authStore: { getState: () => ({ uploadPolicy: null }) },
@@ -45,7 +45,7 @@ import {
   isVideoMime,
   renderAttachment,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import type { Attachment } from "@lib/types";
 
 /** Press the play button that stands in for the player until it is wanted.

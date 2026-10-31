@@ -568,7 +568,7 @@ func TestCallLog_WorkerExitsOnCtxDone(t *testing.T) {
 func TestCallLog_RequeuesNotesOnStoreError(t *testing.T) {
 	f := newCallLogFixture(t)
 	good := f.svc.st
-	f.svc.st = errChannelStore{Store: good}
+	f.svc.st = errChannelStore{Store: good.(Store)}
 	f.join(t, clAlice, clDM)
 	f.pass(t)
 	f.svc.st = good

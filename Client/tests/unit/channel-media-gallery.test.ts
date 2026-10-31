@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn(() => Promise.resolve("blob:thumb")));
 
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
   formatFileSize: (n: number) => `${n} B`,
   isImageMime: (m: string) => m.startsWith("image/"),
@@ -350,5 +350,105 @@ describe("localMonthKey", () => {
   it("reads the server's UTC timestamp in the local calendar", () => {
     expect(localMonthKey("2026-01-31 12:00:00")).toBe("2026-01");
     expect(localMonthKey("not a date")).toBe("");
+  });
+});
+
+describe("ChannelMediaGallery files tab usage line", () => {
+  let container: HTMLDivElement;
+  let panel: ChannelMediaGalleryPanel | null = null;
+
+  function open(extra: Partial<ChannelMediaGalleryOptions>): ChannelMediaGalleryPanel {
+    panel = createChannelMediaGallery({
+      channelName: "photos",
+      loadPage: vi.fn(() => Promise.resolve({ items: [], next_cursor: "" })),
+      loadMonths: vi.fn(() => Promise.resolve({ months: [] })),
+      uploaders: () => [],
+      onJumpToMessage: vi.fn(),
+      onClose: vi.fn(),
+      timeZone: "UTC",
+      ...extra,
+    });
+    panel.mount(container);
+    return panel;
+  }
+  const filesTab = (): HTMLButtonElement =>
+    container.querySelector<HTMLButtonElement>("[data-kind='files']")!;
+  const usage = (): HTMLElement =>
+    container.querySelector<HTMLElement>("[data-testid='media-usage']")!;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+  afterEach(() => {
+    panel?.destroy();
+    panel = null;
+    container.remove();
+  });
+
+  it("fetches storage once when Files first opens and links to My uploads", async () => {
+    const loadStorage = vi.fn(() => Promise.resolve({ used_bytes: 64, quota_bytes: 100 }));
+    const onManageUploads = vi.fn();
+    open({ loadStorage, onManageUploads });
+    await flush();
+    expect(loadStorage).not.toHaveBeenCalled();
+    expect(usage().hidden).toBe(true);
+
+    filesTab().click();
+    await flush();
+    expect(loadStorage).toHaveBeenCalledTimes(1);
+    expect(usage().hidden).toBe(false);
+    expect(usage().textContent).toContain("You've used 64 B of 100 B");
+
+    container.querySelector<HTMLButtonElement>("[data-testid='media-manage']")!.click();
+    expect(onManageUploads).toHaveBeenCalledTimes(1);
+
+    container.querySelector<HTMLButtonElement>("[data-kind='media']")!.click();
+    expect(usage().hidden).toBe(true);
+    filesTab().click();
+    await flush();
+    expect(loadStorage).toHaveBeenCalledTimes(1);
+    expect(usage().hidden).toBe(false);
+  });
+
+  it("says how much is used when the quota is unlimited", async () => {
+    open({
+      loadStorage: () => Promise.resolve({ used_bytes: 5, quota_bytes: 0 }),
+      onManageUploads: vi.fn(),
+    });
+    filesTab().click();
+    await flush();
+    expect(usage().textContent).toContain("5 B used");
+    expect(usage().textContent).not.toContain("of");
+  });
+
+  it("stays out of the way when storage cannot be read", async () => {
+    open({ loadStorage: () => Promise.reject(new Error("offline")) });
+    filesTab().click();
+    await flush();
+    expect(usage().hidden).toBe(true);
+  });
+
+  it("drops only the removed attachment's item when a message's file list shrinks", async () => {
+    const two = (name: string): ChannelMediaItem =>
+      item(9, name, "application/pdf", "2026-02-03 10:00:00", { id: `id-${name}` });
+    const p = open({
+      loadPage: vi.fn(() =>
+        Promise.resolve({ items: [two("a.pdf"), two("b.pdf")], next_cursor: "" }),
+      ),
+    });
+    filesTab().click();
+    await flush();
+    expect(container.querySelectorAll(".media-gallery__file")).toHaveLength(2);
+
+    p.syncMessageAttachments(9, ["id-b.pdf"]);
+    const left = [...container.querySelectorAll(".media-gallery__file")];
+    expect(left).toHaveLength(1);
+    expect(left[0]!.getAttribute("data-attachment-id")).toBe("id-b.pdf");
+
+    p.syncMessageAttachments(9, []);
+    expect(container.querySelectorAll(".media-gallery__file")).toHaveLength(0);
+    expect(container.querySelector(".media-gallery__section")).toBeNull();
+    p.syncMessageAttachments(123, []);
   });
 });

@@ -235,7 +235,7 @@ func (h *Hub) broadcastMergedPresenceLocked(userID int64, conns []*Client, merge
 		// Invisible: others would only get another blank "offline" frame, and one per game
 		// start or stop is itself a sign the user is online. Only the player hears it, on
 		// every device; nothing public changed, so a queued connect entry stays.
-		frame := buildPresenceMsg(userID, merged.status, text, merged.activity, merged.listening)
+		frame := buildPresenceMsg(userID, merged.status, text, merged.activity, merged.listening, merged.mobile)
 		for _, own := range conns {
 			own.sendPresenceMsg(frame)
 		}
@@ -243,7 +243,7 @@ func (h *Hub) broadcastMergedPresenceLocked(userID int64, conns []*Client, merge
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
 	h.dropQueuedPresenceLocked(userID)
-	for _, ev := range presenceEvents(userID, merged.status, text, merged.activity, merged.listening) {
+	for _, ev := range presenceEvents(userID, merged.status, text, merged.activity, merged.listening, merged.mobile) {
 		h.enqueueExpiredPresence(conns[0], ev)
 	}
 }
@@ -309,9 +309,9 @@ func (h *Hub) clearActivityAndListeningLocked(c *Client) {
 
 // bareActivityFrame is the presence frame without game and song, built only when
 // there is something to leave out (nil otherwise).
-func bareActivityFrame(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []byte {
+func bareActivityFrame(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity, mobile bool) []byte {
 	if activity == nil && listening == nil {
 		return nil
 	}
-	return buildPresenceMsg(userID, status, customStatus, nil, nil)
+	return buildPresenceMsg(userID, status, customStatus, nil, nil, mobile)
 }

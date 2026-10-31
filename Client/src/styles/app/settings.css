@@ -1444,7 +1444,9 @@ details.disclose[open] > summary .icon {
 
 /* Phone: Settings fills the screen. The section list is one page and an open
    section is another, with a back arrow between them. */
-@media (max-width: 600px) {
+@media (max-width: 600px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   .settings-panel {
     width: 100%;
     max-width: none;
@@ -1569,4 +1571,137 @@ details.disclose[open] > summary .icon {
     background: transparent;
     color: var(--text-normal);
   }
+}
+
+/* ── My uploads tab ── */
+.my-uploads__usage {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.my-uploads__usage-text {
+  margin-bottom: var(--space-2);
+  font-size: var(--font-size-md);
+  color: var(--text-normal);
+}
+.my-uploads__bar {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+.my-uploads__bar[hidden] {
+  display: none;
+}
+.my-uploads__bar-fill {
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+}
+.my-uploads__usage.is-warning .my-uploads__bar-fill {
+  background: var(--red);
+}
+.my-uploads__usage.is-warning .my-uploads__usage-text {
+  color: var(--text-danger);
+}
+.my-uploads__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.my-uploads__sort {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.my-uploads__sort-btn {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.my-uploads__sort-btn[aria-pressed="true"] {
+  background: var(--bg-active);
+  color: var(--text-normal);
+}
+.my-uploads__search {
+  flex: 1;
+  min-width: 160px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-normal);
+}
+.my-uploads__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.my-uploads__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.my-uploads__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  overflow: hidden;
+}
+.my-uploads__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.my-uploads__text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.my-uploads__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+.my-uploads__meta,
+.my-uploads__where {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.my-uploads__remove {
+  flex-shrink: 0;
+}
+.my-uploads__status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+.my-uploads__status[hidden],
+.my-uploads__more[hidden] {
+  display: none;
+}
+.my-uploads__more {
+  display: block;
+  margin: var(--space-3) auto 0;
 }

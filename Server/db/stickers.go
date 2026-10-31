@@ -188,7 +188,7 @@ func (d *DB) GetMessageSticker(ctx context.Context, messageID int64) (*MessageSt
 // stickerInfos builds the sticker block of each id that is a sticker message.
 // Ids that are not are absent from the result.
 func (d *DB) stickerInfos(ctx context.Context, ids []int64) (map[int64]*MessageStickerInfo, error) {
-	rows, err := d.q.GetMessageStickersByMessageIDs(ctx, ids)
+	rows, err := d.q.GetMessageStickersByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
 		return nil, fmt.Errorf("message stickers: %w", err)
 	}

@@ -38,11 +38,12 @@ import {
   STATUS_DEFS,
   customStatusClearsLine,
   parseExpiry,
+  statusNote,
   statusTimerLine,
   type StatusDef,
 } from "@components/statusDefs";
 import { createLazyScreen } from "@components/lazyScreen";
-import { createAvatarElement } from "@components/message-list/avatar";
+import { createAvatarElement } from "../features/profiles/avatar";
 import { copyWithToast, isDeveloperMode } from "../features/developer-mode/developerTools";
 import { shellText } from "../i18n/shell";
 import { connectText } from "../i18n/connect";
@@ -500,12 +501,13 @@ export function createSelfProfileCard(options: SelfProfileCardOptions): SelfProf
       text.appendChild(
         createElement("span", { class: "spc-status-label" }, shellText(def.labelKey)),
       );
-      if (def.noteKey !== undefined) {
+      const note = statusNote(def);
+      if (note !== null) {
         text.appendChild(
           createElement(
             "span",
             { class: "spc-status-note", "data-testid": `spc-note-${def.value}` },
-            shellText(def.noteKey),
+            note,
           ),
         );
       }

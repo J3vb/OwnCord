@@ -45,6 +45,8 @@ import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import type { ReadyChannel } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
+import { resetMessagesState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function channel(id: number, unread: number, pointer: number | undefined): ReadyChannel {
   return {
@@ -103,21 +105,9 @@ beforeEach(() => {
     unreads.push([id, messageId]);
     return `u-${unreads.length}`;
   });
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
+  resetMessagesState();
   applyReadyCapabilities({ read_pointer: true });
   // Module state: a test that scrolled away must not leave the next one away.
   setLiveTailInView(1, true);

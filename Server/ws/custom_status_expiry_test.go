@@ -216,7 +216,7 @@ func TestCustomStatusExpired_RaceWithPresenceUpdate(t *testing.T) {
 			}
 			// handleMessageApply stores the live presence, then emits.
 			c.setLivePresence(db.StatusOnline, str("new"), newTag)
-			h.EmitEvents(ctx, presenceEvents(uid, db.StatusOnline, str("new"), nil, nil))
+			h.EmitEvents(ctx, presenceEvents(uid, db.StatusOnline, str("new"), nil, nil, false))
 		}()
 		close(start)
 		wg.Wait()

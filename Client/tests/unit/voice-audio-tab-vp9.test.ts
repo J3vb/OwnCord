@@ -1,4 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
@@ -6,6 +7,7 @@ const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
 vi.mock("../../src/features/voice/native/platform", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
   isWindowsDesktop: () => false,
+  isAndroidApp: () => false,
 }));
 const nativeH264 = vi.hoisted(() => ({ value: true }));
 const nativeVp9 = vi.hoisted(() => ({ value: false }));
@@ -51,21 +53,13 @@ vi.mock("../../src/platform/desktop/pushToTalk", () => ({
     updateKey: async () => {},
   },
 }));
-vi.mock("@lib/voice/livekitSession", () => ({
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  switchVideoDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  applyInputMode: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn(),
-  reapplyEnhancedNoiseSuppression: vi.fn(),
-  getLocalMicSettings: () => null,
-  onNativeInputLevel: () => () => {},
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    reapplyAudioProcessing: vi.fn(),
+  }),
+);
 
-import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+import { createVoiceAudioTab } from "../../src/features/settings/VoiceAudioTab";
 import { installFakeAudio } from "../helpers/fakeAudioContext";
 
 function codecOptions(): string[] {

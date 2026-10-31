@@ -260,14 +260,24 @@ never ships in the desktop bundle — the client only ever calls
 Controls server log verbosity. The level gates both stdout and the in-memory
 ring buffer that backs the admin panel's live log view.
 
-| Key             | Type   | Default  | Description                                                                                                                                |
-| --------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `logging.level` | string | `"info"` | Minimum level logged: `debug`, `info`, `warn`, `error`. Empty = `info`; an unrecognised value falls back to `info` with a startup warning. |
+| Key                      | Type   | Default  | Description                                                                                                                                |
+| ------------------------ | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `logging.level`          | string | `"info"` | Minimum level logged: `debug`, `info`, `warn`, `error`. Empty = `info`; an unrecognised value falls back to `info` with a startup warning. |
+| `logging.history_days`   | int    | `7`      | Days of logs saved to `<data_dir>/logs` for the Logs page's History tab. `0` saves nothing.                                                |
+| `logging.history_max_mb` | int    | `200`    | Cap on the saved log files' total size. The oldest files are deleted first.                                                                |
 
 An administrator can switch the running server to `debug` for 15 minutes from
 the admin panel's Logs page without editing this file or restarting:
 the level reverts to the configured one when the window elapses. This does not
 change `config.yaml`, so a restart returns to `logging.level`.
+
+Saved logs survive a restart. The server writes every line the live view shows,
+already redacted the same way, to `<data_dir>/logs/owncord-YYYY-MM-DD.log`
+(one JSON object per line), starting a new file each day (UTC) and whenever a
+file reaches 50 MB. The Logs page's **History** tab searches them on the
+server by time range, level and text. Backups do not include them. If the
+folder cannot be written, the server logs one warning and stops saving until
+the next day; the live view keeps working.
 
 ### Moderation (`moderation`)
 
@@ -518,7 +528,7 @@ anyway, so the panel would add risk and save no work. To move it:
 
 <!-- gendocs:config:start -->
 
-Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 78 keys.
+Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 80 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -541,6 +551,8 @@ Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags 
 | `github.owner`                              | GitHub / Updates (`github`)             |
 | `github.repo`                               | GitHub / Updates (`github`)             |
 | `github.token`                              | GitHub / Updates (`github`)             |
+| `logging.history_days`                      | Logging (`logging`)                     |
+| `logging.history_max_mb`                    | Logging (`logging`)                     |
 | `logging.level`                             | Logging (`logging`)                     |
 | `moderation.action_retention_days`          | Moderation (`moderation`)               |
 | `moderation.report_retention_days`          | Moderation (`moderation`)               |

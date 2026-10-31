@@ -1,7 +1,7 @@
 // 2A-3: files a send did not carry come back as chips in an error state. A
 // chip with its file re-uploads at Send and never posts the old id again; one
 // without a file blocks Send until it is removed.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@components/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
@@ -12,6 +12,7 @@ vi.mock("@components/GifPicker", () => ({
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
 import { messagingText } from "../../src/i18n/messaging";
+import { useMountContainer } from "../helpers/mountContainer";
 
 function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
   return {
@@ -33,14 +34,8 @@ const send = (c: HTMLElement): void => (c.querySelector(".send-btn") as HTMLButt
 
 describe("MessageInput unsent attachments (2A-3)", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("shows a skipped file as an error chip and re-uploads it at Send", async () => {
@@ -62,8 +57,14 @@ describe("MessageInput unsent attachments (2A-3)", () => {
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     expect(chips(container)[0]!.classList.contains("unsent")).toBe(false);
 
-    await new Promise((r) => setTimeout(r, 600));
-    send(container);
+    // Step the clock past the double-click send guard instead of waiting it out.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.advanceTimersByTime(600);
+      send(container);
+    } finally {
+      vi.useRealTimers();
+    }
     expect(opts.onSend).toHaveBeenCalledWith(
       "",
       null,

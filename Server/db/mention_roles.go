@@ -49,12 +49,10 @@ func (d *DB) GetRoleMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (m
 	if len(msgIDs) == 0 {
 		return result, nil
 	}
-	placeholders, args := inPlaceholders(msgIDs)
-	rows, err := d.reader.QueryContext(ctx,
-		fmt.Sprintf( //nolint:gosec // G201: placeholder interpolation, not user input
-			`SELECT message_id, role_id FROM message_role_mentions
-			 WHERE message_id IN (%s) ORDER BY message_id, role_id`, placeholders),
-		args...,
+	rows, err := d.queryCached(ctx,
+		`SELECT message_id, role_id FROM message_role_mentions
+		 WHERE message_id IN (SELECT value FROM json_each(?)) ORDER BY message_id, role_id`,
+		idsJSON(msgIDs),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("GetRoleMentionsByMessageIDs: %w", err)

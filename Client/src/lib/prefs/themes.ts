@@ -9,7 +9,7 @@ import { Disposable } from "../disposable";
 import { readStored, removeStored, writeStored } from "./preferences";
 import { deriveAccentTokens, parseColor, type Rgb } from "../text/colorContrast";
 
-/** Built-in theme palettes. Moved here from `@components/settings/helpers` so
+/** Built-in theme palettes. Moved here from `features/settings/helpers` so
  *  `lib/` and `features/` modules can apply a theme without importing the
  *  component layer. */
 export const THEMES = {
@@ -215,7 +215,7 @@ export function applyThemeByName(name: string): void {
 /**
  * Apply a built-in theme's palette inline on documentElement, then hand the
  * body class and persistence to applyThemeByName. Moved here from
- * `@components/settings/helpers` so `lib/` can apply a stored theme
+ * `features/settings/helpers` so `lib/` can apply a stored theme
  * without importing the component layer.
  */
 export function applyTheme(name: ThemeName): void {

@@ -15,6 +15,41 @@ import (
 	"github.com/J3vb/OwnCord/Server/permissions"
 )
 
+// reportStore is what ReportService reads and writes. *db.DB satisfies it.
+type reportStore interface {
+	GetMessage(ctx context.Context, id int64) (*db.Message, error)
+	GetChannel(ctx context.Context, id int64) (*db.Channel, error)
+	GetUserByID(ctx context.Context, id int64) (*db.User, error)
+	HasNSFWAcknowledgement(ctx context.Context, userID, channelID int64) (bool, error)
+	// FileReport inserts the report row and its evidence snapshot in one writer
+	// transaction, leaving no autocommit window for an erasure to land content or an
+	// author id mid-intake. The caller generates publicID (crypto/rand).
+	FileReport(ctx context.Context, publicID string, reporterID, subjectID int64, targetType, targetRef string, channelID *int64, reason, detail string, evidence []db.ReportEvidenceInput) (int64, error)
+	GetReport(ctx context.Context, id int64) (*db.Report, error)
+	GetReportByPublicID(ctx context.Context, publicID string) (*db.Report, error)
+	FindOpenOrAssignedReport(ctx context.Context, reporterID int64, targetType, targetRef string) (int64, error)
+	ListReportsQueue(ctx context.Context, state string) ([]db.ReportQueueRow, error)
+	ListReportsMine(ctx context.Context, reporterID int64) ([]db.ReportSummary, error)
+	// AssignReport is guarded on state, the caller's last-observed assignee
+	// (optimistic concurrency) and EXISTS(users).
+	AssignReport(ctx context.Context, id, assigneeID, observedAssigneeID int64) (bool, error)
+	// AssignReportForced is the force-reassign path: BOTH principals' role positions
+	// are read fresh inside the write's transaction. ErrForbidden means the caller
+	// does not outrank the current assignee.
+	AssignReportForced(ctx context.Context, id, assigneeID, observedAssigneeID, actorID int64) (bool, error)
+	CloseReport(ctx context.Context, id int64, state, outcome string, actorID int64) (bool, error)
+	ListReportEvidence(ctx context.Context, reportID int64) ([]db.ReportEvidenceRow, error)
+	// InsertReportNote is guarded on EXISTS(users) and the report's state; false
+	// means 409: the author was erased, or the report closed, before the write.
+	InsertReportNote(ctx context.Context, reportID, authorID int64, body string) (bool, error)
+	ListReportNotes(ctx context.Context, reportID int64) ([]db.ReportNoteRow, error)
+	// ListReportEvents reads report_events, this feature's own immutable history
+	// (never the shared audit_log), exposed only inside the queue detail. The
+	// mutations above write their event in the same transaction.
+	ListReportEvents(ctx context.Context, reportID int64) ([]db.ReportEvent, error)
+	PruneReportContentOlderThan(ctx context.Context, cutoff string) (int64, error)
+}
+
 // ReportService is the local report intake and moderator queue: the report row,
 // the immutable evidence snapshot taken at file time, assignment/status/notes
 // and the reporter's status view. Every write is audited with the actor tokens
@@ -24,7 +59,7 @@ import (
 // PublicIDFor) so a sequential id never lets a bit holder infer a neighbouring
 // report.
 type ReportService struct {
-	st       Store
+	st       reportStore
 	perms    *PermissionService
 	messages *MessageService
 	uploads  *UploadService
@@ -35,7 +70,7 @@ type ReportService struct {
 }
 
 // NewReportService creates a ReportService.
-func NewReportService(st Store, perms *PermissionService, messages *MessageService, uploads *UploadService, moderation *ModerationService, limiter *auth.RateLimiter) *ReportService {
+func NewReportService(st reportStore, perms *PermissionService, messages *MessageService, uploads *UploadService, moderation *ModerationService, limiter *auth.RateLimiter) *ReportService {
 	return &ReportService{st: st, perms: perms, messages: messages, uploads: uploads, moderation: moderation, limiter: limiter}
 }
 

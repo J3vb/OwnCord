@@ -114,11 +114,11 @@ func (d *DB) attachCalls(ctx context.Context, msgs []MessageAPIResponse) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	calls, err := d.q.GetMessageCallsByMessageIDs(ctx, ids)
+	calls, err := d.q.GetMessageCallsByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
 		return fmt.Errorf("calls: %w", err)
 	}
-	parts, err := d.q.GetMessageCallParticipantsByMessageIDs(ctx, ids)
+	parts, err := d.q.GetMessageCallParticipantsByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
 		return fmt.Errorf("participants: %w", err)
 	}

@@ -44,12 +44,6 @@
     "opener:default",
     "dialog:default",
     "process:allow-restart",
-    "window-state:default",
-    "autostart:allow-enable",
-    "autostart:allow-disable",
-    "autostart:allow-is-enabled",
-    "deep-link:default",
-    "deep-link:allow-register",
     {
       "identifier": "fs:allow-write-file",
       "allow": [

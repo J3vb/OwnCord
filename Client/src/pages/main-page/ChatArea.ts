@@ -10,12 +10,17 @@ import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@components/Toast";
 import { createLazyVideoGrid } from "./lazyVideoGrid";
 import type { LazyVideoGrid } from "./lazyVideoGrid";
+import type { PhoneCallBarOptions } from "@components/PhoneCallBar";
+import { createLazyPhoneCallBar } from "./lazyPhoneCallBar";
 import { buildChatHeader } from "./ChatHeader";
 import type { ChatHeaderRefs } from "./ChatHeader";
 import { createPinnedPanelController, createSearchOverlayController } from "./OverlayManagers";
 import type { SearchOverlayController } from "./OverlayManagers";
 import { createMediaGalleryController } from "./MediaGalleryController";
-import type { MessageDeleteSubscriber } from "./MediaGalleryController";
+import type {
+  MessageAttachmentsSubscriber,
+  MessageDeleteSubscriber,
+} from "./MediaGalleryController";
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "./MessageJump";
 import { setMessageJumpHandler } from "@lib/nav/messageNavigation";
@@ -43,8 +48,12 @@ export interface ChatAreaOptions {
   readonly onStartVideoCall?: () => void;
   /** Rename the open group DM (the header's group name click). */
   readonly onRenameGroup?: () => void;
+  /** What the phone call bar does; without it the page has no bar. */
+  readonly callBar?: PhoneCallBarOptions;
   /** Deleted-message events, so an open media gallery drops their items. */
   readonly subscribeDeletes: MessageDeleteSubscriber;
+  /** Edits that removed files from a message, for the same gallery. */
+  readonly subscribeAttachments?: MessageAttachmentsSubscriber;
 }
 
 export interface ChatAreaResult {
@@ -67,6 +76,8 @@ export interface ChatAreaResult {
   readonly chatHeaderRefs: ChatHeaderRefs;
   /** The header's narrow-width sidebar toggle, for the drawer controller. */
   readonly sidebarToggle: HTMLButtonElement;
+  /** Re-decide whether the phone call bar shows (the call view opened or closed). */
+  readonly refreshCallBar: () => void;
   /** The search overlay controller. */
   readonly searchCtrl: SearchOverlayController;
   /** Close the media gallery if it is open. */
@@ -137,6 +148,9 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     getRoot,
     getCurrentChannelId: () => getChannelCtrl()?.currentChannelId ?? null,
     subscribeDeletes: opts.subscribeDeletes,
+    ...(opts.subscribeAttachments === undefined
+      ? {}
+      : { subscribeAttachments: opts.subscribeAttachments }),
     onJumpToMessage: (channelId: number, msgId: number) => {
       void jumper.jumpTo(channelId, msgId);
     },
@@ -208,6 +222,13 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
   });
   chatArea.appendChild(chatHeader.element);
 
+  // --- Phone call bar (directly under the header) ---
+  const callBar = opts.callBar === undefined ? null : createLazyPhoneCallBar(opts.callBar);
+  if (callBar !== null) {
+    callBar.mount(chatArea);
+    children.push(callBar);
+  }
+
   // --- Slots ---
   const callPanelSlot = createElement("div", {
     class: "call-panel-slot",
@@ -260,6 +281,7 @@ export function createChatArea(opts: ChatAreaOptions): ChatAreaResult {
     chatHeaderName,
     chatHeaderRefs: chatHeader.refs,
     sidebarToggle: chatHeader.refs.sidebarToggle,
+    refreshCallBar: () => callBar?.refresh(),
     searchCtrl,
     closePinnedPanel: pinnedCtrl.cleanup,
     closeMediaGallery: mediaCtrl.cleanup,

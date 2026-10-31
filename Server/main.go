@@ -93,7 +93,7 @@ func main() {
 
 	// Create ring buffer for admin log viewer, then build a multi-handler
 	// that tees log records to both stdout and the ring buffer.
-	logBuf := admin.NewRingBuffer(2000)
+	logBuf := admin.NewRingBuffer(10000)
 	// levelVar controls both handlers' thresholds. It starts at INFO so
 	// early-startup logs are captured, then app.LoadConfig adjusts it once
 	// config.yaml / OWNCORD_LOGGING_LEVEL is loaded. The ring buffer shares it

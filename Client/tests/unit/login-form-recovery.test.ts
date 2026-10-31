@@ -9,7 +9,7 @@ vi.mock("../../src/lib/net/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
 }));
 
-vi.mock("../../src/components/SettingsOverlay", () => ({
+vi.mock("../../src/features/settings/SettingsOverlay", () => ({
   createSettingsOverlay: () => ({ mount: vi.fn(), destroy: vi.fn() }),
 }));
 

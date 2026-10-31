@@ -38,6 +38,8 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"upload.user_quota_mb", &cfg.Upload.UserQuotaMB, 0, maxMiB, def.Upload.UserQuotaMB, "the default, 0, means unlimited", false},
 		{"upload.import_max_mb", &cfg.Upload.ImportMaxMB, 1, maxMiB, def.Upload.ImportMaxMB, "the default, 500 MB", false},
 		{"server.min_free_disk_mb", &cfg.Server.MinFreeDiskMB, 0, maxMiB, def.Server.MinFreeDiskMB, "the default floor; write 0 to disable it", false},
+		{"logging.history_days", &cfg.Logging.HistoryDays, 0, 3650, def.Logging.HistoryDays, "the default, 7 days; write 0 to turn saved logs off", false},
+		{"logging.history_max_mb", &cfg.Logging.HistoryMaxMB, 1, 1 << 20, def.Logging.HistoryMaxMB, "the default, 200 MB", false},
 		{"moderation.report_retention_days", &cfg.Moderation.ReportRetentionDays, 0, 3650, def.Moderation.ReportRetentionDays, "0 means never prune report content", false},
 		{"moderation.action_retention_days", &cfg.Moderation.ActionRetentionDays, 0, 3650, def.Moderation.ActionRetentionDays, "0 means never retire warning/timeout rows", false},
 		{"attention.disk_warn_free_mb", &cfg.Attention.DiskWarnFreeMB, 0, maxMiB, def.Attention.DiskWarnFreeMB, "the default, 1024 MB; write 0 for only the critical level at server.min_free_disk_mb", false},
@@ -45,6 +47,12 @@ func boundedKeys(cfg *Config) []boundedKey {
 		{"attention.reconnects_per_min", &cfg.Attention.ReconnectsPerMin, 1, 1_000_000, def.Attention.ReconnectsPerMin, "the default, 30 per minute", false},
 		{"attention.delivery_drops_per_min", &cfg.Attention.DeliveryDropsPerMin, 1, 1_000_000, def.Attention.DeliveryDropsPerMin, "the default, 1 per minute", false},
 		{"push.subscription_ttl_days", &cfg.Push.SubscriptionTTLDays, 1, 3650, def.Push.SubscriptionTTLDays, "the default, 90 days", false},
+		{"event_persistence.retention_hours", &cfg.EventPersistence.RetentionHours, 1, 8_760, def.EventPersistence.RetentionHours, "the default, 24 hours", false},
+		{"event_persistence.batch_size", &cfg.EventPersistence.BatchSize, 1, 10_000, def.EventPersistence.BatchSize, "the default, 50 events", false},
+		{"event_persistence.batch_flush_ms", &cfg.EventPersistence.BatchFlushMs, 1, 60_000, def.EventPersistence.BatchFlushMs, "the default, 100 ms", false},
+		{"event_persistence.pruner_interval_minutes", &cfg.EventPersistence.PrunerIntervalMinutes, 1, 10_080, def.EventPersistence.PrunerIntervalMinutes, "the default, 60 minutes", false},
+		{"event_persistence.replay_ring_size", &cfg.EventPersistence.ReplayRingSize, 1, 1_000_000, def.EventPersistence.ReplayRingSize, "the default, 1000 events", false},
+		{"event_persistence.replay_cold_limit", &cfg.EventPersistence.ReplayColdLimit, 0, 1_000_000, def.EventPersistence.ReplayColdLimit, "the default, 5000 events", false},
 		{"voice.udp_port", &cfg.Voice.UDPPort, 0, 65535, def.Voice.UDPPort, "0, which uses the 50000-60000 range", true},
 	}
 }

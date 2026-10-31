@@ -1,26 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
 
 const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
   fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("blob:animated")),
 }));
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 });
 
-import { buildCustomEmojiImage } from "../../src/components/message-list/customEmoji";
-import { clearAttachmentCaches } from "../../src/components/message-list/attachments";
+import { buildCustomEmojiImage } from "../../src/features/messaging/content/customEmoji";
+import { clearAttachmentCaches } from "../../src/features/messaging/content/attachments";
 import {
   animateEmojiEnabled,
   captureStill,

@@ -318,10 +318,14 @@ export const shellText = defineCatalog("shell", {
   "status.dnd": "Do Not Disturb",
   "status.invisible": "Invisible",
   "status.offline": "Offline",
+  "status.onlineMobile": "Online on the phone app",
+  "status.idleMobile": "Idle on the phone app",
+  "status.dndMobile": "Do Not Disturb on the phone app",
   "status.customPlaceholder": "Set a custom status",
   "status.customLabel": "Custom status",
   "status.change": "Change status",
   "status.dndNote": "You will not receive desktop notifications",
+  "status.dndNote.android": "You will not receive notifications",
   "status.invisibleNote": "You will appear offline",
   "status.clearCustom": "Clear custom status",
   "status.editProfile": "Edit Profile",
@@ -345,8 +349,12 @@ export const shellText = defineCatalog("shell", {
   "status.clearsToday": "Clears today",
   "status.emojiButton": "Add an emoji to your custom status",
 
+  "sheet.back": "Back",
+  "channel.sheetLabel": "{name} options",
+
   "sidebar.open": "Open navigation",
   "sidebar.close": "Close navigation",
+  "sidebar.search": "Find or start a conversation",
 
   "toast.dismiss": "Dismiss notification",
 
@@ -383,6 +391,25 @@ export const shellText = defineCatalog("shell", {
   "messages.loadNewerFailed": "Failed to load newer messages",
   "messages.reactionSlowDown": "Slow down! Please wait before reacting again.",
 });
+
+/** The label for a presence status; with `mobile` it says the member is on the
+ *  phone app. Only online, idle and do-not-disturb can be on the phone: any
+ *  other status reads as its plain label. */
+export function statusLabelFor(status: UserStatus | (string & {}), mobile: boolean): string {
+  if (mobile) {
+    switch (status) {
+      case "online":
+        return shellText("status.onlineMobile");
+      case "idle":
+        return shellText("status.idleMobile");
+      case "dnd":
+        return shellText("status.dndMobile");
+      default:
+        break;
+    }
+  }
+  return statusLabel(status);
+}
 
 /** The catalog label for a presence status ("dnd" reads "Do Not Disturb"). */
 export function statusLabel(status: UserStatus | (string & {})): string {

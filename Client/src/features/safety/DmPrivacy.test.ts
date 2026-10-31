@@ -6,7 +6,7 @@ import { expectConsole } from "../../../tests/helpers/console";
 import { captureLogs } from "../../../tests/helpers/log-capture";
 import type { DmPrivacy } from "@lib/api";
 // Loaded here so the avatar module's app-lifetime listeners predate the first test.
-import "@components/message-list/avatar";
+import "../profiles/avatar";
 import "../reports/myReports";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { buildSafetyPane } from "../reports/safetyPane";

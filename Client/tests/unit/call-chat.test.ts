@@ -12,6 +12,7 @@ import {
   voiceStore,
   setVoiceStatus,
 } from "@stores/voice.store";
+import { savePref } from "@lib/prefs/preferences";
 import {
   createCallChat,
   type CallChat,
@@ -325,6 +326,45 @@ describe("callChat", () => {
       chat.refresh();
       expect(states.at(-1)).toEqual({ capable: true, open: false });
       expect(lastBeside(second)).toBe(false);
+    });
+
+    describe("on a phone", () => {
+      beforeEach(() => {
+        vi.stubGlobal(
+          "matchMedia",
+          vi.fn((q: string) => ({ matches: q.includes("pointer: coarse") })),
+        );
+      });
+      afterEach(() => {
+        vi.unstubAllGlobals();
+      });
+
+      it("starts closed when the user never chose, so the call view has the screen", () => {
+        const ctrl = fakeCtrl();
+        inCall(ctrl);
+        expect(lastBeside(ctrl)).toBe(false);
+      });
+
+      it("keeps a saved choice of open", () => {
+        savePref("callChatOpen", true);
+        const ctrl = fakeCtrl();
+        inCall(ctrl);
+        expect(lastBeside(ctrl)).toBe(true);
+      });
+
+      it("keeps a saved choice of closed", () => {
+        savePref("callChatOpen", false);
+        const ctrl = fakeCtrl();
+        inCall(ctrl);
+        expect(lastBeside(ctrl)).toBe(false);
+      });
+
+      it("opens from the header's toggle", () => {
+        const ctrl = fakeCtrl();
+        inCall(ctrl);
+        chat?.toggleChat();
+        expect(lastBeside(ctrl)).toBe(true);
+      });
     });
 
     it("an unreadable pref falls back to the chat open", () => {

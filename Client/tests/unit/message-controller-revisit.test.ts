@@ -6,21 +6,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // revalidated: an edit made while away shows, a delete made while away is
 // gone, and the older rows need no rebuild.
 
-// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  };
-}
-
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
@@ -43,6 +28,7 @@ import {
 } from "@stores/messages.store";
 import { setActiveChannel, setChannels } from "@stores/channels.store";
 import type { MessageResponse } from "../../src/lib/types";
+import "../helpers/resizeObserverStub";
 
 const CH = 1;
 

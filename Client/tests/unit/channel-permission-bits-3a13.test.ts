@@ -6,30 +6,18 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { channelBitOrRole } from "@lib/permissions";
 import { Permission } from "@lib/types";
-import { authStore } from "@stores/auth.store";
 import { addChannel, channelsStore, setChannels, setRoles } from "@stores/channels.store";
 import type { Message } from "@stores/messages.store";
 import { messagesStore } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
 import { createReactionController } from "../../src/pages/main-page/ReactionController";
+import { resetMessagesState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const ME = 1;
 const OTHER = 2;
@@ -38,13 +26,10 @@ function setRole(manage: boolean): void {
   setRoles([
     { id: 1, name: "member", color: null, permissions: manage ? Permission.MANAGE_MESSAGES : 0 },
   ]);
-  authStore.setState(() => ({
-    token: "t",
-    user: { id: ME, username: "me", avatar: null, role: "member" },
-    serverName: null,
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs(
+    { id: ME, username: "me", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
 }
 
 type Bits = { can_delete_others?: boolean; can_pin?: boolean; can_react?: boolean };
@@ -106,20 +91,8 @@ describe("channel permission bits (3A-13)", () => {
     container.querySelector<HTMLElement>("[data-testid='msg-react-11']")!;
 
   beforeEach(() => {
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetChannelsState();
+    resetMessagesState();
     setConnectionStatus("connected");
     uiStore.flush();
     container = document.createElement("div");

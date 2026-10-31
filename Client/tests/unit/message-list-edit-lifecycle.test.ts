@@ -5,14 +5,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 const loader = vi.hoisted(() => ({ failLoad: false }));
 vi.mock("../../src/features/messaging/inlineEditLoader", async (importActual) => {
   const actual =
@@ -33,6 +25,8 @@ import type { Message } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { setChannels, setActiveChannel, setRoles, channelsStore } from "@stores/channels.store";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
@@ -93,15 +87,8 @@ describe("MessageList — inline editor lifecycle", () => {
   beforeEach(() => {
     loader.failLoad = false;
     resetServerCapabilities();
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMessagesState();
+    resetMembersState();
     setChannels([]);
     setActiveChannel(null);
     scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
@@ -182,6 +169,38 @@ describe("MessageList — inline editor lifecycle", () => {
     editor(1)!.dispatchEvent(new Event("input", { bubbles: true }));
     container.querySelector<HTMLElement>("[data-testid='msg-edit-save-1']")!.click();
     expect(options.onEditSave).toHaveBeenCalledWith(1, "yo <@10> @Mod <@77>");
+  });
+
+  it("refuses an edit that is within the limit as shown but over it once mentions expand", async () => {
+    applyReadyCapabilities({ id_mentions: true });
+    membersStore.setState(() => ({
+      members: new Map([
+        [
+          123456789012,
+          {
+            id: 123456789012,
+            username: "Zed",
+            avatar: null,
+            role: "member",
+            status: "online" as const,
+          },
+        ],
+      ]),
+      typingUsers: new Map(),
+    }));
+    setMessages([makeMessage(1, { content: "<@123456789012> <@123456789012> short" })]);
+    mount();
+    expect(list!.startEdit(1)).toBe(true);
+    await vi.waitFor(() => expect(editor(1)).not.toBeNull());
+    expect(editor(1)!.value).toBe("@Zed @Zed short");
+
+    const draft = `@Zed @Zed ${"a".repeat(3989)}`;
+    editor(1)!.value = draft;
+    editor(1)!.dispatchEvent(new Event("input", { bubbles: true }));
+    container.querySelector<HTMLElement>("[data-testid='msg-edit-save-1']")!.click();
+    expect(options.onEditSave).not.toHaveBeenCalled();
+    expect(editor(1)!.value).toBe(draft);
+    expect(container.querySelector(".msg-inline-edit-error")?.textContent).toContain("4000");
   });
 
   it("saves the shown text as is without the id_mentions capability", async () => {

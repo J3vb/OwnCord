@@ -9,7 +9,7 @@ vi.mock("@lib/logger", () => ({
 import { createUserProfilePopup } from "@components/UserProfilePopup";
 import { createDmProfileSidebar } from "@components/DmProfileSidebar";
 import { createDmSidebar, type DmConversation } from "@components/DmSidebar";
-import { buildGameActivityRows } from "../../src/components/settings/GameActivityRows";
+import { buildGameActivityRows } from "../../src/features/settings/GameActivityRows";
 import { playingForLine, playingLine } from "../../src/features/members/gameActivityLine";
 import {
   applyGameActivityPolicy,

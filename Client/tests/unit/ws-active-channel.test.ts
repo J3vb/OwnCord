@@ -212,4 +212,32 @@ describe("auth frame: features", () => {
     client.disconnect();
     vi.useRealTimers();
   });
+
+  it("adds mobile only in the Android app, not in a phone browser", async () => {
+    vi.useFakeTimers();
+    const dial = async (): Promise<unknown> => {
+      mockInvoke.mockReset();
+      mockInvoke.mockResolvedValue(undefined);
+      eventHandlers.clear();
+      setActiveChannelProvider(null);
+      const client = createWsClient();
+      client.connect({ host: "localhost:8443", token: "t" });
+      await vi.advanceTimersByTimeAsync(10);
+      emitTauriEvent("ws-state", "open");
+      const features = getAuthPayload().features;
+      client.disconnect();
+      return features;
+    };
+
+    // A phone browser: Android user agent, no native host.
+    vi.stubGlobal("navigator", { ...navigator, userAgent: "Mozilla/5.0 (Linux; Android 14)" });
+    expect(await dial()).toEqual(["forums"]);
+
+    // The Android app: a Tauri host on an Android user agent.
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    expect(await dial()).toEqual(["forums", "mobile"]);
+
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 });

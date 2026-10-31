@@ -156,7 +156,7 @@ After the WebSocket connection is established, the client sends the first messag
 | `active_channel_id`   | int64    | No       | The channel the client had open when it disconnected. Honoured only on a resume (`last_seq > 0`) and only after the server re-checks read permission; an unknown or unreadable id is ignored. Omit when unknown.                                                                                                          |
 | `wake`                | bool     | No       | `true` marks a dial the client made on its own after its process was suspended (a laptop waking from sleep). Servers that keep one connection per device session accept it like any other dial; the flag is ignored. Older servers refused it with `ANOTHER_DEVICE_ACTIVE` while a different session held the connection. |
 | `epoch`               | int      | No       | The wire epoch this client speaks (`PROTOCOL_EPOCH`, generated from `protocol/schema.json`). Absent means 0. See [Compatibility](#compatibility-protocol-epoch).                                                                                                                                                          |
-| `features`            | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. Only `"forums"` is defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                                |
+| `features`            | string[] | No       | Optional capabilities this client can render, declared once per connection (see [Client features](#client-features)). Absent means none. `"forums"` and `"mobile"` are defined; unknown names are ignored. The list is untrusted input and only ever narrows what the socket is sent.                                     |
 | `identity_public_key` | string   | No       | This device's voice E2EE identity public key (base64, at most 128 characters, same rules as `identity_public_key` on `PATCH /users/me`). See [Identity key per device](#identity-key-per-device). An invalid or wrongly typed value is ignored and logged; it never fails the handshake.                                  |
 
 #### Identity key per device
@@ -377,9 +377,10 @@ first such declaration. Names the server does not know are ignored, the list is
 capped (32 names of at most 32 bytes each), and it grants nothing: it only
 narrows what the socket is sent.
 
-| Feature  | Declared by            | Effect on a socket that does **not** declare it                                                                                                                                                                                                                                                                                      |
-| -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `forums` | clients from WP 6.9d-b | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. It also gets no frame for a forum's posts (see [Forum posts](#forum-posts)). |
+| Feature  | Declared by            | Effect on a socket that does **not** declare it                                                                                                                                                                                                                                                                                                                              |
+| -------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `forums` | clients from WP 6.9d-b | No `type: "forum"` row in `ready.channels`, and no forum `channel_create` (channel creation, visibility refresh, timeout refresh and role refresh alike). Those frames are per recipient and unsequenced, so skipping one allocates no sequence number. It also gets no frame for a forum's posts (see [Forum posts](#forum-posts)).                                         |
+| `mobile` | the Android app        | Nothing is withheld. It decides only whether this connection can make the user's presence show the phone: the merged `presence` carries `"mobile": true` when the connection the shown status comes from declared `mobile` and every other connection in the same idle class (all active, or all idle) did too. A phone browser does not declare it and counts as a desktop. |
 
 `channel_update` for a forum is **not** filtered: it is one shared sequenced
 frame, and dropping it for some sockets would allocate a sequence number and
@@ -703,12 +704,16 @@ server. Load it as an uploaded avatar URL is loaded. Only the group's members
 can fetch it, and only while it is the live icon, so a client that loses access
 (removed, or the icon replaced) falls back to the stacked avatars.
 
+A DM recipient (`recipient` and each `recipients[]` entry) may carry
+`mobile: true` under the rule of `presence.mobile`; it is omitted when `false`
+and for a recipient who is offline to this viewer.
+
 A DM's `mention_count` is the same `read_states.mention_count` the channel list
 carries. It used to be absent here, so a DM mention badge silently reset to 0 on
 every reconnect; the ready payload now ships the stored value. A DM's
 `unread_count` is capped at 100 under the same rule as `channels[]` above.
 
-**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name of the member's top role), `role_ids` (every role the member holds, top role first, always an array with at least one id; absent on an older server, where `role` is the only role), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
+**members[]:** All registered users with `id`, `username`, `avatar`, `role` (lowercase name of the member's top role), `role_ids` (every role the member holds, top role first, always an array with at least one id; absent on an older server, where `role` is the only role), `status`, `display_name` (`null` when unset — render it instead of `username`), `about` (the About Me bio, `null` when unset; sent for every member, invisible ones included), `created_at` (the account creation instant, RFC 3339 UTC like `2026-10-15T13:04:05Z`; for an approval-mode account this is the application time), `custom_status` (`null` when unset), `mobile` (`true` when the member is on the Android app, under the rule of `presence.mobile`; optional, omitted when `false` and for a member who is offline to this viewer), `identity_public_key` (base64 long-term E2EE identity key, omitted when the user has not published one — see voice E2EE TOFU), `banner` (the profile banner image path `/api/v1/files/{id}`) and `banner_color` (`#rgb` or `#rrggbb`, lower-case); both are omitted when unset, so absent means no banner
 
 **activities[]:** The games connected members are playing, as `{user_id, name, started_at}` (`started_at` in unix milliseconds), sorted by `user_id`; always an array, `[]` when nobody is playing. It lists every connected member who reports a game and is not offline to this viewer, the viewer included: an invisible member appears only in their own `ready`. It is a separate array, not a field of `members[]`, and is the first key of the payload. It is `[]` while an admin has game activity switched off, and absent on a server without the `game_activity` capability; a client then treats every member as not playing. Later changes arrive as `presence`.
 
@@ -1806,6 +1811,15 @@ The capability is `listening_activity`.
 }
 ```
 
+`mobile` is `true` when the user is on the Android app: the connection the shown
+status comes from declared the `mobile` [client feature](#client-features) and
+every other connection in the same idle class (all active, or all idle) did too. A desktop that is as active as the phone wins, so the flag is
+`false`; a phone that is active beside an idle desktop shows it; a phone alone
+shows it. It is optional and omitted when `false`, and never present on the
+`"offline"` frame an invisible user's status collapses to; the user's own copy
+may carry it. A change of the flag alone (a device leaving or going idle) is
+broadcast as a new `presence`.
+
 `listening` (WP 8.10a) is the song the user is listening to (see
 `listening_update`): `{title, artist, player, started_at, duration_ms}`, always
 present (`null` when none), with the same rules as `activity`: every presence
@@ -1873,7 +1887,9 @@ of N users costs each client a handful of frames instead of N.
 }
 ```
 
-Each entry means what a `presence` with the same fields means: `custom_status`,
+Each entry means what a `presence` with the same fields means, `mobile`
+included (optional, omitted when `false`, absent on an entry collapsed to
+offline): `custom_status`,
 `activity` and `listening` (WP 8.10a) are always present (`null` when unset), and an invisible user is
 `"offline"` with `custom_status: null`, `activity: null` and `listening: null` for everyone but themselves — the invisible user's
 own copy of the same frame (same `seq`) carries their true status. An entry

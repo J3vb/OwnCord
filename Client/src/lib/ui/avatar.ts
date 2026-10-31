@@ -3,9 +3,9 @@
  *
  * Pure identity helpers only. The DOM builder and the URL-renderability check
  * that need the authenticated image fetch live one layer up, in
- * `components/message-list/avatar.ts` — an earlier version kept them here and
- * imported that UI helper, which the import-direction check forbids
- * (`lib/` must not reach `components/`).
+ * `features/profiles/avatar.ts` — an earlier version kept them here and
+ * imported that UI helper, which the layer rule forbids (`lib/` must not
+ * reach `features/` or the UI).
  */
 
 /** Everything the shared identity helpers need to know about the user. */

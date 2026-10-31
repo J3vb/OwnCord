@@ -108,6 +108,7 @@ func settleUntil(t *testing.T, h *Hub, cond func() bool, what string) {
 }
 
 func TestFreshConnect_ExistingMemberSendsNoMemberJoin(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	observer := connect("observer", true)
 	settle(t, h)
@@ -144,6 +145,7 @@ func wantMemberJoinThenBatch(t *testing.T, frames []batchFrame, newcomer *Client
 }
 
 func TestFreshConnect_FirstEverConnectSendsMemberJoinAheadOfBatch(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	observer := connect("observer", true)
 	settle(t, h)
@@ -158,6 +160,7 @@ func TestFreshConnect_FirstEverConnectSendsMemberJoinAheadOfBatch(t *testing.T) 
 }
 
 func TestFreshConnect_FailedFirstHandshakeStillAnnouncesOnNextConnect(t *testing.T) {
+	t.Parallel()
 	h, database, connect := presenceBatchHub(t)
 	ctx := context.Background()
 	observer := connect("observer", true)
@@ -327,6 +330,7 @@ func fillQueue(c *Client) {
 }
 
 func TestPresenceFrame_FullQueueDropsAndMarksStale_ContentFrameStillCloses(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	slow := connect("slow", true)
 	mover := connect("mover", true)
@@ -337,7 +341,7 @@ func TestPresenceFrame_FullQueueDropsAndMarksStale_ContentFrameStillCloses(t *te
 	// A window batch and a single status change, both into a full queue.
 	h.QueuePresence(mover.userID, db.StatusIdle, nil)
 	settle(t, h)
-	h.EmitEvents(context.Background(), presenceEvents(mover.userID, db.StatusDND, nil, nil, nil))
+	h.EmitEvents(context.Background(), presenceEvents(mover.userID, db.StatusDND, nil, nil, nil, false))
 	if err := h.awaitDispatch(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -362,6 +366,7 @@ func TestPresenceFrame_FullQueueDropsAndMarksStale_ContentFrameStillCloses(t *te
 }
 
 func TestPresenceStale_NextWindowSendsFullSnapshot(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	slow := connect("slow", true)
 	ghost := connect("ghost", true)
@@ -397,6 +402,7 @@ func TestPresenceStale_NextWindowSendsFullSnapshot(t *testing.T) {
 }
 
 func TestPresenceDrop_ForcesFullReadyOnResume(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	slow := connect("slow", true)
 	mover := connect("mover", true)
@@ -445,7 +451,7 @@ func TestPresenceUpdate_InsideTheWindowStillDeliversTheNewMember(t *testing.T) {
 		t.Fatal("a later state in the window lost the member data")
 	}
 
-	h.EmitEvents(context.Background(), presenceEvents(9, db.StatusDND, nil, nil, nil))
+	h.EmitEvents(context.Background(), presenceEvents(9, db.StatusDND, nil, nil, nil, false))
 	if len(h.broadcast) != 2 {
 		t.Fatalf("got %d frames, want member_join then the fresher presence", len(h.broadcast))
 	}
@@ -571,6 +577,7 @@ func fullSnapshotTexts(t *testing.T, c *Client) map[int64]*string {
 }
 
 func TestPresenceSnapshot_RepairsADroppedCustomStatus(t *testing.T) {
+	t.Parallel()
 	h, _, connect := presenceBatchHub(t)
 	ctx := context.Background()
 	slow := connect("slow", true)

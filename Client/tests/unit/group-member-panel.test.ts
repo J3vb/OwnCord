@@ -24,6 +24,7 @@ const member = (
   username: name.toLowerCase(),
   avatar: null,
   status: "online",
+  mobile: false,
   isOwner: false,
   isSelf: false,
   ...over,

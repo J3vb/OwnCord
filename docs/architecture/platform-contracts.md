@@ -275,7 +275,7 @@ native surface itself lives only in `platform/desktop/`.
 
 | Contract          | Files today                                                                                           | Native surface                                                                                                                                        | Browser outlook                                             |
 | ----------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| HTTP fetch        | `lib/api.ts`, `lib/presence/profiles.ts`, `message-list/attachments.ts` (server files)                | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
+| HTTP fetch        | `lib/api.ts`, `lib/presence/profiles.ts`, `features/messaging/content/attachments.ts` (server files)  | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
 | External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                                          | `api/core`; 2 invokes (`external_*`)                                                                                                                  | ⚠ no equivalent — a page cannot classify resolved addresses |
 | WebSocket         | `lib/ws.ts`                                                                                           | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                                                   | ⚠ see hard cases                                            |
 | Secret storage    | `lib/net/credentials.ts`, `lib/net/identity.ts`, `lib/pendingMessages.ts`                             | `api/core`; 11 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
@@ -287,7 +287,7 @@ native surface itself lives only in `platform/desktop/`.
 | Updater / process | `lib/net/updater.ts`, `settings/AdvancedTab.ts`                                                       | `api/core`, `api/event` (`update-progress`, `update-installing`), `plugin-process`, `plugin-autostart`                                                | unsupported — the page reloads instead                      |
 | Tray status       | `main.ts`                                                                                             | `api/event` (`status-change`)                                                                                                                         | unsupported — there is no tray                              |
 | Shell / opener    | `lib/adminPanel.ts`, `main.ts`                                                                        | `api/core` (`open_external_url`)                                                                                                                      | `window.open`                                               |
-| File save / pick  | `message-list/attachments.ts`                                                                         | `plugin-dialog`, `plugin-fs`                                                                                                                          | `<a download>` / File System Access API                     |
+| File save / pick  | `features/messaging/content/attachments.ts`                                                           | `plugin-dialog`, `plugin-fs`                                                                                                                          | `<a download>` / File System Access API                     |
 | Input / PTT       | `lib/voice/ptt.ts`                                                                                    | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
 | Global shortcuts  | `pages/MainPage.ts`, `settings/{KeybindsTab,pttControls}.ts`, `platform/desktop/pushToTalkService.ts` | `api/core`, `api/event`; 6 invokes, 2 event listens                                                                                                   | unsupported — a page cannot observe keys outside itself     |
 | Deep links        | `lib/nav/deepLink.ts`                                                                                 | `plugin-deep-link`                                                                                                                                    | URL routing                                                 |
@@ -299,7 +299,7 @@ native surface itself lives only in `platform/desktop/`.
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`
 surface exists for them: the cross-platform media-device call sites
 (`lib/voice/deviceManager.ts`, `lib/net/connectionDiagnostics.ts`,
-`components/settings/VoiceAudioTab.ts`) use the Web API
+`features/settings/VoiceAudioTab.ts`) use the Web API
 `navigator.mediaDevices`, while the Linux-native voice session lists its audio
 and camera devices through its own `native_voice_*` commands (the audio
 parity and Linux native camera work, above). A contract would wrap a web API
@@ -449,7 +449,7 @@ lifted in place first (notifications, window, opener, app metadata, dev tools,
 autostart, the LiveKit half of the proxies), exactly as B7-4 did; `AppProcess`
 was lifted the same way. `TrayStatus` has no legacy binding — the subscription
 was inline in `main.ts`, which cannot be imported on its own — so its oracle
-for the move is `tests/unit/main.test.ts`'s tray tests (OC-0037, OC-0176),
+for the move is `tests/unit/main/lifecycle.test.ts`'s tray tests (OC-0037, OC-0176),
 green before and after.
 
 **One contract was added in B7-16:** `contracts/externalContent.ts`

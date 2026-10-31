@@ -3,13 +3,13 @@
  * the cap and the "N more" row, visibility with the parent, and the menu.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  setUserVolume: vi.fn(),
-  getUserVolume: vi.fn(() => 1),
-  getUserLocalMute: vi.fn(() => false),
-  rePinPeerIdentity: vi.fn(async () => true),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    rePinPeerIdentity: vi.fn(async () => true),
+  }),
+);
 vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
   initToast: vi.fn(),
@@ -23,7 +23,6 @@ import {
   resetChannelsStore,
   setChannels,
 } from "../../src/stores/channels.store";
-import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import {
   adoptReadyThreads,
@@ -35,6 +34,7 @@ import { muteChannel, unmuteChannel } from "../../src/lib/prefs/channelMutes";
 import { setHideMutedChannels } from "../../src/lib/prefs/hideMutedChannels";
 import type { ReadyChannel, ReadyThread } from "../../src/lib/types";
 import { makeThread } from "../helpers/thread-fixtures";
+import { signInAs } from "../helpers/storeSeeds";
 
 const text = (id: number, over: Partial<ReadyChannel> = {}): ReadyChannel => ({
   id,
@@ -88,13 +88,10 @@ describe("followed threads in the sidebar", () => {
   beforeEach(() => {
     resetChannelsStore();
     resetThreadsStore();
-    authStore.setState(() => ({
-      token: "t",
-      user: { id: 1, username: "me", avatar: null, role: "member" },
-      serverName: "S",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "me", avatar: null, role: "member" },
+      { token: "t", serverName: "S" },
+    );
     uiStore.setState((prev) => ({
       ...prev,
       connectionStatus: "connected" as const,

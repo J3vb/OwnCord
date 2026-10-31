@@ -5,12 +5,13 @@
  * route the popup body through it.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 import { markdownToPlainText } from "../../src/lib/text/markdown";
 import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
-import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
+import { signInAs } from "../helpers/storeSeeds";
 
 const { testPrefs } = vi.hoisted(() => ({ testPrefs: new Map<string, unknown>() }));
 
@@ -21,15 +22,7 @@ vi.mock("../../src/lib/prefs/preferences", async (importOriginal) => ({
   savePref: (key: string, value: unknown) => testPrefs.set(key, value),
 }));
 
-vi.mock("../../src/lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn(),
-  switchOutputDevice: vi.fn(),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("../../src/lib/voice/livekitSession", () => voiceSession.defaults());
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: vi.fn().mockResolvedValue(true),
@@ -94,13 +87,10 @@ describe("notifyIncomingMessage — popup body is plain text (U1a)", () => {
     testPrefs.clear();
     resetNotificationCoalescing();
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
-    authStore.setState(() => ({
-      token: "t",
-      user: { id: 1, username: "Me", avatar: null, role: "member" },
-      serverName: null,
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "Me", avatar: null, role: "member" },
+      { token: "t", serverName: null },
+    );
     channelsStore.setState(() => ({
       categories: [],
       channels: new Map([

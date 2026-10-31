@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  rePinPeerIdentity: vi.fn(),
-  leaveVoice: vi.fn(),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    rePinPeerIdentity: vi.fn(),
+  }),
+);
 vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
@@ -47,10 +48,11 @@ import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
-import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/readState";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
+import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
 
 const UNREAD: ReadyChannel[] = [
   {
@@ -97,26 +99,15 @@ describe("SidebarArea - server name menu", () => {
     localStorage.clear();
     sent = [];
     setMarkReadSender((id) => sent.push(id));
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     uiStore.setState((prev) => ({
       ...prev,
       collapsedCategories: new Set(),
       sidebarMode: "channels" as const,
     }));
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     grant(Permission.SEND_MESSAGES);
     container = document.createElement("div");
     document.body.appendChild(container);

@@ -95,7 +95,7 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 		if cur == nil || cur.customStatus == nil || cur.customStatusExpiresAt != expiresAt {
 			continue
 		}
-		if c.presence.CompareAndSwap(cur, &livePresence{status: cur.status, idleSince: cur.idleSince, setAt: cur.setAt, activity: cur.activity, listening: cur.listening}) && first == nil {
+		if c.presence.CompareAndSwap(cur, &livePresence{status: cur.status, idleSince: cur.idleSince, setAt: cur.setAt, activity: cur.activity, listening: cur.listening, selfIdle: cur.selfIdle}) && first == nil {
 			first = c
 		}
 	}
@@ -106,7 +106,7 @@ func (h *Hub) CustomStatusExpired(userID int64, expiresAt string) {
 	}
 	// Like every user-chosen presence, this supersedes a queued connect entry.
 	h.dropQueuedPresenceLocked(userID)
-	for _, ev := range presenceEvents(userID, shown.status, nil, shown.activity, shown.listening) {
+	for _, ev := range presenceEvents(userID, shown.status, nil, shown.activity, shown.listening, shown.mobile) {
 		h.enqueueExpiredPresence(first, ev)
 	}
 }

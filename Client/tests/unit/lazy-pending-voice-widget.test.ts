@@ -3,31 +3,20 @@
  * builds a fresh module graph so the widget's import can be held open.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const h = vi.hoisted(() => ({
   gate: null as null | { promise: Promise<void>; open: () => void; fail: () => void },
   loads: { value: 0 },
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  leaveVoice: vi.fn(),
-  switchInputDevice: vi.fn().mockResolvedValue(undefined),
-  switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  setVoiceSensitivity: vi.fn(),
-  setInputVolume: vi.fn(),
-  setOutputVolume: vi.fn(),
-  reapplyAudioProcessing: vi.fn().mockResolvedValue(undefined),
-  getRoomForStats: vi.fn().mockReturnValue(null),
-  reapplyEnhancedNoiseSuppression: vi.fn().mockResolvedValue(undefined),
-  retryMicPermission: vi.fn().mockResolvedValue(undefined),
-  getSessionDebugInfo: vi.fn().mockReturnValue({}),
-  setMuted: vi.fn(),
-  setDeafened: vi.fn(),
-  enableCamera: vi.fn().mockResolvedValue(undefined),
-  disableCamera: vi.fn().mockResolvedValue(undefined),
-  enableScreenshare: vi.fn().mockResolvedValue(undefined),
-  disableScreenshare: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+    reapplyEnhancedNoiseSuppression: vi.fn().mockResolvedValue(undefined),
+  }),
+);
 
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({

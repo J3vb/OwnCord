@@ -17,7 +17,7 @@
 import { createElement, appendChildren, setText } from "../../lib/dom";
 import { createIcon, type IconName } from "../../lib/icons";
 import { shellText } from "../../i18n/shell";
-import type { createAvatarElement } from "../../components/message-list/avatar";
+import type { createAvatarElement } from "../profiles/avatar";
 import {
   mentionBadge,
   nsfwIndicator,

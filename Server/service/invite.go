@@ -9,13 +9,23 @@ import (
 	"github.com/J3vb/OwnCord/Server/telemetry"
 )
 
+// inviteStore is what InviteService reads and writes. *db.DB satisfies it.
+type inviteStore interface {
+	db.Auditor
+	CreateInvite(ctx context.Context, createdBy int64, maxUses int, expiresAt *time.Time) (string, error)
+	GetInvite(ctx context.Context, code string) (*db.Invite, error)
+	ListInvites(ctx context.Context) ([]*db.Invite, error)
+	RevokeInvite(ctx context.Context, code string) error
+	ListInviteRedemptions(ctx context.Context, inviteID int64, limit int) ([]*db.InviteRedemption, error)
+}
+
 // InviteService handles invite management.
 type InviteService struct {
-	st Store
+	st inviteStore
 }
 
 // NewInviteService creates an InviteService.
-func NewInviteService(st Store) *InviteService {
+func NewInviteService(st inviteStore) *InviteService {
 	return &InviteService{st: st}
 }
 

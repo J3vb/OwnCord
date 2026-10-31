@@ -1,0 +1,154 @@
+/* The call bar under the chat header (components/PhoneCallBar.ts): phones only.
+   The header keeps its height; the bar is about 56px with an 8px margin. */
+.phone-call-bar {
+  display: none;
+}
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .phone-call-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-height: 56px;
+    margin: 8px;
+    padding: 6px 6px 6px 8px;
+    border: 1px solid var(--green);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--green) 14%, var(--bg-secondary));
+  }
+  .phone-call-bar[hidden] {
+    display: none;
+  }
+  .pcb-open {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+  }
+  .pcb-open:disabled {
+    cursor: default;
+  }
+  .pcb-avatars {
+    display: flex;
+    flex-shrink: 0;
+  }
+  .pcb-avatar {
+    width: 28px;
+    height: 28px;
+    margin-left: -8px;
+    border: 2px solid var(--bg-secondary);
+    border-radius: var(--radius-circle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-sm);
+    font-weight: 700;
+    color: var(--on-fill);
+    overflow: hidden;
+    box-sizing: content-box;
+  }
+  .pcb-avatar:first-child {
+    margin-left: 0;
+  }
+  .pcb-text {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .pcb-name,
+  .pcb-detail {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .pcb-name {
+    color: var(--header-primary);
+    font-size: var(--font-size-md);
+    font-weight: 700;
+  }
+  .pcb-detail {
+    color: var(--text-positive);
+    font-size: var(--font-size-sm);
+  }
+  .pcb-btn {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+    border-radius: var(--radius-circle);
+    background: var(--bg-active);
+    color: var(--text-normal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pcb-btn:disabled {
+    opacity: 0.5;
+  }
+  .pcb-mute[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--red) 22%, var(--bg-active));
+    color: var(--text-danger);
+  }
+  .pcb-leave {
+    background: var(--danger-fill);
+    color: var(--on-fill);
+  }
+}
+
+/* features/voice/talkButton.ts: Push to Talk's hold-to-talk button, only ever
+   built in the Android app. Green while the mic is open. */
+.talk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--bg-active);
+  color: var(--text-normal);
+  font-weight: 600;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.talk-btn[hidden] {
+  display: none;
+}
+.talk-btn:disabled {
+  opacity: 0.5;
+}
+.talk-btn.talking {
+  background: var(--success-fill);
+  color: var(--on-fill);
+}
+.talk-btn--bar {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-circle);
+}
+.talk-btn--call {
+  flex: 1 0 100%;
+  order: -1;
+  min-height: 56px;
+  padding: 0 var(--space-5);
+  font-size: var(--font-size-md);
+}
+.video-fs-calls--talk {
+  flex-wrap: wrap;
+  justify-content: center;
+}
+/* Beside Mute in the user bar: the bar's own 32 px button look, green while
+   talking. */
+.user-bar .ub-controls .talk-btn[hidden] {
+  display: none;
+}
+.user-bar .ub-controls .talk-btn.talking {
+  background: var(--success-fill);
+  color: var(--on-fill);
+}

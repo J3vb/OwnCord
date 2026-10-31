@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
   // No cached bytes: every avatar here is a still picture (WP 8.7).
   cachedImageBytes: () => null,

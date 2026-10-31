@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { mockLoadPref, mockSavePref } = vi.hoisted(() => ({
   mockLoadPref: vi.fn((_key: string, defaultVal: unknown) => defaultVal),
@@ -44,13 +45,15 @@ vi.mock("@stores/voice.store", () => ({
   },
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({
-  parseUserId: (identity: string) => {
-    const match = identity.match(/^user-(\d+)$/);
-    if (match !== null && match[1] !== undefined) return parseInt(match[1], 10);
-    return 0;
-  },
-}));
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    parseUserId: (identity: string) => {
+      const match = identity.match(/^user-(\d+)$/);
+      if (match !== null && match[1] !== undefined) return parseInt(match[1], 10);
+      return 0;
+    },
+  }),
+);
 
 import { AudioElements, setAudioVolumeHost } from "../../src/lib/voice/audioElements";
 

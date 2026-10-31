@@ -19,6 +19,7 @@ import type {
   ChannelMediaMonthsResponse,
   ChannelMediaPage,
   ChannelMediaQuery,
+  UserStorage,
 } from "@lib/types";
 import { formatDate, formatNumber } from "../i18n/format";
 import { mediaGalleryText } from "../i18n/mediaGallery";
@@ -31,7 +32,7 @@ import {
   isAudioMime,
   resolveServerUrl,
   thumbnailUrl,
-} from "./message-list/attachments";
+} from "../features/messaging/content/attachments";
 
 /** Quiet period after the last keystroke before a name search runs. */
 export const MEDIA_SEARCH_DEBOUNCE_MS = 300;
@@ -53,6 +54,10 @@ export interface ChannelMediaGalleryOptions {
   /** The members the uploader filter offers, read when the panel opens. */
   readonly uploaders: () => readonly MediaUploader[];
   readonly onJumpToMessage: (messageId: number) => void;
+  /** The caller's upload usage, read once when the Files tab first opens. */
+  readonly loadStorage?: (signal: AbortSignal) => Promise<UserStorage>;
+  /** Opens Settings at My uploads. Without it the usage line has no link. */
+  readonly onManageUploads?: () => void;
   readonly onClose: () => void;
   /** IANA zone months are counted in; the browser's own when omitted. */
   readonly timeZone?: string;
@@ -62,6 +67,8 @@ export interface ChannelMediaGalleryPanel extends MountableComponent {
   destroy(): void;
   /** Drop the items of deleted messages in place. */
   removeMessages(messageIds: readonly number[]): void;
+  /** Drop the items of a message whose attachment is no longer in `remainingIds`. */
+  syncMessageAttachments(messageId: number, remainingIds: readonly string[]): void;
 }
 
 type Kind = ChannelMediaQuery["kind"];
@@ -95,6 +102,16 @@ function formatDuration(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** The usage line's text: "You've used X of Y", or "X used" with no limit. */
+export function storageUsageText(storage: UserStorage): string {
+  return storage.quota_bytes > 0
+    ? mediaGalleryText("usage.of", {
+        used: formatFileSize(storage.used_bytes),
+        quota: formatFileSize(storage.quota_bytes),
+      })
+    : mediaGalleryText("usage.noLimit", { used: formatFileSize(storage.used_bytes) });
+}
+
 function renderFileRow(item: ChannelMediaItem): HTMLButtonElement {
   const att = item.attachment;
   const row = createElement("button", {
@@ -102,6 +119,7 @@ function renderFileRow(item: ChannelMediaItem): HTMLButtonElement {
     class: "media-gallery__file",
     "aria-label": mediaGalleryText("item.open", { name: att.filename }),
     "data-message-id": String(item.message_id),
+    "data-attachment-id": att.id,
   });
   const icon = createElement("span", { class: "media-gallery__file-icon" });
   icon.appendChild(createIcon(fileIcon(item), 20));
@@ -138,6 +156,8 @@ export function createChannelMediaGallery(
   let monthNav: HTMLElement | null = null;
   let sentinel: HTMLDivElement | null = null;
   let statusEl: HTMLDivElement | null = null;
+  let usageEl: HTMLDivElement | null = null;
+  let usageRequested = false;
   const tabs = new Map<Kind, HTMLButtonElement>();
 
   // One scope per query: a filter change destroys it, which aborts the
@@ -211,6 +231,7 @@ export function createChannelMediaGallery(
       title: att.filename,
       "aria-label": mediaGalleryText("item.open", { name: att.filename }),
       "data-message-id": String(item.message_id),
+      "data-attachment-id": att.id,
     });
     const url = resolveServerUrl(att.url);
     if (isVideoAttachment(att)) {
@@ -360,9 +381,39 @@ export function createChannelMediaGallery(
     void loadMore();
   }
 
+  /** Fill the Files tab's usage line; read once, and a failure just leaves it out. */
+  function loadUsage(): void {
+    if (usageRequested || options.loadStorage === undefined) return;
+    usageRequested = true;
+    options.loadStorage(disposable.signal).then(
+      (storage) => {
+        if (disposable.signal.aborted || usageEl === null) return;
+        usageEl.textContent = "";
+        usageEl.appendChild(createElement("span", {}, storageUsageText(storage)));
+        if (options.onManageUploads !== undefined) {
+          const manage = createElement(
+            "button",
+            { type: "button", class: "media-gallery__manage", "data-testid": "media-manage" },
+            mediaGalleryText("usage.manage"),
+          );
+          manage.addEventListener("click", () => options.onManageUploads?.(), {
+            signal: disposable.signal,
+          });
+          usageEl.appendChild(manage);
+        }
+        usageEl.hidden = kind !== "files";
+      },
+      () => {
+        usageRequested = false;
+      },
+    );
+  }
+
   function selectKind(next: Kind): void {
     if (next === kind) return;
     kind = next;
+    if (usageEl !== null) usageEl.hidden = kind !== "files" || usageEl.childElementCount === 0;
+    if (kind === "files") loadUsage();
     for (const [k, tab] of tabs) {
       tab.setAttribute("aria-selected", String(k === kind));
       tab.tabIndex = k === kind ? 0 : -1;
@@ -537,7 +588,12 @@ export function createChannelMediaGallery(
 
     const main = createElement("div", { class: "media-gallery__main" });
     appendChildren(main, body, monthNav);
-    appendChildren(root, header, tabList, buildToolbar(), main);
+    usageEl = createElement("div", {
+      class: "media-gallery__usage",
+      "data-testid": "media-usage",
+    });
+    usageEl.hidden = true;
+    appendChildren(root, header, tabList, buildToolbar(), usageEl, main);
     container.appendChild(root);
 
     if (typeof IntersectionObserver !== "undefined") {
@@ -568,23 +624,44 @@ export function createChannelMediaGallery(
     reload(true);
   }
 
+  function dropElement(el: HTMLElement): void {
+    const section = el.closest(".media-gallery__section");
+    el.remove();
+    if (section !== null && section.querySelector("[data-message-id]") === null) {
+      if (lastSection?.content.parentElement === section) lastSection = null;
+      section.remove();
+    }
+  }
+
+  function showEmptyIfDrained(): void {
+    if (tilesByMessage.size === 0 && !hasMore && !loading) {
+      setStatus(mediaGalleryText(kind === "media" ? "empty.media" : "empty.files"));
+    }
+  }
+
   function removeMessages(messageIds: readonly number[]): void {
     for (const id of messageIds) {
       const els = tilesByMessage.get(id);
       if (els === undefined) continue;
       tilesByMessage.delete(id);
-      for (const el of els) {
-        const section = el.closest(".media-gallery__section");
-        el.remove();
-        if (section !== null && section.querySelector("[data-message-id]") === null) {
-          if (lastSection?.content.parentElement === section) lastSection = null;
-          section.remove();
-        }
-      }
+      for (const el of els) dropElement(el);
     }
-    if (tilesByMessage.size === 0 && !hasMore && !loading) {
-      setStatus(mediaGalleryText(kind === "media" ? "empty.media" : "empty.files"));
-    }
+    showEmptyIfDrained();
+  }
+
+  function syncMessageAttachments(messageId: number, remainingIds: readonly string[]): void {
+    const els = tilesByMessage.get(messageId);
+    if (els === undefined) return;
+    const keep = new Set(remainingIds);
+    const kept = els.filter((el) => {
+      const id = el.dataset.attachmentId;
+      if (id === undefined || keep.has(id)) return true;
+      dropElement(el);
+      return false;
+    });
+    if (kept.length === 0) tilesByMessage.delete(messageId);
+    else tilesByMessage.set(messageId, kept);
+    showEmptyIfDrained();
   }
 
   function destroy(): void {
@@ -597,9 +674,10 @@ export function createChannelMediaGallery(
     monthNav = null;
     sentinel = null;
     statusEl = null;
+    usageEl = null;
     tabs.clear();
     tilesByMessage.clear();
   }
 
-  return { mount, destroy, removeMessages };
+  return { mount, destroy, removeMessages, syncMessageAttachments };
 }

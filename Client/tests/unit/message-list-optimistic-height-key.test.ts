@@ -1,25 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// jsdom does not provide ResizeObserver — stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {
-      /* noop */
-    }
-    unobserve(): void {
-      /* noop */
-    }
-    disconnect(): void {
-      /* noop */
-    }
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 // Unique markers so the offsetHeight stub below can tell the two unconfirmed
 // (id: 0) optimistic rows apart by content, since both currently collide on
@@ -31,37 +18,12 @@ const HEIGHT_B = 222;
 const HEIGHT_DEFAULT = 10;
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMessagesState();
+  resetMembersState();
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
-    channelId: 1,
-    user: { id: 1, username: "Alice", avatar: null },
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  return buildMessage(overrides);
 }
 
 function setMessages(channelId: number, messages: Message[]): void {

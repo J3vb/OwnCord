@@ -1,11 +1,12 @@
 // EmojiPicker — grid-based emoji selector with search and scrollable categories.
 // Uses @lib/dom helpers exclusively. Never sets innerHTML with user content.
 
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
-import { buildCustomEmojiNode } from "@components/message-list/customEmoji";
+import { buildCustomEmojiNode } from "../features/messaging/content/customEmoji";
 import { messagingText } from "../i18n/messaging";
 import { addRecentEmoji, getRecentEmoji } from "./emojiRecent";
 import {
@@ -451,7 +452,10 @@ export function createEmojiPicker(options: EmojiPickerOptions): {
   );
 
   // Focus search on mount
-  requestAnimationFrame(() => searchInput.focus());
+  // On a phone the keyboard would cover half the sheet before anyone asked to search.
+  requestAnimationFrame(() => {
+    if (!isPhoneLayout()) searchInput.focus();
+  });
 
   function destroy(): void {
     disposable.destroy();

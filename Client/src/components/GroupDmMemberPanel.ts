@@ -21,10 +21,10 @@ import { showContextMenu, openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createConfirmModal } from "../features/dialogs/confirmModal";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
-import { createAvatarElement, pickAvatarColor } from "./message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import type { GroupMemberView, GroupPanelView } from "../features/direct-messages/groupMembers";
 import { groupDmText } from "../i18n/groupDm";
-import { statusLabel } from "../i18n/shell";
+import { applyStatusIndicator } from "@lib/ui/statusIndicator";
 
 export interface GroupDmMemberPanelOptions {
   readonly view: GroupPanelView;
@@ -46,19 +46,6 @@ export type GroupDmMemberPanelComponent = MountableComponent & {
   /** Repaint from a fresher view (members added or removed, owner changed). */
   readonly update: (view: GroupPanelView) => void;
 };
-
-function statusColor(status: string): string {
-  switch (status) {
-    case "online":
-      return "var(--green)";
-    case "idle":
-      return "var(--yellow)";
-    case "dnd":
-      return "var(--red)";
-    default:
-      return "var(--text-micro)";
-  }
-}
 
 function asUserStatus(status: string): UserStatus {
   return status === "online" || status === "idle" || status === "dnd" ? status : "offline";
@@ -249,13 +236,9 @@ export function createGroupDmMemberPanel(
       { username: member.username, displayName: member.name, avatar: member.avatar },
       { className: "mi-avatar", background: pickAvatarColor(member.username), decorative: true },
     );
-    avatar.appendChild(
-      createElement("div", {
-        class: "mi-status",
-        style: `background: ${statusColor(member.status)}`,
-        title: statusLabel(asUserStatus(member.status)),
-      }),
-    );
+    const dot = createElement("div", { class: "mi-status" });
+    applyStatusIndicator(dot, asUserStatus(member.status), member.mobile);
+    avatar.appendChild(dot);
     const name = createElement("span", { class: "mi-name" }, label);
     appendChildren(main, avatar, name);
     if (member.isOwner) {

@@ -26,7 +26,7 @@ func (d *DB) importedAuthors(ctx context.Context, ids []int64) (map[int64]*Impor
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := d.q.GetImportAuthorsByMessageIDs(ctx, ids)
+	rows, err := d.q.GetImportAuthorsByMessageIDs(ctx, padIDs(ids))
 	if err != nil {
 		return nil, fmt.Errorf("imported authors: %w", err)
 	}

@@ -8,8 +8,8 @@ import { createIcon, type IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
-import { membersStore } from "@stores/members.store";
-import { voiceStore, isSelfMuted, type VoiceState } from "@stores/voice.store";
+import { membersStore, type MembersState } from "@stores/members.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { openSettings, uiStore } from "@stores/ui.store";
 import { createStatusPicker, type StatusPickerComponent } from "@components/StatusPicker";
 import { createSelfProfileCard, type SelfProfileCard } from "@components/SelfProfileCard";
@@ -29,17 +29,19 @@ import {
   avatarAnimationMode,
   isRenderableAvatar,
   setAvatarSource,
-} from "@components/message-list/avatar";
+} from "../features/profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "@components/message-list/attachments";
+} from "../features/messaging/content/attachments";
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence/presence";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
+import { micControlState } from "../features/voice/voiceStatusText";
 import { portalText } from "../i18n/portal";
+import { createTalkSlot } from "../features/voice/talkSlot";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
@@ -106,30 +108,16 @@ function swapIcon(btn: HTMLButtonElement, name: IconName): void {
  *  mute, and an idle push-to-talk key reads as its own state, not a mute. */
 function renderVoiceControls(muteBtn: HTMLButtonElement, deafenBtn: HTMLButtonElement): void {
   const voice = voiceStore.getState();
-  const inCall = voice.currentChannelId !== null;
-  const userMuted = isSelfMuted(voice);
-  const serverMuted = voice.localServerMuted === true;
   const serverDeafened = voice.localServerDeafened === true;
-  // The AFK channel is listen-only for everyone: the mic reads muted and is locked.
-  const afkLocked = inCall && voice.inAfkChannel === true;
-  const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
-  const pttGated = inCall && voice.pttGated === true && !userMuted && !listenOnly && !afkLocked;
+  const mic = micControlState(voice);
 
-  muteBtn.classList.toggle("active-ctrl", userMuted);
-  muteBtn.classList.toggle("ptt-gated", pttGated);
-  muteBtn.classList.toggle("ub-listen-only", listenOnly);
-  swapIcon(muteBtn, userMuted || listenOnly || afkLocked ? "mic-off" : "mic");
-  muteBtn.setAttribute("aria-pressed", String(userMuted || afkLocked));
-  muteBtn.disabled = serverMuted || listenOnly || afkLocked;
-  muteBtn.title = serverMuted
-    ? voiceText("widget.mutedByModerator")
-    : afkLocked
-      ? voiceText("widget.control.afkLocked")
-      : listenOnly
-        ? voiceText("widget.control.listenOnly")
-        : pttGated
-          ? voiceText("widget.control.pttGated")
-          : voiceText(userMuted ? "widget.control.unmute" : "widget.control.mute");
+  muteBtn.classList.toggle("active-ctrl", mic.userMuted);
+  muteBtn.classList.toggle("ptt-gated", mic.pttGated);
+  muteBtn.classList.toggle("ub-listen-only", mic.listenOnly);
+  swapIcon(muteBtn, mic.micOff ? "mic-off" : "mic");
+  muteBtn.setAttribute("aria-pressed", String(mic.pressed));
+  muteBtn.disabled = mic.disabled;
+  muteBtn.title = mic.title;
 
   deafenBtn.classList.toggle("active-ctrl", voice.localDeafened);
   swapIcon(deafenBtn, voice.localDeafened ? "headphones-off" : "headphones");
@@ -163,6 +151,12 @@ function selfSpeaking(s: VoiceState): boolean {
       ? undefined
       : s.voiceUsers.get(s.currentChannelId)?.get(id);
   return self?.speaking === true && !s.localMuted && !s.localDeafened && s.pttGated !== true;
+}
+
+/** Whether the signed-in user's own member entry is on the phone app. */
+function ownMobile(s: MembersState): boolean {
+  const id = authStore.getState().user?.id;
+  return id !== undefined && s.members.get(id)?.mobile === true;
 }
 
 export function createUserBar(options?: UserBarOptions): MountableComponent {
@@ -363,6 +357,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
       onCustomStatusChange: applyCustomStatus,
     });
     statusPicker.mount(statusPickerWrap);
+    // Your own dot is a phone while the server says you are on the phone app.
+    statusPicker.setMobile(ownMobile(membersStore.getState()));
+    disposable.onStoreChange(membersStore, ownMobile, (mobile: boolean) =>
+      statusPicker?.setMobile(mobile),
+    );
 
     // Reflect status changes made on the settings Account tab.
     disposable.addCleanup(
@@ -420,6 +419,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         renderVoiceControls(muteBtn, deafenBtn),
       );
       appendChildren(buttons, muteBtn, deafenBtn);
+      // Push to Talk in the Android app: a hold-to-talk button before Mute, so
+      // a call that leaves no call bar on screen (a tablet) can still talk.
+      const talkSlot = createTalkSlot("user");
+      disposable.addCleanup(() => talkSlot.clear());
+      talkSlot.attach(buttons, muteBtn);
     }
 
     const settingsBtn = createElement("button", {

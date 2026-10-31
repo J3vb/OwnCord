@@ -28,6 +28,7 @@ func (a *App) stages() []stage {
 	return []stage{
 		{"file-limit", a.startFileLimit},
 		{"data-dir", a.startDataDir},
+		{"log-history", a.startLogHistory},
 		{"tls", a.startTLS},
 		{"database", a.startDatabase},
 		{"boot-marker", a.startBootMarker},

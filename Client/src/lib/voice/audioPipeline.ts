@@ -25,18 +25,16 @@ import {
 import { voiceText } from "../../i18n/voice";
 import { effectiveVoiceGate, effectiveVoiceSensitivity } from "@lib/ui/inputMode";
 import { NoiseFloorTracker } from "@lib/voice/noiseFloor";
+import { vadThreshold } from "@lib/voice/gateScale";
 
 const log = createLogger("audioPipeline");
 
-/** The gate threshold at sensitivity 0, as the RMS of one 128-sample render
- *  quantum. The settings meter draws its level on this same scale. */
-export const VAD_MAX_THRESHOLD = 0.1;
+/** Hysteresis: the gate closes only this far below the level it opens at
+ *  (vad-worklet.js HYSTERESIS_DB). */
+export const GATE_HYSTERESIS_DB = 6;
+const GATE_CLOSE_RATIO = 10 ** (-GATE_HYSTERESIS_DB / 20);
 
-/** The RMS a render quantum must reach to count as speech at `sensitivity`
- *  (0-100). 100 is no gate at all. */
-export function vadThreshold(sensitivity: number): number {
-  return ((100 - sensitivity) / 100) * VAD_MAX_THRESHOLD;
-}
+export { vadLevelPosition, vadThreshold, vadThresholdDb } from "@lib/voice/gateScale";
 
 /**
  * The browser processing every microphone capture asks for: the three saved
@@ -98,6 +96,14 @@ export interface VadDetector {
   resetFloor(): void;
 }
 
+/** RNNoise's speech probability for the detector's second input, and the
+ *  switch that runs RNNoise for it (MicProcessor.setSpeechDetection). */
+export interface SpeechDetection {
+  readonly source: AudioNode;
+  /** Resolves whether RNNoise runs; false leaves the gate on its level. */
+  setOn(on: boolean): Promise<boolean>;
+}
+
 export interface VadDetectorHandlers {
   /** The gate verdict: true = closed (silence). */
   onGate(gated: boolean): void;
@@ -112,10 +118,13 @@ export interface VadDetectorHandlers {
 /**
  * Run the voice detector over `analyser`: the AudioWorklet (vad-worklet.js)
  * when it loads, otherwise a setTimeout poll with the same timing. Both apply
- * the same attack (~32 ms) and hold (~320 ms), so the settings meter and the
- * live gate open and close alike. `gate` "auto" runs the threshold a margin
+ * the same attack (~32 ms), hysteresis (closing 6 dB under the threshold)
+ * and hold (~500 ms), so the settings meter and the live gate open and
+ * close alike. `gate` "auto" runs the threshold a margin
  * above the noise floor of the levels the detector reports (lib/voice/noiseFloor.ts),
- * starting at `seed`.
+ * starting at `seed`. With `speech`, "auto" also asks RNNoise whether a frame
+ * is a voice (vad-worklet.js's speech gate) once it runs; the fallback has
+ * no worklets, so no RNNoise, and gates on the level alone.
  */
 export function startVadDetector(
   ctx: AudioContext,
@@ -123,12 +132,35 @@ export function startVadDetector(
   gate: number | "auto",
   handlers: VadDetectorHandlers,
   seed?: number,
+  speech?: SpeechDetection,
 ): VadDetector {
   let tracker = gate === "auto" ? new NoiseFloorTracker(seed) : null;
   let threshold = tracker?.threshold ?? (gate as number);
   let stopped = false;
   let workletNode: AudioWorkletNode | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** Bumped on every mode change, so a late RNNoise load applies to the
+   *  mode that asked for it. */
+  let speechRequest = 0;
+
+  /** Run RNNoise's verdict for automatic sensitivity, or drop it. The
+   *  worklet is told once RNNoise answers, so the gate never waits on a
+   *  signal that is not there. */
+  const applySpeechGate = (auto: boolean): void => {
+    if (speech === undefined) return;
+    const request = ++speechRequest;
+    // The manual slider drops the rule at once; auto adds it once RNNoise runs.
+    // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
+    if (!auto) workletNode?.port.postMessage({ type: "speechGate", on: false });
+    speech.setOn(auto).then(
+      (on) => {
+        if (stopped || request !== speechRequest || !auto || !on) return;
+        // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
+        workletNode?.port.postMessage({ type: "speechGate", on: true });
+      },
+      (err: unknown) => log.warn("Speech detection could not start", err),
+    );
+  };
 
   /** Every level report: the meter's, and the automatic estimate's input. */
   const onLevel = (rms: number): void => {
@@ -146,10 +178,10 @@ export function startVadDetector(
     // backgrounded, which freezes the VAD gate. setTimeout continues firing
     // (throttled ~1Hz when hidden), still fast enough for VAD gate timing.
     const dataArray = new Float32Array(analyser.fftSize);
-    let quietSince = 0; // Date.now() of the first poll below the threshold, 0 = none
+    let quietSince = 0; // Date.now() of the first poll below the close level, 0 = none
     let speechFrames = 0;
     let gated = false;
-    const GATE_HOLD_MS = 320; // as vad-worklet.js holds; elapsed time, as timers throttle
+    const GATE_HOLD_MS = 500; // as vad-worklet.js holds; elapsed time, as timers throttle
     const GATE_OFF_FRAMES = 2;
     let startupFrames = 0;
     const STARTUP_GRACE = 30;
@@ -175,21 +207,28 @@ export function startVadDetector(
       }
       if (startupFrames < STARTUP_GRACE) {
         startupFrames++;
-      } else if (rms < threshold) {
-        speechFrames = 0;
+      } else if (gated) {
+        // The attack counts up at the threshold and down below it, as the
+        // worklet's does, so one dip inside an onset does not start it over.
+        if (rms >= threshold) speechFrames++;
+        else if (speechFrames > 0) speechFrames--;
+        if (speechFrames >= GATE_OFF_FRAMES) {
+          gated = false;
+          speechFrames = 0;
+          quietSince = 0;
+          handlers.onGate(false);
+        }
+      } else if (rms < threshold * GATE_CLOSE_RATIO) {
         const now = Date.now();
         if (quietSince === 0) quietSince = now;
-        if (!gated && now - quietSince >= GATE_HOLD_MS) {
+        if (now - quietSince >= GATE_HOLD_MS) {
           gated = true;
+          quietSince = 0;
+          speechFrames = 0;
           handlers.onGate(true);
         }
       } else {
         quietSince = 0;
-        speechFrames++;
-        if (gated && speechFrames >= GATE_OFF_FRAMES) {
-          gated = false;
-          handlers.onGate(false);
-        }
       }
       timer = setTimeout(poll, 16);
     };
@@ -203,7 +242,7 @@ export function startVadDetector(
     .then(() => {
       if (stopped) return;
       try {
-        workletNode = new AudioWorkletNode(ctx, "vad-processor");
+        workletNode = new AudioWorkletNode(ctx, "vad-processor", { numberOfInputs: 2 });
       } catch (err) {
         log.warn("Failed to create VAD AudioWorkletNode, falling back", err);
         startFallback();
@@ -211,8 +250,10 @@ export function startVadDetector(
       }
       // Analysis only: the worklet's output goes nowhere.
       analyser.connect(workletNode);
+      speech?.source.connect(workletNode, 0, 1);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode.port.postMessage({ type: "config", threshold });
+      applySpeechGate(tracker !== null);
       // oxlint-disable-next-line prefer-add-event-listener -- MessagePort does not support addEventListener
       workletNode.port.onmessage = (event: MessageEvent) => {
         if (event.data.type === "gate") handlers.onGate(event.data.gated as boolean);
@@ -229,7 +270,9 @@ export function startVadDetector(
 
   const stop = (): Promise<void> => {
     stopped = true;
+    speechRequest++;
     if (timer !== null) clearTimeout(timer);
+    void speech?.setOn(false).catch((err: unknown) => log.debug("Speech detection stop", err));
     const node = workletNode;
     if (node === null) return Promise.resolve();
     workletNode = null;
@@ -247,6 +290,7 @@ export function startVadDetector(
     setThreshold(next: number | "auto"): void {
       tracker = next === "auto" ? new NoiseFloorTracker(tracker?.threshold) : null;
       threshold = tracker?.threshold ?? (next as number);
+      if (workletNode !== null) applySpeechGate(tracker !== null);
       // oxlint-disable-next-line require-post-message-target-origin -- MessagePort.postMessage, not Window.postMessage
       workletNode?.port.postMessage({ type: "config", threshold });
     },
@@ -254,6 +298,14 @@ export function startVadDetector(
       tracker?.reset(performance.now());
     },
   };
+}
+
+/** The processor's RNNoise verdict for the detector, once the processor has
+ *  its graph. */
+export function speechDetectionOf(processor: MicProcessor): SpeechDetection | undefined {
+  const source = processor.speechProbability;
+  if (source === null) return undefined;
+  return { source, setOn: (on) => processor.setSpeechDetection(on) };
 }
 
 /** A room that gates its own capture for push-to-talk: the Linux NativeRoom,
@@ -617,6 +669,7 @@ export class AudioPipeline {
         },
       },
       this.lastAutoThreshold,
+      speechDetectionOf(processor),
     );
   }
 

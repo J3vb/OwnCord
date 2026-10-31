@@ -6,26 +6,17 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, deleteMessage } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import {
   blocksStore,
   resetBlocksStore,
   setBlockedByMe,
   setUserBlockedByMe,
 } from "@stores/blocks.store";
-import { channelsStore, setActiveChannel, setChannels } from "@stores/channels.store";
+import { setActiveChannel, setChannels } from "@stores/channels.store";
 import {
   leaveChannel,
   resetReadPointerState,
@@ -34,6 +25,9 @@ import {
 } from "@lib/readState";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const CHANNEL_ID = 1;
 const ALICE = { id: 2, username: "alice", avatar: null };
@@ -43,21 +37,9 @@ const CAROL = { id: 4, username: "carol", avatar: null };
 function resetStores(): void {
   resetGateStores();
   resetBlocksStore();
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetMessagesState();
+  resetMembersState();
+  resetChannelsState();
 }
 
 /** Ten minutes apart (past the 7-minute group window), so no two rows group. */
@@ -353,15 +335,22 @@ describe("MessageList: blocked users' messages", () => {
     });
 
     it("a live blocked arrival with the tail in view is marked seen by its id", async () => {
-      block(BOB.id);
-      setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB)]);
-      openChannel(2);
-      mount();
-      scrollTo(SCROLL_HEIGHT - CLIENT_HEIGHT);
-      marks.length = 0;
-      setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB), msg(5, BOB)]);
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 5]]), { timeout: 3000 });
-      expect(run(3)!.textContent).toContain("3 blocked messages");
+      vi.useFakeTimers();
+      try {
+        block(BOB.id);
+        setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB)]);
+        openChannel(2);
+        mount();
+        scrollTo(SCROLL_HEIGHT - CLIENT_HEIGHT);
+        marks.length = 0;
+        setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB), msg(5, BOB)]);
+        // The live mark_read is throttled to one a second.
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(marks).toEqual([[CHANNEL_ID, 5]]);
+        expect(run(3)!.textContent).toContain("3 blocked messages");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("a block landing on the row the reader is anchored to folds the list without losing it", () => {

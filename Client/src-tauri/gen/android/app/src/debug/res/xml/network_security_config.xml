@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds load the vite dev server from the developer's machine
+     (tauri android dev), so they allow plain http everywhere. Release builds
+     use src/main's loopback-only config. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

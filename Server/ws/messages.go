@@ -32,6 +32,10 @@ type presencePayload struct {
 	Activity *gameActivity `json:"activity"`
 	// Listening is the song being listened to; same rules as Activity.
 	Listening *listeningActivity `json:"listening"`
+	// Mobile is true when the user is on the Android app (see mergeLivePresence).
+	// Omitted when false, and never set on a frame that stands for an invisible
+	// user's "offline".
+	Mobile bool `json:"mobile,omitempty"`
 }
 
 type memberUserPayload struct {
@@ -382,10 +386,10 @@ func buildProtocolEpochError(clientEpoch int) []byte {
 // buildPresenceMsg constructs a presence broadcast. status is taken verbatim:
 // callers pass db.BroadcastStatus(status) for everyone but the owner. A builder
 // that always collapsed invisible could never produce the owner's own message.
-func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity) []byte {
+func buildPresenceMsg(userID int64, status string, customStatus *string, activity *gameActivity, listening *listeningActivity, mobile bool) []byte {
 	return buildJSON(wsMsg{
 		Type:    MsgTypePresence,
-		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus, Activity: activity, Listening: listening},
+		Payload: presencePayload{UserID: userID, Status: status, CustomStatus: customStatus, Activity: activity, Listening: listening, Mobile: mobile},
 	})
 }
 
@@ -692,16 +696,20 @@ func buildChannelDelete(channelID int64) []byte {
 // db.DMChannelInfo, the shape REST and ready carry. It is built per viewer
 // because recipient/recipients are relative to the reader and each participant's
 // status is the live one (presentDMStatuses), not the users.status row.
-func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string) []byte {
+func buildDMChannelOpen(info db.DMChannelInfo, viewerID int64, liveStatus func(userID int64) string, liveMobile func(userID int64) bool) []byte {
+	presented := presentDMStatuses([]db.DMChannelInfo{info}, viewerID, liveStatus)
+	if liveMobile != nil {
+		presentDMMobile(presented, liveMobile)
+	}
 	return buildJSON(wsMsg{
 		Type:    MsgTypeDMChannelOpen,
-		Payload: presentDMStatuses([]db.DMChannelInfo{info}, viewerID, liveStatus)[0],
+		Payload: presented[0],
 	})
 }
 
 // buildDMChannelOpenFor announces a 1:1 DM to the user on the other end. Returns
 // nil if recipient is nil.
-func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, liveStatus func(userID int64) string) []byte {
+func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, liveStatus func(userID int64) string, liveMobile func(userID int64) bool) []byte {
 	if recipient == nil {
 		slog.Warn("buildDMChannelOpenFor called with nil recipient", "channel_id", channelID)
 		return nil
@@ -724,7 +732,7 @@ func buildDMChannelOpenFor(channelID int64, recipient *db.User, viewerID int64, 
 		ChannelID:  channelID,
 		Recipient:  other,
 		Recipients: []db.DMUser{other},
-	}, viewerID, liveStatus)
+	}, viewerID, liveStatus, liveMobile)
 }
 
 // dmRequestSenderPayload is the sender profile a dm_request carries, so the inbox

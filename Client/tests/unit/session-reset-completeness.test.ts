@@ -34,10 +34,10 @@ import {
   externalPartition,
   fetchMediaAsObjectUrl,
   setServerHost,
-} from "../../src/components/message-list/attachments";
-import { renderGenericLinkPreview } from "../../src/components/message-list/embeds";
-import { renderInlineImage } from "../../src/components/message-list/media";
-import { getImageBox, setImageBox } from "../../src/components/message-list/imageSizes";
+} from "../../src/features/messaging/content/attachments";
+import { renderGenericLinkPreview } from "../../src/features/messaging/content/embeds";
+import { renderInlineImage } from "../../src/features/messaging/content/media";
+import { getImageBox, setImageBox } from "../../src/features/messaging/content/imageSizes";
 import {
   rememberRowHeight,
   rememberedRowHeight,
@@ -80,7 +80,7 @@ import {
   setReactionUsersFetcher,
 } from "../../src/features/messaging/reactionUsers";
 import { buildBlockedUsersSection } from "../../src/features/safety/BlockedUsers";
-import { createAvatarElement } from "../../src/components/message-list/avatar";
+import { createAvatarElement } from "../../src/features/profiles/avatar";
 import { isVoiceMovePending, noteVoiceMoved } from "../../src/features/voice/moveHint";
 import { noteWatchSent, takeWatchRefusal } from "../../src/lib/voice/watchRequest";
 import { getChannelMutesHost, setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
@@ -630,6 +630,14 @@ const EXEMPT: readonly string[] = [
   // Playing <audio> elements, not store state; features/voice-messages/player.test.ts
   // ("pauses every playing clip when the session ends") runs the reset.
   "voice-messages:player",
+  // A DOM sheet, not store state, and mounting one here starts unrelated
+  // body-observer timers the timer-count probes read; bottomSheet.test.ts
+  // ("closes from closeBottomSheet and from a session reset") runs the reset.
+  "bottomSheet:open",
+  // The reset pops the history entry, and jsdom runs history.back() on a timer,
+  // which the timer-count probes read; backHistory.test.ts ("a session reset
+  // drops every claim and the guard, and pops the entry") runs the reset.
+  "backHistory:claims",
   // Per-subscriber names built from a counter in auth.store (onAuthCleared);
   // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",

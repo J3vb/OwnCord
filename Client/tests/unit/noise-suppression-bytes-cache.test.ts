@@ -195,7 +195,7 @@ describe("createRNNoiseNode worklet wiring", () => {
     expect(fetchMock).toHaveBeenCalledWith("/rnnoise.wasm");
   });
 
-  it("builds a mono-in mono-out rnnoise-processor node on the given context", async () => {
+  it("builds a mono-in, audio-and-speech-out rnnoise-processor node on the given context", async () => {
     const { createRNNoiseNode } = await import("@lib/voice/noiseSuppression");
     const context = makeContext();
 
@@ -205,7 +205,7 @@ describe("createRNNoiseNode worklet wiring", () => {
       {
         context,
         name: "rnnoise-processor",
-        options: { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] },
+        options: { numberOfInputs: 1, numberOfOutputs: 2, outputChannelCount: [1, 1] },
       },
     ]);
   });
