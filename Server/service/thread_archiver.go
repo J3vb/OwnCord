@@ -42,9 +42,10 @@ type ThreadArchiver struct {
 	retryAfter time.Duration
 }
 
-// NewThreadArchiver returns an archiver over st's thread storage. A Store
-// without it (a test double) gives an archiver that does nothing.
-func NewThreadArchiver(st Store) *ThreadArchiver {
+// NewThreadArchiver returns an archiver over st's thread storage. A store
+// without it (a test double) gives an archiver that does nothing. st is only
+// checked for threadArchiveStore, so it takes any value.
+func NewThreadArchiver(st any) *ThreadArchiver {
 	a := &ThreadArchiver{
 		now: time.Now, slack: expirerSlack, maxSleep: expirerMaxSleep, retryAfter: expirerRetryAfterError,
 	}

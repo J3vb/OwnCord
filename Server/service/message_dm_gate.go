@@ -15,7 +15,7 @@ import (
 // applies. A recipient with message requests off is accepted and opened inside the
 // gate's own transaction; the gate then marks target as trusting the sender and
 // reports true.
-func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessageParams, target *db.DMDeliveryTarget, result *SendMessageResult) bool {
+func (s *dmDelivery) dmFirstContactGate(ctx context.Context, p SendMessageParams, target *db.DMDeliveryTarget, result *SendMessageResult) bool {
 	recipientID := target.UserID
 	recipient, rErr := s.st.GetUserByID(ctx, recipientID)
 	if rErr != nil {
@@ -70,7 +70,7 @@ func (s *MessageService) dmFirstContactGate(ctx context.Context, p SendMessagePa
 // racing the frame leaves a stale preview on the wire while REST reports preview:
 // null. nil (no preview) when the message cannot be read or was deleted, exactly
 // that query's condition.
-func (s *MessageService) canonicalRequestPreview(ctx context.Context, messageID int64) *DMRequestPreview {
+func (s *dmDelivery) canonicalRequestPreview(ctx context.Context, messageID int64) *DMRequestPreview {
 	msg, err := s.st.GetMessage(ctx, messageID)
 	if err != nil || msg == nil || msg.Deleted {
 		return nil

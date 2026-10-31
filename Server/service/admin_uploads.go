@@ -27,6 +27,7 @@ type AdminUploadStore interface {
 	SetUserStorageQuotaMB(ctx context.Context, userID int64, quotaMB *int64) (found bool, err error)
 	ListMemberStorage(ctx context.Context, userIDs []int64) ([]db.MemberStorage, error)
 	ReferencedStoredFiles(ctx context.Context, names []string) (map[string]bool, error)
+	db.Auditor
 }
 
 var _ AdminUploadStore = (*db.DB)(nil)
@@ -227,7 +228,7 @@ func (s *UploadService) RemoveUploadAsAdmin(ctx context.Context, actorID int64, 
 	if removed.UploaderID != nil {
 		target = *removed.UploaderID
 	}
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "upload_delete", "user", target,
+	db.WriteAudit(context.WithoutCancel(ctx), s.admin, actorID, "upload_delete", "user", target,
 		fmt.Sprintf("deleted file %q (%d bytes)", removed.Filename, removed.Size))
 	return removed, nil
 }
@@ -258,13 +259,16 @@ func (s *UploadService) SetMemberQuota(ctx context.Context, actorID, userID int6
 	default:
 		detail = fmt.Sprintf("upload limit set to %d MB", *quotaMB)
 	}
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "upload_limit_change", "user", userID, detail)
+	db.WriteAudit(context.WithoutCancel(ctx), s.admin, actorID, "upload_limit_change", "user", userID, detail)
 	return nil
 }
 
 // AuditLeftoverCleanup records that actorID removed n leftover files.
 func (s *UploadService) AuditLeftoverCleanup(ctx context.Context, actorID int64, n int) {
-	db.WriteAudit(context.WithoutCancel(ctx), s.st, actorID, "storage_cleanup", "server", 0,
+	if s.admin == nil {
+		return
+	}
+	db.WriteAudit(context.WithoutCancel(ctx), s.admin, actorID, "storage_cleanup", "server", 0,
 		fmt.Sprintf("removed %d leftover files", n))
 }
 

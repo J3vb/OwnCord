@@ -322,6 +322,7 @@ export const shellText = defineCatalog("shell", {
   "status.customLabel": "Custom status",
   "status.change": "Change status",
   "status.dndNote": "You will not receive desktop notifications",
+  "status.dndNote.android": "You will not receive notifications",
   "status.invisibleNote": "You will appear offline",
   "status.clearCustom": "Clear custom status",
   "status.editProfile": "Edit Profile",
@@ -345,8 +346,12 @@ export const shellText = defineCatalog("shell", {
   "status.clearsToday": "Clears today",
   "status.emojiButton": "Add an emoji to your custom status",
 
+  "sheet.back": "Back",
+  "channel.sheetLabel": "{name} options",
+
   "sidebar.open": "Open navigation",
   "sidebar.close": "Close navigation",
+  "sidebar.search": "Find or start a conversation",
 
   "toast.dismiss": "Dismiss notification",
 

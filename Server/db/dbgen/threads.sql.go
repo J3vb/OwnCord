@@ -417,6 +417,21 @@ func (q *Queries) ListThreadFollowerIDs(ctx context.Context, threadID int64) ([]
 }
 
 const listThreadInfosByParent = `-- name: ListThreadInfosByParent :many
+WITH page AS (
+    SELECT c.id
+    FROM channels c
+    WHERE c.parent_channel_id = ?1 AND c.type = 'thread'
+      AND c.thread_archived = ?2
+      AND (CAST(?3 AS INTEGER) = 1
+           OR EXISTS (SELECT 1 FROM thread_tags tt
+                      WHERE tt.thread_id = c.id AND instr(CAST(?4 AS TEXT), ',' || tt.tag_id || ',') > 0))
+      AND (CAST(?5 AS INTEGER) = 0
+           OR COALESCE(c.thread_last_activity_at, '') < CAST(?6 AS TEXT)
+           OR (COALESCE(c.thread_last_activity_at, '') = CAST(?6 AS TEXT)
+               AND c.id < CAST(?5 AS INTEGER)))
+    ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC
+    LIMIT ?7
+)
 SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_owner_id,
        c.thread_starter_message_id, c.thread_archived, c.thread_locked,
        c.thread_auto_archive_minutes,
@@ -426,18 +441,9 @@ SELECT c.id, COALESCE(c.parent_channel_id, 0) AS parent_id, c.name, c.thread_own
          WHERE m.channel_id = c.id AND m.deleted = 0) AS last_message_at,
        c.created_at,
        COALESCE(c.thread_last_activity_at, '') AS activity_at
-FROM channels c
-WHERE c.parent_channel_id = ?1 AND c.type = 'thread'
-  AND c.thread_archived = ?2
-  AND (CAST(?3 AS INTEGER) = 1
-       OR EXISTS (SELECT 1 FROM thread_tags tt
-                  WHERE tt.thread_id = c.id AND instr(CAST(?4 AS TEXT), ',' || tt.tag_id || ',') > 0))
-  AND (CAST(?5 AS INTEGER) = 0
-       OR COALESCE(c.thread_last_activity_at, '') < CAST(?6 AS TEXT)
-       OR (COALESCE(c.thread_last_activity_at, '') = CAST(?6 AS TEXT)
-           AND c.id < CAST(?5 AS INTEGER)))
+FROM page
+JOIN channels c ON c.id = page.id
 ORDER BY COALESCE(c.thread_last_activity_at, '') DESC, c.id DESC
-LIMIT ?7
 `
 
 type ListThreadInfosByParentParams struct {
@@ -470,7 +476,8 @@ type ListThreadInfosByParentRow struct {
 // last row, never re-read from the table, so a post in that thread between
 // pages cannot move the page. before_id 0 is the first page. tag_ids is a
 // comma-wrapped list such as ',3,7,' matched any-of (forum posts), and
-// no_tag_filter 1 skips it.
+// no_tag_filter 1 skips it. The page of ids is picked first and only those
+// rows get their message count and last message time.
 func (q *Queries) ListThreadInfosByParent(ctx context.Context, arg ListThreadInfosByParentParams) ([]ListThreadInfosByParentRow, error) {
 	rows, err := q.db.QueryContext(ctx, listThreadInfosByParent,
 		arg.ParentID,

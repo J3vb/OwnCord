@@ -1154,13 +1154,31 @@ describe("ServerPanel", () => {
 
       const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
       inputs[0]!.value = "Bad Server";
-      inputs[1]!.value = "http://evil.com/path";
+      inputs[1]!.value = "evil.com:80!<x>";
 
       const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
       saveBtn.click();
 
       expect(onAddProfile).not.toHaveBeenCalled();
       expect(container.querySelector(".modal-overlay")).not.toBeNull();
+    });
+
+    it("saves only the host of a pasted link", () => {
+      const onAddProfile = vi.fn();
+      const panel = createServerPanel(makeOpts({ onAddProfile }), SIMPLE_PROFILES);
+      container.appendChild(panel.element);
+
+      const addBtn = container.querySelector(".btn-add-server") as HTMLElement;
+      addBtn.click();
+
+      const inputs = container.querySelectorAll(".form-input") as NodeListOf<HTMLInputElement>;
+      inputs[0]!.value = "Pasted";
+      inputs[1]!.value = "https://Chat.Example.com:8443/path";
+
+      const saveBtn = container.querySelector(".modal-footer .btn-primary") as HTMLElement;
+      saveBtn.click();
+
+      expect(onAddProfile).toHaveBeenCalledWith("Pasted", "chat.example.com:8443");
     });
 
     it("accepts host without port", () => {

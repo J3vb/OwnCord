@@ -566,6 +566,17 @@ func b611CopyFile(t *testing.T, src, dst string) {
 	}
 }
 
+// b611ShortenCheckpointWait lowers the writer's busy_timeout so an erasure
+// checkpoint blocked by a held reader gives up at once instead of after the
+// DSN's 5 s. The checkpoint still comes back blocked, which is the state the
+// drills measure.
+func b611ShortenCheckpointWait(t *testing.T, database *DB) {
+	t.Helper()
+	if _, err := database.writer.ExecContext(context.Background(), `PRAGMA busy_timeout=50`); err != nil {
+		t.Fatalf("busy_timeout=50: %v", err)
+	}
+}
+
 func TestB611_ErasureBytes(t *testing.T) {
 	t.Run("E1_idle", b611E1Idle)
 	t.Run("E2_active_reader", b611E2ActiveReader)
@@ -609,6 +620,7 @@ func b611E2ActiveReader(t *testing.T) {
 	assertB611Planted(t, w, before)
 
 	reader := b611HoldReader(t, w.db)
+	b611ShortenCheckpointWait(t, w.db)
 	job, logs := w.erase(t)
 	w.removeJobFiles(t, job)
 	w.backup(t, w.db)
@@ -674,6 +686,7 @@ func b611E3CheckpointFailed(t *testing.T) {
 	assertB611Planted(t, w, before)
 
 	reader := b611HoldReader(t, w.db)
+	b611ShortenCheckpointWait(t, w.db)
 	job, logs := w.erase(t)
 	w.removeJobFiles(t, job)
 

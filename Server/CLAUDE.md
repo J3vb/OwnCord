@@ -59,10 +59,13 @@ coraza WAF, prometheus.
   imports it needs a row in `invariants/db_import_boundary.go` (`DBImportAllow`)
   with a disposition and reason — the B3 inventory, which only shrinks. New
   persistence goes behind a service, not into a handler.
-  A new service takes a slice interface it declares; new REST response DTOs live
-  in `api` or `service`, not `db/models.go`. `service/datastore_ratchet_test.go`
-  pins the `Store` surface and the `models.go` json tags; lower the pin when you
-  shrink them.
+  Each service takes the interface it declares beside its type (`blockStore` in
+  `service/block.go`); `Store` is only their union, and only `service.New` takes
+  it (`service/datastore_consumers_test.go`, which also pins each service's
+  method count). A new call adds a line to that service's interface. New REST
+  response DTOs live in `api` or `service`, not `db/models.go`.
+  `service/datastore_ratchet_test.go` pins the `Store` surface and the
+  `models.go` json tags; lower the pin when you shrink them.
 - Only `permissions/` calls the raw permission bit helpers (`HasPerm`,
   `HasAnyPerm`, `HasServerPerm`, `HasAdmin`, `EffectivePerms`,
   `EffectiveChannelPerms`). Everywhere else resolves a `permissions.Subject`

@@ -133,11 +133,15 @@ func TestCreatePoll_CapsTable(t *testing.T) {
 		{"malformed client_message_id", func(p *PollCreateParams) { p.ClientMessageID = "nope" }, false},
 		{"huge question is refused before sanitising", func(p *PollCreateParams) { p.Question = long(5000) }, false},
 	}
+	// One fixture for every case: its setup dominates the run, and each case
+	// compares row counts before and after its own call.
+	f := newForwardFixture(t, nil)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			f := newForwardFixture(t, nil)
 			p := f.pollParams(fwdBob, fwdDstChan)
 			tc.mutate(&p)
+			pollsBefore := f.count(t, `SELECT COUNT(*) FROM polls`)
+			msgsBefore := f.count(t, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND channel_id = ?`, fwdBob, fwdDstChan)
 			res, err := f.createPoll(p)
 			if tc.ok {
 				if err != nil {
@@ -148,10 +152,10 @@ func TestCreatePoll_CapsTable(t *testing.T) {
 			if !errors.Is(err, ErrBadRequest) {
 				t.Fatalf("res = %+v, err = %v, want ErrBadRequest", res, err)
 			}
-			if n := f.count(t, `SELECT COUNT(*) FROM polls`); n != 0 {
+			if n := f.count(t, `SELECT COUNT(*) FROM polls`) - pollsBefore; n != 0 {
 				t.Errorf("a refused poll left %d poll rows", n)
 			}
-			if n := f.count(t, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND channel_id = ?`, fwdBob, fwdDstChan); n != 0 {
+			if n := f.count(t, `SELECT COUNT(*) FROM messages WHERE user_id = ? AND channel_id = ?`, fwdBob, fwdDstChan) - msgsBefore; n != 0 {
 				t.Errorf("a refused poll left %d messages", n)
 			}
 		})

@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 255 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 257 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -119,6 +119,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/admin/api/storage/summary`                                         |
 | POST    | `/admin/api/support-bundles/download`                                |
 | POST    | `/admin/api/support-bundles/preview`                                 |
+| GET     | `/admin/api/system/slow-requests`                                    |
+| GET     | `/admin/api/system/stats`                                            |
 | GET     | `/admin/api/tokens`                                                  |
 | POST    | `/admin/api/tokens`                                                  |
 | DELETE  | `/admin/api/tokens/{id}`                                             |
@@ -4382,6 +4384,7 @@ Authorization is two-layered:
 | `GET/PATCH/DELETE /admin/api/logs/level`                                                                                                             | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — the running level and a timed debug boost, SRE-07                                                                                                                                                                                                              |
 | `POST /admin/api/support-bundles/preview`, `POST /admin/api/support-bundles/download`                                                                | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
 | `GET /admin/api/attention`                                                                                                                           | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes) — RI-07                                                                                                                                                                                                                                                          |
+| `GET /admin/api/system/stats`, `GET /admin/api/system/slow-requests`                                                                                 | `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)                                                                                                                                                                                                                                                                  |
 | `/api/v1/admin/plugins…`                                                                                                                             | `ADMINISTRATOR`                                                                                                                                                                                                                                                                                              |
 | `/admin/api/tokens…`, `/admin/api/updates…`                                                                                                          | `/admin/api/tokens…`: Owner role **or** `MANAGE_TOKENS` (`permissions.CanManageTokens`; a holder who is not the owner sees, creates and revokes only their own tokens); `/admin/api/updates…`: Owner role **or** `MANAGE_UPDATES` (`permissions.CanManageUpdates`); `ADMINISTRATOR` passes neither — WP 8.4d |
 | `DELETE /admin/api/backups/{name}`, `POST /admin/api/backups/{name}/restore`, `GET /admin/api/archive`, `POST /admin/api/archive/link`               | Owner role **or** `RESTORE_BACKUPS` (`permissions.CanRestoreBackups`; `ADMINISTRATOR` does not pass); the archive link is re-checked when opened — WP 8.4d                                                                                                                                                   |
@@ -4685,6 +4688,116 @@ Nothing here is exported off the host.
 
 `INTERNAL_ERROR` "attention service unavailable" when the server was built
 without the attention service (partial wirings in tests).
+
+---
+
+### GET /admin/api/system/stats
+
+The Dashboard's health row: CPU, memory, disk and uptime now, plus the CPU and
+memory history. The server reads the system every 5 seconds into a 24-hour
+ring held in memory; this route only reads that ring, the data volume's free
+space and the cached upload total.
+
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
+
+**Query:** `window` is `1h` (default), `6h` or `24h`. Anything else is
+`400 BAD_REQUEST`.
+
+#### Response 200 OK
+
+```json
+{
+  "interval_seconds": 5,
+  "window_seconds": 3600,
+  "uptime_seconds": 532800,
+  "online_users": 14,
+  "cpu_cores": 8,
+  "memory_total": 17179869184,
+  "memory_scope": "machine",
+  "current": {
+    "t": 1793386035,
+    "process_cpu": 3.1,
+    "machine_cpu": 7.4,
+    "process_memory": 195035136,
+    "memory_used": 9771487232
+  },
+  "series": [
+    {
+      "t": 1793382440,
+      "process_cpu": 2.9,
+      "machine_cpu": 6.8,
+      "process_memory": 194510848,
+      "memory_used": 9764732928
+    }
+  ],
+  "disk": {
+    "free": 12240656384,
+    "total": 128849018880,
+    "min_free": 1073741824,
+    "low": false,
+    "uploads": 41016705024
+  }
+}
+```
+
+- `process_cpu` is OwnCord's CPU use as a share of the whole machine (all
+  cores), so it compares directly with `machine_cpu`. Both are percentages.
+- `memory_used` and `memory_total` are the machine's, or inside a container
+  with a memory limit the container's (`memory_scope` `container`, the
+  inactive file cache not counted as used). `process_memory` is OwnCord's
+  resident memory. All are bytes.
+- Linux reads `/proc` and the cgroup memory files, Windows asks the system.
+  Other systems give only OwnCord's own CPU and memory, from the Go runtime.
+- A figure the server cannot read is `null`, never `0`. CPU needs two
+  readings, so `current.process_cpu` and `current.machine_cpu` are `null` for
+  the first 5 seconds after start; `current` itself is `null` before the
+  first reading.
+- `series` is oldest first, averaged down to at most 360 points; `t` is unix
+  seconds. The history is in memory, so a restart clears it.
+- `disk.low` is `free` below `server.min_free_disk_mb` (`min_free`, bytes),
+  where uploads are refused; it is `null` when that floor is `0` or `free` is
+  unknown. `uploads` is every upload's size summed.
+
+---
+
+### GET /admin/api/system/slow-requests
+
+The Dashboard's slow requests card: the ten slowest kinds of request over the
+last hour. Every request the router matches is counted under its route
+pattern, so ids and tokens never appear. Routes the request deadline exempts
+(the WebSocket, the LiveKit proxy, uploads, file downloads, the log stream,
+archive and backup transfers, and the other long-running routes in
+`Server/api/request_deadline.go`) are never counted: they stay open by design,
+so their time says nothing about slowness.
+
+**Auth:** `VIEW_DIAGNOSTICS` (`ADMINISTRATOR` passes)
+
+#### Response 200 OK
+
+```json
+{
+  "window_seconds": 3600,
+  "routes": [
+    {
+      "method": "POST",
+      "route": "/api/v1/channels/{id}/messages",
+      "count": 1204,
+      "p50_ms": 20,
+      "p95_ms": 200,
+      "max_ms": 731.4
+    }
+  ]
+}
+```
+
+- Rows are slowest first by `p95_ms`, then `max_ms`. `routes` is `[]` when
+  nothing was counted yet.
+- `p50_ms` and `p95_ms` are the upper bound of the time bucket the median and
+  95th percentile fall in (0.5 ms to 5 s, the same buckets as
+  `GET /api/v1/metrics`), capped at `max_ms`. `max_ms` is the slowest single
+  call.
+- The hour is twelve 5-minute slots, so a call leaves the list 55 to 60
+  minutes after it was made. The counts are in memory: a restart clears them.
 
 ---
 
@@ -6606,10 +6719,10 @@ Tauri-compatible update endpoint. The desktop client checks this to see if a new
 
 #### Path Parameters
 
-| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact get 204. The `linux-x86_64-deb` and `linux-aarch64-deb` targets are served only with `?deb_install=pkexec` (see below). |
-| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                                                                                                                  |
+| Param             | Type   | Description                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`          | string | Tauri updater target `{os}-{arch}-{installer}` (e.g., `windows-x86_64-nsis`, `windows-aarch64-nsis`, `linux-x86_64-appimage`, `linux-aarch64-appimage`, `android-aarch64-apk`). Selects the platform's updater artifact and is echoed back as the `platforms` key. Targets without a published updater artifact get 204. The `linux-x86_64-deb` and `linux-aarch64-deb` targets are served only with `?deb_install=pkexec` (see below). |
+| `current_version` | string | Client's current semver version (e.g., `1.0.0`)                                                                                                                                                                                                                                                                                                                                                                                         |
 
 #### Query Parameters
 

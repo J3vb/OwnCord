@@ -15,6 +15,36 @@ import (
 // persistence sentinel.
 var ErrVoiceChannelFull = errors.New("voice channel is full")
 
+// voiceStore is what VoiceService reads and writes. *db.DB satisfies it.
+type voiceStore interface {
+	db.Auditor
+	JoinVoiceChannel(ctx context.Context, userID, channelID int64) error
+	JoinVoiceChannelIfCapacity(ctx context.Context, userID, channelID int64, maxUsers int) error
+	LeaveVoiceChannelIfMatch(ctx context.Context, userID, expectedChannelID int64, expectedJoinedAt string) (bool, error)
+	GetVoiceState(ctx context.Context, userID int64) (*db.VoiceState, error)
+	GetChannelVoiceStates(ctx context.Context, channelID int64) ([]db.VoiceState, error)
+	GetAllVoiceStates(ctx context.Context) ([]db.VoiceState, error)
+	UpdateVoiceMute(ctx context.Context, userID int64, muted bool) error
+	UpdateVoiceDeafen(ctx context.Context, userID int64, deafened bool) error
+	UpdateVoiceCamera(ctx context.Context, userID int64, camera bool) error
+	EnableCameraIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
+	UpdateVoiceScreenshare(ctx context.Context, userID int64, screenshare bool) error
+	EnableScreenshareIfUnderLimit(ctx context.Context, userID, channelID int64, maxVideo int) (bool, error)
+	CountChannelVoiceUsers(ctx context.Context, channelID int64) (int, error)
+	SetVoiceServerMute(ctx context.Context, userID, channelID int64, serverMuted bool) (matched bool, err error)
+	SetVoiceServerDeafen(ctx context.Context, userID, channelID int64, serverDeafened bool) (matched bool, err error)
+	// MuteForTimeoutSession is SetVoiceServerMute scoped to one exact session
+	// (channelID, joinedAt), stamping actionID as owner (voice_states.server_muted_by)
+	// atomically with the mute, only on a genuine unmuted-to-muted transition.
+	// supersededIDs transfers ownership from just-superseded ledger ids onto actionID
+	// in the same transaction; only the caller (ws.Hub, under its per-user lock) may
+	// do that transfer (see TimeoutVoiceMuter.MuteForTimeout).
+	MuteForTimeoutSession(ctx context.Context, userID, channelID, actionID int64, joinedAt string, supersededIDs []int64) (matched, transitioned bool, err error)
+	// ClearServerMuteOwnedBy clears server_muted for the voice_states row naming one
+	// of actionIDs as owner and reports its channel/join token for the paired SFU call.
+	ClearServerMuteOwnedBy(ctx context.Context, userID int64, actionIDs []int64) (channelID int64, joinedAt string, matched bool, err error)
+}
+
 // VoiceService owns the voice_states table: who is in which voice channel, since
 // when, and the self- and moderator-imposed flags. The hub keeps the transport
 // (SFU round trips, pub/sub topics, key-holder election, broadcasts) and asks
@@ -28,14 +58,14 @@ var ErrVoiceChannelFull = errors.New("voice channel is full")
 //   - compensating writes (rollback, restore) run on a context detached from the
 //     request, since the cancellation that triggered them must not abort them.
 type VoiceService struct {
-	st Store
+	st voiceStore
 	// callLog is told about completed DM joins and voice row deletes to keep the call
 	// log. Set by service.New; nil in a standalone service, where the notes do nothing.
 	callLog *CallLogService
 }
 
 // NewVoiceService creates a VoiceService.
-func NewVoiceService(st Store) *VoiceService {
+func NewVoiceService(st voiceStore) *VoiceService {
 	return &VoiceService{st: st}
 }
 

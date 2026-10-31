@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -92,18 +91,17 @@ func seedStaleMarkerBacklog(t *testing.T, database *db.DB, uid int64, n int) (ch
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range n {
-		res, err := database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp) VALUES (?, ?, ?, ?)`,
-			chID, uid, fmt.Sprintf("stale %d", i), retentionNow.Add(-time.Duration(400+i)*24*time.Hour).Format("2006-01-02 15:04:05"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		mid, _ := res.LastInsertId()
-		stored := fmt.Sprintf("stale-%d", i)
-		if _, err := database.ExecContext(ctx, `INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id) VALUES (?, ?, 'f', ?, 'image/png', 1, ?)`,
-			stored, mid, stored, uid); err != nil {
-			t.Fatal(err)
-		}
+	// Set-based: one row at a time cost most of the test under the race detector.
+	if _, err := database.ExecContext(ctx, `WITH RECURSIVE s(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM s WHERE i < ? - 1)
+		INSERT INTO messages (channel_id, user_id, content, timestamp)
+		SELECT ?, ?, 'stale ' || i, datetime(?, printf('-%d days', 400 + i)) FROM s ORDER BY i`,
+		n, chID, uid, retentionNow.Format("2006-01-02 15:04:05")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO attachments (id, message_id, filename, stored_as, mime_type, size, uploader_id)
+		SELECT 'stale-' || id, id, 'f', 'stale-' || id, 'image/png', 1, ? FROM messages WHERE channel_id = ?`,
+		uid, chID); err != nil {
+		t.Fatal(err)
 	}
 	return chID
 }

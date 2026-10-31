@@ -237,6 +237,8 @@ var deadlineBound = []string{
 	"GET /admin/api/storage/leftovers",
 	"GET /admin/api/storage/members",
 	"GET /admin/api/storage/summary",
+	"GET /admin/api/system/stats",
+	"GET /admin/api/system/slow-requests",
 	"GET /admin/api/tokens",
 	"GET /admin/api/updates",
 	"GET /admin/api/users",

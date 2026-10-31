@@ -20,6 +20,17 @@
 id = "GO-2026-5932"
 reason = "golang.org/x/crypto, module-level only: govulncheck reports it unreachable from our code"
 
+# --- npm: dev-only. minimatch 10.2.6 reaches us only through eslint,
+# typescript-eslint and stryker, ships in no artifact, and `npm audit
+# --omit=dev --audit-level=high` gates the shipped tree. The fix is in 11.0.1,
+# which none of those accepts (all require ^10 or ~10.2). The advisory needs an
+# attacker-supplied glob pattern; every pattern here comes from our own lint
+# and mutation config. Drop it once eslint, typescript-eslint and stryker
+# resolve minimatch >= 11.0.1.
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+reason = "minimatch dev-only via eslint/typescript-eslint/stryker; fix only in 11.x, which no dependent accepts; patterns are our own config"
+
 # --- Rust: the accepted advisories cargo-deny carries in
 # Client/src-tauri/deny.toml (the authoritative list with the reachability
 # argument), kept in step with it, plus glib's unsound advisory, which
@@ -64,17 +75,6 @@ reason = "zbus_names unmaintained (merged into zbus 6), reached only via zbus 4/
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0372"
 reason = "zvariant_derive unmaintained (merged into zbus 6), reached only via zbus 4/5 on Linux D-Bus paths (see deny.toml)"
-
-# block-buffer 0.10.4 comes in through digest 0.10 (sha2 for tauri-codegen, wry
-# and the secret-service crates; sha1 for tungstenite and zbus 4; md-5; hkdf).
-# Moving to the fixed 0.12.1 needs the digest 0.11 stack in every one of those,
-# so it is not a lockfile bump. The advisory needs a panic inside a hashing
-# callback that the caller catches and then keeps using the same buffer; none of
-# these callers catch panics around a hash. Drop it once digest 0.10 leaves the
-# graph (0.12.1 is already here via digest 0.11).
-[[IgnoredVulns]]
-id = "GHSA-qwgh-2vcv-g2f7"
-reason = "block-buffer 0.10 via digest 0.10: fix needs the digest 0.11 stack upstream; needs a caught panic plus buffer reuse, which no caller does"
 
 # --- Rust: Linux native voice (livekit), phase-0 build plumbing ---
 #

@@ -634,6 +634,10 @@ const EXEMPT: readonly string[] = [
   // body-observer timers the timer-count probes read; bottomSheet.test.ts
   // ("closes from closeBottomSheet and from a session reset") runs the reset.
   "bottomSheet:open",
+  // The reset pops the history entry, and jsdom runs history.back() on a timer,
+  // which the timer-count probes read; backHistory.test.ts ("a session reset
+  // drops every claim and the guard, and pops the entry") runs the reset.
+  "backHistory:claims",
   // Per-subscriber names built from a counter in auth.store (onAuthCleared);
   // page-scoped callers only, each removes its own entry with its disposer.
   "auth-cleared#${authClearedSeq}",

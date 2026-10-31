@@ -1126,22 +1126,9 @@ func TestBackupToSafe_CleansUpPartialFileOnFailure(t *testing.T) {
 	if _, err := database.SQLDb().Exec("CREATE TABLE bulk(x TEXT)"); err != nil {
 		t.Fatalf("CREATE TABLE bulk: %v", err)
 	}
-	tx, err := database.SQLDb().Begin()
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	stmt, err := tx.Prepare("INSERT INTO bulk(x) VALUES (?)")
-	if err != nil {
-		t.Fatalf("Prepare: %v", err)
-	}
-	for i := range 300000 {
-		if _, err := stmt.Exec(i); err != nil {
-			t.Fatalf("insert bulk row %d: %v", i, err)
-		}
-	}
-	_ = stmt.Close()
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
+	if _, err := database.SQLDb().Exec(`WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < 299999)
+		INSERT INTO bulk(x) SELECT i FROM n`); err != nil {
+		t.Fatalf("insert bulk rows: %v", err)
 	}
 
 	backupDir := filepath.Join(tmpDir, "backups")

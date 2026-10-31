@@ -379,6 +379,11 @@ pub async fn ws_connect<R: Runtime>(
 /// WebSocket login. Only the top-level `type` counts; a chat message whose
 /// content says "auth_ok" does not.
 fn is_auth_ok(text: &str) -> bool {
+    // Most frames never mention it; skip parsing them (the `ready` payload is
+    // large).
+    if !text.contains("auth_ok") {
+        return false;
+    }
     serde_json::from_str::<Value>(text)
         .ok()
         .and_then(|v| {
@@ -694,6 +699,22 @@ mod tests {
         assert!(!is_auth_ok(r#"{"payload":{"type":"auth_ok"}}"#));
         assert!(!is_auth_ok("not json"));
         assert!(!is_auth_ok(""));
+    }
+
+    #[test]
+    fn auth_ok_check_skips_frames_that_do_not_mention_it() {
+        // A large frame without the marker is rejected, and a well-formed
+        // auth_ok frame with extra whitespace or fields is still accepted.
+        let big = format!(
+            r#"{{"type":"ready","payload":{{"data":"{}"}}}}"#,
+            "x".repeat(100_000)
+        );
+        assert!(!is_auth_ok(&big));
+        assert!(is_auth_ok(r#"{ "payload": {"n": 1}, "type" : "auth_ok" }"#));
+        // Mentioning the marker inside a nested field never counts.
+        assert!(!is_auth_ok(
+            r#"{"type":"ready","payload":{"note":"auth_ok"}}"#
+        ));
     }
 
     #[test]

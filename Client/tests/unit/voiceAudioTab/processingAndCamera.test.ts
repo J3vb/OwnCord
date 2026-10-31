@@ -459,7 +459,7 @@ describe("VoiceAudioTab UI structure", () => {
     press("ArrowRight");
     expect(threshold.style.left).toBe("55%");
     expect(threshold.getAttribute("aria-valuenow")).toBe("55");
-    expect(threshold.getAttribute("aria-valuetext")).toBe("Sensitivity 45%");
+    expect(threshold.getAttribute("aria-valuetext")).toBe("-37 dB");
     expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(45);
 
     press("Home");
@@ -470,7 +470,7 @@ describe("VoiceAudioTab UI structure", () => {
     press("End");
     expect(threshold.style.left).toBe("100%");
     expect(threshold.getAttribute("aria-valuenow")).toBe("100");
-    expect(threshold.getAttribute("aria-valuetext")).toBe("Sensitivity 0%");
+    expect(threshold.getAttribute("aria-valuetext")).toBe("-10 dB");
     expect(mockSetVoiceSensitivity).toHaveBeenLastCalledWith(0);
     ac.abort();
   });
@@ -552,7 +552,7 @@ describe("VoiceAudioTab UI structure", () => {
       threshold.dispatchEvent(new PointerEvent("pointermove", { pointerId: 1, clientX: x }));
     }
 
-    expect(threshold.getAttribute("aria-valuetext")).toBe("Sensitivity 0%");
+    expect(threshold.getAttribute("aria-valuetext")).toBe("-10 dB");
     expect(mockSetVoiceSensitivity).not.toHaveBeenCalled();
 
     threshold.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1 }));

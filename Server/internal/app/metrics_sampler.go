@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/metrics"
+	"github.com/J3vb/OwnCord/Server/sysstats"
 	"github.com/J3vb/OwnCord/Server/ws"
 )
 
@@ -75,6 +76,22 @@ func (a *App) startMetricsWindows(w *metrics.Windows) {
 		case <-done:
 		case <-stepCtx.Done():
 			a.log.Warn("metrics sampler did not stop before the close budget ran out")
+		}
+		return nil
+	})
+}
+
+// startSystemStats runs the Dashboard health row's sampler under a child of
+// bgCtx and registers its close step, the same shape as startMetricsWindows.
+func (a *App) startSystemStats(s *sysstats.Sampler) {
+	ctx, cancel := context.WithCancel(a.bgCtx)
+	done := s.Run(ctx)
+	a.onClose("system-stats", func(stepCtx context.Context) error {
+		cancel()
+		select {
+		case <-done:
+		case <-stepCtx.Done():
+			a.log.Warn("system stats sampler did not stop before the close budget ran out")
 		}
 		return nil
 	})

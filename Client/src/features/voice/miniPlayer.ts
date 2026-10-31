@@ -12,6 +12,7 @@ import { Disposable } from "../../lib/disposable";
 import { createIcon, type IconName } from "../../lib/icons";
 import { syncVideoSurface } from "../../lib/voice/videoSurface";
 import { voiceText } from "../../i18n/voice";
+import { isAndroidApp } from "./native/platform";
 
 /** How far one arrow key press moves the player. */
 const KEY_STEP_PX = 24;
@@ -91,7 +92,10 @@ export function openMiniPlayer(opts: MiniPlayerOptions): MiniPlayer {
     controls.appendChild(btn);
   }
   control(voiceText("mini.return"), "maximize", "return", opts.onReturn);
-  control(voiceText("tile.popOut"), "picture-in-picture-2", "popout", opts.onPopout);
+  // The Android app has one window, so there is nothing to pop out to.
+  if (!isAndroidApp()) {
+    control(voiceText("tile.popOut"), "picture-in-picture-2", "popout", opts.onPopout);
+  }
   control(voiceText("tile.stopWatching"), "eye-off", "stop", opts.onStopWatching);
 
   root.append(opts.video, name, controls, hint);

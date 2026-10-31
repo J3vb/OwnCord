@@ -6,6 +6,7 @@
 import type { UserStatus } from "@lib/types";
 import { formatDate } from "../i18n/format";
 import { shellText } from "../i18n/shell";
+import { isAndroidApp } from "../features/voice/native/platform";
 
 export interface StatusDef {
   readonly value: UserStatus;
@@ -32,6 +33,16 @@ export const STATUS_DEFS: readonly StatusDef[] = [
     noteKey: "status.invisibleNote",
   },
 ];
+
+/** The one-line note under a status's label, or null where it has none. Do Not
+ *  Disturb says "desktop notifications" on a desktop and plain "notifications"
+ *  in the Android app. */
+export function statusNote(def: StatusDef): string | null {
+  if (def.noteKey === undefined) return null;
+  if (def.noteKey === "status.dndNote" && isAndroidApp())
+    return shellText("status.dndNote.android");
+  return shellText(def.noteKey);
+}
 
 export function colorForStatus(status: UserStatus): string {
   return STATUS_DEFS.find((d) => d.value === status)?.color ?? "var(--text-micro)";

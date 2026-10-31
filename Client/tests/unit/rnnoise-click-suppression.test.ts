@@ -55,6 +55,42 @@ describe("RNNoise worklet on recorded audio", () => {
     return output;
   }
 
+  /** RNNoise's speech probability (output 1) for each 128-sample quantum. */
+  async function speechProbabilities(input: Float32Array): Promise<number[]> {
+    // @ts-expect-error — worklet script has no module exports
+    await import("../../public/rnnoise-worklet.js");
+    const processor = new processorCtor!();
+    const wasm = readFileSync("public/rnnoise.wasm");
+    await processor._initWasm(wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.length));
+    const probabilities: number[] = [];
+    for (let at = 0; at + 128 <= input.length; at += 128) {
+      const speech = new Float32Array(128);
+      processor.process([[input.subarray(at, at + 128)]], [[new Float32Array(128)], [speech]]);
+      probabilities.push(speech[127]!);
+    }
+    return probabilities;
+  }
+
+  it("says voice for the speech clip and not for the room, nor while it settles", async () => {
+    const quantaPerSecond = FIXTURE_SAMPLE_RATE / 128;
+    // The room tone alone: never a voice, including the model's first frames,
+    // which read as voice before their state settles and are masked.
+    const room = await speechProbabilities(placeInRoomTone(new Float32Array(0), 1, 2));
+    expect(Math.max(...room)).toBeLessThan(0.15);
+    // Once running it never reports exactly 0: that reads as no RNNoise.
+    expect(Math.min(...room.slice(Math.round(0.2 * quantaPerSecond)))).toBeGreaterThan(0);
+
+    const clip = readAudioFixture("speech.wav");
+    const speech = await speechProbabilities(placeInRoomTone(clip, 0.5, 2));
+    const spoken = speech.slice(
+      Math.round(0.5 * quantaPerSecond),
+      Math.round((0.5 + clip.length / FIXTURE_SAMPLE_RATE) * quantaPerSecond),
+    );
+    // Most of the clip reads as a voice; the room before it does not.
+    expect(spoken.filter((p) => p >= 0.5).length / spoken.length).toBeGreaterThan(0.8);
+    expect(Math.max(...speech.slice(0, Math.round(0.4 * quantaPerSecond)))).toBeLessThan(0.15);
+  });
+
   // RNNoise works on 10 ms frames, so how much of a click survives depends on
   // where in a frame it lands; each offset has to clear the bar.
   it.each([0, 3, 7])(

@@ -182,6 +182,8 @@ export interface SidebarAreaResult {
   readonly syncMemberSection: () => void;
   /** Rename a group DM through the sidebar's prompt (the header's name click). */
   readonly renameGroup: (channelId: number) => void;
+  /** Open the call in a channel, as the voice widget's channel name does. */
+  readonly openCall: (channelId: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -1296,27 +1298,29 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     ws,
     limiters,
   );
+  /** Open the call in `channelId`: its DM, or a guild voice channel's call view. */
+  function openCall(channelId: number): void {
+    const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
+    if (dm !== undefined) {
+      selectDmConversation(dm, dmDeps);
+      return;
+    }
+    // A guild voice channel: back to the server view, then its call, the
+    // same as clicking the joined channel in the sidebar.
+    if (uiStore.getState().sidebarMode === "channels") {
+      opts.onOpenCall?.();
+      return;
+    }
+    returnToChannel();
+    // After the channel switch's store notification, which shows that
+    // channel's chat and would close a call view opened before it.
+    queueMicrotask(() => opts.onOpenCall?.());
+  }
   const voiceWidgetOptions: VoiceWidgetOptions = {
     onDisconnect,
     onCameraToggle,
     onScreenshareToggle,
-    onOpenCall: (channelId) => {
-      const dm = dmStore.getState().channels.find((c) => c.channelId === channelId);
-      if (dm !== undefined) {
-        selectDmConversation(dm, dmDeps);
-        return;
-      }
-      // A guild voice channel: back to the server view, then its call, the
-      // same as clicking the joined channel in the sidebar.
-      if (uiStore.getState().sidebarMode === "channels") {
-        opts.onOpenCall?.();
-        return;
-      }
-      returnToChannel();
-      // After the channel switch's store notification, which shows that
-      // channel's chat and would close a call view opened before it.
-      queueMicrotask(() => opts.onOpenCall?.());
-    },
+    onOpenCall: openCall,
   };
   sidebarWrapper.appendChild(voiceWidgetSlot);
 
@@ -1533,5 +1537,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     buildMemberPanel,
     syncMemberSection,
     renameGroup,
+    openCall,
   };
 }

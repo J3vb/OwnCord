@@ -14,17 +14,30 @@ import (
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
+// settingsStore is what SettingsService reads and writes. *db.DB satisfies it.
+type settingsStore interface {
+	channelGetter
+	db.Auditor
+	settingGetter
+	ServerRetentionDays(ctx context.Context) (int, error)
+	SearchAuditLog(ctx context.Context, action, query string, hideSignins bool, limit, offset int) ([]db.AuditEntry, error)
+	ListAuditActions(ctx context.Context, limit int) ([]string, error)
+	CountUsersWithoutTOTP(ctx context.Context) (int, error)
+	GetAllSettings(ctx context.Context) (map[string]string, error)
+	ApplySettings(ctx context.Context, updates map[string]string) error
+}
+
 // SettingsService owns the server-settings policy the admin panel writes and the
 // server reads: which keys exist, boolean normalization, the require_2fa
 // preconditions and the atomic apply. Handlers are thin adapters; the hub reads
 // server identity through it.
 type SettingsService struct {
-	st Store
+	st settingsStore
 	mu syncutil.Mutex
 }
 
 // NewSettingsService creates a SettingsService.
-func NewSettingsService(st Store) *SettingsService {
+func NewSettingsService(st settingsStore) *SettingsService {
 	return &SettingsService{st: st}
 }
 

@@ -248,8 +248,8 @@ describe("downloadAndInstallUpdate", () => {
     const first = downloadAndInstallUpdate("https://first.example");
     await vi.dynamicImportSettled();
     expect(state).toHaveBeenLastCalledWith({ status: "restarting" });
-    // Both the progress and the installing listener are detached.
-    expect(unlisten).toHaveBeenCalledTimes(2);
+    // The progress, installing and installer-opened listeners are detached.
+    expect(unlisten).toHaveBeenCalledTimes(3);
     expect(downloadAndInstallUpdate("https://second.example")).toBe(first);
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(relaunch).toHaveBeenCalledTimes(1);
@@ -268,9 +268,10 @@ describe("downloadAndInstallUpdate", () => {
 
     await downloadAndInstallUpdate("https://s.example");
     expect(invoke).toHaveBeenCalledTimes(2);
-    // Two listeners per attempt (progress, installing), every one detached.
-    expect(listen).toHaveBeenCalledTimes(4);
-    expect(unlisten).toHaveBeenCalledTimes(4);
+    // Three listeners per attempt (progress, installing, installer-opened),
+    // every one detached.
+    expect(listen).toHaveBeenCalledTimes(6);
+    expect(unlisten).toHaveBeenCalledTimes(6);
     expect(relaunch).toHaveBeenCalledTimes(1);
     unsubscribe();
   });
@@ -289,13 +290,13 @@ describe("downloadAndInstallUpdate", () => {
 
     const installing = listen.mock.calls.find((call) => call[0] === "update-installing");
     expect(installing).toBeDefined();
-    (installing?.[1] as () => void)();
+    (installing?.[1] as (() => void) | undefined)?.();
     expect(state).toHaveBeenLastCalledWith({ status: "installing" });
 
     finish();
     await installation;
-    // Both listeners are detached once the install returns.
-    expect(unlisten).toHaveBeenCalledTimes(2);
+    // Every listener is detached once the install returns.
+    expect(unlisten).toHaveBeenCalledTimes(3);
     unsubscribe();
   });
 
@@ -331,6 +332,50 @@ describe("downloadAndInstallUpdate", () => {
       restartRequired: false,
       reason: "not-authorized",
     });
+    unsubscribe();
+  });
+
+  it("an opened Android installer waits for the Install tap without relaunching", async () => {
+    invoke.mockImplementationOnce(async () => {
+      const opened = listen.mock.calls.find((call) => call[0] === "update-installer-opened");
+      expect(opened).toBeDefined();
+      (opened?.[1] as (() => void) | undefined)?.();
+    });
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+
+    await expect(downloadAndInstallUpdate("https://s.example")).resolves.toBeUndefined();
+    expect(state).toHaveBeenLastCalledWith({
+      status: "failed",
+      restartRequired: false,
+      reason: "android-confirm",
+    });
+    expect(relaunch).not.toHaveBeenCalled();
+    expect(unlisten).toHaveBeenCalledTimes(3);
+
+    // The user may close Android's prompt, so Retry starts a fresh attempt.
+    await downloadAndInstallUpdate("https://s.example");
+    expect(invoke).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
+  it("a missing Android install permission ends failed with reason android-permission", async () => {
+    invoke.mockRejectedValueOnce("update install permission needed");
+    const state = vi.fn();
+    const unsubscribe = subscribeToUpdateInstall(state);
+
+    await expect(downloadAndInstallUpdate("https://s.example")).rejects.toBe(
+      "update install permission needed",
+    );
+    expect(state).toHaveBeenLastCalledWith({
+      status: "failed",
+      restartRequired: false,
+      reason: "android-permission",
+    });
+    expect(relaunch).not.toHaveBeenCalled();
+
+    await downloadAndInstallUpdate("https://s.example");
+    expect(invoke).toHaveBeenCalledTimes(2);
     unsubscribe();
   });
 

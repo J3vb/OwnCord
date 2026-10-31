@@ -183,6 +183,22 @@ describe("installGlobalGuards", () => {
       expect(installTouchInput.mock.calls[0]![0]).toBeInstanceOf(AbortSignal);
     });
 
+    it("asks for the long-press buzz only in the Android app", async () => {
+      stubPointer(true);
+      installGlobalGuards();
+      await vi.waitFor(() => expect(installTouchInput).toHaveBeenCalledOnce());
+      expect(installTouchInput.mock.calls[0]![1]).toEqual({ haptics: false });
+
+      installTouchInput.mockClear();
+      vi.stubGlobal("__TAURI_INTERNALS__", {});
+      vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+        "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/140.0",
+      );
+      installGlobalGuards();
+      await vi.waitFor(() => expect(installTouchInput).toHaveBeenCalledOnce());
+      expect(installTouchInput.mock.calls[0]![1]).toEqual({ haptics: true });
+    });
+
     it("never loads it on a fine-pointer device", async () => {
       stubPointer(false);
       installGlobalGuards();

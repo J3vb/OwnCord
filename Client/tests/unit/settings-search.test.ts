@@ -77,6 +77,7 @@ import { whatsNewText } from "../../src/i18n/whatsNew";
 import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
 import type { SearchableTab } from "@components/settings/settingsSearch";
+import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
 
 const options = {
   onClose: vi.fn(),
@@ -182,9 +183,16 @@ describe("settings search", () => {
     // it; this renders each one and checks both directions: every indexed
     // string is really on screen, and every row label / section heading on
     // screen is indexed (so a new row cannot be added without its text).
-    it.each(names.filter((n) => n !== "Safety"))(
-      "matches what the %s tab renders",
-      async (name) => {
+    // It runs on the desktop app and on the Android app, which leaves out the
+    // Keybinds tab and the rows that only a desktop has.
+    describe.each([
+      ["desktop app", hostDesktopApp, names.filter((n) => n !== "Safety")],
+      ["Android app", hostAndroidApp, names.filter((n) => n !== "Safety" && n !== "Keybinds")],
+    ] as const)("on the %s", (_host, setHost, tabNames) => {
+      beforeEach(setHost);
+      afterEach(clearHost);
+
+      it.each(tabNames)("matches what the %s tab renders", async (name) => {
         mountOverlay(
           name === "My uploads"
             ? {
@@ -218,8 +226,33 @@ describe("settings search", () => {
           .map((el) => (el.textContent ?? "").trim())
           .filter((text) => text !== "" && !known.has(text) && !STATE_TEXT.has(text));
         expect(unindexed).toEqual([]);
-      },
-    );
+      });
+    });
+
+    it("lists no Keybinds tab and no keybind text in the Android app", () => {
+      hostAndroidApp();
+      try {
+        mountOverlay({
+          safetyTab: () => document.createElement("div"),
+          myUploadsTab: () => document.createElement("div"),
+        });
+        expect(tabs().map((t) => labelFor(t))).not.toContain("Keybinds");
+        expect(SETTINGS_SEARCH_INDEX.Keybinds()).toEqual([]);
+        // The rows left out there are not searchable either.
+        type("screen share quality");
+        expect(visibleNames()).toEqual([]);
+        type("flash taskbar");
+        expect(visibleNames()).toEqual([]);
+        type("launch on login");
+        expect(visibleNames()).toEqual([]);
+        type("zoom level");
+        expect(visibleNames()).toEqual([]);
+        type("noise suppression");
+        expect(visibleNames()).toEqual(["Voice & Video"]);
+      } finally {
+        clearHost();
+      }
+    });
 
     it("lists every tab the overlay can show", () => {
       mountOverlay({

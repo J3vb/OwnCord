@@ -353,15 +353,22 @@ describe("MessageList: blocked users' messages", () => {
     });
 
     it("a live blocked arrival with the tail in view is marked seen by its id", async () => {
-      block(BOB.id);
-      setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB)]);
-      openChannel(2);
-      mount();
-      scrollTo(SCROLL_HEIGHT - CLIENT_HEIGHT);
-      marks.length = 0;
-      setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB), msg(5, BOB)]);
-      await vi.waitFor(() => expect(marks).toEqual([[CHANNEL_ID, 5]]), { timeout: 3000 });
-      expect(run(3)!.textContent).toContain("3 blocked messages");
+      vi.useFakeTimers();
+      try {
+        block(BOB.id);
+        setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB)]);
+        openChannel(2);
+        mount();
+        scrollTo(SCROLL_HEIGHT - CLIENT_HEIGHT);
+        marks.length = 0;
+        setMessages([msg(1), msg(2), msg(3, BOB), msg(4, BOB), msg(5, BOB)]);
+        // The live mark_read is throttled to one a second.
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(marks).toEqual([[CHANNEL_ID, 5]]);
+        expect(run(3)!.textContent).toContain("3 blocked messages");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("a block landing on the row the reader is anchored to folds the list without losing it", () => {

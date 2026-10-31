@@ -13,13 +13,20 @@ type GIFFavorite = db.GIFFavorite
 // per-user cap.
 var ErrGIFFavoritesFull = db.ErrGIFFavoritesFull
 
+// gifFavoriteStore is what GIFFavoriteService reads and writes. *db.DB satisfies it.
+type gifFavoriteStore interface {
+	AddGIFFavorite(ctx context.Context, userID int64, f db.GIFFavorite) error
+	RemoveGIFFavorite(ctx context.Context, userID int64, url string) error
+	ListGIFFavorites(ctx context.Context, userID int64) ([]db.GIFFavorite, error)
+}
+
 // GIFFavoriteService is the per-user saved-GIF list.
 type GIFFavoriteService struct {
-	st Store
+	st gifFavoriteStore
 }
 
 // NewGIFFavoriteService creates a GIFFavoriteService.
-func NewGIFFavoriteService(st Store) *GIFFavoriteService {
+func NewGIFFavoriteService(st gifFavoriteStore) *GIFFavoriteService {
 	return &GIFFavoriteService{st: st}
 }
 

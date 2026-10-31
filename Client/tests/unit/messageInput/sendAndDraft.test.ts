@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/messageInputMocks";
 import { createMessageInput } from "@components/MessageInput";
 import { makeOptions } from "../../helpers/messageInputHarness";
+import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
@@ -19,6 +20,7 @@ describe("MessageInput", () => {
 
   afterEach(() => {
     container.remove();
+    clearHost();
   });
 
   it("mounts with message-input-wrap class", () => {
@@ -89,6 +91,47 @@ describe("MessageInput", () => {
     );
 
     expect(opts.onSend).not.toHaveBeenCalled();
+
+    comp.destroy?.();
+  });
+
+  it("the desktop app sends on Enter and keeps the default Enter key hint", () => {
+    hostDesktopApp();
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    expect(textarea.hasAttribute("enterkeyhint")).toBe(false);
+    textarea.value = "Hello";
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    textarea.dispatchEvent(enter);
+
+    expect(enter.defaultPrevented).toBe(true);
+    expect(opts.onSend).toHaveBeenCalledTimes(1);
+
+    comp.destroy?.();
+  });
+
+  it("the Android app adds a new line on Enter and sends only from the send button", () => {
+    hostAndroidApp();
+    const opts = makeOptions();
+    const comp = createMessageInput(opts);
+    comp.mount(container);
+
+    const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
+    expect(textarea.getAttribute("enterkeyhint")).toBe("enter");
+    textarea.value = "Hello";
+    // Not prevented, so the field inserts its own line break.
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    textarea.dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
+    expect(opts.onSend).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("Hello");
+
+    const sendBtn = container.querySelector(".send-btn") as HTMLButtonElement;
+    sendBtn.click();
+    expect(opts.onSend).toHaveBeenCalledWith("Hello", null, [], [], false);
 
     comp.destroy?.();
   });

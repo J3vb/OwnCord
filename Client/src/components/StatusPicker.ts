@@ -1,13 +1,16 @@
 /**
  * StatusPicker — compact dropdown for selecting user online status.
  * Shows a colored status dot; clicking it opens a floating menu
- * with all status options. Intended for use in the UserBar.
+ * with all status options. Intended for use in the UserBar. On a phone the
+ * same options and custom status field open as a bottom sheet instead, since
+ * a popover over the drawer is hard to hit and easy to lose.
  */
 
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { isPhoneLayout, openBottomSheet } from "@lib/ui/bottomSheet";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { MAX_CUSTOM_STATUS_LEN } from "@lib/presence/userStatus";
@@ -43,6 +46,17 @@ export type StatusPickerComponent = MountableComponent & {
   setEnabled(enabled: boolean): void;
 };
 
+/** Where the custom status field is shown: the dropdown, or the phone sheet. */
+interface CustomRowSurface {
+  readonly signal: AbortSignal;
+  /** Leave the surface after a committed status. */
+  readonly done: () => void;
+  /** Leave it after Escape in the field. */
+  readonly cancel: () => void;
+  /** Called with the field, so the picker can seed and disable the live one. */
+  readonly onInput: (input: HTMLInputElement) => void;
+}
+
 // ---------------------------------------------------------------------------
 // Component factory
 // ---------------------------------------------------------------------------
@@ -56,7 +70,11 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
   let dotEl: HTMLDivElement | null = null;
   let dropdownEl: HTMLDivElement | null = null;
   let checkEls = new Map<UserStatus, HTMLSpanElement>();
+  /** The field that is live now: the sheet's while it is open, else the dropdown's. */
   let customInputEl: HTMLInputElement | null = null;
+  let dropdownInputEl: HTMLInputElement | null = null;
+  /** Closes the phone sheet; null while none is open. */
+  let closeSheet: (() => void) | null = null;
   /** Last text handed to the callback. Guards the blur-after-Enter double
    *  send, which would otherwise cost a second presence_update against the
    *  server's one-per-ten-seconds limit. */
@@ -82,6 +100,11 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
 
   function toggleDropdown(): void {
     if (!enabled) return;
+    if (isPhoneLayout()) {
+      if (closeSheet !== null) closeSheet();
+      else openSheet();
+      return;
+    }
     if (isOpen()) {
       closeDropdown();
     } else {
@@ -160,7 +183,10 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
    * The "Set a custom status" row. Only built when a handler was supplied —
    * an input whose value goes nowhere is worse than no input.
    */
-  function buildCustomStatusRow(onChange: (text: string) => void): HTMLDivElement {
+  function buildCustomStatusRow(
+    onChange: (text: string) => void,
+    surface: CustomRowSurface,
+  ): HTMLDivElement {
     const row = createElement("div", { class: "status-picker-custom" });
     const input = createElement("input", {
       class: "status-picker-custom-input",
@@ -169,16 +195,16 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
       "aria-label": shellText("status.customLabel"),
       "data-testid": "custom-status-input",
     });
-    input.value = options.currentCustomStatus ?? "";
+    input.value = lastCommittedCustom;
     const hint = attachLimitHint(input, {
       max: MAX_CUSTOM_STATUS_LEN,
       hint: lineHintText(MAX_CUSTOM_STATUS_LEN),
       countCharacters: true,
       id: "custom-status-hint",
-      signal,
+      signal: surface.signal,
     });
     hint.el.dataset["testid"] = "custom-status-hint";
-    customInputEl = input;
+    surface.onInput(input);
 
     /** True when the text was sent or was already current; false when it was
      *  refused for length and stays in the field. */
@@ -210,27 +236,97 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
           e.preventDefault();
           // A refused (over-limit) status keeps the menu open with the hint.
           if (!commit()) return;
-          closeDropdown();
-          // Leave the input: a hidden input keeps focus, and setCustomStatus()
-          // skips a focused one, so a TIMED_OUT rollback arriving right after
-          // this commit could not re-seed the refused text out of it.
-          dotEl?.focus();
+          surface.done();
         } else if (e.key === "Escape" && !isImeCommit(e)) {
           e.preventDefault();
           input.value = lastCommittedCustom;
           hint.reset();
-          closeDropdown();
+          surface.cancel();
         }
       },
-      { signal },
+      { signal: surface.signal },
     );
-    input.addEventListener("blur", commit, { signal });
+    input.addEventListener("blur", commit, { signal: surface.signal });
     // The row is inside the dropdown; clicking the input must not be treated
     // as picking a status or as an outside click.
-    input.addEventListener("click", (e: MouseEvent) => e.stopPropagation(), { signal });
+    input.addEventListener("click", (e: MouseEvent) => e.stopPropagation(), {
+      signal: surface.signal,
+    });
 
     appendChildren(row, input, hint.el);
     return row;
+  }
+
+  // ---- Phone sheet ----------------------------------------------------------
+
+  /** One status as a sheet row: the colour dot, its name, a check on the current one. */
+  function buildSheetOption(def: StatusDef, close: () => void): HTMLButtonElement {
+    const row = createElement("button", {
+      type: "button",
+      class: "msg-sheet-action status-sheet-option",
+      role: "radio",
+      "aria-checked": String(def.value === currentStatus),
+      "data-testid": `status-sheet-${def.value}`,
+    });
+    const dot = createElement("span", { class: "status-picker-option-dot" });
+    dot.style.background = def.color;
+    const check = createElement("span", { class: "status-sheet-check" });
+    if (def.value === currentStatus) check.appendChild(createIcon("check", 18));
+    appendChildren(
+      row,
+      dot,
+      createElement("span", { class: "menu-sheet-label" }, shellText(def.labelKey)),
+      check,
+    );
+    row.addEventListener("click", () => {
+      if (!enabled) return;
+      applyStatus(def.value);
+      close();
+      options.onStatusChange(def.value);
+    });
+    return row;
+  }
+
+  function openSheet(): void {
+    const content = createElement("div", { class: "msg-sheet status-sheet" });
+    const sheet = openBottomSheet({
+      label: shellText("status.change"),
+      content,
+      testId: "status-sheet",
+      signal,
+      fallbackFocus: () => dotEl,
+      onClosed: () => {
+        closeSheet = null;
+        customInputEl = dropdownInputEl;
+        dotEl?.setAttribute("aria-expanded", "false");
+      },
+    });
+    if (sheet.signal.aborted) return;
+    closeSheet = sheet.close;
+    dotEl?.setAttribute("aria-expanded", "true");
+
+    const card = createElement("div", {
+      class: "msg-sheet-section",
+      role: "radiogroup",
+      "aria-label": shellText("status.change"),
+    });
+    for (const def of STATUS_DEFS) card.appendChild(buildSheetOption(def, sheet.close));
+    content.appendChild(card);
+
+    const onCustomStatusChange = options.onCustomStatusChange;
+    if (onCustomStatusChange !== undefined) {
+      const custom = buildCustomStatusRow(onCustomStatusChange, {
+        signal: sheet.signal,
+        done: sheet.close,
+        cancel: sheet.close,
+        onInput: (input) => {
+          customInputEl = input;
+        },
+      });
+      custom.classList.add("status-sheet-custom");
+      content.appendChild(custom);
+    }
+    content.querySelector<HTMLElement>(".status-sheet-option")?.focus();
   }
 
   // ---- MountableComponent ---------------------------------------------------
@@ -278,7 +374,23 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     const onCustomStatusChange = options.onCustomStatusChange;
     if (onCustomStatusChange !== undefined) {
       dropdownEl.appendChild(createElement("div", { class: "status-picker-divider" }));
-      dropdownEl.appendChild(buildCustomStatusRow(onCustomStatusChange));
+      dropdownEl.appendChild(
+        buildCustomStatusRow(onCustomStatusChange, {
+          signal,
+          done: () => {
+            closeDropdown();
+            // Leave the input: a hidden input keeps focus, and setCustomStatus()
+            // skips a focused one, so a TIMED_OUT rollback arriving right after
+            // this commit could not re-seed the refused text out of it.
+            dotEl?.focus();
+          },
+          cancel: closeDropdown,
+          onInput: (input) => {
+            dropdownInputEl = input;
+            customInputEl = input;
+          },
+        }),
+      );
     }
 
     appendChildren(root, dotEl, dropdownEl);
@@ -317,6 +429,8 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
     dotEl = null;
     dropdownEl = null;
     customInputEl = null;
+    dropdownInputEl = null;
+    closeSheet = null;
   }
 
   function setStatus(status: UserStatus): void {
@@ -325,7 +439,10 @@ export function createStatusPicker(options: StatusPickerOptions): StatusPickerCo
 
   function setEnabled(value: boolean): void {
     enabled = value;
-    if (!value) closeDropdown();
+    if (!value) {
+      closeDropdown();
+      closeSheet?.();
+    }
     if (dotEl !== null) {
       dotEl.setAttribute("aria-disabled", String(!value));
       // A disabled trigger must not be a Tab stop or activatable by key.

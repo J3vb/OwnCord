@@ -4,6 +4,7 @@ import { createSidebarArea } from "../../../src/pages/main-page/SidebarArea";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import { authStore } from "../../../src/stores/auth.store";
+import { dmStore, setDmChannels } from "../../../src/stores/dm.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { createCreateChannelModal } from "@components/CreateChannelModal";
@@ -108,6 +109,61 @@ describe("SidebarArea", () => {
         unsub();
         cleanup(result);
       }
+    });
+
+    it("openCall (the phone call bar's tap) opens a guild call at once from the server view", () => {
+      const onOpenCall = vi.fn();
+      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
+      container.appendChild(result.sidebarWrapper);
+
+      result.openCall(4242);
+
+      expect(onOpenCall).toHaveBeenCalledOnce();
+      cleanup(result);
+    });
+
+    it("openCall leaves DM mode before opening a guild call", async () => {
+      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      const onOpenCall = vi.fn();
+      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
+      container.appendChild(result.sidebarWrapper);
+
+      result.openCall(4242);
+      expect(onOpenCall).not.toHaveBeenCalled();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(uiStore.getState().sidebarMode).toBe("channels");
+      expect(onOpenCall).toHaveBeenCalledOnce();
+      cleanup(result);
+    });
+
+    it("openCall opens a DM call by selecting the DM, not the call view", () => {
+      setDmChannels([
+        {
+          channelId: 77,
+          recipient: { id: 7, username: "bob", avatar: "", status: "online" },
+          participants: [{ id: 7, username: "bob", avatar: "", status: "online" }],
+          name: "",
+          isGroup: false,
+          lastMessageId: null,
+          lastMessage: "",
+          lastMessageAt: "",
+          unreadCount: 0,
+          mentionCount: 0,
+        },
+      ]);
+      dmStore.flush();
+      const onOpenCall = vi.fn();
+      const result = createSidebarArea({ ...defaultOpts(), onOpenCall });
+      container.appendChild(result.sidebarWrapper);
+
+      result.openCall(77);
+
+      expect(channelsStore.getState().activeChannelId).toBe(77);
+      expect(uiStore.getState().sidebarMode).toBe("dms");
+      expect(onOpenCall).not.toHaveBeenCalled();
+      cleanup(result);
     });
 
     it("onOpenCall forwards to the page's call opener", () => {
