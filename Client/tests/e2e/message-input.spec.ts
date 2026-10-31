@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage } from "./helpers";
+import { startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Message Input
@@ -7,9 +7,7 @@ import { mockTauriFullSession, navigateToMainPage } from "./helpers";
 
 test.describe("Message Input", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("message input area is visible", async ({ page }) => {

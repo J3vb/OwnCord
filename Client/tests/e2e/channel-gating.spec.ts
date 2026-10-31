@@ -27,7 +27,9 @@ import {
   waitForWsReady,
   openDmRow,
   BASE_SESSION_ROUTES,
+  openContextMenuOn,
 } from "./helpers";
+import { type SentFrame, sentFrames } from "./support/invokeLog";
 import { captureCalls, fetchCalls } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
@@ -98,30 +100,6 @@ const DM_GROUP = {
 // ---------------------------------------------------------------------------
 // Outgoing-frame capture
 // ---------------------------------------------------------------------------
-
-interface SentFrame {
-  readonly type: string;
-  readonly payload?: Record<string, unknown>;
-}
-
-/** The client's own outgoing WS frames, as recorded by the Tauri mock's IPC log. */
-async function sentFrames(page: Page): Promise<SentFrame[]> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // A non-JSON frame is not a client WS message; skip it.
-      }
-    }
-    return frames;
-  });
-}
 
 async function chatSendFrames(page: Page): Promise<SentFrame[]> {
   return (await sentFrames(page)).filter((f) => f.type === "chat_send");
@@ -259,22 +237,7 @@ async function sendMessage(page: Page, text: string): Promise<void> {
 /** Open a member row's context menu, positioned at a safe viewport point (the
  *  sidebar rows sit low and a real right-click would put the menu off-screen). */
 async function openMemberMenu(page: Page, userId: number) {
-  const row = page.locator(`[data-testid='member-${userId}']`);
-  await expect(row).toBeVisible({ timeout: 5_000 });
-  await row.evaluate((el) =>
-    el.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: 640,
-        clientY: 80,
-        button: 2,
-      }),
-    ),
-  );
-  const menu = page.locator(".context-menu").first();
-  await expect(menu).toBeVisible({ timeout: 5_000 });
-  return menu;
+  return openContextMenuOn(page, page.locator(`[data-testid='member-${userId}']`));
 }
 
 // ---------------------------------------------------------------------------

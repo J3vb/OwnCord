@@ -1,12 +1,17 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, submitLogin, waitForWsReady } from "./helpers";
+import { ROUTE_MESSAGES_EMPTY } from "./helpers";
+import { type AppearancePrefs, findUnnamedControls } from "./support/accessibility";
 import {
-  type AppearancePrefs,
-  contrastMeter,
-  findUnnamedControls,
-  setAppearance,
-} from "./support/accessibility";
+  attachScreenshot,
+  bootSignedIn,
+  contrastMatrix,
+  expectNoMotion,
+  expectReachable,
+  horizontalOverflow,
+  openModerationReport,
+  undersizedTargets,
+} from "./support/a11yHarness";
 
 // ---------------------------------------------------------------------------
 // B9-12: a report's review controls, internal notes and history against the
@@ -20,7 +25,6 @@ import {
 // tests/e2e/fullstack/moderation-workflow.spec.ts. Synthetic content only.
 // ---------------------------------------------------------------------------
 
-const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;
 const OPEN = "c".repeat(32);
 const MINE = "d".repeat(32);
 
@@ -91,48 +95,32 @@ const detail = (id: string, state: string, assignee: number, reason: string) => 
 
 async function boot(page: Page, prefs?: AppearancePrefs): Promise<void> {
   const q = "/api/v1/moderation/queue";
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
-        { pattern: q, method: "GET", status: 200, body: QUEUE },
-        {
-          pattern: `${q}/${MINE}`,
-          method: "GET",
-          status: 200,
-          body: detail(MINE, "assigned", 1, "harassment"),
-        },
-        {
-          pattern: `${q}/${OPEN}`,
-          method: "GET",
-          status: 200,
-          body: detail(OPEN, "open", 0, "spam"),
-        },
-        { pattern: `${q}/${MINE}/notes`, method: "POST", status: 204, body: null },
-      ],
-      simulateWsFlow: true,
-    }),
+  await bootSignedIn(
+    page,
+    [
+      ROUTE_MESSAGES_EMPTY,
+      { pattern: q, method: "GET", status: 200, body: QUEUE },
+      {
+        pattern: `${q}/${MINE}`,
+        method: "GET",
+        status: 200,
+        body: detail(MINE, "assigned", 1, "harassment"),
+      },
+      {
+        pattern: `${q}/${OPEN}`,
+        method: "GET",
+        status: 200,
+        body: detail(OPEN, "open", 0, "spam"),
+      },
+      { pattern: `${q}/${MINE}/notes`, method: "POST", status: 204, body: null },
+    ],
+    prefs,
   );
-  await page.goto("/");
-  if (prefs !== undefined) await setAppearance(page, prefs);
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
 }
 
 /** Open the Moderation Center and the report at `index`, from the keyboard. */
-async function openReport(page: Page, index = 0): Promise<Locator> {
-  await page.getByTestId("moderation-btn").focus();
-  await page.keyboard.press("Enter");
-  const center = page.getByRole("region", { name: "Moderation" });
-  await expect(center.getByTestId("mod-status")).toHaveText("2 reports open or in review");
-  await center.getByTestId("mod-queue-row").nth(index).focus();
-  await page.keyboard.press("Enter");
-  await expect(center.getByTestId("mod-report").getByRole("heading", { level: 3 })).toBeFocused();
-  return center;
-}
+const openReport = (page: Page, index = 0): Promise<Locator> =>
+  openModerationReport(page, "2 reports open or in review", index);
 
 test.describe("moderation review accessibility", () => {
   test("keyboard: note, outcome and close are reachable and operable in order", async ({
@@ -190,17 +178,14 @@ test.describe("moderation review accessibility", () => {
     await boot(page);
     const small: string[] = [];
     const check = async (root: Locator) => {
-      for (const target of await root
-        .locator(
-          "[data-testid=mod-work] button, [data-testid=mod-work] textarea, .mod-work-outcome",
-        )
-        .all()) {
-        if (!(await target.isVisible())) continue;
-        const box = await target.boundingBox();
-        if (box === null || box.width < 24 || box.height < 24) {
-          small.push(`${await target.textContent()}: ${box?.width}x${box?.height}`);
-        }
-      }
+      small.push(
+        ...(await undersizedTargets(
+          root.locator(
+            "[data-testid=mod-work] button, [data-testid=mod-work] textarea, .mod-work-outcome",
+          ),
+          { skipHidden: true },
+        )),
+      );
     };
     const center = await openReport(page);
     await check(center);
@@ -214,64 +199,53 @@ test.describe("moderation review accessibility", () => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await boot(page);
     const center = await openReport(page);
-    for (const el of [
+    await expectNoMotion([
       center.getByTestId("mod-work"),
       center.locator(".mod-history-item").first(),
       center.locator(".mod-note").first(),
       center.locator(".mod-work-outcome").first(),
-    ]) {
-      await expect(el).toHaveCSS("animation-name", "none");
-      await expect(el).toHaveCSS("transition-duration", "0s");
-    }
+    ]);
   });
 
-  for (const theme of THEMES) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: text and focus contrast`, async ({
-        page,
-      }, testInfo) => {
-        await boot(page, { theme, highContrast, accent: null });
-        const { measured, failures, measure, ring } = contrastMeter(page);
+  for (const c of contrastMatrix({
+    title: "text and focus contrast",
+    attachName: (theme, hc) => `b9-12-contrast-${theme}${hc ? "-hc" : ""}.json`,
+    boot: boot,
+    scenario: async (page, { measure, ring }) => {
+      const center = await openReport(page);
+      const report = center.getByTestId("mod-report");
+      const work = center.getByTestId("mod-work");
+      await measure("notes heading", report.locator("h4", { hasText: "Internal notes" }));
+      await measure("note byline", report.locator(".mod-note .mod-history-when"));
+      await measure("note text", report.locator(".mod-note-body"));
+      await measure(
+        "history hint",
+        report.locator(".mod-evidence-status", { hasText: "can't be edited" }),
+      );
+      await measure("history entry", report.locator(".mod-history-what").first());
+      await measure("history date", report.locator(".mod-history .mod-history-when").first());
+      await measure("action reason", report.locator(".mod-history-reason"));
+      await measure("review heading", work.locator("h4"));
+      await measure("review state", work.locator(".mod-evidence-status").first());
+      await measure("note label", work.locator("label").first());
+      await measure("note hint", work.locator(".mod-work-form .mod-evidence-status").first());
+      await measure("outcome legend", work.locator("legend"));
+      await measure("outcome label", work.locator(".mod-work-outcome span").first());
+      await measure("close hint", work.locator(".mod-work-form .mod-evidence-status").nth(1));
+      await measure("add note button", work.getByRole("button", { name: "Add note" }));
+      await measure("close button", work.getByRole("button", { name: "Close report" }));
 
-        const center = await openReport(page);
-        const report = center.getByTestId("mod-report");
-        const work = center.getByTestId("mod-work");
-        await measure("notes heading", report.locator("h4", { hasText: "Internal notes" }));
-        await measure("note byline", report.locator(".mod-note .mod-history-when"));
-        await measure("note text", report.locator(".mod-note-body"));
-        await measure(
-          "history hint",
-          report.locator(".mod-evidence-status", { hasText: "can't be edited" }),
-        );
-        await measure("history entry", report.locator(".mod-history-what").first());
-        await measure("history date", report.locator(".mod-history .mod-history-when").first());
-        await measure("action reason", report.locator(".mod-history-reason"));
-        await measure("review heading", work.locator("h4"));
-        await measure("review state", work.locator(".mod-evidence-status").first());
-        await measure("note label", work.locator("label").first());
-        await measure("note hint", work.locator(".mod-work-form .mod-evidence-status").first());
-        await measure("outcome legend", work.locator("legend"));
-        await measure("outcome label", work.locator(".mod-work-outcome span").first());
-        await measure("close hint", work.locator(".mod-work-form .mod-evidence-status").nth(1));
-        await measure("add note button", work.getByRole("button", { name: "Add note" }));
-        await measure("close button", work.getByRole("button", { name: "Close report" }));
-
-        await work.getByRole("textbox").focus();
-        await ring("note field");
-        await page.keyboard.press("Tab");
-        await ring("add note");
-        await page.keyboard.press("Tab");
-        await ring("outcome");
-        await page.keyboard.press("Tab");
-        await ring("close");
-
-        await testInfo.attach(`b9-12-contrast-${theme}${highContrast ? "-hc" : ""}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+      await work.getByRole("textbox").focus();
+      await ring("note field");
+      await page.keyboard.press("Tab");
+      await ring("add note");
+      await page.keyboard.press("Tab");
+      await ring("outcome");
+      await page.keyboard.press("Tab");
+      await ring("close");
+    },
+  })) {
+    test(c.title, c.run);
   }
 
   test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
@@ -283,20 +257,14 @@ test.describe("moderation review accessibility", () => {
       await boot(page, { fontSize: 20, largeFont: true });
       const center = await openReport(page);
       const view = page.getByTestId("feature-view");
-      expect(await view.evaluate((n) => n.scrollWidth - n.clientWidth)).toBeLessThanOrEqual(0);
-      for (const el of await center
-        .locator(
+      expect(await horizontalOverflow(view)).toBeLessThanOrEqual(0);
+      await expectReachable(
+        center.locator(
           "[data-testid=mod-work] button, [data-testid=mod-work] textarea, .mod-work-outcome, .mod-note-body, .mod-history-item",
-        )
-        .all()) {
-        if (!(await el.isVisible())) continue;
-        await el.scrollIntoViewIfNeeded();
-        await expect(el).toBeInViewport();
-      }
-      await testInfo.attach("b9-12-moderation-review-940x500-20px.png", {
-        body: await page.screenshot(),
-        contentType: "image/png",
-      });
+        ),
+        { skipHidden: true },
+      );
+      await attachScreenshot(testInfo, "b9-12-moderation-review-940x500-20px.png", page);
     });
   });
 });

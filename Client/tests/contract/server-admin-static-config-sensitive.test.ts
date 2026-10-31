@@ -9,7 +9,12 @@
 // after a typed confirmation, which the PATCH carries in X-OwnCord-Confirm.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  loadPanelWithFetch,
+  scriptedPanelFetch,
+  settlePanel,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -25,7 +30,7 @@ window.__test = {
   configMovedAddress: typeof configMovedAddress==='function'?configMovedAddress:undefined
 };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 interface FetchCall {
   method: string;
@@ -82,43 +87,33 @@ const SETTINGS = {
   ],
 };
 
+function recordTo(calls: FetchCall[], answer: Parameters<typeof scriptedPanelFetch>[1]) {
+  return scriptedPanelFetch(({ method, path, body, headers }) => {
+    calls.push({ method, path, body, headers: { ...headers } });
+  }, answer);
+}
+
 async function boot(
   calls: FetchCall[],
   settings: unknown = SETTINGS,
   patchSettings?: unknown,
 ): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
+  const dom = loadPanelWithFetch(
+    ADMIN_HTML,
+    recordTo(calls, (path, method) => ({
+      json:
+        path === "/config/settings"
+          ? method === "PATCH" && patchSettings
+            ? patchSettings
+            : settings
+          : {},
+    })),
+    (window) => {
       window.confirm = () => true;
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const path = String(input).replace(/^\/admin\/api/, "");
-        let body: unknown;
-        if (typeof opts.body === "string") body = JSON.parse(opts.body);
-        const headers = { ...(opts.headers as Record<string, string>) };
-        calls.push({ method, path, body, headers });
-        const json =
-          path === "/config/settings"
-            ? method === "PATCH" && patchSettings
-              ? patchSettings
-              : settings
-            : {};
-        return {
-          ok: true,
-          status: 200,
-          headers: new Headers(),
-          json: async () => json,
-          text: async () => JSON.stringify(json),
-        } as Response;
-      }) as typeof fetch;
     },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+  );
+  const bridge = await settlePanel<Bridge>(dom);
   calls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   bridge.state.me = { permissions: bridge.PERM.ADMINISTRATOR, is_owner: true };
   return { dom, bridge };
 }
@@ -150,11 +145,29 @@ describe("Server/admin/static — sensitive server configuration", () => {
     dom = undefined;
   });
 
+  /** Boots the panel and renders the configuration page. */
+  async function open(calls: FetchCall[], settings?: unknown, patchSettings?: unknown) {
+    const booted = await boot(calls, settings, patchSettings);
+    dom = booted.dom;
+    const doc = await render(booted.dom, booted.bridge);
+    return { booted, doc };
+  }
+
+  /** Types `value` into the control for `key`, then saves. */
+  async function editAndSave(
+    booted: { bridge: Bridge },
+    doc: Document,
+    key: string,
+    value: string,
+  ) {
+    control(doc, key).value = value;
+    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
+    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+  }
+
   it("renders a secret as an empty write-only field that says whether one is set", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { doc } = await open(calls);
 
     const secret = control(doc, "gif.api_key");
     expect(secret.type).toBe("password");
@@ -170,21 +183,15 @@ describe("Server/admin/static — sensitive server configuration", () => {
 
   it("sends a secret only when one is typed, and removes the override with null", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { booted, doc } = await open(calls);
 
-    control(doc, "server.name").value = "Renamed";
-    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
-    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    await editAndSave(booted, doc, "server.name", "Renamed");
     expect(patches(calls)).toHaveLength(1);
     expect(patches(calls)[0]!.body).toEqual({ "server.name": "Renamed" });
 
     calls.length = 0;
-    const doc2 = await render(dom, booted.bridge);
-    control(doc2, "gif.api_key").value = "new-key-123";
-    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
-    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    const doc2 = await render(booted.dom, booted.bridge);
+    await editAndSave(booted, doc2, "gif.api_key", "new-key-123");
     expect(patches(calls)[0]?.body).toEqual({ "gif.api_key": "new-key-123" });
 
     calls.length = 0;
@@ -194,9 +201,7 @@ describe("Server/admin/static — sensitive server configuration", () => {
 
   it("clears a secret whose rule allows an empty value by sending an empty string", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { booted, doc } = await open(calls);
 
     expect(doc.querySelector('[data-action="clearConfigSecretValue"]')).not.toBeNull();
     calls.length = 0;
@@ -221,9 +226,7 @@ describe("Server/admin/static — sensitive server configuration", () => {
         },
       ],
     };
-    const booted = await boot(calls, settings);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { doc } = await open(calls, settings);
 
     expect(doc.querySelector('[data-action="clearConfigSecretValue"]')).toBeNull();
     expect(doc.querySelector('[data-action="clearConfigSecret"]')).not.toBeNull();
@@ -231,13 +234,9 @@ describe("Server/admin/static — sensitive server configuration", () => {
 
   it("asks for a typed confirmation before saving a lock-out-capable key", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { booted, doc } = await open(calls);
 
-    control(doc, "server.port").value = "9443";
-    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
-    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    await editAndSave(booted, doc, "server.port", "9443");
     // Nothing is sent yet: a dialog names the key and wants CONFIRM typed.
     expect(patches(calls)).toHaveLength(0);
     const modal = doc.getElementById("modal")!;
@@ -261,13 +260,9 @@ describe("Server/admin/static — sensitive server configuration", () => {
 
   it("keeps Save usable after the confirmation is cancelled", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { booted, doc } = await open(calls);
 
-    control(doc, "server.port").value = "9443";
-    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
-    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    await editAndSave(booted, doc, "server.port", "9443");
     expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(true);
     expect(patches(calls)).toHaveLength(0);
 
@@ -278,58 +273,28 @@ describe("Server/admin/static — sensitive server configuration", () => {
 
   it("does not send a null reset when a numeric field without an override is cleared", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { booted, doc } = await open(calls);
 
-    control(doc, "server.port").value = "";
-    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
-    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    await editAndSave(booted, doc, "server.port", "");
     expect(patches(calls)).toHaveLength(0);
     expect(doc.getElementById("modal")!.classList.contains("visible")).toBe(false);
   });
 
   it("lets a confirmed save be retried after the server refuses it", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls);
-    dom = booted.dom;
-    const doc = await render(dom, booted.bridge);
+    const { booted, doc } = await open(calls);
 
-    control(doc, "server.port").value = "9443";
-    fn(booted.bridge.markConfigChanged, "markConfigChanged")();
-    await fn(booted.bridge.saveServerConfig, "saveServerConfig")();
+    await editAndSave(booted, doc, "server.port", "9443");
     const typed = doc.getElementById("typedConfirm") as HTMLInputElement;
     typed.value = "CONFIRM";
 
-    const win = dom.window as unknown as { fetch: typeof fetch };
+    const win = booted.dom.window as unknown as { fetch: typeof fetch };
     let refuse = true;
-    win.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-      const method = String((opts.method as string) || "GET").toUpperCase();
-      const path = String(input).replace(/^\/admin\/api/, "");
-      calls.push({
-        method,
-        path,
-        body: typeof opts.body === "string" ? JSON.parse(opts.body) : undefined,
-        headers: { ...(opts.headers as Record<string, string>) },
-      });
-      const json = path === "/config/settings" ? SETTINGS : {};
-      if (refuse) {
-        return {
-          ok: false,
-          status: 400,
-          headers: new Headers(),
-          json: async () => ({ message: "server.port is not available on this host" }),
-          text: async () => "",
-        } as Response;
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: new Headers(),
-        json: async () => json,
-        text: async () => JSON.stringify(json),
-      } as Response;
-    }) as typeof fetch;
+    win.fetch = recordTo(calls, (path) =>
+      refuse
+        ? { status: 400, json: { message: "server.port is not available on this host" } }
+        : { json: path === "/config/settings" ? SETTINGS : {} },
+    );
 
     await fn(booted.bridge.confirmServerConfig, "confirmServerConfig")();
     expect(patches(calls)).toHaveLength(1);

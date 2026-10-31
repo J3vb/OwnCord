@@ -23,7 +23,10 @@ import {
   connectVoiceSession,
   openDmRow,
   BASE_SESSION_ROUTES,
+  dmChannel,
+  thirdDmChannel,
 } from "./helpers";
+import { sentFrames, sentTo, waitForSent } from "./support/invokeLog";
 
 // ---------------------------------------------------------------------------
 // Fixtures — one DM (channel 100) whose recipient has a nickname
@@ -48,22 +51,8 @@ const READY_MEMBERS = [
 ];
 
 const MOCK_DM_CHANNELS = [
-  {
-    channel_id: DM_CHANNEL_ID,
-    recipient: { id: OTHER_USER_ID, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-  {
-    channel_id: 101,
-    recipient: { id: 3, username: "thirduser", avatar: "", status: "idle" },
-    last_message_id: 501,
-    last_message: "See you later",
-    last_message_at: "2026-03-15T11:00:00Z",
-    unread_count: 0,
-  },
+  dmChannel(DM_CHANNEL_ID, { id: OTHER_USER_ID, username: "otheruser" }),
+  thirdDmChannel(),
 ];
 
 async function mockSession(page: Page): Promise<void> {
@@ -131,52 +120,6 @@ async function attentionRequests(page: Page): Promise<unknown[]> {
       .filter((e) => e.cmd === "plugin:window|request_user_attention")
       .map((e) => e.args?.value),
   );
-}
-
-// ---------------------------------------------------------------------------
-// Outgoing-frame capture — the mock's own IPC log, no extra init script
-// ---------------------------------------------------------------------------
-
-interface SentFrame {
-  readonly type: string;
-  readonly payload?: Record<string, unknown>;
-}
-
-async function sentFrames(page: Page): Promise<SentFrame[]> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // A frame that is not JSON is not a client WS message; skip it.
-      }
-    }
-    return frames;
-  });
-}
-
-/** Poll until a matching frame has gone out, and return it. */
-async function waitForSent(
-  page: Page,
-  type: string,
-  has: (frame: SentFrame) => boolean = () => true,
-  timeout = 5_000,
-): Promise<SentFrame> {
-  let found: SentFrame | undefined;
-  await expect(async () => {
-    found = (await sentFrames(page)).find((f) => f.type === type && has(f));
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
-
-function sentTo(page: Page, type: string, channelId: number): Promise<SentFrame> {
-  return waitForSent(page, type, (f) => f.payload?.channel_id === channelId);
 }
 
 // ---------------------------------------------------------------------------

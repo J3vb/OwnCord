@@ -1,18 +1,8 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
-import { TEST_PASSWORD, type TestServer } from "../support/server";
+import { TEST_PASSWORD } from "../support/server";
+import { channelItem, generalId, signIn, generalMessagesWith } from "./serverApi";
 import { rawSocket } from "../support/raw-socket";
-
-async function generalId(server: TestServer): Promise<number> {
-  const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
-  return channels.find(
-    (channel: { name: string; type: string }) =>
-      channel.name === "general" && channel.type === "text",
-  ).id;
-}
-
-const channelItem = (page: Page, name: string) =>
-  page.locator(".channel-item:not(.voice)").filter({ hasText: name });
 
 /** Count, from now on, removals of a node whose text includes `text`. */
 async function watchRemovals(page: Page, text: string): Promise<() => Promise<number>> {
@@ -77,19 +67,7 @@ test("two users receive exactly one message across transport loss and server res
     ).toBeVisible();
   }
   await expect(received).toHaveCount(1);
-  const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
-  const general = channels.find(
-    (channel: { name: string; type: string }) =>
-      channel.name === "general" && channel.type === "text",
-  );
-  const history = await server.api(
-    `/api/v1/channels/${general.id}/messages`,
-    undefined,
-    server.owner!.token,
-  );
-  expect(
-    history.messages.filter((message: { content: string }) => message.content === text),
-  ).toHaveLength(1);
+  expect(await generalMessagesWith(server, text)).toHaveLength(1);
   const after = `after-restart-${crypto.randomUUID()}`;
   await input.fill(after);
   await input.press("Enter");
@@ -117,11 +95,7 @@ test("revoking channel visibility reaches an already connected member", async ({
 }) => {
   void alice;
   const owner = server.owner!.token;
-  const channels = await server.api("/api/v1/channels/", undefined, owner);
-  const general = channels.find(
-    (channel: { name: string; type: string }) =>
-      channel.name === "general" && channel.type === "text",
-  );
+  const general = { id: await generalId(server) };
   const members = await server.api("/admin/api/users", undefined, owner);
   const member = members.find((user: { username: string }) => user.username === "bob");
   await expect(bob.locator(".channel-item:not(.voice)", { hasText: "general" })).toBeVisible();
@@ -133,12 +107,8 @@ test("revoking channel visibility reaches an already connected member", async ({
     "PUT",
   );
   await expect(bob.locator(".channel-item:not(.voice)", { hasText: "general" })).toHaveCount(0);
-  const auth = await server.api("/api/v1/auth/login", {
-    username: "bob",
-    password: "OwnCord-E2E-pass-123!",
-  });
   const response = await fetch(`${server.origin}/api/v1/channels/${general.id}/messages`, {
-    headers: { Authorization: `Bearer ${auth.token}` },
+    headers: { Authorization: `Bearer ${await signIn(server, "bob")}` },
   });
   expect(response.status).toBe(403);
   await server.api(

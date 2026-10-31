@@ -8,31 +8,11 @@
  * missed live update without faking the server.
  */
 
-import { test, expect, login } from "./fixtures";
+import { test, expect } from "./fixtures";
+import { composer, relogin, userIds } from "./serverApi";
 import type { Page } from "@playwright/test";
-import type { TestServer } from "../support/server";
-
-async function bobId(server: TestServer): Promise<number> {
-  const users = (await server.api("/admin/api/users", undefined, server.owner!.token)) as {
-    id: number;
-    username: string;
-  }[];
-  return users.find((u) => u.username === "bob")!.id;
-}
-
-/** Log out from settings and sign in again: a full ready, and a store cleared by sign-out. */
-async function relogin(page: Page, server: TestServer): Promise<void> {
-  await page.getByRole("button", { name: "Settings" }).click();
-  await page.locator(".settings-nav-item.danger").click();
-  // Log Out asks first.
-  await page.locator("[data-testid='logout-confirm']").click();
-  await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
-  await login(page, server, "bob");
-}
 
 const banner = (page: Page) => page.getByRole("region", { name: "Moderation notices" });
-const composer = (page: Page) => page.locator("[data-testid='message-input'] textarea");
-
 test.describe("moderation notices (real server)", () => {
   test("a warning reaches bob live and after a missed frame, and his acknowledgement is recorded", async ({
     bob,
@@ -40,7 +20,7 @@ test.describe("moderation notices (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const target = await bobId(server);
+    const target = (await userIds(server))("bob");
     const paths: string[] = [];
     // Spy only: record every REST path bob's client calls, fail none.
     bobTransport.failHttpRequests(({ method, path }) => {
@@ -84,7 +64,7 @@ test.describe("moderation notices (real server)", () => {
     const warnings = ledger.filter((a) => a.kind === "warning");
     expect(warnings).toHaveLength(2);
     for (const w of warnings) expect(w.acknowledged_at).toBeTruthy();
-    await relogin(bob, server);
+    await relogin(bob, server, "bob");
     await expect(composer(bob)).toBeEnabled();
     await expect(banner(bob)).toBeHidden();
 
@@ -101,7 +81,7 @@ test.describe("moderation notices (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const target = await bobId(server);
+    const target = (await userIds(server))("bob");
     await server.api(
       `/api/v1/moderation/users/${target}/timeout`,
       { reason: "Cool off", duration_seconds: 600 },
@@ -122,7 +102,7 @@ test.describe("moderation notices (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    const target = await bobId(server);
+    const target = (await userIds(server))("bob");
     // Let sign-in's own history read land first, so only the refusal can
     // tell the client about the timeout below.
     await bob.waitForTimeout(1_000);
@@ -143,7 +123,7 @@ test.describe("moderation notices (real server)", () => {
     bobTransport.filterServerMessages(undefined);
 
     // A full reconnect keeps the timeout and its expiry (GET /users/me/moderation).
-    await relogin(bob, server);
+    await relogin(bob, server, "bob");
     await expect(composer(bob)).toBeDisabled();
     await expect(composer(bob)).toHaveAttribute("placeholder", /^You can't send messages until /);
 

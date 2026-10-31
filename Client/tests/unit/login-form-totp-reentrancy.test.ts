@@ -3,32 +3,13 @@
 // the verify round trip could fire a second onTotpSubmit call before the
 // first resolved. Covered here through ConnectPage, which mounts LoginForm.
 import { describe, it, expect, vi } from "vitest";
+import * as mocks from "../helpers/connectPageMocks";
 import { createConnectPage } from "../../src/pages/ConnectPage";
-import type { ConnectPageCallbacks, SimpleProfile } from "../../src/pages/ConnectPage";
+import { makeCallbacks, testProfiles } from "../helpers/connectPageHarness";
 import { useMountContainer } from "../helpers/mountContainer";
 
-vi.mock("../../src/lib/net/credentials", () => ({
-  loadCredential: vi.fn().mockResolvedValue(null),
-}));
-
-vi.mock("../../src/features/settings/SettingsOverlay", () => ({
-  createSettingsOverlay: () => ({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
-
-function makeCallbacks(overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks {
-  return {
-    onLogin: vi.fn().mockResolvedValue(undefined),
-    onLoginWithSavedPassword: vi.fn().mockResolvedValue(undefined),
-    onRegister: vi.fn().mockResolvedValue(undefined),
-    onTotpSubmit: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  };
-}
-
-const testProfiles: SimpleProfile[] = [{ name: "Test Server", host: "localhost:8443" }];
+vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 describe("LoginForm TOTP re-entrancy guard", () => {
   let container: HTMLDivElement;

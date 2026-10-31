@@ -7,7 +7,7 @@
  * - Events: plugin:event|listen, plugin:event|unlisten
  */
 
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
@@ -218,6 +218,103 @@ export const MOCK_MESSAGES_RICH = {
 // device's call: the roster shows it, but this device holds no call, so the
 // widget stays hidden. Tests that need the widget visible must join via the
 // real click path (see joinVoiceChannelByName).
+/**
+ * Right-click `row` with the same `contextmenu` event the browser would send,
+ * from a safe coordinate. The menu is `position:fixed` at the click point and
+ * rows sit low in the sidebar, so a real right-click can put the lower items
+ * below the viewport or under another menu.
+ */
+export async function dispatchContextMenu(row: Locator): Promise<void> {
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  await row.evaluate((el) =>
+    el.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 640,
+        clientY: 80,
+        button: 2,
+      }),
+    ),
+  );
+}
+
+/** `dispatchContextMenu`, then the open `.context-menu`. */
+export async function openContextMenuOn(page: Page, row: Locator): Promise<Locator> {
+  await dispatchContextMenu(row);
+  const menu = page.locator(".context-menu").first();
+  await expect(menu).toBeVisible({ timeout: 5_000 });
+  return menu;
+}
+
+/** One row of `GET /users/me/moderation`; `over` sets the identifying fields and any others. */
+export function moderationHistoryEntry(
+  over: { id: number; kind: string; reason: string; created_at: string } & Record<string, unknown>,
+) {
+  return {
+    expires_at: null,
+    lifted_at: null,
+    acknowledged_at: null,
+    appealable: true,
+    appeal: null,
+    ...over,
+  };
+}
+
+/** A DM list entry; `over` overrides any field. */
+export function dmChannel(
+  channelId: number,
+  recipient: { id: number; username: string; status?: string; display_name?: string } = {
+    id: 2,
+    username: "otheruser",
+  },
+  over: Record<string, unknown> = {},
+) {
+  return {
+    channel_id: channelId,
+    recipient: { avatar: "", status: "online", ...recipient },
+    last_message_id: 500,
+    last_message: "Hey there!",
+    last_message_at: "2026-03-15T12:00:00Z",
+    unread_count: 0,
+    ...over,
+  };
+}
+
+/** The second DM most DM specs seed next to `dmChannel`'s default. */
+export function thirdDmChannel(channelId = 101, over: Record<string, unknown> = {}) {
+  return dmChannel(
+    channelId,
+    { id: 3, username: "thirduser", status: "idle" },
+    {
+      last_message_id: 501,
+      last_message: "See you later",
+      last_message_at: "2026-03-15T11:00:00Z",
+      ...over,
+    },
+  );
+}
+
+/** A group DM of member1 and member2 as the ready payload carries it. */
+export function groupDmChannel(channelId: number, over: Record<string, unknown> = {}) {
+  return {
+    channel_id: channelId,
+    recipient: { id: 3, username: "member1", avatar: "", status: "idle" },
+    recipients: [
+      { id: 3, username: "member1", avatar: "", status: "idle" },
+      { id: 4, username: "member2", avatar: "", status: "dnd" },
+    ],
+    name: "Study Group",
+    is_group: true,
+    last_message_id: null,
+    last_message: "Hey everyone",
+    last_message_at: "2026-03-15T12:00:00Z",
+    unread_count: 0,
+    mention_count: 0,
+    ...over,
+  };
+}
+
 export const MOCK_VOICE_STATE = [
   { user_id: 2, channel_id: 10, muted: true, deafened: false },
   { user_id: 3, channel_id: 10, muted: false, deafened: false },
@@ -980,20 +1077,29 @@ export function buildTauriMockScript(opts: {
 
 /** Route literals the presets below share. `buildTauriMockScript` only reads
  *  its options (spread + `JSON.stringify`), so one copy per route is safe. */
-const ROUTE_HEALTH = {
+export const ROUTE_HEALTH = {
   pattern: "/api/v1/health",
   status: 200,
   body: { status: "ok", version: "1.0.0" },
 };
-const ROUTE_LOGIN = { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE };
+export const ROUTE_LOGIN = {
+  pattern: "/api/v1/auth/login",
+  status: 200,
+  body: MOCK_LOGIN_RESPONSE,
+};
 const ROUTE_LOGIN_2FA = {
   pattern: "/api/v1/auth/login",
   status: 200,
   body: MOCK_LOGIN_2FA_RESPONSE,
 };
-const ROUTE_MESSAGES = { pattern: "/messages", status: 200, body: MOCK_MESSAGES };
+export const ROUTE_MESSAGES = { pattern: "/messages", status: 200, body: MOCK_MESSAGES };
 const ROUTE_MESSAGES_RICH = { pattern: "/messages", status: 200, body: MOCK_MESSAGES_RICH };
-const ROUTE_PINS = { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES };
+export const ROUTE_PINS = { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES };
+export const ROUTE_MESSAGES_EMPTY = {
+  pattern: "/messages",
+  status: 200,
+  body: { messages: [], has_more: false },
+};
 const ROUTE_INVITES = { pattern: "/api/v1/invites", status: 200, body: MOCK_INVITES };
 
 /** The three routes nearly every mocked session needs: health, login and the message history. */
@@ -1036,6 +1142,16 @@ export async function mockTauriFullSession(
       deferReady: options.deferReady,
     }),
   );
+}
+
+/** The plain full session, signed in; `ready` also waits for the WS handshake. */
+export async function startFullSession(
+  page: Page,
+  options: { ready?: boolean } = {},
+): Promise<void> {
+  await mockTauriFullSession(page);
+  await page.goto("/");
+  await (options.ready === true ? navigateToMainPageReady(page) : navigateToMainPage(page));
 }
 
 /**
@@ -1176,6 +1292,53 @@ export const mockTauriLoginError = mock({
 // ---------------------------------------------------------------------------
 // Public API — page actions
 // ---------------------------------------------------------------------------
+
+/**
+ * Hold every HTTP response whose request URL contains `urlPart` open for
+ * `delayMs`, so an in-flight loading state is observable. Call before `page.goto`.
+ */
+export async function delayHttpResponses(
+  page: Page,
+  urlPart: string,
+  delayMs = 800,
+): Promise<void> {
+  await page.addInitScript(
+    ({ part, delay }) => {
+      const t = (
+        window as unknown as {
+          __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
+        }
+      ).__TAURI_INTERNALS__;
+      const orig = t.invoke.bind(t);
+      const urls = new Map<number, string>();
+      t.invoke = async (cmd: string, args?: unknown) => {
+        if (cmd === "plugin:http|fetch") {
+          const a = args as { rid?: number; clientConfig?: { url?: string } };
+          const rid = (await orig(cmd, args)) as number;
+          urls.set(rid, a.clientConfig?.url ?? "");
+          return rid;
+        }
+        if (cmd === "plugin:http|fetch_send") {
+          const rid = (args as { rid?: number }).rid ?? -1;
+          if (urls.get(rid)?.includes(part)) {
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
+        return orig(cmd, args);
+      };
+    },
+    { part: urlPart, delay: delayMs },
+  );
+}
+
+/** Click a user-bar control and expect its `active-ctrl` state to flip. */
+export async function expectUserBarToggle(page: Page, label: string): Promise<void> {
+  const button = page.locator(`.user-bar button[aria-label='${label}']`);
+  const hadActive = await button.evaluate((el) => el.classList.contains("active-ctrl"));
+  await button.click();
+  const hasActive = await button.evaluate((el) => el.classList.contains("active-ctrl"));
+  expect(hasActive).not.toBe(hadActive);
+}
 
 export async function submitLogin(page: Page): Promise<void> {
   await page.locator("#host").fill("localhost:8443");

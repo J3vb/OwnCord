@@ -7,10 +7,10 @@
 
 import { test, expect } from "./fixtures";
 import {
-  mockTauriFullSession,
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  startFullSession,
 } from "./helpers";
 import {
   Q1,
@@ -31,9 +31,7 @@ async function bgTertiary(page: import("@playwright/test").Page): Promise<string
 
 test.describe("Custom themes", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Appearance");
   });

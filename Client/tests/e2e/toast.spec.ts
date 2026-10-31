@@ -1,10 +1,10 @@
 import { test, expect } from "./fixtures";
 import {
   emitWsMessage,
-  mockTauriFullSession,
   mockTauriFullSessionWithMessagesAndEcho,
   mockTauriFullSessionWithFailingMessages,
   navigateToMainPage,
+  startFullSession,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -52,9 +52,7 @@ test.describe("Toast Notifications", () => {
   });
 
   test("toast container is a polite live region for screen readers", async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
 
     const toastContainer = page.locator("[data-testid='toast-container']");
     // The container carries the DC-13 announcement contract: a status live
@@ -67,9 +65,7 @@ test.describe("Toast Notifications", () => {
   test("an error toast persists until dismissed", async ({ page }) => {
     // Errors persist (UX-5): drive a real error toast from a server WS
     // `error` frame and check it outlives the old 5s auto-dismiss.
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
 
     // A generic error frame with no pending send reaches the dispatcher's
     // catch-all, which toasts it as an error.

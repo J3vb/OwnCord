@@ -14,28 +14,18 @@
  */
 
 import { test, expect, login } from "./fixtures";
-import type { Locator, Page } from "@playwright/test";
-import { TEST_PASSWORD, type TestServer } from "../support/server";
+import {
+  MEMBER_ROLE_ID,
+  appealRow,
+  openSafety,
+  register,
+  setRole,
+  signIn,
+  userIds,
+} from "./serverApi";
 
-const MEMBER_ROLE_ID = 4;
 const MEMBER_BITS = 0x663;
 const MODERATE_MEMBERS = 0x400000;
-
-async function token(server: TestServer, username: string): Promise<string> {
-  const auth = await server.api("/api/v1/auth/login", { username, password: TEST_PASSWORD });
-  return auth.token as string;
-}
-
-async function openSafety(page: Page): Promise<Locator> {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
-  const pane = page.locator(".safety-tab");
-  await expect(pane.getByRole("heading", { name: "Appeals" })).toBeVisible();
-  return pane;
-}
-
-const appealRow = (pane: Locator, reason: string) =>
-  pane.locator(".safety-appeals-list > .safety-history-row", { hasText: `Reason: ${reason}` });
 
 type AppealState = { state: string; assignee_id: number; decision_note: string };
 
@@ -47,18 +37,8 @@ test.describe("appeal review (real server)", () => {
     server,
   }) => {
     const owner = server.owner!.token;
-    await server.api("/api/v1/auth/register", {
-      username: "carol",
-      password: TEST_PASSWORD,
-      invite_code: server.owner!.invite_code,
-    });
-    const users = (await server.api("/admin/api/users", undefined, owner)) as {
-      id: number;
-      username: string;
-    }[];
-    const id = (name: string) => users.find((u) => u.username === name)!.id;
-    const setRole = (userId: number, roleId: number) =>
-      server.api(`/admin/api/users/${userId}`, { role_id: roleId }, owner, "PATCH");
+    await register(server, "carol");
+    const id = await userIds(server);
     const warden = (
       (await server.api(
         "/admin/api/roles",
@@ -66,9 +46,9 @@ test.describe("appeal review (real server)", () => {
         owner,
       )) as { id: number }
     ).id;
-    await setRole(id("carol"), warden);
-    const carolToken = await token(server, "carol");
-    const bobToken = await token(server, "bob");
+    await setRole(server, id("carol"), warden);
+    const carolToken = await signIn(server, "carol");
+    const bobToken = await signIn(server, "bob");
 
     /** A warning to bob from `by`, and bob's appeal against it; the appeal's public id. */
     const appealed = async (by: string, reason: string, body: string): Promise<string> => {
@@ -196,7 +176,7 @@ test.describe("appeal review (real server)", () => {
     // Demoted while her frames are held: the stale view still offers Take;
     // the server refuses and the whole Moderation Center clears.
     aliceTransport.filterServerMessages(() => false);
-    await setRole(id("carol"), MEMBER_ROLE_ID);
+    await setRole(server, id("carol"), MEMBER_ROLE_ID);
     await appeal.getByRole("button", { name: "Take this appeal" }).click();
     await expect(alert).toHaveText("You no longer have permission to moderate on this server.");
     await expect(appeal).toHaveCount(0);

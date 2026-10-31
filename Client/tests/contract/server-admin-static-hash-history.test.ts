@@ -13,9 +13,11 @@
 // dialog through its discard guard and asks before dropping Settings edits.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
-
-const ADMIN_HTML_SOURCE = adminPanelHtml();
+import {
+  adminHtmlWithBridge,
+  loadPanelWithFetch,
+  scriptedPanelFetch,
+} from "../helpers/adminPanelFetch";
 
 // Classic-script bindings never land on `window`; bridge the ones driven here.
 const BRIDGE = `<script>
@@ -27,10 +29,7 @@ window.__test = {
   nav: NAV
 };
 </script>`;
-if (!ADMIN_HTML_SOURCE.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 interface Bridge {
   state: any;
@@ -66,23 +65,20 @@ function boot(me: object = OWNER_ME): {
   doc: Document;
   tick: () => Promise<void>;
 } {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string) => {
-        const p = String(input).replace(/^\/admin\/api/, "");
-        let json: unknown = {};
-        if (p === "/setup/status") json = { needs_setup: false };
-        else if (p === "/me") json = me;
+  const dom = loadPanelWithFetch(
+    ADMIN_HTML,
+    scriptedPanelFetch(
+      () => undefined,
+      (p) => {
+        if (p === "/setup/status") return { json: { needs_setup: false } };
+        if (p === "/me") return { json: me };
         // The list routes the page renders read return arrays, not {}.
-        else if (p.startsWith("/registrations") || p.startsWith("/users")) json = [];
-        else if (p.startsWith("/roles")) json = [];
-        return { ok: true, status: 200, json: async () => json } as Response;
-      }) as typeof fetch;
-    },
-  });
+        if (p.startsWith("/registrations") || p.startsWith("/users") || p.startsWith("/roles"))
+          return { json: [] };
+        return { json: {} };
+      },
+    ),
+  );
   const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   expect(bridge).toBeTruthy();
   bridge.state.me = me;

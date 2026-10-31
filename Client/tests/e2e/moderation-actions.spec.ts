@@ -1,12 +1,16 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, submitLogin, waitForWsReady } from "./helpers";
+import { ROUTE_MESSAGES_EMPTY } from "./helpers";
+import { type AppearancePrefs, findUnnamedControls } from "./support/accessibility";
 import {
-  type AppearancePrefs,
-  contrastMeter,
-  findUnnamedControls,
-  setAppearance,
-} from "./support/accessibility";
+  attachScreenshot,
+  bootSignedIn,
+  contrastMatrix,
+  expectReachable,
+  horizontalOverflow,
+  openModerationReport,
+  undersizedTargets,
+} from "./support/a11yHarness";
 
 // ---------------------------------------------------------------------------
 // B9-13: a report's warning, timeout and lift-timeout actions against the
@@ -25,7 +29,6 @@ import {
 // role gets which, and the server's refusals, run against the real server.
 // ---------------------------------------------------------------------------
 
-const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;
 const MINE = "e".repeat(32);
 
 const QUEUE = [
@@ -87,41 +90,27 @@ async function boot(
   report: { queue: unknown; detail: unknown } = { queue: QUEUE, detail: DETAIL },
 ): Promise<void> {
   const q = "/api/v1/moderation/queue";
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
-        { pattern: q, method: "GET", status: 200, body: report.queue },
-        { pattern: `${q}/${MINE}`, method: "GET", status: 200, body: report.detail },
-        { pattern: `${q}/${MINE}/act`, method: "POST", status: 200, body: { voice: "applied" } },
-        {
-          pattern: "/api/v1/moderation/users/2/untimeout",
-          method: "POST",
-          status: 204,
-          body: null,
-        },
-      ],
-      simulateWsFlow: true,
-    }),
+  await bootSignedIn(
+    page,
+    [
+      ROUTE_MESSAGES_EMPTY,
+      { pattern: q, method: "GET", status: 200, body: report.queue },
+      { pattern: `${q}/${MINE}`, method: "GET", status: 200, body: report.detail },
+      { pattern: `${q}/${MINE}/act`, method: "POST", status: 200, body: { voice: "applied" } },
+      {
+        pattern: "/api/v1/moderation/users/2/untimeout",
+        method: "POST",
+        status: 204,
+        body: null,
+      },
+    ],
+    prefs,
   );
-  await page.goto("/");
-  if (prefs !== undefined) await setAppearance(page, prefs);
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
 }
 
 /** Open the Moderation Center and the report, from the keyboard; the actions section. */
 async function openActions(page: Page): Promise<{ center: Locator; acts: Locator }> {
-  await page.getByTestId("moderation-btn").focus();
-  await page.keyboard.press("Enter");
-  const center = page.getByRole("region", { name: "Moderation" });
-  await expect(center.getByTestId("mod-status")).toHaveText("1 report open or in review");
-  await center.getByTestId("mod-queue-row").focus();
-  await page.keyboard.press("Enter");
-  await expect(center.getByTestId("mod-report").getByRole("heading", { level: 3 })).toBeFocused();
+  const center = await openModerationReport(page, "1 report open or in review");
   return { center, acts: center.getByTestId("mod-act") };
 }
 
@@ -188,13 +177,9 @@ test.describe("moderation actions accessibility", () => {
   test("pointer targets are at least 24x24 CSS px (2.5.8)", async ({ page }) => {
     await boot(page);
     const { acts } = await openActions(page);
-    const small: string[] = [];
-    for (const target of await acts.locator("button, input, select").all()) {
-      const box = await target.boundingBox();
-      if (box === null || box.width < 24 || box.height < 24) {
-        small.push(`${await target.getAttribute("data-focus")}: ${box?.width}x${box?.height}`);
-      }
-    }
+    const small = await undersizedTargets(acts.locator("button, input, select"), {
+      label: (target) => target.getAttribute("data-focus"),
+    });
     expect(small).toEqual([]);
   });
 
@@ -208,47 +193,39 @@ test.describe("moderation actions accessibility", () => {
     await expect(acts).toHaveCSS("transition-duration", "0s");
   });
 
-  for (const theme of THEMES) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: text and focus contrast`, async ({
-        page,
-      }, testInfo) => {
-        await boot(page, { theme, highContrast, accent: null });
-        const { measured, failures, measure, ring } = contrastMeter(page);
+  for (const c of contrastMatrix({
+    title: "text and focus contrast",
+    attachName: (theme, hc) => `b9-13-contrast-${theme}${hc ? "-hc" : ""}.json`,
+    boot: boot,
+    scenario: async (page, { measure, ring }) => {
+      const { center, acts } = await openActions(page);
+      await measure("actions heading", acts.locator("h4"));
+      await measure("actions hint", acts.locator(":scope > .mod-evidence-status"));
+      await measure("reason label", acts.locator("label").first());
+      await measure("reason hint", acts.locator("form .mod-evidence-status").first());
+      await measure("length hint", acts.locator("form .mod-evidence-status").nth(2));
+      await measure("warn button", acts.getByRole("button", { name: "Issue warning" }));
+      await measure("timeout button", acts.getByRole("button", { name: "Time out" }));
+      await measure("lift hint", acts.locator(".mod-work-form > .mod-evidence-status").last());
+      await measure("lift button", acts.getByRole("button", { name: "Lift timeout" }));
+      await measure(
+        "history end",
+        center.locator(".mod-history-item .mod-history-when", { hasText: "Until" }),
+      );
 
-        const { center, acts } = await openActions(page);
-        await measure("actions heading", acts.locator("h4"));
-        await measure("actions hint", acts.locator(":scope > .mod-evidence-status"));
-        await measure("reason label", acts.locator("label").first());
-        await measure("reason hint", acts.locator("form .mod-evidence-status").first());
-        await measure("length hint", acts.locator("form .mod-evidence-status").nth(2));
-        await measure("warn button", acts.getByRole("button", { name: "Issue warning" }));
-        await measure("timeout button", acts.getByRole("button", { name: "Time out" }));
-        await measure("lift hint", acts.locator(".mod-work-form > .mod-evidence-status").last());
-        await measure("lift button", acts.getByRole("button", { name: "Lift timeout" }));
-        await measure(
-          "history end",
-          center.locator(".mod-history-item .mod-history-when", { hasText: "Until" }),
-        );
+      // The length error, shown by refusing an empty length.
+      await acts.getByRole("button", { name: "Time out" }).click();
+      await measure("length error", acts.locator(".form-error"));
 
-        // The length error, shown by refusing an empty length.
-        await acts.getByRole("button", { name: "Time out" }).click();
-        await measure("length error", acts.locator(".form-error"));
-
-        await acts.getByRole("textbox").first().focus();
-        await ring("warning reason");
-        for (const name of ["warn", "timeout reason", "length", "unit", "time out", "lift"]) {
-          await page.keyboard.press("Tab");
-          await ring(name);
-        }
-
-        await testInfo.attach(`b9-13-contrast-${theme}${highContrast ? "-hc" : ""}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+      await acts.getByRole("textbox").first().focus();
+      await ring("warning reason");
+      for (const name of ["warn", "timeout reason", "length", "unit", "time out", "lift"]) {
+        await page.keyboard.press("Tab");
+        await ring(name);
+      }
+    },
+  })) {
+    test(c.title, c.run);
   }
 
   test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
@@ -258,16 +235,9 @@ test.describe("moderation actions accessibility", () => {
       await boot(page, { fontSize: 20, largeFont: true });
       const { acts } = await openActions(page);
       const view = page.getByTestId("feature-view");
-      expect(await view.evaluate((n) => n.scrollWidth - n.clientWidth)).toBeLessThanOrEqual(0);
-      for (const el of await acts.locator("button, input, select, label, p").all()) {
-        if (!(await el.isVisible())) continue;
-        await el.scrollIntoViewIfNeeded();
-        await expect(el).toBeInViewport();
-      }
-      await testInfo.attach("b9-13-moderation-actions-940x500-20px.png", {
-        body: await page.screenshot(),
-        contentType: "image/png",
-      });
+      expect(await horizontalOverflow(view)).toBeLessThanOrEqual(0);
+      await expectReachable(acts.locator("button, input, select, label, p"), { skipHidden: true });
+      await attachScreenshot(testInfo, "b9-13-moderation-actions-940x500-20px.png", page);
     });
   });
 });
@@ -341,43 +311,35 @@ test.describe("removal, kick and ban accessibility", () => {
     await expect(dialog.getByRole("button").first()).toHaveCSS("animation-name", "none");
   });
 
-  for (const theme of THEMES) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: action and dialog contrast`, async ({
-        page,
-      }, testInfo) => {
-        await boot(page, { theme, highContrast, accent: null }, ABOUT_MESSAGE);
-        const { measured, failures, measure, ring } = contrastMeter(page);
-
-        const { acts } = await openActions(page);
-        const reason = acts.getByRole("textbox", { name: "Reason for a removal, log-out or ban" });
-        await measure("reason label", acts.locator("label", { hasText: "Reason for a removal" }));
-        await measure("reason hint", acts.locator(".mod-evidence-status").last());
-        await reason.focus();
-        await ring("reason");
-        for (const name of ACTIONS) {
-          await measure(name, acts.getByRole("button", { name }));
-          await page.keyboard.press("Tab");
-          await ring(name);
-        }
-
-        await page.keyboard.press("Enter");
-        const dialog = page.getByRole("dialog", { name: "Ban this member?" });
-        await measure("dialog title", dialog.getByRole("heading"));
-        await measure("dialog body", dialog.locator(".modal-danger-text"));
-        await measure("dialog cancel", dialog.getByRole("button", { name: "Cancel" }));
-        await measure("dialog ban", dialog.getByRole("button", { name: "Ban", exact: true }));
-        await ring("dialog cancel");
+  for (const c of contrastMatrix({
+    title: "action and dialog contrast",
+    attachName: (theme, hc) => `b9-14-contrast-${theme}${hc ? "-hc" : ""}.json`,
+    boot: (page, prefs) => boot(page, prefs, ABOUT_MESSAGE),
+    scenario: async (page, { measure, ring }) => {
+      const { acts } = await openActions(page);
+      const reason = acts.getByRole("textbox", { name: "Reason for a removal, log-out or ban" });
+      await measure("reason label", acts.locator("label", { hasText: "Reason for a removal" }));
+      await measure("reason hint", acts.locator(".mod-evidence-status").last());
+      await reason.focus();
+      await ring("reason");
+      for (const name of ACTIONS) {
+        await measure(name, acts.getByRole("button", { name }));
         await page.keyboard.press("Tab");
-        await ring("dialog ban");
+        await ring(name);
+      }
 
-        await testInfo.attach(`b9-14-contrast-${theme}${highContrast ? "-hc" : ""}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+      await page.keyboard.press("Enter");
+      const dialog = page.getByRole("dialog", { name: "Ban this member?" });
+      await measure("dialog title", dialog.getByRole("heading"));
+      await measure("dialog body", dialog.locator(".modal-danger-text"));
+      await measure("dialog cancel", dialog.getByRole("button", { name: "Cancel" }));
+      await measure("dialog ban", dialog.getByRole("button", { name: "Ban", exact: true }));
+      await ring("dialog cancel");
+      await page.keyboard.press("Tab");
+      await ring("dialog ban");
+    },
+  })) {
+    test(c.title, c.run);
   }
 
   test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
@@ -389,7 +351,7 @@ test.describe("removal, kick and ban accessibility", () => {
       await boot(page, { fontSize: 20, largeFont: true }, ABOUT_MESSAGE);
       const { acts } = await openActions(page);
       const view = page.getByTestId("feature-view");
-      expect(await view.evaluate((n) => n.scrollWidth - n.clientWidth)).toBeLessThanOrEqual(0);
+      expect(await horizontalOverflow(view)).toBeLessThanOrEqual(0);
       for (const name of ACTIONS) {
         const b = acts.getByRole("button", { name });
         await b.scrollIntoViewIfNeeded();
@@ -400,10 +362,7 @@ test.describe("removal, kick and ban accessibility", () => {
       for (const el of await dialog.locator("h3, p, button").all()) {
         await expect(el).toBeInViewport();
       }
-      await testInfo.attach("b9-14-confirm-940x500-20px.png", {
-        body: await page.screenshot(),
-        contentType: "image/png",
-      });
+      await attachScreenshot(testInfo, "b9-14-confirm-940x500-20px.png", page);
     });
   });
 });

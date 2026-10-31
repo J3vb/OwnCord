@@ -44,147 +44,33 @@
  * sends it. B8 (browser/mobile) is deferred and not qualified here.
  */
 
-import { randomUUID } from "node:crypto";
 import type { Locator, Page, Request } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
+import {
+  composer,
+  connectSender,
+  generalChannel,
+  liveMessageId,
+  messageId,
+  openDm,
+  openSafety,
+  register,
+  relogin,
+  sendAndSee,
+  signIn,
+  userIds,
+  type Sender,
+} from "./serverApi";
 import { installRealTransport } from "../support/real-transport";
 import { TEST_PASSWORD, type TestServer } from "../support/server";
 import { Q1, textContrast } from "../support/accessibility";
 
-type Frame = { type: string; id?: string; payload?: Record<string, unknown> };
-
-/** A sender who is not in the browser: a REST token plus its own socket. */
-interface Sender {
-  readonly token: string;
-  channelId: number;
-  send(content: string): Promise<Frame>;
-  close(): void;
-}
-
-async function signIn(server: TestServer, name: string): Promise<string> {
-  const auth = await server.api("/api/v1/auth/login", { username: name, password: TEST_PASSWORD });
-  return auth.token as string;
-}
-
-async function firstContact(server: TestServer, name: string, bobId: number): Promise<Sender> {
-  const token = await signIn(server, name);
-  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/ws`);
-  const frames: Frame[] = [];
-  const waiters: Array<{ wants: (f: Frame) => boolean; resolve: (f: Frame) => void }> = [];
-  socket.addEventListener("message", (e) => {
-    const f = JSON.parse(String(e.data)) as Frame;
-    frames.push(f);
-    for (const w of waiters.splice(0)) {
-      if (w.wants(f)) w.resolve(f);
-      else waiters.push(w);
-    }
-  });
-  const next = (wants: (f: Frame) => boolean): Promise<Frame> =>
-    new Promise((resolve) => waiters.push({ wants, resolve }));
-  await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
-  const ready = next((f) => f.type === "ready");
-  socket.send(JSON.stringify({ type: "auth", payload: { token } }));
-  await ready;
-  const dm = (await server.api("/api/v1/dms", { recipient_id: bobId }, token)) as {
-    channel_id: number;
-  };
-  const sender: Sender = {
-    token,
-    channelId: dm.channel_id,
-    async send(content) {
-      const id = randomUUID();
-      const ok = next((f) => f.id === id);
-      socket.send(
-        JSON.stringify({
-          type: "chat_send",
-          id,
-          payload: { channel_id: sender.channelId, content, reply_to: null },
-        }),
-      );
-      return ok;
-    },
-    close: () => socket.close(),
-  };
-  return sender;
-}
-
-async function register(server: TestServer, username: string): Promise<void> {
-  await server.api("/api/v1/auth/register", {
-    username,
-    password: TEST_PASSWORD,
-    invite_code: server.owner!.invite_code,
-  });
-}
-
-async function users(server: TestServer): Promise<(name: string) => number> {
-  const rows = (await server.api("/admin/api/users", undefined, server.owner!.token)) as {
-    id: number;
-    username: string;
-  }[];
-  return (name) => rows.find((u) => u.username === name)!.id;
-}
-
-async function generalChannel(server: TestServer): Promise<{ id: number; name: string }> {
-  const channels = (await server.api("/api/v1/channels/", undefined, server.owner!.token)) as {
-    id: number;
-    name: string;
-    type: string;
-  }[];
-  return channels.find((c) => c.name === "general" && c.type === "text")!;
-}
-
-/** The message id for `content`, or null when the server no longer holds it. */
-async function messageId(
-  server: TestServer,
-  channelId: number,
-  content: string,
-): Promise<number | null> {
-  const history = await server.api(
-    `/api/v1/channels/${channelId}/messages`,
-    undefined,
-    server.owner!.token,
-  );
-  return history.messages.find((m: { content: string }) => m.content === content)?.id ?? null;
-}
-
-/** The message id for `content`, asserting the server still holds it. */
-async function liveMessageId(
-  server: TestServer,
-  channelId: number,
-  content: string,
-): Promise<number> {
-  const id = await messageId(server, channelId, content);
-  expect(id).not.toBeNull();
-  return id!;
-}
-
-async function send(page: Page, text: string): Promise<void> {
-  const composer = page.locator("[data-testid='message-input'] textarea");
-  await composer.fill(text);
-  await composer.press("Enter");
-  await expect(page.locator(".msg-text", { hasText: text })).toBeVisible();
-}
-
-const composer = (page: Page) => page.locator("[data-testid='message-input'] textarea");
 const notice = (page: Page) => page.getByRole("region", { name: "Moderation notices" });
 
-async function openSafety(page: Page): Promise<Locator> {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
-  const pane = page.locator(".safety-tab");
-  await expect(pane.getByRole("heading", { name: "Appeals" })).toBeVisible();
-  return pane;
-}
-
-/** Log out from settings and back in: the connect page's health check then
- *  fills the `server-info` snapshot the Account tab's retention notice reads. */
-async function relogin(page: Page, server: TestServer, username: string): Promise<void> {
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.locator(".settings-nav-item.danger").click();
-  // Log Out asks first.
-  await page.locator("[data-testid='logout-confirm']").click();
-  await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
-  await login(page, server, username);
+async function firstContact(server: TestServer, name: string, bobId: number): Promise<Sender> {
+  const sender = await connectSender(server, name);
+  await openDm(server, sender, bobId);
+  return sender;
 }
 
 /** The status of a raw call whose failure the test asserts. */
@@ -235,12 +121,12 @@ test.describe("moderation journey (real server)", () => {
   }) => {
     const owner = server.owner!.token;
     await register(server, "carol");
-    const id = await users(server);
+    const id = await userIds(server);
     const general = await generalChannel(server);
 
     // bob posts the content carol reports, from his own signed-in client.
     const text = `synthetic-journey-${crypto.randomUUID()}`;
-    await send(bob, text);
+    await sendAndSee(bob, text);
     const message = await liveMessageId(server, general.id, text);
     const carol = await signIn(server, "carol");
     const report = (
@@ -362,7 +248,7 @@ test.describe("lifecycle journey (real server)", () => {
   }) => {
     const owner = server.owner!.token;
     await register(server, "carol");
-    const id = await users(server);
+    const id = await userIds(server);
     const bobId = id("bob");
     const general = await generalChannel(server);
     await server.api("/admin/api/channels", { name: "journey-other", type: "text" }, owner);
@@ -370,7 +256,7 @@ test.describe("lifecycle journey (real server)", () => {
     // bob is reported and warned and appeals, before he erases himself, so the
     // erasure half of the chain is exercised on a subject with moderation rows.
     const text = `synthetic-erasure-${crypto.randomUUID()}`;
-    await send(bob, text);
+    await sendAndSee(bob, text);
     const message = await liveMessageId(server, general.id, text);
     const carol = await signIn(server, "carol");
     const report = (
@@ -482,7 +368,7 @@ test.describe("first-contact journey (real server)", () => {
     bobTransport,
     server,
   }) => {
-    const bobId = (await users(server))("bob");
+    const bobId = (await userIds(server))("bob");
     await register(server, "stranger");
     const stranger = await firstContact(server, "stranger", bobId);
     // The stranger's avatar points at a host that must never be fetched while
@@ -544,7 +430,7 @@ test.describe("first-contact journey (real server)", () => {
       // sender from the member context menu (it confirms twice).
       await bob.locator("[data-testid='dm-back-header']").click();
       await expect(bob.locator("[data-testid='member-list']")).toBeVisible();
-      const strangerId = (await users(server))("stranger");
+      const strangerId = (await userIds(server))("stranger");
       const row = bob.locator(`[data-testid='member-${strangerId}']`);
       await expect(row).toBeVisible();
       await row.evaluate((el) =>
@@ -623,7 +509,7 @@ test.describe("several-devices journey (real server)", () => {
 
       // Both devices are live: a message sent from the second reaches the first.
       const text = `from device two ${crypto.randomUUID()}`;
-      await send(page, text);
+      await sendAndSee(page, text);
       await expect(bob.locator(".msg-text", { hasText: text })).toBeVisible({ timeout: 30_000 });
       expect(transport.errors).toEqual([]);
     } finally {
@@ -701,7 +587,7 @@ test.describe("network-loss journey (real server)", () => {
     server,
   }) => {
     const beforeText = `before-cut-${crypto.randomUUID()}`;
-    await send(bob, beforeText);
+    await sendAndSee(bob, beforeText);
 
     // Cut the transport mid-session: the socket closes and every dial fails.
     await bobTransport.offline();
@@ -723,7 +609,7 @@ test.describe("network-loss journey (real server)", () => {
     // send lands, read back from the server's own history.
     await expect(bob.locator(".msg-text", { hasText: beforeText })).toHaveCount(1);
     const afterText = `after-cut-${crypto.randomUUID()}`;
-    await send(bob, afterText);
+    await sendAndSee(bob, afterText);
     const general = await generalChannel(server);
     await expect
       .poll(async () => {
@@ -746,7 +632,7 @@ test.describe("refused-role journey (real server)", () => {
   }) => {
     const owner = server.owner!.token;
     await register(server, "carol");
-    const id = await users(server);
+    const id = await userIds(server);
 
     // bob is an ordinary member: the Moderation Center entry is not offered.
     await expect(bob.getByTestId("moderation-btn")).toBeHidden();
@@ -821,7 +707,7 @@ test.describe("integrated accessibility matrix (real server)", () => {
   }) => {
     await register(server, "stranger");
     await register(server, "carol");
-    const bobId = (await users(server))("bob");
+    const bobId = (await userIds(server))("bob");
     const stranger = await firstContact(server, "stranger", bobId);
     try {
       expect((await stranger.send("joined a11y request")).type).toBe("chat_send_ok");
@@ -916,7 +802,7 @@ test.describe("consent-to-evidence journey (real server)", () => {
     // bob posts a message in a channel that is afterwards labelled, and carol
     // reports it; its evidence is gated by the moderator's own NSFW consent.
     const text = `synthetic-consent-evidence-${crypto.randomUUID()}`;
-    await send(bob, text);
+    await sendAndSee(bob, text);
     const message = await liveMessageId(server, labelled.id, text);
     await server.api(
       "/api/v1/reports",

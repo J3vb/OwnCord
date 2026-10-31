@@ -1,4 +1,5 @@
 import { pruneExpiredMutes } from "@lib/prefs/channelMuteExpiry";
+import { makeDm } from "../helpers/dmHarness";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { makeChannel } from "../helpers/channelFactory";
 import { openChannelMenu, useChannelMenuHost } from "../helpers/channelMenuHost";
@@ -146,18 +147,11 @@ describe("NotificationsTab — muted channel list", () => {
   it("names a muted DM with an at-sign and its display name", () => {
     dmStore.setState(() => ({
       channels: [
-        {
+        makeDm({
           channelId: 9,
           recipient: { id: 2, username: "bob", avatar: "", status: "online" },
           participants: [{ id: 2, username: "bob", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
+        }),
       ],
     }));
     muteChannel(9);

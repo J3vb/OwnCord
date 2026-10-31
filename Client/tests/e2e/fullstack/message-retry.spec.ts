@@ -1,4 +1,5 @@
 import { test, expect, login } from "./fixtures";
+import { generalMessagesWith } from "./serverApi";
 
 test("a recovered send retries the original logical message after its acknowledgment is lost", async ({
   alice,
@@ -41,19 +42,7 @@ test("a recovered send retries the original logical message after its acknowledg
   await expect(alice.locator(".msg-text", { hasText: content })).toHaveCount(1);
   await expect(bob.locator(".msg-text", { hasText: content })).toHaveCount(1);
 
-  const channels = await server.api("/api/v1/channels/", undefined, server.owner!.token);
-  const general = channels.find(
-    (channel: { name: string; type: string }) =>
-      channel.name === "general" && channel.type === "text",
-  );
-  const history = await server.api(
-    `/api/v1/channels/${general.id}/messages`,
-    undefined,
-    server.owner!.token,
-  );
-  expect(
-    history.messages.filter((message: { content: string }) => message.content === content),
-  ).toHaveLength(1);
+  expect(await generalMessagesWith(server, content)).toHaveLength(1);
 
   // The acknowledgment removes encrypted pending data as well as the failed UI.
   await login(alice, server, "alice");

@@ -9,7 +9,14 @@
  */
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, navigateToMainPageReady } from "./helpers";
+import {
+  buildTauriMockScript,
+  navigateToMainPageReady,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  ROUTE_MESSAGES_EMPTY,
+} from "./helpers";
+import { sentFrames } from "./support/invokeLog";
 import { Q1, findUnnamedControls, focusIndicator } from "./support/accessibility";
 
 /** A 1x1 transparent PNG, as the sticker image bytes. */
@@ -25,36 +32,12 @@ const STICKERS = [
   { id: 2, name: "Party Blob", emoji: null, url: "/api/v1/stickers/2/image" },
 ];
 
-interface SentFrame {
-  readonly type: string;
-  readonly payload?: Record<string, unknown>;
-}
-
-/** The client's own outgoing WS frames, as recorded by the Tauri mock's IPC log. */
-async function sentFrames(page: Page): Promise<SentFrame[]> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // Not a client WS message.
-      }
-    }
-    return frames;
-  });
-}
-
 async function start(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         ...STICKERS.map((s) => ({
           pattern: s.url,
           status: 200,
@@ -63,7 +46,7 @@ async function start(page: Page): Promise<void> {
           contentType: "image/png",
         })),
         { pattern: "/api/v1/stickers", status: 200, body: STICKERS },
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+        ROUTE_MESSAGES_EMPTY,
       ],
       simulateWsFlow: true,
       readyOverrides: { capabilities: { stickers: true, message_deduplication: true } },

@@ -5,6 +5,7 @@
  * them. The banner itself is the main page's (the mainPage/ tests).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import type { RingState } from "../../src/lib/voice/callRing";
 
 const { testPrefs, showCall, clearCall, requestAttention, showToast } = vi.hoisted(() => ({
@@ -185,18 +186,13 @@ describe("a ring replaced by a ring from another channel (3B-4)", () => {
   it("names the group for a missed group call", () => {
     dmStore.setState(() => ({
       channels: [
-        {
+        makeDm({
           channelId: 50,
           recipient: { id: 10, username: "Otto", avatar: "", status: "online" },
           participants: [{ id: 10, username: "Otto", avatar: "", status: "online" }],
           name: "Game night",
           isGroup: true,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
+        }),
       ],
     }));
     alertSupersededCall(ring);

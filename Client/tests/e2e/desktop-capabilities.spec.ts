@@ -21,6 +21,7 @@ import {
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  startFullSession,
 } from "./helpers";
 import { findUnnamedControls, keyboardReachable } from "./support/accessibility";
 
@@ -190,9 +191,7 @@ test.describe("notification limitations are actionable", () => {
   test("the desktop build says it cannot read the system setting, with no false grant", async ({
     page,
   }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Notifications");
 
@@ -207,9 +206,7 @@ test.describe("notification limitations are actionable", () => {
 
   test("the permission row reflows at the 940x500 minimum window", async ({ page }) => {
     await page.setViewportSize({ width: 940, height: 500 });
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
     await openSettings(page);
     await switchSettingsTab(page, "Notifications");
 

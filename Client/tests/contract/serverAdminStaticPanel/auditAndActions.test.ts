@@ -11,6 +11,7 @@ import {
   Responder,
   ADMINISTRATOR,
   boot,
+  bootAsAdmin,
   showShell,
   proposedPreview,
 } from "../../helpers/serverAdminStaticPanelHarness";
@@ -41,7 +42,6 @@ describe("Server/admin/static — panel behaviour", () => {
       { id: 4, name: "Member", position: 40, permissions: 0, is_default: true },
     ];
     const respond: Responder = (p, method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?"))
         return {
           json: [{ id: 2, username: "member", role_id: 4, status: "online", banned: false }],
@@ -192,7 +192,6 @@ describe("Server/admin/static — panel behaviour", () => {
       role_id: 4,
     }));
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/users?")) return { json: users };
       return { json: {} };
     };
@@ -228,13 +227,11 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     const entries = [{ id: 1, action: "message_delete", actor_id: 1, target_type: "message" }];
     const respond: Responder = (p, _method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) return { json: entries };
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.auditActionFilter = "channel_delete";
 
     const html = await booted.bridge.renderAudit();
@@ -271,7 +268,6 @@ describe("Server/admin/static — panel behaviour", () => {
       ["user_ban", "user", 0, "tok"],
     ];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?"))
         return {
           json: rowsIn.map(([action, target_type, target_id, subject_token], i) => ({
@@ -288,10 +284,9 @@ describe("Server/admin/static — panel behaviour", () => {
         };
       return { json: {} };
     };
-    const booted = await boot([], respond);
+    const booted = await bootAsAdmin([], respond);
     dom = booted.dom;
     const doc = booted.dom.window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
 
@@ -378,13 +373,11 @@ describe("Server/admin/static — panel behaviour", () => {
   it("hides sign-ins and connections from the dashboard's Recent activity", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) return { json: [] };
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     await booted.bridge.renderDashboard();
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
@@ -409,7 +402,6 @@ describe("Server/admin/static — panel behaviour", () => {
       created_at: "2026-09-01 10:00:00",
     });
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         const q = new URLSearchParams(p.slice("/audit-log?".length));
         const headers =
@@ -425,12 +417,11 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
     showShell(booted.dom);
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     booted.bridge.state.auditPage = 2;
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
@@ -482,7 +473,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     const now = new Date().toISOString();
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         return {
           json: [
@@ -522,11 +512,10 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
     expect(calls.find((c) => c.path.startsWith("/audit-log?"))?.path).toBe(
@@ -583,7 +572,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         if (fail) return { status: 500, json: { message: "boom" } };
         return {
@@ -592,11 +580,10 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
 
@@ -624,7 +611,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let fail = false;
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p.startsWith("/audit-log?")) {
         if (fail) return { status: 500, json: { message: "boom" } };
         return {
@@ -634,11 +620,10 @@ describe("Server/admin/static — panel behaviour", () => {
       }
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
     const { window } = booted.dom;
     const doc = window.document;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
     booted.bridge.state.section = "audit";
     doc.getElementById("content")!.innerHTML = await booted.bridge.renderAudit();
     const select = doc.querySelector<HTMLSelectElement>("#auditAction")!;

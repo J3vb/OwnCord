@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, vi, type Mock } from "vitest";
+import { afterEach, beforeEach, expect, it, vi, type Mock } from "vitest";
 
 /** The accept/reject warning modals (certificate and identity mismatch). */
 export interface WarningModalRig {
@@ -169,4 +169,52 @@ export function checkFocusRestored(mount: MountWarningModal, container: Element)
   modal.destroy?.();
   expect(document.activeElement).toBe(outside);
   outside.remove();
+}
+
+/** The test names a warning modal suite gives the checks its two modals word differently. */
+export interface WarningModalSpec {
+  readonly accept: string;
+  readonly reject: string;
+  readonly close: string;
+  readonly backdrop: string;
+  readonly body: string;
+  readonly title: string;
+  readonly certTitle: string;
+  readonly titleId: string;
+}
+
+/** Registers the accept/reject, dismissal, title and accessibility tests every warning modal shares. */
+export function registerWarningModalTests(
+  rig: { readonly container: () => Element; readonly mountModal: MountWarningModal },
+  spec: WarningModalSpec,
+): void {
+  const { container, mountModal } = rig;
+  it(spec.accept, () => checkAcceptClick(mountModal, container()));
+  it(spec.reject, () => checkRejectClick(mountModal, container(), ".btn-ghost"));
+  it(spec.close, () => checkRejectClick(mountModal, container(), ".modal-close"));
+  it(spec.backdrop, () => checkBackdropRejects(mountModal, container()));
+  it("stays open when a drag-select ends on the backdrop", () =>
+    checkDragSelectDoesNotReject(mountModal, container()));
+  it(spec.body, () => checkBodyClickDoesNotReject(mountModal, container()));
+  it("destroy removes the modal from the DOM", () =>
+    checkDestroyRemovesModal(mountModal, container()));
+  it(`displays the title '${spec.title}'`, () => {
+    mountModal();
+    const title = container().querySelector(".modal-header h3");
+    expect(title?.textContent).toBe(spec.title);
+  });
+  it(`displays the cert title '${spec.certTitle}'`, () => {
+    mountModal();
+    const title = container().querySelector(".cert-title");
+    expect(title?.textContent).toBe(spec.certTitle);
+  });
+  it("carries dialog semantics labelled by the h3 title", () =>
+    checkDialogSemantics(mountModal, container(), spec.titleId, spec.title));
+  it("gives the icon-only close button an accessible name", () =>
+    checkCloseButtonLabel(mountModal, container()));
+  it("calls onReject when Escape is pressed", () => checkEscapeRejects(mountModal));
+  it("does not call onReject on Escape after destroy", () =>
+    checkEscapeIgnoredAfterDestroyRejecting(mountModal));
+  it("moves focus inside the modal on mount and restores it on destroy", () =>
+    checkFocusRestored(mountModal, container()));
 }

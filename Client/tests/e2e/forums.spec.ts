@@ -3,10 +3,12 @@ import { test, expect } from "./fixtures";
 import {
   MOCK_PINNED_MESSAGES,
   MOCK_ROLES,
-  MOCK_LOGIN_RESPONSE,
   buildTauriMockScript,
   emitWsMessage,
   navigateToMainPage,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  ROUTE_MESSAGES_EMPTY,
 } from "./helpers";
 
 // A forum channel in the mocked app (WP 6.9d): the post list with its tag
@@ -89,8 +91,8 @@ const page_ = (threads: unknown[]) => ({ threads, has_more: false, next_before: 
 const LIST = "/channels/9/threads?archived=0&sort=activity&limit=25";
 
 const ROUTES = [
-  { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-  { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
   { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
   {
     pattern: "/channels/95/messages",
@@ -114,7 +116,7 @@ const ROUTES = [
       has_more: false,
     },
   },
-  { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+  ROUTE_MESSAGES_EMPTY,
   { pattern: LIST, status: 200, body: page_([...POSTS, DELETED_OPENING]) },
   { pattern: `${LIST}&tag=1`, status: 200, body: page_([POSTS[1], POSTS[3]]) },
   { pattern: "/channels/9/threads?archived=1", status: 200, body: page_([OLD]) },

@@ -14,6 +14,7 @@ import {
   expectOverlayUntilReady,
   MOCK_LOGIN_2FA_RESPONSE,
   MOCK_TOKEN,
+  ROUTE_HEALTH,
 } from "./helpers";
 
 const PROFILE = {
@@ -35,7 +36,7 @@ async function mockWithSavedPassword(
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ROUTE_HEALTH,
         // A typed-password login would go here. These tests assert it is NOT
         // used, so it returns a token that would be visibly wrong if it were.
         {

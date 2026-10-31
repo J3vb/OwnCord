@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { addDmToChannelsStore } from "@stores/dm.store";
@@ -329,18 +330,11 @@ describe("QuickSwitcher", () => {
   });
 
   it("does not duplicate a synthesized DM mirror row", () => {
-    const dm: DmChannel = {
+    const dm: DmChannel = makeDm({
       channelId: 99,
       recipient: { id: 1, username: "bob", avatar: "", status: "online" },
       participants: [{ id: 1, username: "bob", avatar: "", status: "online" }],
-      name: "",
-      isGroup: false,
-      lastMessageId: null,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    };
+    });
     addDmToChannelsStore(dm);
 
     switcher.mount(container);

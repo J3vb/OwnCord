@@ -16,9 +16,9 @@ import {
   buildTauriMockScript,
   emitWsMessage,
   MOCK_CHANNELS,
-  submitLogin,
-  waitForWsReady,
   BASE_SESSION_ROUTES,
+  navigateToMainPageReady,
+  moderationHistoryEntry,
 } from "./helpers";
 import {
   Q1,
@@ -26,8 +26,8 @@ import {
   focusIndicator,
   setAppearance,
   textContrast,
-  type AppearancePrefs,
 } from "./support/accessibility";
+import { APPEARANCE_MATRIX } from "./support/a11yHarness";
 
 const NOTICES = [
   { id: 12, kind: "warning", reason: "Second: keep it civil", created_at: "2026-09-21T09:00:00Z" },
@@ -35,28 +35,19 @@ const NOTICES = [
 ];
 
 const HISTORY = [
-  {
+  moderationHistoryEntry({
     id: 12,
     kind: "warning",
     reason: "Second: keep it civil",
     created_at: "2026-09-21T09:00:00Z",
-    expires_at: null,
-    lifted_at: null,
-    acknowledged_at: null,
-    appealable: true,
-    appeal: null,
-  },
-  {
+  }),
+  moderationHistoryEntry({
     id: 9,
     kind: "removal",
     reason: "Off-topic post",
     created_at: "2026-09-19T09:00:00Z",
-    expires_at: null,
-    lifted_at: null,
-    acknowledged_at: null,
-    appealable: true,
     appeal: { id: "APL-1", state: "open" },
-  },
+  }),
 ];
 
 const VOICE = { id: 3, name: "Lounge", type: "voice", position: 2, category: null };
@@ -90,13 +81,7 @@ async function start(
     }),
   );
   await page.goto("/");
-  await signIn(page);
-}
-
-async function signIn(page: Page): Promise<void> {
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
+  await navigateToMainPageReady(page);
 }
 
 /** The acknowledgement POSTs the client sent, from the mock's IPC log. */
@@ -253,18 +238,10 @@ test.describe("moderation notices", () => {
 
   test("contrast holds in every theme, High Contrast and a custom accent", async ({ page }) => {
     await start(page);
-    const matrix: AppearancePrefs[] = [
-      { theme: "dark" },
-      { theme: "midnight" },
-      { theme: "neon-glow" },
-      { theme: "light" },
-      { theme: "dark", highContrast: true },
-      { theme: "light", accent: "#fee75c" }, // below 3:1 on light: falls back (Q8)
-    ];
     const rows: string[] = [];
-    for (const prefs of matrix) {
+    for (const prefs of APPEARANCE_MATRIX) {
       await setAppearance(page, prefs);
-      await signIn(page);
+      await navigateToMainPageReady(page);
       const first = notice(page, 11);
       await expect(first).toBeVisible();
       const parts = {
@@ -297,7 +274,7 @@ test.describe("moderation notices", () => {
     await page.setViewportSize({ width: 940, height: 500 });
     await start(page);
     await setAppearance(page, { fontSize: 20, largeFont: true, reducedMotion: true });
-    await signIn(page);
+    await navigateToMainPageReady(page);
     const region = banner(page);
     await expect(region).toBeVisible();
     expect(await region.evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);

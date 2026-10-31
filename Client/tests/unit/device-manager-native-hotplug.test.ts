@@ -2,6 +2,7 @@
 // the webview's `devicechange`, so a plug or unplug in a call falls back and
 // restores through DeviceManager's existing rules.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const { prefs, nativeWatch } = vi.hoisted(() => ({
   prefs: new Map<string, string>(),
@@ -19,9 +20,7 @@ vi.mock("@lib/prefs/preferences", () => ({
     prefs.set(key, val as string);
   },
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 vi.mock("livekit-client", () => ({
   Room: Object.assign(vi.fn(), { getLocalDevices: vi.fn() }),
 }));

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 // ---------------------------------------------------------------------------
@@ -37,14 +38,7 @@ const {
   mockShowToast: vi.fn(),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 vi.mock("@stores/voice.store", async (importOriginal) => ({
   voiceStore: { getState: mockVoiceStoreGetState },

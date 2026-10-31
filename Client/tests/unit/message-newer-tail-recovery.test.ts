@@ -5,9 +5,8 @@
  * dropping a live row that landed in between.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+import { loggerMock } from "../helpers/loggerMock";
+vi.mock("@lib/logger", () => loggerMock());
 
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import {

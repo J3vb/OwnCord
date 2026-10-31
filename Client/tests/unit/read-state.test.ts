@@ -4,6 +4,7 @@
  * moving the connection's focused channel is the reason this exists.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 
 import {
   markActiveChannelReadOnUnload,
@@ -41,18 +42,12 @@ function channel(id: number, unread: number, mentions = 0): ReadyChannel {
 }
 
 function dm(channelId: number, unread: number, mentions = 0): DmChannel {
-  return {
+  return makeDm({
     channelId,
     recipient: { id: channelId * 10, username: `u${channelId}`, avatar: "", status: "online" },
-    participants: [],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
     unreadCount: unread,
     mentionCount: mentions,
-  };
+  });
 }
 
 let sent: number[];

@@ -8,12 +8,7 @@
 
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
-import {
-  mockTauriFullSession,
-  navigateToMainPageReady,
-  emitWsEvent,
-  emitWsMessage,
-} from "./helpers";
+import { emitWsEvent, emitWsMessage, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Helper: simulate a full disconnect -> reconnect cycle
@@ -68,9 +63,7 @@ async function simulateReconnect(page: Page): Promise<void> {
 
 test.describe("Reconnection — Banner Visibility", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
   });
 
   test("reconnecting banner is hidden when connected", async ({ page }) => {
@@ -107,9 +100,7 @@ test.describe("Reconnection — Banner Visibility", () => {
 
 test.describe("Reconnection — State Recovery", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await startFullSession(page, { ready: true });
   });
 
   test("channels are still displayed after reconnect", async ({ page }) => {

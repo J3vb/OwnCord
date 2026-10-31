@@ -23,11 +23,12 @@ import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   MOCK_MEMBERS_MULTI_ROLE,
   navigateToMainPageReady,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
 import {
   captureCalls,
@@ -99,8 +100,8 @@ async function openSession(page: Page, opts: MockOpts = {}): Promise<void> {
     buildTauriMockScript({
       wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         {
           pattern: "/messages/purge",
           status: opts.purge?.status ?? 200,

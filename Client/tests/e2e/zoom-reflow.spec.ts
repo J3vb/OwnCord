@@ -24,11 +24,14 @@ import type { Locator, Page, TestInfo } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   openSettings,
   submitLogin,
   waitForWsReady,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  ROUTE_MESSAGES_EMPTY,
+  dmChannel,
 } from "./helpers";
 import {
   ZOOM_VIEWPORT,
@@ -41,23 +44,10 @@ test.use({ viewport: ZOOM_VIEWPORT, deviceScaleFactor: 1 });
 
 type Route = { pattern: string; status: number; body: unknown; method?: string };
 
-const HEALTH: Route = {
-  pattern: "/api/v1/health",
-  status: 200,
-  body: { status: "ok", version: "1.0.0" },
-};
-const LOGIN: Route = { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE };
+const HEALTH: Route = ROUTE_HEALTH;
+const LOGIN: Route = ROUTE_LOGIN;
 
-const DM_CHANNELS = [
-  {
-    channel_id: 100,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 1,
-  },
-];
+const DM_CHANNELS = [dmChannel(100, undefined, { unread_count: 1 })];
 
 const REQUESTS = [
   {
@@ -416,7 +406,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
     test("the moderation queue fits at 200 % zoom", async ({ page }, testInfo) => {
       await boot(page, [
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+        ROUTE_MESSAGES_EMPTY,
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
       ]);
       await openDrawer(page);
@@ -434,7 +424,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
     test("the moderation review and its actions fit at 200 % zoom", async ({ page }, testInfo) => {
       await boot(page, [
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+        ROUTE_MESSAGES_EMPTY,
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
         {
           pattern: `/api/v1/moderation/queue/${MINE}`,
@@ -471,7 +461,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
     test("the ban confirm fits at 200 % zoom", async ({ page }, testInfo) => {
       await boot(page, [
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+        ROUTE_MESSAGES_EMPTY,
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
         {
           pattern: `/api/v1/moderation/queue/${MINE}`,
@@ -499,7 +489,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
   test.describe("appeal review", () => {
     test("the appeal decision form fits at 200 % zoom", async ({ page }, testInfo) => {
       await boot(page, [
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+        ROUTE_MESSAGES_EMPTY,
         { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: [] },
         { pattern: APPEALS_Q, method: "GET", status: 200, body: APPEALS },
         { pattern: `${APPEALS_Q}/${HELD}`, method: "GET", status: 200, body: APPEAL_DETAIL },

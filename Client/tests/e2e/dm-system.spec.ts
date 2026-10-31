@@ -6,6 +6,7 @@
  * and background unread increments.
  */
 
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
@@ -16,30 +17,15 @@ import {
   dmRows,
   emitWsMessage,
   BASE_SESSION_ROUTES,
+  dmChannel,
+  thirdDmChannel,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // DM mock data
 // ---------------------------------------------------------------------------
 
-const MOCK_DM_CHANNELS = [
-  {
-    channel_id: 100,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-  {
-    channel_id: 101,
-    recipient: { id: 3, username: "thirduser", avatar: "", status: "idle" },
-    last_message_id: 501,
-    last_message: "See you later",
-    last_message_at: "2026-03-15T11:00:00Z",
-    unread_count: 2,
-  },
-];
+const MOCK_DM_CHANNELS = [dmChannel(100), thirdDmChannel(101, { unread_count: 2 })];
 
 // ---------------------------------------------------------------------------
 // Custom mock session with DM support
@@ -81,6 +67,15 @@ async function navigateToMainPageWithDms(page: import("@playwright/test").Page):
 // Tests: DM Sidebar Mode
 // ---------------------------------------------------------------------------
 
+/** Open Home, click the first DM row and return it. */
+async function openFirstDm(page: Page): Promise<Locator> {
+  await openHome(page);
+  const dmItem = dmRows(page).first();
+  await expect(dmItem).toBeVisible({ timeout: 5_000 });
+  await dmItem.click();
+  return dmItem;
+}
+
 test.describe("DM System — Sidebar Mode", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriSessionWithDms(page);
@@ -102,11 +97,7 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("opening a DM from Home marks it active in DM mode", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    const dmItem = await openFirstDm(page);
     await expect(dmItem).toHaveClass(/active/);
 
     // DM back header should appear (proves DM mode is active)
@@ -115,11 +106,7 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("DM sidebar shows 'Back to Server' header", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     const backHeader = page.locator("[data-testid='dm-back-header']");
     await expect(backHeader).toBeVisible({ timeout: 5_000 });
@@ -130,11 +117,7 @@ test.describe("DM System — Sidebar Mode", () => {
   });
 
   test("'Back to Server' returns to channel sidebar", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     const backHeader = page.locator("[data-testid='dm-back-header']");
     await expect(backHeader).toBeVisible({ timeout: 5_000 });
@@ -248,11 +231,7 @@ test.describe("DM System — Message Display", () => {
   });
 
   test("sending message in DM echoes back in chat", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     // Wait for the message input to appear after switching to DM
     const input = page.locator("[data-testid='msg-textarea']");
@@ -267,11 +246,7 @@ test.describe("DM System — Message Display", () => {
   });
 
   test("receiving WS chat_message in active DM shows in chat", async ({ page }) => {
-    await openHome(page);
-    const dmItem = dmRows(page).first();
-    await expect(dmItem).toBeVisible({ timeout: 5_000 });
-
-    await dmItem.click();
+    await openFirstDm(page);
 
     // Wait for messages container to be ready
     const messagesContainer = page.locator(".messages-container");

@@ -1,11 +1,9 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage, emitWsMessage } from "./helpers";
+import { emitWsMessage, startFullSession } from "./helpers";
 
 test.describe("Typing Indicator — WebSocket", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("typing indicator appears when another user starts typing", async ({ page }) => {

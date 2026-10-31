@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as mocks from "../helpers/messageInputMocks";
 
 let stickerOpts: {
   onSelect: (s: { id: number; name: string }) => void;
@@ -6,20 +7,8 @@ let stickerOpts: {
   canManage: boolean;
 } | null = null;
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => {
-    const element = document.createElement("div");
-    element.classList.add("emoji-picker");
-    return { element, destroy: vi.fn() };
-  },
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => {
-    const element = document.createElement("div");
-    element.classList.add("gif-picker");
-    return { element, destroy: vi.fn() };
-  },
-}));
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 vi.mock("@components/StickerPicker", () => ({
   createStickerPicker: (opts: NonNullable<typeof stickerOpts>) => {
     stickerOpts = opts;
@@ -31,15 +20,7 @@ vi.mock("@components/StickerPicker", () => ({
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
-
-const gifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
+import { stubGifApi as gifApi } from "../helpers/messageInputHarness";
 
 describe("expression popup", () => {
   let container: HTMLDivElement;

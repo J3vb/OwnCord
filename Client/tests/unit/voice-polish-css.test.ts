@@ -6,29 +6,9 @@
 //
 // jsdom never applies app.css, so these assert the parsed stylesheet rules
 // (tests/helpers/app-css.ts). The e2e spec proves the computed behaviour.
-import type { Declaration } from "lightningcss";
-import { cascadedDeclaration, keyword } from "../helpers/app-css";
+import { cascadedDeclaration, keyword, varToken } from "../helpers/app-css";
+import { px } from "../helpers/appCssMedia";
 import { describe, it, expect } from "vitest";
-
-/** A length declaration's px value, or undefined for anything else. */
-function px(d: ReturnType<typeof cascadedDeclaration>): number | undefined {
-  const v: { type?: string; value?: { type?: string; value?: { unit?: string; value?: number } } } =
-    (d?.value as Declaration | undefined)?.value as never;
-  if (v?.type === "length-percentage" && v.value?.value?.unit === "px") {
-    return v.value.value.value;
-  }
-  return undefined;
-}
-
-/** The custom-property name a declaration reads as a bare `var(--x)`, or undefined. */
-function varToken(d: ReturnType<typeof cascadedDeclaration>): string | undefined {
-  const v = d?.value as Declaration | undefined;
-  if (v?.property !== "unparsed") return undefined;
-  const tokens = v.value.value;
-  if (tokens.length !== 1) return undefined;
-  const t = tokens[0]!;
-  return t.type === "var" ? t.value.name.ident : undefined;
-}
 
 describe("voice/media polish CSS", () => {
   it("reveals the tile audio overlay on focus-within, not just hover", () => {

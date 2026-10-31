@@ -45,8 +45,31 @@ function getAuthFrame(): { type: string; payload: Record<string, unknown> } {
   };
 }
 
+/** Emits the server's `auth_ok` at sequence `seq`. */
+function emitAuthOk(seq: number): void {
+  emitTauriEvent(
+    "ws-message",
+    JSON.stringify({
+      type: "auth_ok",
+      seq,
+      payload: {
+        user: { id: 1, username: "a", avatar: null, role: "admin" },
+        server_name: "S",
+        motd: "",
+      },
+    }),
+  );
+}
+
 describe("contract: auth frame key set (epoch 1)", () => {
   let client: ReturnType<typeof createWsClient>;
+
+  /** Connects and lets the socket open, so the first auth frame goes out. */
+  async function connectAndOpen(): Promise<void> {
+    client.connect({ host: "localhost:8443", token: "t" });
+    await vi.advanceTimersByTimeAsync(10);
+    emitTauriEvent("ws-state", "open");
+  }
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -68,9 +91,7 @@ describe("contract: auth frame key set (epoch 1)", () => {
   });
 
   it("fresh connect: envelope keys are exactly [type, payload, id], payload keys exactly [token, last_seq, epoch, features]", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await connectAndOpen();
 
     const frame = getAuthFrame();
     // send() (ws.ts:631-637) wraps every outgoing message with a correlation
@@ -89,22 +110,9 @@ describe("contract: auth frame key set (epoch 1)", () => {
   });
 
   it("resume with a registered active-channel provider: payload keys exactly [token, last_seq, active_channel_id, epoch, features]", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await connectAndOpen();
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 7,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk(7);
 
     setActiveChannelProvider(() => 42);
 
@@ -126,22 +134,9 @@ describe("contract: auth frame key set (epoch 1)", () => {
   });
 
   it("resume without a provider registered: payload keys stay exactly [token, last_seq, epoch, features]", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await connectAndOpen();
 
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 3,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    emitAuthOk(3);
 
     // No setActiveChannelProvider call -- stays null from beforeEach reset.
     emitTauriEvent("ws-state", "closed");
@@ -155,21 +150,8 @@ describe("contract: auth frame key set (epoch 1)", () => {
   });
 
   it("wake reconnect: payload keys are exactly [token, last_seq, epoch, features, wake]", async () => {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent(
-      "ws-message",
-      JSON.stringify({
-        type: "auth_ok",
-        seq: 3,
-        payload: {
-          user: { id: 1, username: "a", avatar: null, role: "admin" },
-          server_name: "S",
-          motd: "",
-        },
-      }),
-    );
+    await connectAndOpen();
+    emitAuthOk(3);
 
     // The socket closed, then the process slept: the wall clock jumps with no
     // timer running, so the next dial is marked a wake (U4).

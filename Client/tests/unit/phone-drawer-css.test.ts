@@ -1,80 +1,14 @@
 // The phone drawer's layout is CSS, and jsdom never applies it, so these read
 // the parsed stylesheet (Lightning CSS, as tests/helpers/app-css.ts does) and
 // walk the @media rules that helper leaves out.
-import { join } from "node:path";
-import { bundle } from "lightningcss";
-import type { Rule, Selector } from "lightningcss";
 import { describe, expect, it } from "vitest";
+import { flatMediaRules } from "../helpers/appCssMedia";
 
-interface FlatRule {
-  readonly media: string;
-  /** Each comma-separated query of the media rule, as Lightning CSS parsed it. */
-  readonly queries: readonly string[];
-  readonly selector: string;
-  readonly declarations: string;
-}
-
-function selectorText(selector: Selector): string {
-  return selector
-    .map((c) => {
-      switch (c.type) {
-        case "class":
-          return `.${c.name}`;
-        case "id":
-          return `#${c.name}`;
-        case "type":
-          return c.name;
-        case "combinator":
-          return c.value === "descendant" ? " " : ` ${c.value} `;
-        case "attribute":
-          return c.operation ? `[${c.name}="${c.operation.value}"]` : `[${c.name}]`;
-        default:
-          return `<${c.type}>`;
-      }
-    })
-    .join("");
-}
-
-function flatRules(): FlatRule[] {
-  let sheetRules: Rule[] = [];
-  bundle({
-    filename: join(process.cwd(), "src/styles/app.css"),
-    visitor: {
-      StyleSheet(s) {
-        sheetRules = s.rules;
-      },
-    },
-  });
-  const out: FlatRule[] = [];
-  const walk = (rules: Rule[], media: string, queries: readonly string[]): void => {
-    for (const rule of rules) {
-      if (rule.type === "media") {
-        walk(
-          rule.value.rules,
-          JSON.stringify(rule.value.query),
-          rule.value.query.mediaQueries.map((q) => JSON.stringify(q)),
-        );
-      } else if (rule.type === "style") {
-        const decls = [
-          ...(rule.value.declarations?.declarations ?? []),
-          ...(rule.value.declarations?.importantDeclarations ?? []),
-        ];
-        for (const sel of rule.value.selectors) {
-          out.push({
-            media,
-            queries,
-            selector: selectorText(sel),
-            declarations: JSON.stringify(decls),
-          });
-        }
-      }
-    }
-  };
-  walk(sheetRules, "", []);
-  return out;
-}
-
-const rules = flatRules();
+const rules = flatMediaRules().map((r) => ({
+  ...r,
+  declarations: JSON.stringify(r.declarations),
+}));
+type FlatRule = (typeof rules)[number];
 
 /** The media text of the phone layout: a touch screen that is narrow or short. */
 const isPhoneMedia = (r: FlatRule): boolean =>

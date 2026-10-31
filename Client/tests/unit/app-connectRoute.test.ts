@@ -11,6 +11,7 @@
  * the server is newer than the client.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 import type { ApiClient } from "@lib/api";
 import type { ProfileManager } from "@lib/presence/profiles";
 import type { RenderRecovery } from "@lib/text/safeRender";
@@ -27,14 +28,7 @@ const hoisted = vi.hoisted(() => ({
   logError: vi.fn(),
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: hoisted.logError,
-  }),
-}));
+vi.mock("@lib/logger", () => loggerMock({ error: hoisted.logError }));
 vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
 vi.mock("@lib/net/credentials", () => ({
   deleteCredential: vi.fn(),

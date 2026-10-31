@@ -16,11 +16,13 @@ import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
   grantExternalConsent,
-  MOCK_LOGIN_RESPONSE,
   MOCK_PINNED_MESSAGES,
   navigateToMainPage,
   waitForWsReady,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
+import { sentFrames } from "./support/invokeLog";
 
 // These specs cover what loads once the viewer consented (B9-8); the consent
 // gate itself is content-consent.spec.ts.
@@ -122,8 +124,8 @@ async function mockSession(page: Page, externalContent: ExternalContentOption): 
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         { pattern: "/messages", status: 200, body: MOCK_MEDIA_MESSAGES },
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       ],
@@ -144,26 +146,6 @@ async function brokerCalls(page: Page) {
     return log
       .filter((e) => e.cmd === "external_preview" || e.cmd === "external_image")
       .map((e) => ({ cmd: e.cmd, args: e.args ?? {} }));
-  });
-}
-
-async function sentFrames(
-  page: Page,
-): Promise<Array<{ type: string; payload?: Record<string, unknown> }>> {
-  return page.evaluate(() => {
-    const log = (
-      window as unknown as { __invokeLog: Array<{ cmd: string; args?: { message?: string } }> }
-    ).__invokeLog;
-    const frames: Array<{ type: string; payload?: Record<string, unknown> }> = [];
-    for (const entry of log) {
-      if (entry.cmd !== "ws_send") continue;
-      try {
-        frames.push(JSON.parse(entry.args?.message ?? "{}"));
-      } catch {
-        // Not a JSON client frame; skip.
-      }
-    }
-    return frames;
   });
 }
 
@@ -210,6 +192,14 @@ async function invokedCommands(page: Page): Promise<string[]> {
   );
 }
 
+/** Click the inline image once its broker-fetched bytes are in, and wait for the lightbox. */
+async function openLightbox(page: Page): Promise<void> {
+  const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
+  await expect(inlineImg).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
+  await inlineImg.click();
+  await expect(page.locator(".image-lightbox")).toBeVisible();
+}
+
 test.describe("Image lightbox", () => {
   test("a direct image URL is fetched through the broker and opens the lightbox on click", async ({
     page,
@@ -237,10 +227,7 @@ test.describe("Image lightbox", () => {
     page,
   }) => {
     await bootMedia(page, { image: { [`url:${IMAGE_URL}`]: LIGHTBOX_PNG_BYTES } });
-    const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
-    await expect(inlineImg).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
-    await inlineImg.click();
-    await expect(page.locator(".image-lightbox")).toBeVisible();
+    await openLightbox(page);
 
     await lightboxImg(page).click();
     await expect.poll(() => currentTransform(page)).toMatchObject({ scale: 3 });
@@ -255,10 +242,7 @@ test.describe("Image lightbox", () => {
 
   test("the toolbar offers Download and Open original, and Tab reaches them", async ({ page }) => {
     await bootMedia(page, { image: { [`url:${IMAGE_URL}`]: LIGHTBOX_PNG_BYTES } });
-    const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
-    await expect(inlineImg).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
-    await inlineImg.click();
-    await expect(page.locator(".image-lightbox")).toBeVisible();
+    await openLightbox(page);
 
     const download = page.getByRole("button", { name: "Download image" });
     const openOriginal = page.getByRole("button", { name: "Open original" });
@@ -299,8 +283,8 @@ test.describe("Image lightbox", () => {
     await page.addInitScript(
       buildTauriMockScript({
         httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+          ROUTE_HEALTH,
+          ROUTE_LOGIN,
           { pattern: "/messages", status: 200, body: { messages: [message], has_more: false } },
           { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
           ...names.map((n) => ({
@@ -338,10 +322,7 @@ test.describe("Image lightbox", () => {
 
   test("wheel zoom scales and dragging while zoomed pans the image", async ({ page }) => {
     await bootMedia(page, { image: { [`url:${IMAGE_URL}`]: LIGHTBOX_PNG_BYTES } });
-    const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
-    await expect(inlineImg).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
-    await inlineImg.click();
-    await expect(page.locator(".image-lightbox")).toBeVisible();
+    await openLightbox(page);
 
     const box = (await lightboxImg(page).boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -366,10 +347,7 @@ test.describe("Image lightbox", () => {
 
   test("clicking the backdrop outside the image closes the lightbox", async ({ page }) => {
     await bootMedia(page, { image: { [`url:${IMAGE_URL}`]: LIGHTBOX_PNG_BYTES } });
-    const inlineImg = page.locator("[data-testid='message-201'] .msg-image img");
-    await expect(inlineImg).toHaveAttribute("src", /^blob:/, { timeout: 5_000 });
-    await inlineImg.click();
-    await expect(page.locator(".image-lightbox")).toBeVisible();
+    await openLightbox(page);
 
     await page.locator(".image-lightbox").click({ position: { x: 5, y: 5 } });
     await expect(page.locator(".image-lightbox")).toBeHidden();
@@ -535,8 +513,8 @@ const GIF_TINY_TRENDING = gifResult("1", "Funny cat");
 
 function gifRoutes(trendingBody: unknown, trendingStatus = 200) {
   return [
-    { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-    { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+    ROUTE_HEALTH,
+    ROUTE_LOGIN,
     { pattern: "/messages", status: 200, body: MOCK_MEDIA_MESSAGES },
     { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
     { pattern: "/api/v1/gif/trending", status: trendingStatus, body: trendingBody },

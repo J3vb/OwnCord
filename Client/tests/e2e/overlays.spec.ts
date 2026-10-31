@@ -1,9 +1,5 @@
 import { test, expect } from "./fixtures";
-import {
-  mockTauriFullSession,
-  mockTauriFullSessionWithMessages,
-  navigateToMainPage,
-} from "./helpers";
+import { mockTauriFullSessionWithMessages, navigateToMainPage, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Quick Switcher (Ctrl+K)
@@ -11,9 +7,7 @@ import {
 
 test.describe("Quick Switcher", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("Ctrl+K opens quick switcher", async ({ page }) => {
@@ -111,9 +105,7 @@ test.describe("Quick Switcher", () => {
 
 test.describe("Emoji Picker", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("emoji button opens emoji picker", async ({ page }) => {
@@ -246,9 +238,7 @@ test.describe("Invite Manager", () => {
 
 test.describe("Pinned Messages", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("pin button exists in chat header tools", async ({ page }) => {

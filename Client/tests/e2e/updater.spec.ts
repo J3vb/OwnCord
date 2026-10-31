@@ -110,6 +110,34 @@ const banner = (page: Page): ReturnType<Page["locator"]> => page.locator(".updat
 const bannerText = (page: Page): ReturnType<Page["locator"]> =>
   page.locator(".update-banner .update-banner-text");
 
+/** Mock the session, sign in and wait for the "ready to install" banner. */
+async function bootWithUpdate(page: Page, opts: { android?: boolean } = {}): Promise<void> {
+  await mockUpdaterSession(page, { available: true, version: "9.9.9", ...opts });
+  await page.goto("/");
+  await navigateToMainPageReady(page);
+  await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
+    timeout: 10_000,
+  });
+}
+
+async function relaunched(page: Page): Promise<boolean> {
+  return page.evaluate(() =>
+    (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.some(
+      (e) => e.cmd === "plugin:process|restart",
+    ),
+  );
+}
+
+async function startInstall(page: Page): Promise<void> {
+  await page.locator(".update-banner-install").click();
+  await expect(bannerText(page)).toHaveText("Downloading update…");
+}
+
+async function dismissBanner(page: Page): Promise<void> {
+  await page.locator(".update-banner-later").click();
+  await expect(banner(page)).toHaveCount(0);
+}
+
 test.describe("Updater journey", () => {
   test("no banner when the server reports no update", async ({ page }) => {
     await mockUpdaterSession(page, { available: false });
@@ -133,30 +161,17 @@ test.describe("Updater journey", () => {
   });
 
   test("available → banner with version; Later dismisses it for the session", async ({ page }) => {
-    await mockUpdaterSession(page, { available: true, version: "9.9.9" });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
+    await bootWithUpdate(page);
 
-    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
-      timeout: 10_000,
-    });
-
-    await page.locator(".update-banner-later").click();
-    await expect(banner(page)).toHaveCount(0);
+    await dismissBanner(page);
   });
 
   test("full journey: banner → download progress (% and MB fallback) → auto-relaunch", async ({
     page,
   }) => {
-    await mockUpdaterSession(page, { available: true, version: "9.9.9" });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
-      timeout: 10_000,
-    });
+    await bootWithUpdate(page);
 
-    await page.locator(".update-banner-install").click();
-    await expect(bannerText(page)).toHaveText("Downloading update…");
+    await startInstall(page);
 
     // Progress with a known total renders a percentage…
     await emitProgress(page, 25, 100);
@@ -181,12 +196,7 @@ test.describe("Updater journey", () => {
   test("Android: allow-installs prompt, then the installer's Install tap, both accessible", async ({
     page,
   }) => {
-    await mockUpdaterSession(page, { available: true, version: "9.9.9", android: true });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
-      timeout: 10_000,
-    });
+    await bootWithUpdate(page, { android: true });
 
     await page.locator(".update-banner-install").click();
     await expect(bannerText(page)).toHaveText(
@@ -209,27 +219,15 @@ test.describe("Updater journey", () => {
     expect((await textContrast(bannerText(page))).ratio).toBeGreaterThanOrEqual(Q1.text);
     expect(await keyboardReachable(page, page.locator(".update-banner-install"))).toBe(true);
     // Android restarts the app itself after Install; the webview never relaunches.
-    const restarted = await page.evaluate(() =>
-      (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.some(
-        (e) => e.cmd === "plugin:process|restart",
-      ),
-    );
-    expect(restarted).toBe(false);
+    expect(await relaunched(page)).toBe(false);
 
-    await page.locator(".update-banner-later").click();
-    await expect(banner(page)).toHaveCount(0);
+    await dismissBanner(page);
   });
 
   test("a failed install shows the error state and Dismiss clears it", async ({ page }) => {
-    await mockUpdaterSession(page, { available: true, version: "9.9.9" });
-    await page.goto("/");
-    await navigateToMainPageReady(page);
-    await expect(bannerText(page)).toHaveText("OwnCord 9.9.9 is ready to install", {
-      timeout: 10_000,
-    });
+    await bootWithUpdate(page);
 
-    await page.locator(".update-banner-install").click();
-    await expect(bannerText(page)).toHaveText("Downloading update…");
+    await startInstall(page);
 
     await waitForInstallHandles(page);
     await page.evaluate(() =>
@@ -240,14 +238,8 @@ test.describe("Updater journey", () => {
 
     await expect(bannerText(page)).toHaveText("Update failed. Please try again later.");
     // No relaunch on failure.
-    const restarted = await page.evaluate(() =>
-      (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.some(
-        (e) => e.cmd === "plugin:process|restart",
-      ),
-    );
-    expect(restarted).toBe(false);
+    expect(await relaunched(page)).toBe(false);
 
-    await page.locator(".update-banner-later").click();
-    await expect(banner(page)).toHaveCount(0);
+    await dismissBanner(page);
   });
 });

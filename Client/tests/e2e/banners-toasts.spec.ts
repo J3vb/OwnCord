@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage, emitWsEvent, emitWsMessage } from "./helpers";
+import { emitWsEvent, emitWsMessage, startFullSession } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // Tests: Server Banner (reconnection)
@@ -7,9 +7,7 @@ import { mockTauriFullSession, navigateToMainPage, emitWsEvent, emitWsMessage } 
 
 test.describe("Server Banner", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("reconnecting banner is hidden by default", async ({ page }) => {

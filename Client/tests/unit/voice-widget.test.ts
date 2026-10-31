@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
@@ -369,18 +370,10 @@ describe("VoiceWidget", () => {
   it("links the call's name back to the call, for a DM and a guild channel alike", () => {
     dmStore.setState(() => ({
       channels: [
-        {
-          channelId: 100,
+        makeDm({
           recipient: { id: 2, username: "otto", avatar: "", status: "online" },
           participants: [{ id: 2, username: "otto", avatar: "", status: "online" }],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
-          unreadCount: 0,
-          mentionCount: 0,
-        },
+        }),
       ],
     }));
     setVoiceChannel(100, []);

@@ -10,6 +10,7 @@
  * the composed DOM, and the CSS check below reads it from there.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 import * as mocks from "../helpers/sidebarAreaMocks";
 import { lightSidebarAreaOpts, resetSidebarStoresAsMember } from "../helpers/sidebarAreaOpts";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
@@ -132,18 +133,11 @@ describe("SidebarArea — Mark All as Read", () => {
 
     dmStore.setState(() => ({
       channels: [
-        {
+        makeDm({
           channelId: 50,
           recipient: { id: 9, username: "alice", avatar: "", status: "online" },
-          participants: [],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
           unreadCount: 2,
-          mentionCount: 0,
-        },
+        }),
       ],
     }));
 
@@ -156,18 +150,12 @@ describe("SidebarArea — Mark All as Read", () => {
   it("leaves DM unread, DM read state and the DM badge alone when clicked", async () => {
     dmStore.setState(() => ({
       channels: [
-        {
+        makeDm({
           channelId: 50,
           recipient: { id: 9, username: "alice", avatar: "", status: "online" },
-          participants: [],
-          name: "",
-          isGroup: false,
-          lastMessageId: null,
-          lastMessage: "",
-          lastMessageAt: "",
           unreadCount: 2,
           mentionCount: 1,
-        },
+        }),
       ],
     }));
     mount(CHANNELS);

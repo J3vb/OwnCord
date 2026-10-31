@@ -5,8 +5,7 @@
 //
 // WP 6.10d: the Settings page's "Voice: AFK" card and the AFK badge on the
 // Channels page, driven against the real admin scripts in jsdom.
-import { describe, it, expect, afterEach } from "vitest";
-import { JSDOM } from "jsdom";
+import { describe, it, expect } from "vitest";
 import {
   adminHtmlWithBridge,
   bootAdminPanel,
@@ -58,12 +57,6 @@ async function mountSettings(bridge: Bridge, doc: Document): Promise<void> {
 }
 
 describe("Server/admin/static — AFK card", () => {
-  let dom: JSDOM | undefined;
-  afterEach(() => {
-    dom?.window?.close();
-    dom = undefined;
-  });
-
   function responder(opts: { channels: unknown; perms?: unknown; put?: Reply; timeout?: string }) {
     return (path: string, method: string): Reply => {
       if (path === "/settings" && method === "GET") {
@@ -95,7 +88,6 @@ describe("Server/admin/static — AFK card", () => {
   it("lists non-archived voice channels plus None, with the five timeouts in minutes", async () => {
     const calls: FetchCall[] = [];
     const b = await boot(calls, responder({ channels: CHANNELS }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const sel = b.doc.getElementById("s-afk_channel") as HTMLSelectElement;
     expect([...sel.options].map((o) => o.textContent)).toEqual(["None", "lounge", "quiet"]);
@@ -116,7 +108,6 @@ describe("Server/admin/static — AFK card", () => {
     const calls: FetchCall[] = [];
     const chans = CHANNELS.map((c) => (c.id === 4 ? { ...c, afk: true, voice_max_users: 0 } : c));
     const b = await boot(calls, responder({ channels: chans, timeout: "900" }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     expect((b.doc.getElementById("s-afk_channel") as HTMLSelectElement).value).toBe("4");
     const t = b.doc.getElementById("s-afk_timeout_seconds") as HTMLSelectElement;
@@ -137,7 +128,6 @@ describe("Server/admin/static — AFK card", () => {
   it("saves the channel on its own endpoint and clears it with null", async () => {
     const calls: FetchCall[] = [];
     const b = await boot(calls, responder({ channels: CHANNELS }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const sel = b.doc.getElementById("s-afk_channel") as HTMLSelectElement;
     sel.value = "2";
@@ -161,7 +151,6 @@ describe("Server/admin/static — AFK card", () => {
         put: { status: 404, json: { error: { message: "channel not found" } } },
       }),
     );
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const sel = b.doc.getElementById("s-afk_channel") as HTMLSelectElement;
     sel.value = "2";
@@ -175,7 +164,6 @@ describe("Server/admin/static — AFK card", () => {
     const calls: FetchCall[] = [];
     const chans = CHANNELS.map((c) => (c.id === 4 ? { ...c, afk: true } : c));
     const b = await boot(calls, responder({ channels: chans, perms: role(0, CONNECT_VOICE) }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const warn = b.doc.getElementById("afkWarnings")?.textContent ?? "";
     expect(warn).toContain("cannot join");
@@ -195,7 +183,6 @@ describe("Server/admin/static — AFK card", () => {
       deny: 0,
     });
     const b = await boot(calls, responder({ channels: chans, perms }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     const warn = b.doc.getElementById("afkWarnings")?.textContent ?? "";
     expect(warn).toContain('"Member" cannot join');
@@ -210,7 +197,6 @@ describe("Server/admin/static — AFK card", () => {
     if (!member) throw new Error("expected a Member role");
     member.role_name = "<img src=x onerror=alert(1)>";
     const b = await boot(calls, responder({ channels: chans, perms }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     expect(b.doc.querySelector("#afkWarnings img")).toBeNull();
     expect(b.doc.getElementById("afkWarnings")?.textContent).toContain("<img src=x");
@@ -220,7 +206,6 @@ describe("Server/admin/static — AFK card", () => {
     const calls: FetchCall[] = [];
     const chans = CHANNELS.map((c) => (c.id === 2 ? { ...c, afk: true } : c));
     const b = await boot(calls, responder({ channels: chans }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     expect(b.doc.getElementById("afkWarnings")?.textContent).toBe("");
   });
@@ -228,7 +213,6 @@ describe("Server/admin/static — AFK card", () => {
   it("disables the channel select when the channel list is not readable", async () => {
     const calls: FetchCall[] = [];
     const b = await boot(calls, responder({ channels: null }));
-    dom = b.dom;
     await mountSettings(b.bridge, b.doc);
     expect((b.doc.getElementById("s-afk_channel") as HTMLSelectElement).disabled).toBe(true);
     expect(b.doc.getElementById("s-afk_timeout_seconds")).toBeTruthy();
@@ -238,7 +222,6 @@ describe("Server/admin/static — AFK card", () => {
     const calls: FetchCall[] = [];
     const chans = CHANNELS.map((c) => (c.id === 2 ? { ...c, afk: true } : c));
     const b = await boot(calls, responder({ channels: chans }));
-    dom = b.dom;
     const host = b.doc.createElement("div");
     host.innerHTML = await b.bridge.renderChannels();
     const rows = [...host.querySelectorAll("tr[data-channel]")];

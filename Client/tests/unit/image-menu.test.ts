@@ -3,6 +3,7 @@
  * Copy Image, Copy Link, Open Link, Save Image.
  */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi, type Mock } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const { openUrlMock, saveMock, writeFileMock, showToastMock } = vi.hoisted(() => ({
   openUrlMock: vi.fn(),
@@ -20,9 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: saveMock }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: writeFileMock }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 vi.mock("@lib/ui/toast", () => ({
   showToast: showToastMock,

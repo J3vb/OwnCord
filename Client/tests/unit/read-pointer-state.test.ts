@@ -6,6 +6,7 @@
  * capability every path is the old one.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { makeDm } from "../helpers/dmHarness";
 
 import {
   acceptReadState,
@@ -231,19 +232,12 @@ describe("capability on: marks only what was seen", () => {
   });
 
   it("marks a DM pointer in both stores", () => {
-    const dm: DmChannel = {
+    const dm: DmChannel = makeDm({
       channelId: 50,
       recipient: { id: 7, username: "bob", avatar: "", status: "online" },
-      participants: [],
-      name: "",
-      isGroup: false,
       lastMessageId: 30,
       lastReadMessageId: 10,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    };
+    });
     setDmChannels([dm]);
     noteMessageSeen(50, 30);
     leaveChannel(50);
@@ -415,19 +409,13 @@ describe("Mark Unread", () => {
 });
 
 function dmWith(channelId: number, readUpTo: number, unread = 0): DmChannel {
-  return {
+  return makeDm({
     channelId,
     recipient: { id: channelId * 10, username: `u${channelId}`, avatar: "", status: "online" },
-    participants: [],
-    name: "",
-    isGroup: false,
     lastMessageId: 99,
     lastReadMessageId: readUpTo,
-    lastMessage: "",
-    lastMessageAt: "",
     unreadCount: unread,
-    mentionCount: 0,
-  };
+  });
 }
 
 describe("seen state across connections and capability changes", () => {

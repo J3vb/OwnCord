@@ -9,9 +9,12 @@
 // applied at the next restart (POST /admin/api/restart).
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
-
-const ADMIN_HTML_SOURCE = adminPanelHtml();
+import {
+  adminHtmlWithBridge,
+  bootAdminPanel,
+  type FetchCall,
+  type PanelResponder as Responder,
+} from "../helpers/adminPanelFetch";
 
 // Classic scripts: top-level bindings never land on `window`, so a bridge
 // script copies them onto a test-only global. Each is looked up with typeof so
@@ -29,15 +32,7 @@ window.__test = {
   confirmRestart: typeof confirmRestart==='function'?confirmRestart:undefined
 };
 </script>`;
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
-
-interface FetchCall {
-  method: string;
-  path: string;
-  body: unknown;
-}
-
-type Responder = (path: string, method: string) => { status?: number; json?: unknown };
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 interface Bridge {
   state: any;
@@ -55,40 +50,14 @@ async function boot(
   fetchCalls: FetchCall[],
   respond: Responder,
 ): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
+  const { dom, bridge } = await bootAdminPanel<Bridge>(
+    ADMIN_HTML,
+    fetchCalls,
+    respond,
+    (window) => {
       window.confirm = () => true;
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        let body: unknown;
-        if (typeof opts.body === "string") {
-          try {
-            body = JSON.parse(opts.body);
-          } catch {
-            body = opts.body;
-          }
-        }
-        fetchCalls.push({ method, path: p, body });
-        const r = respond(p, method);
-        const status = r.status ?? 200;
-        return {
-          ok: status >= 200 && status < 300,
-          status,
-          headers: new Headers(),
-          json: async () => r.json ?? {},
-          text: async () => JSON.stringify(r.json ?? {}),
-        } as Response;
-      }) as typeof fetch;
     },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  fetchCalls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  expect(bridge).toBeTruthy();
+  );
   bridge.state.me = { permissions: bridge.PERM.ADMINISTRATOR, is_owner: true };
   return { dom, bridge };
 }
@@ -155,6 +124,16 @@ describe("Server/admin/static — Server configuration page", () => {
     dom = undefined;
   });
 
+  /** Boots the panel against `settings` and renders the configuration page. */
+  async function openConfig(calls: FetchCall[], settings: unknown = CONFIG_SETTINGS) {
+    const booted = await boot(calls, (p) =>
+      p === "/config/settings" ? { json: settings } : { json: {} },
+    );
+    dom = booted.dom;
+    const doc = await renderInto(booted.dom, booted.bridge);
+    return { booted, doc };
+  }
+
   it("is an owner-only page", async () => {
     const booted = await boot([], () => ({ json: {} }));
     dom = booted.dom;
@@ -165,11 +144,7 @@ describe("Server/admin/static — Server configuration page", () => {
 
   it("renders one control per setting, grouped by section, with env-locked rows disabled", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, (p) =>
-      p === "/config/settings" ? { json: CONFIG_SETTINGS } : { json: {} },
-    );
-    dom = booted.dom;
-    const doc = await renderInto(dom, booted.bridge);
+    const { doc } = await openConfig(calls);
 
     expect(calls.some((c) => c.method === "GET" && c.path === "/config/settings")).toBe(true);
     expect(doc.querySelectorAll("[data-config-key]").length).toBe(CONFIG_SETTINGS.settings.length);
@@ -198,11 +173,7 @@ describe("Server/admin/static — Server configuration page", () => {
 
   it("saves only the changed keys, with typed values", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, (p) =>
-      p === "/config/settings" ? { json: CONFIG_SETTINGS } : { json: {} },
-    );
-    dom = booted.dom;
-    const doc = await renderInto(dom, booted.bridge);
+    const { booted, doc } = await openConfig(calls);
 
     control(doc, "server.max_ws_connections").value = "250";
     control(doc, "server.allowed_origins").value = "https://a.example, https://b.example";
@@ -232,11 +203,7 @@ describe("Server/admin/static — Server configuration page", () => {
         },
       ],
     };
-    const booted = await boot(calls, (p) =>
-      p === "/config/settings" ? { json: settings } : { json: {} },
-    );
-    dom = booted.dom;
-    const doc = await renderInto(dom, booted.bridge);
+    const { doc } = await openConfig(calls, settings);
 
     const level = control(doc, "logging.level") as HTMLSelectElement;
     expect(level.disabled).toBe(true);
@@ -265,11 +232,7 @@ describe("Server/admin/static — Server configuration page", () => {
         },
       ],
     };
-    const booted = await boot(calls, (p) =>
-      p === "/config/settings" ? { json: settings } : { json: {} },
-    );
-    dom = booted.dom;
-    const doc = await renderInto(dom, booted.bridge);
+    const { booted, doc } = await openConfig(calls, settings);
 
     const level = control(doc, "logging.level") as HTMLSelectElement;
     expect(level.value).toBe("verbose");
@@ -284,11 +247,7 @@ describe("Server/admin/static — Server configuration page", () => {
 
   it("resets a key by sending null", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, (p) =>
-      p === "/config/settings" ? { json: CONFIG_SETTINGS } : { json: {} },
-    );
-    dom = booted.dom;
-    await renderInto(dom, booted.bridge);
+    const { booted } = await openConfig(calls);
 
     await fn(booted.bridge.resetConfigKey, "resetConfigKey")("server.max_ws_connections");
     const patch = calls.find((c) => c.method === "PATCH" && c.path === "/config/settings");
@@ -297,11 +256,7 @@ describe("Server/admin/static — Server configuration page", () => {
 
   it("links to the Settings page for the server name", async () => {
     const calls: FetchCall[] = [];
-    const booted = await boot(calls, (p) =>
-      p === "/config/settings" ? { json: CONFIG_SETTINGS } : { json: {} },
-    );
-    dom = booted.dom;
-    const doc = await renderInto(dom, booted.bridge);
+    const { booted, doc } = await openConfig(calls);
 
     const link = doc.querySelector<HTMLElement>(
       '#content [data-action="navigateTo"][data-args*="settings"]',

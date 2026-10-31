@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/sidebarAreaMocks";
 import { byName } from "../../helpers/tableCases";
 import {
@@ -20,8 +20,6 @@ import { createProfileManager } from "@lib/presence/profiles";
 import {
   MockedFn,
   getMockDestroy,
-  resetStores,
-  resetMocks,
   enterVoiceAndAwaitWidget,
   defaultOpts,
   makeDm,
@@ -32,6 +30,7 @@ import {
   optsWithToast,
   makeChannel,
   seedChannels,
+  useSidebarAreaHarness,
 } from "../../helpers/sidebarAreaHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -58,17 +57,8 @@ vi.mock("../../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayM
 describe("SidebarArea", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    resetStores();
-    resetMocks();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    // Clean up any modals left on body
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+  useSidebarAreaHarness((c) => {
+    container = c;
   });
 
   const flushMicrotasks = async (count: number): Promise<void> => {

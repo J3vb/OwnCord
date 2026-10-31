@@ -3,13 +3,11 @@
  * Covers: clicking emoji inserts it, picker closes after selection.
  */
 import { test, expect } from "./fixtures";
-import { mockTauriFullSession, navigateToMainPage } from "./helpers";
+import { startFullSession } from "./helpers";
 
 test.describe("Emoji Picker — Insert into textarea", () => {
   test.beforeEach(async ({ page }) => {
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
   });
 
   test("clicking an emoji inserts it into the textarea", async ({ page }) => {

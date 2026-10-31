@@ -1,18 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createCertMismatchModal } from "../../src/components/CertMismatchModal";
 import {
-  checkAcceptClick,
-  checkBackdropRejects,
-  checkBodyClickDoesNotReject,
-  checkCloseButtonLabel,
-  checkDestroyRemovesModal,
-  checkDialogSemantics,
-  checkDragSelectDoesNotReject,
-  checkEscapeIgnoredAfterDestroyRejecting,
-  checkEscapeRejects,
-  checkFocusRestored,
-  checkRejectClick,
   checkVisibleOverlay,
+  registerWarningModalTests,
   useWarningModal,
   type WarningOpts,
 } from "../helpers/warningModalHarness";
@@ -100,50 +90,17 @@ describe("CertMismatchModal", () => {
     expect(texts).toContain("Unknown");
   });
 
-  it("calls onAccept when accept button is clicked", () =>
-    checkAcceptClick(mountModal, container()));
-
-  it("calls onReject when disconnect button is clicked", () =>
-    checkRejectClick(mountModal, container(), ".btn-ghost"));
-
-  it("calls onReject when close X button is clicked", () =>
-    checkRejectClick(mountModal, container(), ".modal-close"));
-
-  it("calls onReject when backdrop is clicked", () =>
-    checkBackdropRejects(mountModal, container()));
-
-  it("stays open when a drag-select ends on the backdrop", () =>
-    checkDragSelectDoesNotReject(mountModal, container()));
-
-  it("does not call onReject when modal body is clicked", () =>
-    checkBodyClickDoesNotReject(mountModal, container()));
-
-  it("destroy removes the modal from the DOM", () =>
-    checkDestroyRemovesModal(mountModal, container()));
-
-  it("displays the title 'Certificate Warning'", () => {
-    mountModal();
-    const title = container().querySelector(".modal-header h3");
-    expect(title?.textContent).toBe("Certificate Warning");
-  });
-
-  it("displays the cert title 'Certificate Changed'", () => {
-    mountModal();
-    const title = container().querySelector(".cert-title");
-    expect(title?.textContent).toBe("Certificate Changed");
-  });
-
-  it("carries dialog semantics labelled by the h3 title", () =>
-    checkDialogSemantics(mountModal, container(), "cert-mismatch-title", "Certificate Warning"));
-
-  it("gives the icon-only close button an accessible name", () =>
-    checkCloseButtonLabel(mountModal, container()));
-
-  it("calls onReject when Escape is pressed", () => checkEscapeRejects(mountModal));
-
-  it("does not call onReject on Escape after destroy", () =>
-    checkEscapeIgnoredAfterDestroyRejecting(mountModal));
-
-  it("moves focus inside the modal on mount and restores it on destroy", () =>
-    checkFocusRestored(mountModal, container()));
+  registerWarningModalTests(
+    { container, mountModal },
+    {
+      accept: "calls onAccept when accept button is clicked",
+      reject: "calls onReject when disconnect button is clicked",
+      close: "calls onReject when close X button is clicked",
+      backdrop: "calls onReject when backdrop is clicked",
+      body: "does not call onReject when modal body is clicked",
+      title: "Certificate Warning",
+      certTitle: "Certificate Changed",
+      titleId: "cert-mismatch-title",
+    },
+  );
 });

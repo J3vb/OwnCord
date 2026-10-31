@@ -11,6 +11,7 @@ import {
   proposedPreview,
   ADMINISTRATOR,
   boot,
+  bootAsAdmin,
   defaultRespond,
 } from "../../helpers/serverAdminStaticPanelHarness";
 
@@ -29,7 +30,6 @@ describe("Server/admin/static — panel behaviour", () => {
   it("preserves the saved-policy preview and confirms all retention writes", async () => {
     const calls: FetchCall[] = [];
     const respond: Responder = (p, method) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/retention")
         return {
           json: {
@@ -62,9 +62,8 @@ describe("Server/admin/static — panel behaviour", () => {
         };
       return { json: {} };
     };
-    const booted = await boot(calls, respond);
+    const booted = await bootAsAdmin(calls, respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     const html = await booted.bridge.renderRetention();
 
@@ -118,7 +117,6 @@ describe("Server/admin/static — panel behaviour", () => {
   it("states channel counts only from the full channel list, in agreeing verb form", async () => {
     let channelsReadable = true;
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/retention")
         return {
           json: {
@@ -139,9 +137,8 @@ describe("Server/admin/static — panel behaviour", () => {
           : { status: 403, json: { message: "forbidden" } };
       return { json: {} };
     };
-    const booted = await boot([], respond);
+    const booted = await bootAsAdmin([], respond);
     dom = booted.dom;
-    booted.bridge.state.me = { id: 1, permissions: ADMINISTRATOR, role_position: 100 };
 
     const full = await booted.bridge.renderRetention();
     expect(full).toContain("1 channel follows this; 1 channel has its own rule.");
@@ -306,7 +303,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let pending = [{ id: 1 }, { id: 2 }];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/me")
         return {
           json: {
@@ -416,7 +412,6 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let warnings = [{ id: "a" }];
     const respond: Responder = (p) => {
-      if (p === "/setup/status") return { json: { needs_setup: false } };
       if (p === "/me")
         return {
           json: {

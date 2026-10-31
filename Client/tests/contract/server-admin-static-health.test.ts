@@ -4,7 +4,13 @@
 // (js/health.js) against a stubbed GET /admin/api/system/stats.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
+import {
+  adminHtmlWithBridge,
+  jsonResponder,
+  loadPanelWithFetch,
+  scriptedPanelFetch,
+  settlePanel,
+} from "../helpers/adminPanelFetch";
 
 const BRIDGE = `<script>
 window.__test = {
@@ -12,7 +18,7 @@ window.__test = {
   renderDashboard: renderDashboard, startHealthPoll: startHealthPoll, pollHealth: pollHealth,
 };
 </script>`;
-const ADMIN_HTML = adminPanelHtml().replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 const ADMINISTRATOR = 0x40000000;
 const MANAGE_CHANNELS = 0x20000;
@@ -28,21 +34,15 @@ interface Bridge {
 type Responder = (path: string) => Promise<unknown> | unknown;
 
 async function boot(paths: string[], respond: Responder): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    beforeParse(window) {
-      window.fetch = (async (input: string) => {
-        const p = String(input).replace(/^\/admin\/api/, "");
-        paths.push(p);
-        const json = p === "/setup/status" ? { needs_setup: false } : await respond(p);
-        return { ok: true, status: 200, json: async () => json ?? {} } as Response;
-      }) as typeof fetch;
-    },
-  });
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+  const dom = loadPanelWithFetch(
+    ADMIN_HTML,
+    scriptedPanelFetch(
+      ({ path }) => paths.push(path),
+      jsonResponder((p) => respond(p)),
+    ),
+  );
+  const bridge = await settlePanel<Bridge>(dom);
   paths.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
   bridge.state.token = "tok";
   bridge.state.section = "dashboard";
   return { dom, bridge };
@@ -98,6 +98,15 @@ const text = (host: Element, id: string, part: string) =>
 
 describe("Server/admin/static — Dashboard health row", () => {
   let dom: JSDOM | undefined;
+
+  /** Boots the panel as someone holding `permissions` and renders the Dashboard. */
+  async function openDashboard(paths: string[], respond: Responder, permissions = ADMINISTRATOR) {
+    const booted = await boot(paths, respond);
+    dom = booted.dom;
+    booted.bridge.state.me = { permissions };
+    const host = render(booted.dom, await booted.bridge.renderDashboard());
+    return { booted, host };
+  }
   afterEach(() => {
     dom?.window?.close();
     dom = undefined;
@@ -105,10 +114,9 @@ describe("Server/admin/static — Dashboard health row", () => {
 
   it("shows CPU, RAM, disk free and uptime with one-hour lines", async () => {
     const paths: string[] = [];
-    const booted = await boot(paths, (p) => (p.startsWith("/system/stats") ? STATS : {}));
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: ADMINISTRATOR };
-    const host = render(dom, await booted.bridge.renderDashboard());
+    const { host } = await openDashboard(paths, (p) =>
+      p.startsWith("/system/stats") ? STATS : {},
+    );
     expect(paths).toContain("/system/stats?window=1h");
 
     expect(host.querySelector("#healthRow")).toBeTruthy();
@@ -182,10 +190,7 @@ describe("Server/admin/static — Dashboard health row", () => {
 
   it("is not requested or shown without View Diagnostics", async () => {
     const paths: string[] = [];
-    const booted = await boot(paths, () => STATS);
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: MANAGE_CHANNELS };
-    const host = render(dom, await booted.bridge.renderDashboard());
+    const { booted, host } = await openDashboard(paths, () => STATS, MANAGE_CHANNELS);
     expect(paths.some((p) => p.startsWith("/system/stats"))).toBe(false);
     expect(host.querySelector("#healthRow")).toBeNull();
     expect(booted.bridge.health.timer).toBeNull();
@@ -357,12 +362,9 @@ describe("Server/admin/static — Dashboard health row", () => {
 
     it("lists routes with calls, typical and worst time under the health row", async () => {
       const paths: string[] = [];
-      const booted = await boot(paths, (p) =>
+      const { host } = await openDashboard(paths, (p) =>
         p === "/system/slow-requests" ? SLOW : p.startsWith("/system/stats") ? STATS : {},
       );
-      dom = booted.dom;
-      booted.bridge.state.me = { permissions: ADMINISTRATOR };
-      const host = render(dom, await booted.bridge.renderDashboard());
       expect(paths).toContain("/system/slow-requests");
       expect(host.querySelector("#healthRow + section #slowRequests")).toBeTruthy();
       expect(rows(host)).toEqual([
@@ -385,16 +387,13 @@ describe("Server/admin/static — Dashboard health row", () => {
     });
 
     it("says so when nothing was recorded yet", async () => {
-      const booted = await boot([], (p) =>
+      const { host } = await openDashboard([], (p) =>
         p === "/system/slow-requests"
           ? { window_seconds: 3600, routes: [] }
           : p.startsWith("/system/stats")
             ? STATS
             : {},
       );
-      dom = booted.dom;
-      booted.bridge.state.me = { permissions: ADMINISTRATOR };
-      const host = render(dom, await booted.bridge.renderDashboard());
       expect(host.querySelector("#slowRequests")?.textContent).toBe(
         "No requests in the last hour yet.",
       );

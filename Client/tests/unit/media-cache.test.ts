@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
 const { previewMock, imageMock } = vi.hoisted(() => ({
   previewMock: vi.fn<any>(),
@@ -16,9 +17,7 @@ vi.mock("../../src/platform/desktop/externalContent", () => ({
   externalContent: { preview: previewMock, image: imageMock },
 }));
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 vi.mock("../../src/features/messaging/content/attachments", () => ({
   isSafeUrl: () => true,

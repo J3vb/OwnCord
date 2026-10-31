@@ -19,6 +19,7 @@ import {
   navigateToMainPageReady,
   openDmRow,
   BASE_SESSION_ROUTES,
+  dmChannel,
 } from "./helpers";
 import { captureCalls, getCapturedCalls } from "./support/ipcCapture";
 
@@ -29,16 +30,7 @@ const CHANNELS_WITH_MOD = MOCK_CHANNELS_WITH_CATEGORIES.map((ch) =>
   ch.id === 10 ? { ...ch, can_moderate_voice: true } : ch,
 );
 
-const DM_CHANNELS = [
-  {
-    channel_id: ONE_TO_ONE_DM_ID,
-    recipient: { id: 2, username: "moderator1", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 0,
-  },
-];
+const DM_CHANNELS = [dmChannel(ONE_TO_ONE_DM_ID, { id: 2, username: "moderator1" })];
 
 async function mockSession(page: Page): Promise<void> {
   await page.addInitScript(

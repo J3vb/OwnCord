@@ -5,7 +5,7 @@
  * it cannot observe the OS setting at all, so the panel never claims a
  * permission it did not observe (BPR-092).
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockNotifier, mockPermissionGranted, mockRequestPermission } = vi.hoisted(() => {
   const mockPermissionGranted = vi.fn();
@@ -25,29 +25,19 @@ vi.mock("../../src/platform/desktop", () => ({
   desktop: { notifier: mockNotifier },
 }));
 
-import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
+import { useNotificationsTabHost } from "../helpers/notificationsTabHost";
 
-let container: HTMLDivElement;
-let ac: AbortController;
+const host = useNotificationsTabHost();
 
 beforeEach(() => {
   localStorage.clear();
   mockNotifier.readsOsPermission = true;
   mockPermissionGranted.mockReset();
   mockRequestPermission.mockReset();
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  ac = new AbortController();
-});
-
-afterEach(() => {
-  ac.abort();
-  container.remove();
 });
 
 function row(): HTMLDivElement {
-  const tab = buildNotificationsTab(ac.signal);
-  container.appendChild(tab);
+  const tab = host.build();
   return tab.querySelector("[data-testid='notification-permission-row']") as HTMLDivElement;
 }
 
@@ -161,7 +151,8 @@ describe("NotificationsTab — system notification permission", () => {
     mockPermissionGranted.mockResolvedValue(false);
     mockRequestPermission.mockResolvedValue(true);
     const el = row();
-    const desktopRow = container
+    const desktopRow = host
+      .container()
       .querySelector('.toggle[aria-label="Desktop Notifications"]')!
       .closest<HTMLElement>(".setting-row")!;
     await vi.waitFor(() => expect(desktopRow.classList.contains("blocked")).toBe(true));

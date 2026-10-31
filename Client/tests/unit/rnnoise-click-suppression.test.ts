@@ -7,7 +7,8 @@
 // is RNNoise's 2018 model: over ordinary room noise it took nothing off the
 // click. The same package's sync build embeds the current model, which takes
 // off 28 dB or more.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { useFakeWorkletHost } from "../helpers/workletHost";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { FIXTURE_SAMPLE_RATE, placeInRoomTone, readAudioFixture, rms, toDb } from "../helpers/wav";
@@ -21,23 +22,12 @@ type Processor = {
 describe("RNNoise worklet on recorded audio", () => {
   let processorCtor: (new () => Processor) | null = null;
 
-  beforeEach(() => {
-    vi.resetModules();
-    class FakeAudioWorkletProcessor {
-      readonly port = { onmessage: null, postMessage: vi.fn() };
-    }
-    Object.assign(globalThis, {
-      registerProcessor: (_name: string, ctor: new () => Processor) => {
-        processorCtor = ctor;
-      },
-      AudioWorkletProcessor: FakeAudioWorkletProcessor,
-    });
-  });
-
-  afterEach(() => {
-    delete (globalThis as Record<string, unknown>).registerProcessor;
-    delete (globalThis as Record<string, unknown>).AudioWorkletProcessor;
-  });
+  useFakeWorkletHost<Processor>(
+    (_name, ctor) => {
+      processorCtor = ctor;
+    },
+    () => vi.fn(),
+  );
 
   async function denoise(input: Float32Array): Promise<Float32Array> {
     // @ts-expect-error — worklet script has no module exports

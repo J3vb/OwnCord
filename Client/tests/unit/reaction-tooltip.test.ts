@@ -3,10 +3,9 @@
  * invalidation, and the name formatting the tooltip renders.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loggerMock } from "../helpers/loggerMock";
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => loggerMock());
 
 import {
   REACTION_TOOLTIP_DEBOUNCE_MS,

@@ -12,16 +12,12 @@ import {
   MOCK_LOGIN_2FA_RESPONSE,
   MOCK_LOGIN_RESPONSE,
   openSettings,
+  ROUTE_HEALTH,
+  submitLogin,
 } from "./helpers";
 
 const KIT_SECRET = "K7QF-3M2X-9PLA-ZB5A-QW2E-TT7Y-AAAA-BBBB";
 const CODES = ["7KQ3M-RX2WN", "P4HT9-ZC6VB"];
-
-const ROUTE_HEALTH = {
-  pattern: "/api/v1/health",
-  status: 200,
-  body: { status: "ok", version: "1.0.0" },
-};
 
 test.describe("Account recovery", () => {
   test("recover with a secret, then issue a kit and regenerate codes", async ({ page }) => {
@@ -114,10 +110,7 @@ test.describe("Account recovery", () => {
       }),
     );
     await page.goto("/");
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("testuser");
-    await page.locator("#password").fill("password123");
-    await page.locator("button.btn-primary[type='submit']").click();
+    await submitLogin(page);
 
     const code = page.locator(".totp-overlay input[autocomplete='one-time-code']");
     await expect(code).toBeVisible({ timeout: 5000 });

@@ -23,6 +23,8 @@ import {
   navigateToMainPageReady,
   openDmRow,
   BASE_SESSION_ROUTES,
+  dmChannel,
+  thirdDmChannel,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/accessibility";
 
@@ -36,22 +38,12 @@ const LONG_CHANNELS = Array.from({ length: 40 }, (_, i) => ({
 }));
 
 const DM_CHANNELS = [
-  {
-    channel_id: 100,
-    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
-    last_message_id: 500,
-    last_message: "Hey there!",
-    last_message_at: "2026-03-15T12:00:00Z",
-    unread_count: 1,
-  },
-  {
-    channel_id: 101,
-    recipient: { id: 3, username: "thirduser", avatar: "", status: "idle" },
+  dmChannel(100, undefined, { unread_count: 1 }),
+  thirdDmChannel(101, {
     last_message_id: 501,
     last_message: "Yo",
     last_message_at: "2026-03-15T12:05:00Z",
-    unread_count: 0,
-  },
+  }),
 ];
 
 test.describe("shell polish", () => {

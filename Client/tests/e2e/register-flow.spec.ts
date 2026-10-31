@@ -3,7 +3,12 @@
  * Covers: mode toggle, form validation, register success, register error.
  */
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, expectOverlayUntilReady } from "./helpers";
+import {
+  buildTauriMockScript,
+  expectOverlayUntilReady,
+  ROUTE_HEALTH,
+  delayHttpResponses,
+} from "./helpers";
 
 const MOCK_REGISTER_RESPONSE = {
   user: { id: 99, username: "newuser" },
@@ -31,7 +36,7 @@ async function mockRegisterSuccess(
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ROUTE_HEALTH,
         ...(mode ? [serverInfoRoute(mode)] : []),
         { pattern: "/api/v1/auth/register", status: 200, body: MOCK_REGISTER_RESPONSE },
       ],
@@ -45,7 +50,7 @@ async function mockRegisterConflict(page: import("@playwright/test").Page): Prom
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+        ROUTE_HEALTH,
         {
           pattern: "/api/v1/auth/register",
           status: 409,
@@ -214,30 +219,7 @@ test.describe("Register Flow — Submission", () => {
     // delays only the register fetch; every other IPC call passes straight
     // through the base mock.
     await mockRegisterSuccess(page);
-    await page.addInitScript(() => {
-      const t = (
-        window as unknown as {
-          __TAURI_INTERNALS__: { invoke: (c: string, a?: unknown) => Promise<unknown> };
-        }
-      ).__TAURI_INTERNALS__;
-      const orig = t.invoke.bind(t);
-      const urls = new Map<number, string>();
-      t.invoke = async (cmd: string, args?: unknown) => {
-        if (cmd === "plugin:http|fetch") {
-          const a = args as { rid?: number; clientConfig?: { url?: string } };
-          const rid = (await orig(cmd, args)) as number;
-          urls.set(rid, a.clientConfig?.url ?? "");
-          return rid;
-        }
-        if (cmd === "plugin:http|fetch_send") {
-          const rid = (args as { rid?: number }).rid ?? -1;
-          if (urls.get(rid)?.includes("/api/v1/auth/register")) {
-            await new Promise((r) => setTimeout(r, 800));
-          }
-        }
-        return orig(cmd, args);
-      };
-    });
+    await delayHttpResponses(page, "/api/v1/auth/register");
 
     await page.goto("/");
     await switchToRegisterMode(page);

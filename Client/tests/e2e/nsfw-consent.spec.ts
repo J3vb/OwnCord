@@ -16,9 +16,10 @@ import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
   emitWsMessage,
-  MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   navigateToMainPageReady,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
 } from "./helpers";
 import {
   Q1,
@@ -27,6 +28,12 @@ import {
   setAppearance,
   textContrast,
 } from "./support/accessibility";
+import {
+  attachScreenshot,
+  contrastMatrix,
+  expectControlFits,
+  expectNoPageScroll,
+} from "./support/a11yHarness";
 
 /** #general (id 1, the default active channel) is labelled; #random is not. */
 const CHANNELS = [
@@ -38,8 +45,8 @@ async function mockSession(page: Page, ackStatus = 204): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+        ROUTE_HEALTH,
+        ROUTE_LOGIN,
         {
           pattern: "/nsfw-acknowledgement",
           method: "PUT",
@@ -160,52 +167,41 @@ test.describe("NSFW consent gate", () => {
 });
 
 test.describe("NSFW consent gate — accessibility", () => {
-  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: names, focus and contrast`, async ({
-        page,
-      }, testInfo) => {
-        await mockSession(page);
-        await setAppearance(page, { theme, highContrast, accent: null });
-        await navigateToMainPageReady(page);
-        await expect(gate(page)).toBeVisible();
-
-        expect(await findUnnamedControls(gate(page))).toEqual([]);
-        const measured: Record<string, number> = {};
-        const failures: string[] = [];
-        for (const [name, selector] of [
-          ["heading", ".nsfw-gate-title"],
-          ["body", ".nsfw-gate-body"],
-          ["scope", ".nsfw-gate-note"],
-          ["decline", "[data-testid='nsfw-gate-back']"],
-          ["accept", "[data-testid='nsfw-gate-continue']"],
-        ] as const) {
-          const { ratio } = await textContrast(gate(page).locator(selector));
-          measured[name] = Number(ratio.toFixed(2));
-          if (ratio < Q1.text) failures.push(`${name} ${ratio.toFixed(2)} < ${Q1.text}`);
-        }
-        for (const _ of ["back", "continue"]) {
-          await page.keyboard.press("Tab");
-          const ring = await focusIndicator(page);
-          measured[`focus ${ring.element}`] = Number(ring.ratio.toFixed(2));
-          for (const p of ring.problems) failures.push(`focus ${ring.element}: ${p}`);
-        }
-        const small = await gate(page)
-          .locator("button")
-          .evaluateAll((els) =>
-            (els as HTMLElement[])
-              .filter((el) => el.offsetWidth < 24 || el.offsetHeight < 24)
-              .map((el) => el.dataset["testid"]),
-          );
-        expect(small).toEqual([]);
-
-        await testInfo.attach(`nsfw-gate-contrast-${theme}-hc-${highContrast}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+  for (const c of contrastMatrix({
+    title: "names, focus and contrast",
+    attachName: (theme, hc) => `nsfw-gate-contrast-${theme}-hc-${hc}.json`,
+    boot: async (page, prefs) => {
+      await mockSession(page);
+      await setAppearance(page, prefs);
+      await navigateToMainPageReady(page);
+      await expect(gate(page)).toBeVisible();
+    },
+    scenario: async (page, { measure, ring }) => {
+      expect(await findUnnamedControls(gate(page))).toEqual([]);
+      for (const [name, selector] of [
+        ["heading", ".nsfw-gate-title"],
+        ["body", ".nsfw-gate-body"],
+        ["scope", ".nsfw-gate-note"],
+        ["decline", "[data-testid='nsfw-gate-back']"],
+        ["accept", "[data-testid='nsfw-gate-continue']"],
+      ] as const) {
+        await measure(name, gate(page).locator(selector));
+      }
+      for (const name of ["back", "continue"]) {
+        await page.keyboard.press("Tab");
+        await ring(name);
+      }
+      const small = await gate(page)
+        .locator("button")
+        .evaluateAll((els) =>
+          (els as HTMLElement[])
+            .filter((el) => el.offsetWidth < 24 || el.offsetHeight < 24)
+            .map((el) => el.dataset["testid"]),
+        );
+      expect(small).toEqual([]);
+    },
+  })) {
+    test(c.title, c.run);
   }
 
   test("the withdraw bar is named, reachable and readable", async ({ page }) => {
@@ -257,21 +253,18 @@ test.describe("NSFW consent gate — accessibility", () => {
         await expect(gate(page)).toBeVisible();
 
         for (const control of await gate(page).locator("button").all()) {
-          await control.scrollIntoViewIfNeeded();
-          await expect(control).toBeInViewport();
-          expect(await control.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+          await expectControlFits(control);
         }
         // The heading scrolls back into view: nothing is cut off above it.
         const title = gate(page).locator(".nsfw-gate-title");
         await title.scrollIntoViewIfNeeded();
         await expect(title).toBeInViewport();
-        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(
-          0,
+        await expectNoPageScroll(page);
+        await attachScreenshot(
+          testInfo,
+          `nsfw-gate-940x500-${label.replaceAll(/\W+/g, "-")}.png`,
+          page,
         );
-        await testInfo.attach(`nsfw-gate-940x500-${label.replaceAll(/\W+/g, "-")}.png`, {
-          body: await page.screenshot(),
-          contentType: "image/png",
-        });
       });
     });
   }

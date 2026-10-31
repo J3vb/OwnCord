@@ -24,6 +24,7 @@ import {
   waitForWsReady,
   openHome,
   BASE_SESSION_ROUTES,
+  groupDmChannel,
 } from "./helpers";
 import { captureCalls, waitForCapturedCall } from "./support/ipcCapture";
 
@@ -34,21 +35,7 @@ import { captureCalls, waitForCapturedCall } from "./support/ipcCapture";
 const GROUP_DM_CHANNEL_ID = 900;
 
 /** The group DM seeded in the ready payload, used for the render+leave slice. */
-const SEEDED_GROUP_DM = {
-  channel_id: GROUP_DM_CHANNEL_ID,
-  recipient: { id: 3, username: "member1", avatar: "", status: "idle" },
-  recipients: [
-    { id: 3, username: "member1", avatar: "", status: "idle" },
-    { id: 4, username: "member2", avatar: "", status: "dnd" },
-  ],
-  name: "Study Group",
-  is_group: true,
-  last_message_id: null,
-  last_message: "Hey everyone",
-  last_message_at: "2026-03-15T12:00:00Z",
-  unread_count: 0,
-  mention_count: 0,
-};
+const SEEDED_GROUP_DM = groupDmChannel(GROUP_DM_CHANNEL_ID);
 
 /** The server's response to POST /dms/group, for the create-flow slice. */
 const CREATED_GROUP_DM = {

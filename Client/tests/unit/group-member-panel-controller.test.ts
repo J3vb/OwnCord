@@ -3,6 +3,8 @@
  * layout: opens for a group only, follows dm_channel_open live, stays open
  * across group switches, remembers the user's choice, and drives Add People.
  */
+import { makeDm } from "../helpers/dmHarness";
+import { makeChannel } from "../helpers/channelFactory";
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { createGroupMemberPanelController } from "../../src/pages/main-page/GroupMemberPanelController";
 import type { ApiClient } from "../../src/lib/api";
@@ -26,20 +28,14 @@ const user = (id: number, username: string): DmUser => ({
 });
 
 function dm(channelId: number, participants: DmUser[], over: Partial<DmChannel> = {}): DmChannel {
-  return {
+  return makeDm({
     channelId,
     recipient: participants[0]!,
     participants,
-    name: "",
     isGroup: participants.length > 1,
     ownerId: ME,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
     ...over,
-  };
+  });
 }
 
 function activate(channelId: number | null): void {
@@ -48,28 +44,7 @@ function activate(channelId: number | null): void {
     channels:
       channelId === null
         ? new Map()
-        : new Map([
-            [
-              channelId,
-              {
-                id: channelId,
-                name: "dm",
-                type: "dm",
-                category: null,
-                topic: "",
-                position: 0,
-                unreadCount: 0,
-                mentionCount: 0,
-                lastMessageId: null,
-                canSend: true,
-                slowMode: 0,
-                nsfw: false,
-                isPrivate: false,
-                voiceMaxUsers: 0,
-                voiceMaxVideo: 0,
-              },
-            ],
-          ]),
+        : new Map([[channelId, makeChannel({ id: channelId, name: "dm", type: "dm" })]]),
     activeChannelId: channelId,
   }));
 }

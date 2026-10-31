@@ -13,9 +13,9 @@
 
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { TEST_PASSWORD, type TestServer } from "../support/server";
+import { MODERATOR_ROLE_ID, register, sendMessage, signIn, userIds } from "./serverApi";
+import { type TestServer } from "../support/server";
 
-const MODERATOR_ROLE_ID = 3;
 /** GET /reports/mine's documented fields; anything else is over-disclosure. */
 const SUMMARY_FIELDS = [
   "closed_at",
@@ -27,19 +27,6 @@ const SUMMARY_FIELDS = [
   "target_type",
 ];
 
-async function token(server: TestServer, username: string): Promise<string> {
-  const auth = await server.api("/api/v1/auth/login", { username, password: TEST_PASSWORD });
-  return auth.token as string;
-}
-
-async function register(server: TestServer, username: string): Promise<void> {
-  await server.api("/api/v1/auth/register", {
-    username,
-    password: TEST_PASSWORD,
-    invite_code: server.owner!.invite_code,
-  });
-}
-
 /** A raw call whose status the test asserts, unlike server.api, which throws. */
 async function status(server: TestServer, path: string, auth: string, body?: unknown) {
   const response = await fetch(`${server.origin}${path}`, {
@@ -48,20 +35,6 @@ async function status(server: TestServer, path: string, auth: string, body?: unk
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   return response.status;
-}
-
-async function send(page: Page, text: string, file?: string): Promise<void> {
-  const composer = page.locator("[data-testid='message-input']");
-  if (file !== undefined) {
-    await composer.locator("input[type='file']").setInputFiles({
-      name: file,
-      mimeType: "text/plain",
-      buffer: Buffer.from("synthetic attachment"),
-    });
-    await expect(composer.locator(".attachment-preview-item")).not.toHaveClass(/uploading/);
-  }
-  await composer.locator("textarea").fill(text);
-  await composer.locator("textarea").press("Enter");
 }
 
 /** The "..." button on the row showing `text`, pressed from the keyboard, then
@@ -98,11 +71,7 @@ test.describe("Local report intake (real server)", () => {
     const owner = server.owner!.token;
     await register(server, "carol");
     await register(server, "dave");
-    const users = (await server.api("/admin/api/users", undefined, owner)) as {
-      id: number;
-      username: string;
-    }[];
-    const id = (name: string) => users.find((u) => u.username === name)!.id;
+    const id = await userIds(server);
     await server.api(
       `/admin/api/users/${id("dave")}`,
       { role_id: MODERATOR_ROLE_ID },
@@ -117,7 +86,7 @@ test.describe("Local report intake (real server)", () => {
     });
 
     const text = `synthetic-report-target-${crypto.randomUUID()}`;
-    await send(alice, text, "synthetic-notes.txt");
+    await sendMessage(alice, text, "synthetic-notes.txt");
     await expect(bob.locator(".message", { hasText: text })).toBeVisible();
 
     // Cancel sends nothing and puts focus back on the Report button.
@@ -172,7 +141,7 @@ test.describe("Local report intake (real server)", () => {
     await expect(mine).not.toContainText("synthetic detail");
 
     // The summary route's fields are exactly the documented allowlist.
-    const bobToken = await token(server, "bob");
+    const bobToken = await signIn(server, "bob");
     const summary = (await server.api("/api/v1/reports/mine", undefined, bobToken)) as Record<
       string,
       unknown
@@ -190,7 +159,7 @@ test.describe("Local report intake (real server)", () => {
     const queue = (await server.api(
       "/api/v1/moderation/queue",
       undefined,
-      await token(server, "dave"),
+      await signIn(server, "dave"),
     )) as { target_type: string; target_ref: string; subject_name: string }[];
     expect(queue.map((q) => [q.target_type, q.target_ref]).sort()).toEqual(
       [
@@ -200,7 +169,7 @@ test.describe("Local report intake (real server)", () => {
       ].sort(),
     );
     expect(await server.api("/api/v1/moderation/queue", undefined, owner)).toEqual([]);
-    const carol = await token(server, "carol");
+    const carol = await signIn(server, "carol");
     expect(await server.api("/api/v1/reports/mine", undefined, carol)).toEqual([]);
     expect(await status(server, "/api/v1/moderation/queue", carol)).toBe(403);
 
@@ -225,7 +194,7 @@ test.describe("Local report intake (real server)", () => {
     server,
   }) => {
     const text = `synthetic-removed-target-${crypto.randomUUID()}`;
-    await send(alice, text);
+    await sendMessage(alice, text);
     await expect(bob.locator(".message", { hasText: text })).toBeVisible();
 
     // Bob opens the form; alice deletes the message before he sends it.
@@ -243,7 +212,7 @@ test.describe("Local report intake (real server)", () => {
     await dialog.getByRole("button", { name: "Cancel" }).click();
 
     // Five attempts per ten minutes: that was one; spend four more directly.
-    const bobToken = await token(server, "bob");
+    const bobToken = await signIn(server, "bob");
     for (let i = 0; i < 4; i++) {
       const code = await status(server, "/api/v1/reports", bobToken, {
         target_type: "user",
@@ -254,7 +223,7 @@ test.describe("Local report intake (real server)", () => {
       expect(code).toBe(404);
     }
     const next = `synthetic-quota-target-${crypto.randomUUID()}`;
-    await send(alice, next);
+    await sendMessage(alice, next);
     await openMessageReport(bob, next);
     const limited = await submit(bob, "Spam");
     await expect(limited.getByRole("alert").filter({ hasText: "too many reports" })).toBeVisible();

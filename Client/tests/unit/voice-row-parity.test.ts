@@ -14,6 +14,7 @@
  * copy is put back to the drawn "-1".
  */
 
+import { makeVoiceUser as vu } from "../helpers/voiceUsers";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
@@ -66,21 +67,6 @@ const SELF = 1;
 
 function voiceChannel(over: Partial<ReadyChannel> = {}): ReadyChannel {
   return { id: CH, name: "lobby", type: "voice", category: "Voice", position: 0, ...over };
-}
-
-function vu(userId: number, over: Partial<VoiceUser> = {}): VoiceUser {
-  return {
-    userId,
-    username: `user${userId}`,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
-    serverMuted: false,
-    serverDeafened: false,
-    ...over,
-  };
 }
 
 function setVoice(

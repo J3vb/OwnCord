@@ -1,17 +1,24 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
   emitWsMessage,
   joinVoiceChannelByName,
+  expectUserBarToggle,
+  startFullSession,
 } from "./helpers";
+
+async function joinVoice(page: Page): Promise<void> {
+  await mockTauriFullSessionWithVoice(page);
+  await page.goto("/");
+  await navigateToMainPage(page);
+  await joinVoiceChannelByName(page);
+}
 
 test.describe("Voice Widget", () => {
   test("is hidden by default when user has no voice state", async ({ page }) => {
-    const { mockTauriFullSession } = await import("./helpers");
-    await mockTauriFullSession(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
+    await startFullSession(page);
 
     const widget = page.locator("[data-testid='voice-widget']");
     // The widget now loads on the first voice join, so it is absent (or hidden) here (O-6b).
@@ -20,11 +27,7 @@ test.describe("Voice Widget", () => {
   });
 
   test("appears with full UI after joining voice", async ({ page }) => {
-    await mockTauriFullSessionWithVoice(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    await joinVoiceChannelByName(page);
+    await joinVoice(page);
 
     const widget = page.locator("[data-testid='voice-widget'].visible");
     await expect(widget).toBeVisible({ timeout: 5_000 });
@@ -37,43 +40,23 @@ test.describe("Voice Widget", () => {
   });
 
   test("mute button toggles active state on click", async ({ page }) => {
-    await mockTauriFullSessionWithVoice(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    await joinVoiceChannelByName(page);
+    await joinVoice(page);
     await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5_000 });
 
-    const muteBtn = page.locator(".user-bar button[aria-label='Mute']");
-    const hadActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    await muteBtn.click();
-    const hasActive = await muteBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    expect(hasActive).not.toBe(hadActive);
+    await expectUserBarToggle(page, "Mute");
   });
 
   test("deafen button toggles active state on click", async ({ page }) => {
-    await mockTauriFullSessionWithVoice(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    await joinVoiceChannelByName(page);
+    await joinVoice(page);
     await expect(page.locator(".vw-controls")).toBeVisible({ timeout: 5_000 });
 
-    const deafenBtn = page.locator(".user-bar button[aria-label='Deafen']");
-    const hadActive = await deafenBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    await deafenBtn.click();
-    const hasActive = await deafenBtn.evaluate((el) => el.classList.contains("active-ctrl"));
-    expect(hasActive).not.toBe(hadActive);
+    await expectUserBarToggle(page, "Deafen");
   });
 
   test("the connection panel reads as a two-line header over Upload/Download tiles, nothing wrapping", async ({
     page,
   }) => {
-    await mockTauriFullSessionWithVoice(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    await joinVoiceChannelByName(page);
+    await joinVoice(page);
     const widget = page.locator("[data-testid='voice-widget'].visible");
     await expect(widget).toBeVisible({ timeout: 5_000 });
 
@@ -110,11 +93,7 @@ test.describe("Voice Widget", () => {
   });
 
   test("second user joining voice appears in sidebar users list", async ({ page }) => {
-    await mockTauriFullSessionWithVoice(page);
-    await page.goto("/");
-    await navigateToMainPage(page);
-
-    await joinVoiceChannelByName(page);
+    await joinVoice(page);
     const widget = page.locator("[data-testid='voice-widget'].visible");
     await expect(widget).toBeVisible({ timeout: 5_000 });
 

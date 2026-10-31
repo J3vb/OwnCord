@@ -1,12 +1,15 @@
 import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, submitLogin, waitForWsReady } from "./helpers";
+import { submitLogin, waitForWsReady } from "./helpers";
+import { type AppearancePrefs, findUnnamedControls, setAppearance } from "./support/accessibility";
 import {
-  type AppearancePrefs,
-  contrastMeter,
-  findUnnamedControls,
-  setAppearance,
-} from "./support/accessibility";
+  attachScreenshot,
+  bootSignedIn,
+  contrastMatrix,
+  expectReachable,
+  horizontalOverflow,
+  undersizedTargets,
+} from "./support/a11yHarness";
 
 // ---------------------------------------------------------------------------
 // B9-10: the report form and My reports against the owner's Q1 checks —
@@ -18,8 +21,6 @@ import {
 // journey (success, duplicate, removed target, quota, role isolation) is
 // tests/e2e/fullstack/reports.spec.ts. Synthetic content only.
 // ---------------------------------------------------------------------------
-
-const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;
 
 const MESSAGES = {
   messages: [
@@ -70,28 +71,20 @@ const MINE = [
 ];
 
 async function boot(page: Page, prefs?: AppearancePrefs): Promise<void> {
-  await page.addInitScript(
-    buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MESSAGES },
-        { pattern: "/api/v1/reports/mine", method: "GET", status: 200, body: MINE },
-        {
-          pattern: "/api/v1/reports",
-          method: "POST",
-          status: 409,
-          body: { error: "DUPLICATE_REPORT", message: "duplicate" },
-        },
-      ],
-      simulateWsFlow: true,
-    }),
+  await bootSignedIn(
+    page,
+    [
+      { pattern: "/messages", status: 200, body: MESSAGES },
+      { pattern: "/api/v1/reports/mine", method: "GET", status: 200, body: MINE },
+      {
+        pattern: "/api/v1/reports",
+        method: "POST",
+        status: 409,
+        body: { error: "DUPLICATE_REPORT", message: "duplicate" },
+      },
+    ],
+    prefs,
   );
-  await page.goto("/");
-  if (prefs !== undefined) await setAppearance(page, prefs);
-  await submitLogin(page);
-  await expect(page.locator("[data-testid='app-layout']")).toBeVisible({ timeout: 15_000 });
-  await waitForWsReady(page);
   await expect(page.getByTestId("message-201")).toBeVisible();
 }
 
@@ -201,64 +194,50 @@ test.describe("report form and My reports", () => {
     await boot(page);
     await openFromKeyboard(page);
     const dialog = reportDialog(page);
-    const small: string[] = [];
-    for (const target of await dialog.locator(".report-option, button").all()) {
-      const box = await target.boundingBox();
-      if (box === null || box.width < 24 || box.height < 24) {
-        small.push(`${await target.textContent()}: ${box?.width}x${box?.height}`);
-      }
-    }
+    const small = await undersizedTargets(dialog.locator(".report-option, button"));
     expect(small).toEqual([]);
   });
 
-  for (const theme of THEMES) {
-    for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: text and focus contrast`, async ({
-        page,
-      }, testInfo) => {
-        await boot(page, { theme, highContrast, accent: null });
-        const { measured, failures, measure, ring } = contrastMeter(page);
+  for (const c of contrastMatrix({
+    title: "text and focus contrast",
+    attachName: (theme, hc) => `b9-10-contrast-${theme}${hc ? "-hc" : ""}.json`,
+    boot: boot,
+    scenario: async (page, { measure, ring }) => {
+      await openFromKeyboard(page);
+      await ring("target radio");
+      const dialog = reportDialog(page);
+      await dialog.getByRole("button", { name: "Send report" }).click();
+      await measure("reason error", dialog.getByText("Choose a reason."));
+      await showErrors(page);
+      await measure("title", dialog.locator("h3"));
+      await measure("privacy note", dialog.locator(".report-note").first());
+      await measure("legend", dialog.locator("legend").first());
+      await measure("option", dialog.locator(".report-option span").first());
+      await measure("detail label", dialog.locator("label.form-label"));
+      await measure("detail hint", dialog.locator(".form-group .report-note"));
+      await measure("send refusal", dialog.getByText("You already have an open report"));
+      await measure("cancel", dialog.getByRole("button", { name: "Cancel" }));
+      await measure("send", dialog.getByRole("button", { name: "Send report" }));
+      await dialog.getByRole("radio", { name: "Spam" }).focus();
+      await page.keyboard.press("ArrowDown");
+      await ring("reason radio");
+      await page.keyboard.press("Tab");
+      await ring("details");
+      await page.keyboard.press("Tab");
+      await ring("cancel");
+      await page.keyboard.press("Tab");
+      await ring("send");
+      await page.keyboard.press("Escape");
 
-        await openFromKeyboard(page);
-        await ring("target radio");
-        const dialog = reportDialog(page);
-        await dialog.getByRole("button", { name: "Send report" }).click();
-        await measure("reason error", dialog.getByText("Choose a reason."));
-        await showErrors(page);
-        await measure("title", dialog.locator("h3"));
-        await measure("privacy note", dialog.locator(".report-note").first());
-        await measure("legend", dialog.locator("legend").first());
-        await measure("option", dialog.locator(".report-option span").first());
-        await measure("detail label", dialog.locator("label.form-label"));
-        await measure("detail hint", dialog.locator(".form-group .report-note"));
-        await measure("send refusal", dialog.getByText("You already have an open report"));
-        await measure("cancel", dialog.getByRole("button", { name: "Cancel" }));
-        await measure("send", dialog.getByRole("button", { name: "Send report" }));
-        await dialog.getByRole("radio", { name: "Spam" }).focus();
-        await page.keyboard.press("ArrowDown");
-        await ring("reason radio");
-        await page.keyboard.press("Tab");
-        await ring("details");
-        await page.keyboard.press("Tab");
-        await ring("cancel");
-        await page.keyboard.press("Tab");
-        await ring("send");
-        await page.keyboard.press("Escape");
-
-        const section = await openSafety(page);
-        await measure("my reports heading", section.locator("h3"));
-        await measure("my reports description", section.locator(".setting-desc"));
-        await measure("report", section.locator(".my-reports-what").first());
-        await measure("status", section.locator(".my-reports-state").first());
-        await measure("dates", section.locator(".my-reports-when").nth(1));
-
-        await testInfo.attach(`b9-10-contrast-${theme}${highContrast ? "-hc" : ""}.json`, {
-          body: JSON.stringify(measured, null, 2),
-          contentType: "application/json",
-        });
-        expect(failures).toEqual([]);
-      });
-    }
+      const section = await openSafety(page);
+      await measure("my reports heading", section.locator("h3"));
+      await measure("my reports description", section.locator(".setting-desc"));
+      await measure("report", section.locator(".my-reports-what").first());
+      await measure("status", section.locator(".my-reports-state").first());
+      await measure("dates", section.locator(".my-reports-when").nth(1));
+    },
+  })) {
+    test(c.title, c.run);
   }
 
   test("reduced motion from the OS or the app stops the dialog's animation", async ({ page }) => {
@@ -293,28 +272,15 @@ test.describe("report form and My reports", () => {
       await openFromKeyboard(page);
       await showErrors(page);
       const dialog = reportDialog(page);
-      const overflow = (el: Locator) => el.evaluate((n) => n.scrollWidth - n.clientWidth);
-      expect(await overflow(page.locator(".report-dialog"))).toBeLessThanOrEqual(0);
-      for (const control of await dialog.locator("input, textarea, button").all()) {
-        await control.scrollIntoViewIfNeeded();
-        await expect(control).toBeInViewport();
-      }
-      await testInfo.attach("b9-10-dialog-940x500-20px.png", {
-        body: await page.screenshot(),
-        contentType: "image/png",
-      });
+      expect(await horizontalOverflow(page.locator(".report-dialog"))).toBeLessThanOrEqual(0);
+      await expectReachable(dialog.locator("input, textarea, button"));
+      await attachScreenshot(testInfo, "b9-10-dialog-940x500-20px.png", page);
       await page.keyboard.press("Escape");
 
       const section = await openSafety(page);
-      expect(await overflow(section)).toBeLessThanOrEqual(0);
-      for (const item of await section.locator(".my-reports-item").all()) {
-        await item.scrollIntoViewIfNeeded();
-        await expect(item).toBeInViewport();
-      }
-      await testInfo.attach("b9-10-my-reports-940x500-20px.png", {
-        body: await page.screenshot(),
-        contentType: "image/png",
-      });
+      expect(await horizontalOverflow(section)).toBeLessThanOrEqual(0);
+      await expectReachable(section.locator(".my-reports-item"));
+      await attachScreenshot(testInfo, "b9-10-my-reports-940x500-20px.png", page);
     });
   });
 });

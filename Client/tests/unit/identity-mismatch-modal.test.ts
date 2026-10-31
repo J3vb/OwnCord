@@ -1,18 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { createIdentityMismatchModal } from "../../src/components/IdentityMismatchModal";
 import {
-  checkAcceptClick,
-  checkBackdropRejects,
-  checkBodyClickDoesNotReject,
-  checkCloseButtonLabel,
-  checkDestroyRemovesModal,
-  checkDialogSemantics,
-  checkDragSelectDoesNotReject,
-  checkEscapeIgnoredAfterDestroyRejecting,
-  checkEscapeRejects,
-  checkFocusRestored,
-  checkRejectClick,
   checkVisibleOverlay,
+  registerWarningModalTests,
   useWarningModal,
   type WarningOpts,
 } from "../helpers/warningModalHarness";
@@ -52,50 +42,17 @@ describe("IdentityMismatchModal", () => {
     expect(container().querySelectorAll(".cert-fingerprint").length).toBe(0);
   });
 
-  it("calls onAccept when the trust button is clicked", () =>
-    checkAcceptClick(mountModal, container()));
-
-  it("calls onReject when the cancel button is clicked", () =>
-    checkRejectClick(mountModal, container(), ".btn-ghost"));
-
-  it("calls onReject when the close X button is clicked", () =>
-    checkRejectClick(mountModal, container(), ".modal-close"));
-
-  it("calls onReject when the backdrop is clicked", () =>
-    checkBackdropRejects(mountModal, container()));
-
-  it("stays open when a drag-select ends on the backdrop", () =>
-    checkDragSelectDoesNotReject(mountModal, container()));
-
-  it("does not call onReject when the modal body is clicked", () =>
-    checkBodyClickDoesNotReject(mountModal, container()));
-
-  it("destroy removes the modal from the DOM", () =>
-    checkDestroyRemovesModal(mountModal, container()));
-
-  it("displays the title 'Identity Warning'", () => {
-    mountModal();
-    const title = container().querySelector(".modal-header h3");
-    expect(title?.textContent).toBe("Identity Warning");
-  });
-
-  it("displays the cert title 'Identity Not Verified'", () => {
-    mountModal();
-    const title = container().querySelector(".cert-title");
-    expect(title?.textContent).toBe("Identity Not Verified");
-  });
-
-  it("carries dialog semantics labelled by the h3 title", () =>
-    checkDialogSemantics(mountModal, container(), "identity-mismatch-title", "Identity Warning"));
-
-  it("gives the icon-only close button an accessible name", () =>
-    checkCloseButtonLabel(mountModal, container()));
-
-  it("calls onReject when Escape is pressed", () => checkEscapeRejects(mountModal));
-
-  it("does not call onReject on Escape after destroy", () =>
-    checkEscapeIgnoredAfterDestroyRejecting(mountModal));
-
-  it("moves focus inside the modal on mount and restores it on destroy", () =>
-    checkFocusRestored(mountModal, container()));
+  registerWarningModalTests(
+    { container, mountModal },
+    {
+      accept: "calls onAccept when the trust button is clicked",
+      reject: "calls onReject when the cancel button is clicked",
+      close: "calls onReject when the close X button is clicked",
+      backdrop: "calls onReject when the backdrop is clicked",
+      body: "does not call onReject when the modal body is clicked",
+      title: "Identity Warning",
+      certTitle: "Identity Not Verified",
+      titleId: "identity-mismatch-title",
+    },
+  );
 });

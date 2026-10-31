@@ -137,23 +137,7 @@ describe("channels store", () => {
       // payload never restates it, so a rebuild must not destroy it.
       channelsStore.setState((prev) => {
         const next = new Map(prev.channels);
-        next.set(99, {
-          id: 99,
-          name: "bob",
-          type: "dm",
-          category: null,
-          topic: "",
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
+        next.set(99, makeChannel({ id: 99, name: "bob", type: "dm" }));
         return { ...prev, channels: next };
       });
 

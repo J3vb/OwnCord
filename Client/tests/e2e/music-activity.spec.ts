@@ -14,10 +14,12 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  ROUTE_MESSAGES_EMPTY,
 } from "./helpers";
 import {
   Q1,
@@ -35,11 +37,7 @@ const MUSIC_CAPABILITIES = { listening_activity: true, game_activity: true };
 async function start(page: Page, theme: (typeof THEMES)[number]): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
-      ],
+      httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES_EMPTY],
       simulateWsFlow: true,
       detectMedia: {
         state: "playing",
