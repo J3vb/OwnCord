@@ -5,14 +5,11 @@ import { vi } from "vitest";
  *
  * vi.mock() is hoisted per test file, so each split file must call
  * vi.mock("@tauri-apps/api/core") / vi.mock("@tauri-apps/api/event") itself
- * with factories that resolve to the handles exported from this module:
+ * with sync factories that resolve to the handles exported from this module:
  *
- *   vi.mock("@tauri-apps/api/core", async () => ({
- *     invoke: (await import("./helpers/ws-mocks")).mockInvoke,
- *   }));
- *   vi.mock("@tauri-apps/api/event", async () => ({
- *     listen: (await import("./helpers/ws-mocks")).mockListen,
- *   }));
+ *   import * as wsMocks from "./helpers/ws-mocks";
+ *   vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+ *   vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
  */
 
 /** Registry of handlers registered through the mocked Tauri listen(). */
@@ -42,6 +39,14 @@ vi.stubGlobal("crypto", {
 // Suppress console output
 vi.spyOn(console, "debug").mockImplementation(() => {});
 vi.spyOn(console, "info").mockImplementation(() => {});
+
+export function tauriCoreMock(): { invoke: typeof mockInvoke } {
+  return { invoke: mockInvoke };
+}
+
+export function tauriEventMock(): { listen: typeof mockListen } {
+  return { listen: mockListen };
+}
 
 /** Simulate Tauri emitting an event to JS */
 export function emitTauriEvent(event: string, payload: unknown): void {

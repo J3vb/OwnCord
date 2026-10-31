@@ -1,28 +1,22 @@
 import { describe, it, expect, vi } from "vitest";
 
-// vi.mock is hoisted per file; the factories resolve to the shared handles
-// exported from ./helpers/ws-mocks (see that module's doc comment).
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
-import { createWsClient, type ConnectionState } from "../../src/lib/ws";
+import { createWsClient } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
-
-const AUTH_OK = JSON.stringify({
-  type: "auth_ok",
-  payload: {
-    user: { id: 1, username: "a", avatar: null, role: "admin" },
-    server_name: "S",
-    motd: "",
-  },
-});
+import {
+  openSocket,
+  emitAuthOk,
+  wsConnectCalls,
+  connectAndAuth,
+  lastAuthPayload,
+  trackStates,
+} from "../helpers/wsSuiteHarness";
 
 // U4 follow-up: the wake is no longer gated on the client. A wall-clock gap
 // past the wake threshold marks the next dial a wake (`auth.wake = true`) and
@@ -36,28 +30,16 @@ describe("wake reconnect signal (U4 follow-up)", () => {
     client = created;
   });
 
-  async function connectAndAuth(): Promise<void> {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", AUTH_OK);
-  }
-
   function reconnects(): unknown[][] {
-    return mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    return wsConnectCalls();
   }
 
-  function lastAuthPayload(): Record<string, unknown> {
-    const call = mockInvoke.mock.calls
-      .filter(
-        (c) =>
-          c[0] === "ws_send" &&
-          typeof c[1]?.message === "string" &&
-          (c[1].message as string).includes('"type":"auth"'),
-      )
-      .at(-1);
-    expect(call).toBeDefined();
-    return JSON.parse((call![1] as { message: string }).message).payload as Record<string, unknown>;
+  /** Lets the backoff dial, opens the socket and checks the wake marker it sent. */
+  async function expectRedialWake(wake: true | undefined): Promise<void> {
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(reconnects().length).toBeGreaterThanOrEqual(1);
+    emitTauriEvent("ws-state", "open");
+    expect(lastAuthPayload().wake).toBe(wake);
   }
 
   /** Drive a suspend wake through the heartbeat probe and the failed-pong
@@ -76,7 +58,7 @@ describe("wake reconnect signal (U4 follow-up)", () => {
   }
 
   it("reconnects after a long suspend, marking the dial as a wake", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     mockInvoke.mockClear();
 
     await wakeAndDial();
@@ -87,7 +69,7 @@ describe("wake reconnect signal (U4 follow-up)", () => {
   });
 
   it("marks a 90-180 s freeze as a wake too, closing the silent-displacement window", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     mockInvoke.mockClear();
 
     // A gap past the wake threshold but under the old 180 s gate: this is the
@@ -104,7 +86,7 @@ describe("wake reconnect signal (U4 follow-up)", () => {
   });
 
   it("does not mark a throttled ~60 s gap as a wake", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     mockInvoke.mockClear();
 
     vi.setSystemTime(Date.now() + 31_000);
@@ -112,15 +94,11 @@ describe("wake reconnect signal (U4 follow-up)", () => {
     expect(reconnects()).toHaveLength(0);
 
     emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(2_000);
-
-    expect(reconnects().length).toBeGreaterThanOrEqual(1);
-    emitTauriEvent("ws-state", "open");
-    expect(lastAuthPayload().wake).toBeUndefined();
+    await expectRedialWake(undefined);
   });
 
   it("an explicit takeover (Use here) after a wake is not marked a wake", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     vi.setSystemTime(Date.now() + 10 * 60_000);
     await vi.advanceTimersByTimeAsync(30_000);
     mockInvoke.mockClear();
@@ -134,7 +112,7 @@ describe("wake reconnect signal (U4 follow-up)", () => {
   });
 
   it("a Retry after a failed wake dial still sends wake", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     let offline = true;
     mockInvoke.mockImplementation((cmd: string) =>
       cmd === "ws_connect" && offline
@@ -153,15 +131,13 @@ describe("wake reconnect signal (U4 follow-up)", () => {
     mockInvoke.mockClear();
 
     // Retry means "reconnect", not "take over from my other device".
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
 
     expect(lastAuthPayload().wake).toBe(true);
   });
 
   it("a leftover frame on the pre-sleep socket does not clear the wake", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     mockInvoke.mockClear();
 
     // The old socket delivers a retransmitted frame and closes after the wake:
@@ -170,40 +146,28 @@ describe("wake reconnect signal (U4 follow-up)", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong", payload: {} }));
     emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(2_000);
-
-    expect(reconnects().length).toBeGreaterThanOrEqual(1);
-    emitTauriEvent("ws-state", "open");
-    expect(lastAuthPayload().wake).toBe(true);
+    await expectRedialWake(true);
   });
 
   it("a leftover frame that beats the heartbeat tick still marks the wake", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     mockInvoke.mockClear();
 
     vi.setSystemTime(Date.now() + 10 * 60_000);
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong", payload: {} }));
     emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(2_000);
-
-    expect(reconnects().length).toBeGreaterThanOrEqual(1);
-    emitTauriEvent("ws-state", "open");
-    expect(lastAuthPayload().wake).toBe(true);
+    await expectRedialWake(true);
   });
 
   it("auth_ok clears the wake so a later ordinary reconnect is unmarked", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     vi.setSystemTime(Date.now() + 10 * 60_000);
     await vi.advanceTimersByTimeAsync(30_000);
-    emitTauriEvent("ws-message", AUTH_OK);
+    emitAuthOk();
     mockInvoke.mockClear();
 
     emitTauriEvent("ws-state", "closed");
-    await vi.advanceTimersByTimeAsync(2_000);
-
-    expect(reconnects().length).toBeGreaterThanOrEqual(1);
-    emitTauriEvent("ws-state", "open");
-    expect(lastAuthPayload().wake).toBeUndefined();
+    await expectRedialWake(undefined);
   });
 
   it("backs off and retries a dial that fails long after the last activity", async () => {
@@ -213,8 +177,7 @@ describe("wake reconnect signal (U4 follow-up)", () => {
     mockInvoke.mockImplementation((cmd: string) =>
       cmd === "ws_connect" ? Promise.reject(new Error("refused")) : Promise.resolve(undefined),
     );
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    const states = trackStates(client);
 
     client.connect({ host: "localhost:8443", token: "t" });
     await vi.advanceTimersByTimeAsync(10);
@@ -227,15 +190,13 @@ describe("wake reconnect signal (U4 follow-up)", () => {
   });
 
   it("disconnect() clears a pending wake", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     vi.setSystemTime(Date.now() + 10 * 60_000);
     await vi.advanceTimersByTimeAsync(30_000);
     client.disconnect();
     mockInvoke.mockClear();
 
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
+    await openSocket(client);
     expect(lastAuthPayload().wake).toBeUndefined();
   });
 });

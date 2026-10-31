@@ -1,38 +1,27 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-// vi.mock is hoisted per file; the factories resolve to the shared handles
-// exported from ./helpers/ws-mocks (see that module's doc comment).
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
+import * as wsMocks from "./helpers/ws-mocks";
 
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
+vi.mock("@tauri-apps/api/core", () => wsMocks.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
-import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
-import { createWsClient, type ConnectionState } from "../../src/lib/ws";
+import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
+import { createWsClient } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
 import { handleConnectionError } from "../../src/features/connection/wsHandlers";
 import { setSessionReplaced, uiStore } from "../../src/stores/ui.store";
 import { useWsClientFixture } from "../helpers/wsClientFixture";
-
-const AUTH_OK = JSON.stringify({
-  type: "auth_ok",
-  payload: {
-    user: { id: 1, username: "a", avatar: null, role: "admin" },
-    server_name: "S",
-    motd: "",
-  },
-});
+import {
+  wsConnectCalls,
+  sentFramesOfType,
+  emitCertMismatch,
+  connectAndAuth,
+  lastAuthPayload,
+  trackStates,
+} from "../helpers/wsSuiteHarness";
 
 function pingSends(): unknown[][] {
-  return mockInvoke.mock.calls.filter(
-    (c) =>
-      c[0] === "ws_send" &&
-      typeof c[1]?.message === "string" &&
-      (c[1].message as string).includes('"type":"ping"'),
-  );
+  return sentFramesOfType("ping");
 }
 
 describe("wake probe (U7d)", () => {
@@ -41,17 +30,9 @@ describe("wake probe (U7d)", () => {
     client = created;
   });
 
-  async function connectAndAuth(): Promise<void> {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", AUTH_OK);
-  }
-
   it("reconnects when the wake probe's pong never arrives", async () => {
-    await connectAndAuth();
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    await connectAndAuth(client);
+    const states = trackStates(client);
     mockInvoke.mockClear();
 
     document.dispatchEvent(new Event("visibilitychange"));
@@ -61,14 +42,13 @@ describe("wake probe (U7d)", () => {
     expect(states).toContain("reconnecting");
 
     await vi.advanceTimersByTimeAsync(1_100);
-    const reconnects = mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect");
+    const reconnects = wsConnectCalls();
     expect(reconnects.length).toBeGreaterThanOrEqual(1);
   });
 
   it("stays connected when the wake probe's pong arrives", async () => {
-    await connectAndAuth();
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    await connectAndAuth(client);
+    const states = trackStates(client);
     mockInvoke.mockClear();
 
     document.dispatchEvent(new Event("visibilitychange"));
@@ -83,11 +63,11 @@ describe("wake probe (U7d)", () => {
     emitTauriEvent("ws-message", JSON.stringify({ type: "pong" }));
 
     expect(states).not.toContain("reconnecting");
-    expect(mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect")).toHaveLength(0);
+    expect(wsConnectCalls()).toHaveLength(0);
   });
 
   it("probes when the device's network returns", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     mockInvoke.mockClear();
 
     window.dispatchEvent(new Event("online"));
@@ -96,7 +76,7 @@ describe("wake probe (U7d)", () => {
   });
 
   it("probes when the document becomes visible again", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     mockInvoke.mockClear();
 
     document.dispatchEvent(new Event("visibilitychange"));
@@ -105,9 +85,8 @@ describe("wake probe (U7d)", () => {
   });
 
   it("probes on the first heartbeat after a brief freeze", async () => {
-    await connectAndAuth();
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    await connectAndAuth(client);
+    const states = trackStates(client);
     mockInvoke.mockClear();
 
     // A freeze past the wake gap moves the wall clock without running any
@@ -124,9 +103,8 @@ describe("wake probe (U7d)", () => {
   });
 
   it("treats a throttled ~60 s heartbeat gap as no wake", async () => {
-    await connectAndAuth();
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    await connectAndAuth(client);
+    const states = trackStates(client);
 
     // A long-hidden page's intensive throttling fires the tick ~60 s late.
     vi.setSystemTime(Date.now() + 31_000);
@@ -137,9 +115,8 @@ describe("wake probe (U7d)", () => {
   });
 
   it("never pushes back a sooner deadline or an older unanswered ping", async () => {
-    await connectAndAuth();
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    await connectAndAuth(client);
+    const states = trackStates(client);
 
     // The heartbeat ping at 30 s goes unanswered; the silence deadline is 60 s.
     await vi.advanceTimersByTimeAsync(55_000);
@@ -151,9 +128,8 @@ describe("wake probe (U7d)", () => {
   });
 
   it("keeps the 60 s silence deadline for an on-time heartbeat", async () => {
-    await connectAndAuth();
-    const states: ConnectionState[] = [];
-    client.onStateChange((s) => states.push(s));
+    await connectAndAuth(client);
+    const states = trackStates(client);
 
     await vi.advanceTimersByTimeAsync(45_000);
 
@@ -170,7 +146,7 @@ describe("wake probe (U7d)", () => {
   });
 
   it("stops probing after disconnect", async () => {
-    await connectAndAuth();
+    await connectAndAuth(client);
     client.disconnect();
     mockInvoke.mockClear();
 
@@ -186,49 +162,32 @@ describe("wake probe (U7d)", () => {
 describe("wake kick while reconnecting", () => {
   let client: ReturnType<typeof createWsClient>;
 
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    // The top of each backoff window, so the fourth failed dial waits 16 s.
-    client = createWsClient({ random: () => 1 });
-  });
+  // The top of each backoff window, so the fourth failed dial waits 16 s.
+  useWsClientFixture(
+    (created) => {
+      client = created;
+    },
+    { clientOptions: { random: () => 1 } },
+  );
 
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
-  });
+  /** Offers every wake signal after a dead end and asserts nothing dials. */
+  async function expectNoKickedDial(): Promise<void> {
+    await vi.advanceTimersByTimeAsync(2_000);
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(dials()).toBe(0);
+  }
 
   function dials(): number {
-    return mockInvoke.mock.calls.filter((c) => c[0] === "ws_connect").length;
-  }
-
-  function lastAuthPayload(): Record<string, unknown> {
-    const call = mockInvoke.mock.calls
-      .filter(
-        (c) =>
-          c[0] === "ws_send" &&
-          typeof c[1]?.message === "string" &&
-          (c[1].message as string).includes('"type":"auth"'),
-      )
-      .at(-1);
-    expect(call).toBeDefined();
-    return JSON.parse((call![1] as { message: string }).message).payload as Record<string, unknown>;
-  }
-
-  async function connectAndAuth(): Promise<void> {
-    client.connect({ host: "localhost:8443", token: "t" });
-    await vi.advanceTimersByTimeAsync(10);
-    emitTauriEvent("ws-state", "open");
-    emitTauriEvent("ws-message", AUTH_OK);
+    return wsConnectCalls().length;
   }
 
   // Loses the live socket, then fails three redials, leaving the fourth
   // attempt pending 16 s out.
   async function reconnectingAtSixteenSeconds(): Promise<void> {
-    await connectAndAuth();
+    await connectAndAuth(client);
     emitTauriEvent("ws-state", "closed");
     for (const delay of [1_000, 2_000, 4_000, 8_000]) {
       await vi.advanceTimersByTimeAsync(delay);
@@ -327,34 +286,18 @@ describe("wake kick while reconnecting", () => {
     emitTauriEvent("ws-state", "closed");
     mockInvoke.mockClear();
 
-    await vi.advanceTimersByTimeAsync(2_000);
-    window.dispatchEvent(new Event("online"));
-    document.dispatchEvent(new Event("visibilitychange"));
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(dials()).toBe(0);
+    await expectNoKickedDial();
   });
 
   it("does not redial through a certificate-mismatch latch (TOFU)", async () => {
     await reconnectingAtSixteenSeconds();
     // The pending redial reaches a server whose certificate changed.
     await vi.advanceTimersByTimeAsync(16_000);
-    emitTauriEvent("cert-tofu", {
-      host: "localhost:8443",
-      fingerprint: "sha256:NEW",
-      status: "mismatch",
-      message: "Stored: sha256:OLD",
-    });
-    expectConsole("error", /\[ws\] Certificate fingerprint mismatch/);
+    emitCertMismatch("localhost:8443");
     emitTauriEvent("ws-state", "closed");
     mockInvoke.mockClear();
 
-    await vi.advanceTimersByTimeAsync(2_000);
-    window.dispatchEvent(new Event("online"));
-    document.dispatchEvent(new Event("visibilitychange"));
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(dials()).toBe(0);
+    await expectNoKickedDial();
   });
 
   it("does not dial while the account is signed in elsewhere", async () => {
@@ -376,12 +319,7 @@ describe("wake kick while reconnecting", () => {
     emitTauriEvent("ws-state", "closed");
     mockInvoke.mockClear();
 
-    await vi.advanceTimersByTimeAsync(2_000);
-    window.dispatchEvent(new Event("online"));
-    document.dispatchEvent(new Event("visibilitychange"));
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(dials()).toBe(0);
+    await expectNoKickedDial();
     setSessionReplaced(false);
   });
 });
