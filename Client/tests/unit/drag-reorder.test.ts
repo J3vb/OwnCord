@@ -178,6 +178,36 @@ function drag(rig: Rig, fromId: number, toIdx: number, half: "top" | "bottom"): 
   document.dispatchEvent(mouse("mouseup", 0, yInRow(toIdx, half)));
 }
 
+function ownerRig(): Rig {
+  signIn("owner");
+  return buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)]);
+}
+
+/** Press on the top of row `idx` and move past the threshold. */
+function beginDrag(source: HTMLElement | undefined, idx: number): void {
+  source?.dispatchEvent(mouse("mousedown", 0, yInRow(idx, "top")));
+  source?.dispatchEvent(mouse("mousemove", 0, yInRow(idx, "top") + 20));
+}
+
+function firstReorder(rig: Rig): readonly ChannelReorderData[] {
+  return rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
+}
+
+function hasDropIndicator(rig: Rig, id: number): boolean | undefined {
+  return rig.items.get(id)?.classList.contains("channel-drop-indicator");
+}
+
+function twoRowRig(): { rig: Rig; el: HTMLElement | undefined } {
+  signIn("owner");
+  const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
+  return { rig, el: rig.items.get(1) };
+}
+
+function expectSingleReorder(rig: Rig, positions: Record<number, number>): void {
+  expect(rig.onReorder).toHaveBeenCalledTimes(1);
+  expect(positionsOf(firstReorder(rig))).toEqual(positions);
+}
+
 beforeEach(() => {
   resetAuthState();
   resetChannelsState();
@@ -303,9 +333,7 @@ describe("attachDragHandlers permission gate", () => {
 
 describe("drag activation threshold", () => {
   it("does not start a drag below the 5px threshold", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mousemove", 2, 6)); // dx+dy = 4
@@ -315,9 +343,7 @@ describe("drag activation threshold", () => {
   });
 
   it("starts a drag once movement exceeds the threshold", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mousemove", 3, 10)); // dx+dy = 9
@@ -327,9 +353,7 @@ describe("drag activation threshold", () => {
   });
 
   it("ignores non-left mouse buttons", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(new MouseEvent("mousedown", { clientX: 0, clientY: 4, button: 2 }));
     el?.dispatchEvent(mouse("mousemove", 0, 40));
@@ -338,9 +362,7 @@ describe("drag activation threshold", () => {
   });
 
   it("a mouseup before the threshold cancels the pending drag", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mouseup", 0, 4));
@@ -354,8 +376,7 @@ describe("drag activation threshold", () => {
     // no drag ran, and because mousedown/mouseup targeted different elements,
     // row 1's own mouseup listener never fires, so its pendingDrag latch is
     // never cleared.
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)]);
+    const rig = ownerRig();
     const row1 = rig.items.get(1)!;
 
     row1.dispatchEvent(mouse("mousedown", 0, yInRow(0, "bottom")));
@@ -391,19 +412,15 @@ describe("reorder index arithmetic", () => {
 
     drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
-    expect(positionsOf(reorders)).toEqual({ 3: 0, 1: 1, 2: 2 });
+    expectSingleReorder(rig, { 3: 0, 1: 1, 2: 2 });
   });
 
   it("dropping on the bottom half inserts after the target", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)]);
+    const rig = ownerRig();
 
     drag(rig, 1, 1, "bottom"); // ch1 after ch2 → [2, 1, 3]
 
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
-    expect(positionsOf(reorders)).toEqual({ 2: 0, 1: 1 });
+    expect(positionsOf(firstReorder(rig))).toEqual({ 2: 0, 1: 1 });
   });
 
   it("carries each channel's pre-drag position as previousPosition", () => {
@@ -458,8 +475,7 @@ describe("reorder index arithmetic", () => {
 
     drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
 
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
-    expect(positionsOf(reorders)).toEqual({ 3: 5, 1: 7, 2: 9 });
+    expect(positionsOf(firstReorder(rig))).toEqual({ 3: 5, 1: 7, 2: 9 });
   });
 
   it("still reorders when every channel in the group shares one position", () => {
@@ -471,10 +487,8 @@ describe("reorder index arithmetic", () => {
 
     drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
     // ch3 keeps position 0 (unchanged, so unreported); ch1 and ch2 move up.
-    expect(positionsOf(reorders)).toEqual({ 1: 1, 2: 2 });
+    expectSingleReorder(rig, { 1: 1, 2: 2 });
   });
 
   it("gives partially tied positions a deterministic order after the drop", () => {
@@ -484,11 +498,9 @@ describe("reorder index arithmetic", () => {
 
     drag(rig, 3, 0, "top"); // ch3 before ch1 → [3, 1, 2]
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
     // Slots [0, 0, 5] become the strictly increasing [0, 1, 5]: every channel
     // ends at a distinct position, so the rendered order matches the drop.
-    expect(positionsOf(reorders)).toEqual({ 3: 0, 1: 1, 2: 5 });
+    expectSingleReorder(rig, { 3: 0, 1: 1, 2: 5 });
   });
 
   it("does not fire when dropped on itself", () => {
@@ -501,9 +513,7 @@ describe("reorder index arithmetic", () => {
   });
 
   it("does not fire when dropped outside any row", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
-    const el = rig.items.get(1);
+    const { rig, el } = twoRowRig();
 
     el?.dispatchEvent(mouse("mousedown", 0, 4));
     el?.dispatchEvent(mouse("mousemove", 0, 30));
@@ -513,8 +523,7 @@ describe("reorder index arithmetic", () => {
   });
 
   it("does not fire when the drag lands back in its original slot", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)]);
+    const rig = ownerRig();
 
     // ch1 dropped on the top half of ch2 → insert before ch2 → [1, 2, 3],
     // which is the order it already had.
@@ -539,36 +548,32 @@ describe("reorder index arithmetic", () => {
 
 describe("drop indicator", () => {
   it("marks the hovered row and never the dragged row", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)]);
+    const rig = ownerRig();
     const source = rig.items.get(1);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     document.dispatchEvent(mouse("mousemove", 0, yInRow(2, "top")));
-    expect(rig.items.get(3)?.classList.contains("channel-drop-indicator")).toBe(true);
+    expect(hasDropIndicator(rig, 3)).toBe(true);
 
     // Hovering the dragged row itself must not show a drop target.
     document.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top")));
-    expect(rig.items.get(1)?.classList.contains("channel-drop-indicator")).toBe(false);
-    expect(rig.items.get(3)?.classList.contains("channel-drop-indicator")).toBe(false);
+    expect(hasDropIndicator(rig, 1)).toBe(false);
+    expect(hasDropIndicator(rig, 3)).toBe(false);
   });
 
   it("moves the indicator as the cursor moves between rows", () => {
-    signIn("owner");
-    const rig = buildRig([makeCh(1, 0), makeCh(2, 1), makeCh(3, 2)]);
+    const rig = ownerRig();
     const source = rig.items.get(1);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     document.dispatchEvent(mouse("mousemove", 0, yInRow(1, "top")));
-    expect(rig.items.get(2)?.classList.contains("channel-drop-indicator")).toBe(true);
+    expect(hasDropIndicator(rig, 2)).toBe(true);
 
     document.dispatchEvent(mouse("mousemove", 0, yInRow(2, "top")));
-    expect(rig.items.get(2)?.classList.contains("channel-drop-indicator")).toBe(false);
-    expect(rig.items.get(3)?.classList.contains("channel-drop-indicator")).toBe(true);
+    expect(hasDropIndicator(rig, 2)).toBe(false);
+    expect(hasDropIndicator(rig, 3)).toBe(true);
   });
 
   it("global handlers no-op when no drag is active", () => {
@@ -609,8 +614,7 @@ describe("mid-drag sidebar re-render", () => {
     const source = rig.items.get(1)!;
 
     // Start the drag on the original rows.
-    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
     expect(source.classList.contains("dragging")).toBe(true);
 
     // A store-driven re-render rebuilds the sidebar mid-drag.
@@ -620,9 +624,7 @@ describe("mid-drag sidebar re-render", () => {
     // Release over the bottom half of row 1 (ch2): ch1 lands after ch2.
     document.dispatchEvent(mouse("mouseup", 0, yInRow(1, "bottom")));
 
-    expect(rig.onReorder).toHaveBeenCalledTimes(1);
-    const reorders = rig.onReorder.mock.calls[0]?.[0] as readonly ChannelReorderData[];
-    expect(positionsOf(reorders)).toEqual({ 2: 0, 1: 1 });
+    expectSingleReorder(rig, { 2: 0, 1: 1 });
     expect(channelsStore.select((s) => s.channels.get(1)?.position)).toBe(1);
     expect(channelsStore.select((s) => s.channels.get(2)?.position)).toBe(0);
     expect(live.container.querySelectorAll(".channel-drop-indicator")).toHaveLength(0);
@@ -636,8 +638,7 @@ describe("mid-drag sidebar re-render", () => {
     const rig = buildRig(channels);
     const source = rig.items.get(1)!;
 
-    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     rig.container.remove();
     const live = rebuildContainer(rig, channels);
@@ -654,8 +655,7 @@ describe("mid-drag sidebar re-render", () => {
     const rig = buildRig(channels);
     const source = rig.items.get(1)!;
 
-    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     // The re-render drops ch1 entirely (deleted mid-drag).
     rig.container.remove();
@@ -707,8 +707,7 @@ describe("mid-drag sidebar re-render", () => {
     });
 
     const source = items.get(1)!;
-    source.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
     expect(source.classList.contains("dragging")).toBe(true);
 
     // A store-driven re-render: renderChannels() aborts ONLY the previous
@@ -806,8 +805,7 @@ describe("global listener ownership", () => {
     const rig = buildRig([makeCh(1, 0), makeCh(2, 1)]);
     const source = rig.items.get(1);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
     expect(source?.classList.contains("dragging")).toBe(true);
 
     rig.abort.abort();
@@ -825,8 +823,7 @@ describe("global listener ownership", () => {
     const other = new AbortController();
     ensureGlobalDragListeners(other.signal);
 
-    source?.dispatchEvent(mouse("mousedown", 0, yInRow(0, "top")));
-    source?.dispatchEvent(mouse("mousemove", 0, yInRow(0, "top") + 20));
+    beginDrag(source, 0);
 
     other.abort();
 

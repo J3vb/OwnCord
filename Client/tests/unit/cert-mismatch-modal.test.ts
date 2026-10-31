@@ -1,5 +1,21 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { createCertMismatchModal } from "../../src/components/CertMismatchModal";
+import {
+  checkAcceptClick,
+  checkBackdropRejects,
+  checkBodyClickDoesNotReject,
+  checkCloseButtonLabel,
+  checkDestroyRemovesModal,
+  checkDialogSemantics,
+  checkDragSelectDoesNotReject,
+  checkEscapeIgnoredAfterDestroyRejecting,
+  checkEscapeRejects,
+  checkFocusRestored,
+  checkRejectClick,
+  checkVisibleOverlay,
+  useWarningModal,
+  type WarningOpts,
+} from "../helpers/warningModalHarness";
 import { parseStoredFingerprint } from "../../src/lib/ws";
 
 // ---------------------------------------------------------------------------
@@ -34,54 +50,27 @@ describe("parseStoredFingerprint", () => {
 // ---------------------------------------------------------------------------
 
 describe("CertMismatchModal", () => {
-  let container: HTMLDivElement;
-  // Every modal a test mounts, destroyed in afterEach so its document keydown
-  // listener does not outlive the test.
-  const mounted: { destroy?(): void }[] = [];
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    for (const modal of mounted.splice(0)) modal.destroy?.();
-    container.remove();
-  });
-
-  function mountModal(overrides?: Partial<Parameters<typeof createCertMismatchModal>[0]>) {
-    const onAccept = vi.fn();
-    const onReject = vi.fn();
-    const modal = createCertMismatchModal({
+  const { container, mountModal } = useWarningModal<WarningOpts<typeof createCertMismatchModal>>(
+    createCertMismatchModal,
+    {
       host: "localhost:8443",
       storedFingerprint: "AA:BB:CC:DD",
       newFingerprint: "11:22:33:44",
-      onAccept,
-      onReject,
-      ...overrides,
-    });
-    modal.mount(container);
-    mounted.push(modal);
-    return { modal, onAccept, onReject };
-  }
+    },
+  );
 
-  it("renders a visible modal overlay", () => {
-    mountModal();
-    const overlay = container.querySelector(".modal-overlay");
-    expect(overlay).not.toBeNull();
-    expect(overlay!.classList.contains("visible")).toBe(true);
-  });
+  it("renders a visible modal overlay", () => checkVisibleOverlay(mountModal, container()));
 
   it("displays the host in the details", () => {
     mountModal();
-    const values = container.querySelectorAll(".cert-value");
+    const values = container().querySelectorAll(".cert-value");
     const texts = Array.from(values).map((el) => el.textContent);
     expect(texts).toContain("localhost:8443");
   });
 
   it("displays stored and new fingerprints", () => {
     mountModal();
-    const fps = container.querySelectorAll(".cert-fingerprint");
+    const fps = container().querySelectorAll(".cert-fingerprint");
     const texts = Array.from(fps).map((el) => el.textContent);
     expect(texts).toContain("AA:BB:CC:DD");
     expect(texts).toContain("11:22:33:44");
@@ -89,7 +78,7 @@ describe("CertMismatchModal", () => {
 
   it("tells the user how to verify the new fingerprint before accepting", () => {
     mountModal();
-    const desc = container.querySelector(".cert-desc")?.textContent ?? "";
+    const desc = container().querySelector(".cert-desc")?.textContent ?? "";
     // Routine public-CA renewals are re-pinned silently, so the prompt must
     // not call a change routine; it asks for extra care instead...
     expect(desc).not.toMatch(/routine, but/);
@@ -106,113 +95,55 @@ describe("CertMismatchModal", () => {
 
   it("shows 'Unknown' when storedFingerprint is empty", () => {
     mountModal({ storedFingerprint: "" });
-    const fps = container.querySelectorAll(".cert-fingerprint");
+    const fps = container().querySelectorAll(".cert-fingerprint");
     const texts = Array.from(fps).map((el) => el.textContent);
     expect(texts).toContain("Unknown");
   });
 
-  it("calls onAccept when accept button is clicked", () => {
-    const { onAccept } = mountModal();
-    const btn = container.querySelector(".btn-danger") as HTMLButtonElement;
-    expect(btn).not.toBeNull();
-    btn.click();
-    expect(onAccept).toHaveBeenCalledOnce();
-  });
+  it("calls onAccept when accept button is clicked", () =>
+    checkAcceptClick(mountModal, container()));
 
-  it("calls onReject when disconnect button is clicked", () => {
-    const { onReject } = mountModal();
-    const btn = container.querySelector(".btn-ghost") as HTMLButtonElement;
-    expect(btn).not.toBeNull();
-    btn.click();
-    expect(onReject).toHaveBeenCalledOnce();
-  });
+  it("calls onReject when disconnect button is clicked", () =>
+    checkRejectClick(mountModal, container(), ".btn-ghost"));
 
-  it("calls onReject when close X button is clicked", () => {
-    const { onReject } = mountModal();
-    const btn = container.querySelector(".modal-close") as HTMLButtonElement;
-    expect(btn).not.toBeNull();
-    btn.click();
-    expect(onReject).toHaveBeenCalledOnce();
-  });
+  it("calls onReject when close X button is clicked", () =>
+    checkRejectClick(mountModal, container(), ".modal-close"));
 
-  it("calls onReject when backdrop is clicked", () => {
-    const { onReject } = mountModal();
-    const overlay = container.querySelector(".modal-overlay") as HTMLDivElement;
-    overlay.click();
-    expect(onReject).toHaveBeenCalledOnce();
-  });
+  it("calls onReject when backdrop is clicked", () =>
+    checkBackdropRejects(mountModal, container()));
 
-  it("stays open when a drag-select ends on the backdrop", () => {
-    const { onReject } = mountModal();
-    const overlayEl = container.querySelector(".modal-overlay") as HTMLElement;
-    overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
-    overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    expect(onReject).not.toHaveBeenCalled();
-  });
+  it("stays open when a drag-select ends on the backdrop", () =>
+    checkDragSelectDoesNotReject(mountModal, container()));
 
-  it("does not call onReject when modal body is clicked", () => {
-    const { onReject } = mountModal();
-    const modal = container.querySelector(".modal") as HTMLDivElement;
-    modal.click();
-    expect(onReject).not.toHaveBeenCalled();
-  });
+  it("does not call onReject when modal body is clicked", () =>
+    checkBodyClickDoesNotReject(mountModal, container()));
 
-  it("destroy removes the modal from the DOM", () => {
-    const { modal } = mountModal();
-    expect(container.querySelector(".modal-overlay")).not.toBeNull();
-    modal.destroy?.();
-    expect(container.querySelector(".modal-overlay")).toBeNull();
-  });
+  it("destroy removes the modal from the DOM", () =>
+    checkDestroyRemovesModal(mountModal, container()));
 
   it("displays the title 'Certificate Warning'", () => {
     mountModal();
-    const title = container.querySelector(".modal-header h3");
+    const title = container().querySelector(".modal-header h3");
     expect(title?.textContent).toBe("Certificate Warning");
   });
 
   it("displays the cert title 'Certificate Changed'", () => {
     mountModal();
-    const title = container.querySelector(".cert-title");
+    const title = container().querySelector(".cert-title");
     expect(title?.textContent).toBe("Certificate Changed");
   });
 
-  it("carries dialog semantics labelled by the h3 title", () => {
-    mountModal();
-    const modal = container.querySelector(".modal");
-    expect(modal?.getAttribute("role")).toBe("dialog");
-    expect(modal?.getAttribute("aria-modal")).toBe("true");
-    expect(modal?.getAttribute("aria-labelledby")).toBe("cert-mismatch-title");
-    const title = container.querySelector("#cert-mismatch-title");
-    expect(title?.textContent).toBe("Certificate Warning");
-  });
+  it("carries dialog semantics labelled by the h3 title", () =>
+    checkDialogSemantics(mountModal, container(), "cert-mismatch-title", "Certificate Warning"));
 
-  it("gives the icon-only close button an accessible name", () => {
-    mountModal();
-    const btn = container.querySelector(".modal-close");
-    expect(btn?.getAttribute("aria-label")).toBe("Close");
-  });
+  it("gives the icon-only close button an accessible name", () =>
+    checkCloseButtonLabel(mountModal, container()));
 
-  it("calls onReject when Escape is pressed", () => {
-    const { onReject } = mountModal();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(onReject).toHaveBeenCalledOnce();
-  });
+  it("calls onReject when Escape is pressed", () => checkEscapeRejects(mountModal));
 
-  it("does not call onReject on Escape after destroy", () => {
-    const { modal, onReject } = mountModal();
-    modal.destroy?.();
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    expect(onReject).not.toHaveBeenCalled();
-  });
+  it("does not call onReject on Escape after destroy", () =>
+    checkEscapeIgnoredAfterDestroyRejecting(mountModal));
 
-  it("moves focus inside the modal on mount and restores it on destroy", () => {
-    const outside = document.createElement("button");
-    document.body.appendChild(outside);
-    outside.focus();
-    const { modal } = mountModal();
-    expect(container.contains(document.activeElement)).toBe(true);
-    modal.destroy?.();
-    expect(document.activeElement).toBe(outside);
-    outside.remove();
-  });
+  it("moves focus inside the modal on mount and restores it on destroy", () =>
+    checkFocusRestored(mountModal, container()));
 });

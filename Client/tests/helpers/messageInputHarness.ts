@@ -1,5 +1,7 @@
-import { vi } from "vitest";
-import { type MessageInputOptions } from "@components/MessageInput";
+import { vi, beforeEach } from "vitest";
+import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
+import { resetPickerCaptures } from "./messageInputMocks";
+import { useMountContainer } from "./mountContainer";
 import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
 
 /** GIF endpoints on the user's own server (never api.klipy.com). */
@@ -20,4 +22,37 @@ export function makeOptions(overrides: Partial<MessageInputOptions> = {}): Messa
     onTyping: vi.fn(),
     ...overrides,
   };
+}
+
+/** Gives each test a fresh container and clears the picker captures. */
+export function useMessageInputContainer(bind: (container: HTMLDivElement) => void): void {
+  beforeEach(() => {
+    resetPickerCaptures();
+  });
+  useMountContainer(bind);
+}
+
+/** Creates a MessageInput from the given overrides and mounts it into the container. */
+export function mountMessageInput(
+  container: HTMLDivElement,
+  overrides: Partial<MessageInputOptions> = {},
+): { opts: MessageInputOptions; comp: ReturnType<typeof createMessageInput> } {
+  const opts = makeOptions(overrides);
+  const comp = createMessageInput(opts);
+  comp.mount(container);
+  return { opts, comp };
+}
+
+/** Picks files through the hidden file input, as the browser would. */
+export function selectFiles(container: HTMLDivElement, files: File[]): void {
+  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+  Object.defineProperty(fileInput, "files", { value: files, writable: true });
+  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/** A file just over the 100 MB upload limit. */
+export function makeOversizedFile(): File {
+  const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
+  Object.defineProperty(bigFile, "size", { value: 101 * 1024 * 1024 });
+  return bigFile;
 }

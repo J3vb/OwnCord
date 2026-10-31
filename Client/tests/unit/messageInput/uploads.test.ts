@@ -1,33 +1,28 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/messageInputMocks";
 import { createMessageInput } from "@components/MessageInput";
 import { authStore } from "@stores/auth.store";
-import { makeOptions } from "../../helpers/messageInputHarness";
+import {
+  makeOptions,
+  makeOversizedFile,
+  mountMessageInput,
+  selectFiles,
+  useMessageInputContainer,
+} from "../../helpers/messageInputHarness";
 
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
 vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-const { resetPickerCaptures } = mocks;
-
 describe("MessageInput", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    resetPickerCaptures();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMessageInputContainer((el) => {
+    container = el;
   });
 
   it("file upload shows preview and sends attachment ID with message", async () => {
     const uploadResult = { id: "srv-123", url: "http://server/file.png", filename: "file.png" };
     const onUploadFile = vi.fn(async () => uploadResult);
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     // Simulate file selection via the hidden input
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -69,17 +64,12 @@ describe("MessageInput", () => {
 
   it("rejects file exceeding 100 MB size limit", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     // Create a file > 100MB
-    const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
-    Object.defineProperty(bigFile, "size", { value: 101 * 1024 * 1024 });
+    const bigFile = makeOversizedFile();
 
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [bigFile], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [bigFile]);
 
     // Give async handlers a tick
     await new Promise((r) => setTimeout(r, 10));
@@ -97,21 +87,16 @@ describe("MessageInput", () => {
 
   it("upload error makes the (initially hidden) preview bar visible", async () => {
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     // Nothing queued yet, so the preview bar starts without the "visible"
     // class -- app.css only shows it via .visible.
     const previewBar = container.querySelector(".attachment-preview-bar");
     expect(previewBar!.classList.contains("visible")).toBe(false);
 
-    const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
-    Object.defineProperty(bigFile, "size", { value: 101 * 1024 * 1024 });
+    const bigFile = makeOversizedFile();
 
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [bigFile], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [bigFile]);
 
     await new Promise((r) => setTimeout(r, 10));
 
@@ -124,15 +109,10 @@ describe("MessageInput", () => {
   it("keeps the error until the user edits, then clears and hides the preview bar (A11Y-05)", async () => {
     vi.useFakeTimers();
     const onUploadFile = vi.fn(async () => ({ id: "x", url: "x", filename: "x" }));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
-    const bigFile = new File(["x"], "huge.bin", { type: "application/octet-stream" });
-    Object.defineProperty(bigFile, "size", { value: 101 * 1024 * 1024 });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [bigFile], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    const bigFile = makeOversizedFile();
+    selectFiles(container, [bigFile]);
 
     await vi.advanceTimersByTimeAsync(10);
     const previewBar = container.querySelector(".attachment-preview-bar");
@@ -163,9 +143,7 @@ describe("MessageInput", () => {
 
       const file = new File(["x"], "clip.mp4", { type: "video/mp4" });
       Object.defineProperty(file, "size", { value: 11 * 1024 * 1024 });
-      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-      Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      selectFiles(container, [file]);
       await new Promise((r) => setTimeout(r, 10));
 
       expect(onUploadFile).not.toHaveBeenCalled();
@@ -242,9 +220,7 @@ describe("MessageInput", () => {
 
       const file = new File(["x"], "big.bin", { type: "application/octet-stream" });
       Object.defineProperty(file, "size", { value: 120 * 1024 * 1024 });
-      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-      Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      selectFiles(container, [file]);
 
       await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
       comp.destroy?.();
@@ -327,9 +303,7 @@ describe("MessageInput", () => {
     comp.mount(container);
 
     const file = new File(["7z"], "a.7z", { type: "application/x-7z-compressed" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [file]);
 
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalled());
     expect(container.querySelector(".attachment-upload-error")).toBeNull();
@@ -350,14 +324,10 @@ describe("MessageInput", () => {
           );
         }),
     );
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "big.pdf", { type: "application/pdf" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [file]);
 
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledOnce());
     expect(capturedSignal).toBeDefined();
@@ -386,9 +356,7 @@ describe("MessageInput", () => {
       >()
       .mockResolvedValueOnce({ id: "srv-a", url: "/a", filename: "a.pdf" })
       .mockImplementationOnce(() => new Promise(() => {}));
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const attach = (name: string): void => {
       Object.defineProperty(fileInput, "files", {
@@ -435,14 +403,10 @@ describe("MessageInput", () => {
           );
         }),
     );
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "big.pdf", { type: "application/pdf" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [file]);
 
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledOnce());
     (container.querySelector("[data-testid='attachment-remove']") as HTMLButtonElement).click();
@@ -458,14 +422,10 @@ describe("MessageInput", () => {
     const onUploadFile = vi.fn(async () => {
       throw new Error("Server exploded");
     });
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "doc.pdf", { type: "application/pdf" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [file]);
 
     // Wait for the async rejection
     await vi.waitFor(() => {
@@ -486,14 +446,10 @@ describe("MessageInput", () => {
           resolveUpload = res;
         }),
     );
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["data"], "doc.txt", { type: "text/plain" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [file]);
 
     // The upload is in flight but not resolved
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
@@ -531,14 +487,10 @@ describe("MessageInput", () => {
           resolveUpload = res;
         }),
     );
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container, { onUploadFile });
 
     const file = new File(["text"], "file.txt", { type: "text/plain" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [file]);
 
     // Wait for the preview to appear (upload started but not resolved)
     await vi.waitFor(() => {
@@ -570,14 +522,10 @@ describe("MessageInput", () => {
   it("remove button removes attachment preview after the upload has completed", async () => {
     const uploadResult = { id: "srv-123", url: "http://server/file.png", filename: "file.png" };
     const onUploadFile = vi.fn(async () => uploadResult);
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
     const testFile = new File(["image data"], "test.png", { type: "image/png" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [testFile], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [testFile]);
 
     // Wait for the upload to resolve — the entry's id is now the server id,
     // not the tempId the remove button was created with.
@@ -613,9 +561,7 @@ describe("MessageInput", () => {
   // ── Reply close button ──
 
   it("clicking reply close button hides reply bar", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setReplyTo(42, "replyuser");
     const replyBar = container.querySelector(".reply-bar") as HTMLDivElement;
@@ -632,9 +578,7 @@ describe("MessageInput", () => {
   // ── Accessible names for icon-only composer controls (B9-22) ──
 
   it("names the reply close button", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container);
 
     comp.setReplyTo(1, "x");
 
@@ -654,9 +598,7 @@ describe("MessageInput", () => {
     comp.mount(container);
 
     const file = new File(["x"], "photo.png", { type: "image/png" });
-    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-    Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    selectFiles(container, [file]);
 
     await vi.waitFor(() => {
       const btn = container.querySelector('[data-testid="attachment-remove"]');
@@ -670,9 +612,7 @@ describe("MessageInput", () => {
   // ── Textarea auto-resize ──
 
   it("textarea height adjusts on input (auto-resize)", () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container);
 
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     // After mount, textarea should have style.height set
@@ -689,9 +629,7 @@ describe("MessageInput", () => {
   // ── Emoji picker ──
 
   it("clicking emoji button opens emoji picker", async () => {
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { comp } = mountMessageInput(container);
 
     const emojiBtn = container.querySelector(".emoji-btn") as HTMLElement;
     emojiBtn.click();

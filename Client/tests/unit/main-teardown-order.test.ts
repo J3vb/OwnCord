@@ -23,7 +23,7 @@
  * disconnect/send/onServerBusy are added.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as mocks from "../helpers/mainMocks";
 
 /** Everything the session teardown does, in the order it did it. */
 const { events, wsClients } = vi.hoisted(() => ({
@@ -34,36 +34,14 @@ const { events, wsClients } = vi.hoisted(() => ({
   }>,
 }));
 
-// ---------------------------------------------------------------------------
-// Tauri API mocks — reuse the ws-mocks.ts event-registry helper so ws.ts's
-// real state machine can be driven with simulated Tauri events (same
-// mechanism ws-lifecycle.test.ts uses), and so the tray's "status-change"
-// listen() call registered by main.ts is capturable via the same
-// emitTauriEvent().
-// ---------------------------------------------------------------------------
-vi.mock("@tauri-apps/api/core", async () => ({
-  invoke: (await import("./helpers/ws-mocks")).mockInvoke,
-}));
-vi.mock("@tauri-apps/api/event", async () => ({
-  listen: (await import("./helpers/ws-mocks")).mockListen,
-}));
-const { mockOnOpenUrl } = vi.hoisted(() => ({
-  mockOnOpenUrl: vi.fn().mockResolvedValue(undefined),
-}));
-
-// CSS imports are handled natively by vite/vitest — no mock needed.
-
-vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
-vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
-vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
-vi.mock("../../src/platform/desktop/pushToTalk", () => ({
-  pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
-}));
-vi.mock("@lib/logPersistence", () => ({
-  initLogPersistence: vi.fn().mockResolvedValue(undefined),
-  flushLogs: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
+vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
+vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
+vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
+vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
+vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
+vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
 vi.mock("@lib/net/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
@@ -73,61 +51,22 @@ vi.mock("@lib/net/credentials", () => ({
   }),
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/prefs/windowState", () => ({
-  initWindowState: vi.fn().mockResolvedValue(undefined),
-}));
-vi.mock("@tauri-apps/plugin-deep-link", () => ({
-  register: vi.fn().mockResolvedValue(undefined),
-  getCurrent: vi.fn().mockResolvedValue(null),
-  onOpenUrl: (...args: unknown[]) => mockOnOpenUrl(...args),
-}));
-// The Reload recovery leaves a call through this lazily imported module.
-const { mockLeaveVoice } = vi.hoisted(() => ({
-  mockLeaveVoice: vi.fn((..._args: unknown[]): Promise<void> => Promise.resolve()),
-}));
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    leaveVoice: (...args: unknown[]) => mockLeaveVoice(...args),
-  }),
-);
-vi.mock("@lib/nav/messageNavigation", () => ({ jumpToMessage: vi.fn() }));
-vi.mock("@components/CertMismatchModal", () => ({
-  createCertMismatchModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-  createCertFirstUseModal: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
-}));
-vi.mock("@lib/net/certReconnect", () => ({ reconnectAfterCertAccept: vi.fn() }));
-const mockProfileManager = vi.hoisted(() => ({
-  loadProfiles: vi.fn().mockResolvedValue(undefined),
-  saveProfiles: vi.fn().mockResolvedValue(undefined),
-  getAll: vi.fn((): { id: string; name: string; host: string }[] => []),
-  addProfile: vi.fn((data: unknown) => ({ id: "profile-1", ...(data as object) })),
-  updateProfile: vi.fn(() => null),
-  removeProfile: vi.fn(() => true),
-  getAutoConnectProfile: vi.fn(() => null),
-  setAutoLogin: vi.fn(),
-  setLastConnected: vi.fn(),
-}));
+vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
+vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
+vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
+vi.mock("@components/CertMismatchModal", () => mocks.certMismatchModalMock());
+vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
+vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock(importOriginal));
 
-vi.mock("@lib/presence/profiles", async (importOriginal) => ({
-  deriveCompatibility: (await importOriginal<typeof import("@lib/presence/profiles")>())
-    .deriveCompatibility,
-  createTauriBackend: vi.fn(() => ({})),
-  createProfileManager: vi.fn(() => mockProfileManager),
-}));
+const { mockLeaveVoice } = mocks;
 
 // api.ts — only login() is exercised (it drives wirePostAuth); the rest of the
 // real client stays, so getConfig()/setConfig() track the host the logout
 // subscriber reads when it deletes the stored credential.
 const mockLogin = vi.fn();
 // The updater is Tauri-backed; stub it so nothing invokes into the void.
-vi.mock("@lib/net/updater", () => ({
-  checkForUpdate: vi.fn(),
-  downloadAndInstallUpdate: vi.fn(),
-  subscribeToUpdateInstall: vi.fn((listener: (state: { status: "idle" }) => void) => {
-    listener({ status: "idle" });
-    return vi.fn();
-  }),
-}));
+vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
 vi.mock("@lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/api")>();
   return {

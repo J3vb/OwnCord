@@ -13,6 +13,7 @@ import { vi } from "vitest";
 import type { PendingMessageOwner } from "../../../src/platform/contracts/pendingMessages";
 import type { PendingMessageStore } from "../../../src/platform/contracts/pendingMessages";
 import { describePendingMessagesSuite } from "./pendingMessages.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const core: {
   isTauri: () => boolean;
@@ -27,9 +28,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     return core.invoke;
   },
 }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 const mod = await import("../../../src/platform/desktop/pendingMessages");
 const desktopBinding: PendingMessageStore = mod.pendingMessages;

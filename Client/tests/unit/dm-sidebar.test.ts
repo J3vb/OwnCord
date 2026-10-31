@@ -1,21 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { avatarAttachmentsMock } from "../helpers/avatarAttachmentsMock";
+
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 // Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
 // reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
-vi.mock("../../src/features/messaging/content/attachments", () => ({
-  fetchImageAsObjectUrl,
-  // No cached bytes: every avatar here is a still picture (WP 8.7).
-  cachedImageBytes: () => null,
-  recoverEvictedImage: () => {},
-  isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
-  resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
-}));
+vi.mock("../../src/features/messaging/content/attachments", () =>
+  avatarAttachmentsMock(fetchImageAsObjectUrl),
+);
 
 import { createDmSidebar } from "../../src/components/DmSidebar";
-import type { DmConversation } from "../../src/components/DmSidebar";
+import type { DmConversation, DmSidebar, DmSidebarOptions } from "../../src/components/DmSidebar";
 import { resetBlocksStore, setUserBlockedByMe } from "../../src/stores/blocks.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 
@@ -31,8 +28,28 @@ const makeConvo = (overrides: Partial<DmConversation> = {}): DmConversation => (
   ...overrides,
 });
 
+function mountDmSidebar(
+  container: HTMLElement,
+  conversations: readonly DmConversation[],
+  overrides: Partial<DmSidebarOptions> = {},
+): DmSidebar {
+  const sidebar = createDmSidebar({
+    conversations,
+    onSelectConversation: vi.fn(),
+    onNewDm: vi.fn(),
+    ...overrides,
+  });
+  sidebar.mount(container);
+  return sidebar;
+}
+
 describe("DmSidebar", () => {
   let container: HTMLDivElement;
+
+  const mountSidebar = (
+    conversations: readonly DmConversation[],
+    overrides: Partial<DmSidebarOptions> = {},
+  ): DmSidebar => mountDmSidebar(container, conversations, overrides);
 
   beforeEach(() => {
     fetchImageAsObjectUrl.mockReset();
@@ -46,12 +63,7 @@ describe("DmSidebar", () => {
   });
 
   it("renders the sidebar with search input", () => {
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([]);
 
     const searchInput = container.querySelector(".dm-search");
     expect(searchInput).not.toBeNull();
@@ -61,15 +73,10 @@ describe("DmSidebar", () => {
   });
 
   it("filters the conversation list as the search box is typed into", () => {
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({ channelId: 1, username: "Alice" }),
-        makeConvo({ channelId: 2, username: "Bob" }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({ channelId: 1, username: "Alice" }),
+      makeConvo({ channelId: 2, username: "Bob" }),
+    ]);
 
     const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
     searchInput.value = "ali";
@@ -92,15 +99,10 @@ describe("DmSidebar", () => {
   });
 
   it("keeps the list's Tab stop on a row the search filter leaves visible", () => {
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({ channelId: 1, username: "Alice" }),
-        makeConvo({ channelId: 2, username: "Bob" }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({ channelId: 1, username: "Alice" }),
+      makeConvo({ channelId: 2, username: "Bob" }),
+    ]);
 
     const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
     searchInput.value = "bob";
@@ -118,12 +120,7 @@ describe("DmSidebar", () => {
   // callback was never wired, and the plan's stated option was to delete it
   // rather than build a friends list. This pins the deletion.
   it("does not render a Friends nav item", () => {
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([]);
 
     expect(container.querySelector(".dm-nav-item")).toBeNull();
     expect(container.textContent).not.toContain("Friends");
@@ -137,12 +134,7 @@ describe("DmSidebar", () => {
       makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
     ];
 
-    const sidebar = createDmSidebar({
-      conversations,
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar(conversations);
 
     const items = container.querySelectorAll(".dm-item");
     expect(items.length).toBe(2);
@@ -152,15 +144,10 @@ describe("DmSidebar", () => {
 
   // ── B9-21: one Tab stop, arrow-key navigation, in-place update ──
   it("exposes one Tab stop and arrow-navigates the conversation list", () => {
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
-        makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
+      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
+    ]);
 
     const items = container.querySelectorAll(".dm-item");
     expect(container.querySelectorAll(".dm-item[tabindex='0']").length).toBe(1);
@@ -177,12 +164,7 @@ describe("DmSidebar", () => {
   });
 
   it("updates rows in place, keeping the search input and its value", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ channelId: 1, userId: 1, username: "Alice" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ channelId: 1, userId: 1, username: "Alice" })]);
 
     const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
     searchInput.value = "ali";
@@ -212,12 +194,7 @@ describe("DmSidebar", () => {
       makeConvo({ channelId: 2, userId: 2, username: "Bob", unread: true }),
     ];
 
-    const sidebar = createDmSidebar({
-      conversations,
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar(conversations);
 
     const names = [...container.querySelectorAll(".dm-item .dm-name")].map((n) => n.textContent);
     expect(names).toEqual(["Alice", "Bob"]);
@@ -226,12 +203,7 @@ describe("DmSidebar", () => {
   });
 
   it("shows unread dot for unread conversations", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ unread: true })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ unread: true })]);
 
     const unreadDot = container.querySelector(".dm-unread");
     expect(unreadDot).not.toBeNull();
@@ -241,12 +213,9 @@ describe("DmSidebar", () => {
 
   it("calls onSelectConversation when a DM item is clicked", () => {
     const onSelectConversation = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ channelId: 42, userId: 42 })],
+    const sidebar = mountSidebar([makeConvo({ channelId: 42, userId: 42 })], {
       onSelectConversation,
-      onNewDm: vi.fn(),
     });
-    sidebar.mount(container);
 
     const item = container.querySelector(".dm-item") as HTMLElement;
     item.click();
@@ -257,13 +226,7 @@ describe("DmSidebar", () => {
 
   it("calls onCloseDm when close button is clicked", () => {
     const onCloseDm = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ channelId: 42, userId: 42 })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      onCloseDm,
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ channelId: 42, userId: 42 })], { onCloseDm });
 
     const closeBtn = container.querySelector(".dm-close") as HTMLButtonElement;
     closeBtn.click();
@@ -278,13 +241,9 @@ describe("DmSidebar", () => {
   // so the ✕ asks first; a 1:1 hide does not.
   it("asks to confirm leaving a group, and calls onCloseDm only after confirm", () => {
     const onCloseDm = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
+    const sidebar = mountSidebar([makeConvo({ channelId: 7, isGroup: true, username: "Crew" })], {
       onCloseDm,
     });
-    sidebar.mount(container);
 
     (container.querySelector(".dm-close") as HTMLButtonElement).click();
     expect(onCloseDm).not.toHaveBeenCalled();
@@ -299,13 +258,9 @@ describe("DmSidebar", () => {
 
   it("cancelling the group-leave confirm leaves the conversation alone", () => {
     const onCloseDm = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
+    const sidebar = mountSidebar([makeConvo({ channelId: 7, isGroup: true, username: "Crew" })], {
       onCloseDm,
     });
-    sidebar.mount(container);
 
     (container.querySelector(".dm-close") as HTMLButtonElement).click();
     (document.querySelector("[data-testid='dm-leave-cancel']") as HTMLButtonElement).click();
@@ -319,13 +274,7 @@ describe("DmSidebar", () => {
   it("keeps the group-leave confirm open while its row is rebuilt, and closes it when the row goes", () => {
     const onCloseDm = vi.fn();
     const group = makeConvo({ channelId: 7, isGroup: true, username: "Crew" });
-    const sidebar = createDmSidebar({
-      conversations: [group],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      onCloseDm,
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([group], { onCloseDm });
 
     (container.querySelector(".dm-close") as HTMLButtonElement).click();
     // A new message rebuilds the row; the prompt must survive it.
@@ -346,13 +295,9 @@ describe("DmSidebar", () => {
 
   it("shift-click skips the group-leave confirm", () => {
     const onCloseDm = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ channelId: 7, isGroup: true, username: "Crew" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
+    const sidebar = mountSidebar([makeConvo({ channelId: 7, isGroup: true, username: "Crew" })], {
       onCloseDm,
     });
-    sidebar.mount(container);
 
     (container.querySelector(".dm-close") as HTMLButtonElement).dispatchEvent(
       new MouseEvent("click", { bubbles: true, shiftKey: true }),
@@ -366,12 +311,7 @@ describe("DmSidebar", () => {
 
   it("calls onNewDm when add button is clicked", () => {
     const onNewDm = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm,
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([], { onNewDm });
 
     const addBtn = container.querySelector(".dm-add") as HTMLButtonElement;
     addBtn.click();
@@ -381,12 +321,7 @@ describe("DmSidebar", () => {
   });
 
   it("shows avatar initial when no avatar image", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ username: "alice", avatar: null })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ username: "alice", avatar: null })]);
 
     const avatar = container.querySelector(".dm-avatar");
     expect(avatar!.textContent).toBe("A");
@@ -400,12 +335,7 @@ describe("DmSidebar", () => {
     // attachments use and swapped in once the bytes arrive -- never assigned
     // as a raw src.
     fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ avatar: "http://example.com/img.png" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ avatar: "http://example.com/img.png" })]);
 
     expect(fetchImageAsObjectUrl).toHaveBeenCalledWith("http://example.com/img.png");
     await vi.waitFor(() => {
@@ -419,12 +349,7 @@ describe("DmSidebar", () => {
 
   it("fetches a server-relative avatar through the authenticated path instead of leaving a raw <img src> that 404s", async () => {
     fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,BBB");
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ username: "Bob", avatar: "/api/v1/files/42" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ username: "Bob", avatar: "/api/v1/files/42" })]);
 
     // The letter fallback draws immediately, not skipped in favor of a
     // broken <img>.
@@ -443,12 +368,7 @@ describe("DmSidebar", () => {
 
   it("keeps the presence dot when the fetched avatar image is swapped in", async () => {
     fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,CCC");
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ avatar: "/api/v1/files/42", status: "online" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ avatar: "/api/v1/files/42", status: "online" })]);
 
     const avatar = container.querySelector(".dm-avatar") as HTMLDivElement;
     // Dot and letter are both there before the bytes arrive.
@@ -470,22 +390,17 @@ describe("DmSidebar", () => {
 
   it("swaps fetched images into group faces, keeping the letter for members without one", async () => {
     fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,DDD");
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({
-          channelId: 9,
-          isGroup: true,
-          username: "Weekend Plans",
-          participants: [
-            { id: 2, username: "Bob", avatar: "/api/v1/files/7" },
-            { id: 3, username: "Carol", avatar: null },
-          ],
-        }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({
+        channelId: 9,
+        isGroup: true,
+        username: "Weekend Plans",
+        participants: [
+          { id: 2, username: "Bob", avatar: "/api/v1/files/7" },
+          { id: 3, username: "Carol", avatar: null },
+        ],
+      }),
+    ]);
 
     const faces = container.querySelectorAll(".dm-avatar-face");
     expect(faces.length).toBe(2);
@@ -504,12 +419,7 @@ describe("DmSidebar", () => {
   });
 
   it("marks active conversation with active class", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ active: true })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ active: true })]);
 
     const item = container.querySelector(".dm-item");
     expect(item!.classList.contains("active")).toBe(true);
@@ -518,12 +428,7 @@ describe("DmSidebar", () => {
   });
 
   it("shows a named phone glyph on a DM with a live call, and drops it when the call ends", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ inCall: true }), makeConvo({ channelId: 101 })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ inCall: true }), makeConvo({ channelId: 101 })]);
 
     const glyph = container.querySelector("[data-testid='dm-in-call-100']");
     expect(glyph).not.toBeNull();
@@ -537,12 +442,7 @@ describe("DmSidebar", () => {
   });
 
   it("cleans up on destroy", () => {
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([]);
 
     expect(container.querySelector(".channel-sidebar")).not.toBeNull();
 
@@ -552,14 +452,7 @@ describe("DmSidebar", () => {
 
   it("renders back header when onBack is provided", () => {
     const onBack = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      onBack,
-      serverName: "OwnCord",
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([], { onBack, serverName: "OwnCord" });
 
     const backHeader = container.querySelector('[data-testid="dm-back-header"]');
     expect(backHeader).not.toBeNull();
@@ -571,13 +464,7 @@ describe("DmSidebar", () => {
 
   it("clicking back header calls onBack", () => {
     const onBack = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      onBack,
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([], { onBack });
 
     const backHeader = container.querySelector('[data-testid="dm-back-header"]') as HTMLDivElement;
     backHeader.click();
@@ -587,12 +474,7 @@ describe("DmSidebar", () => {
   });
 
   it("does not render back header when onBack is undefined", () => {
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([]);
 
     const backHeader = container.querySelector('[data-testid="dm-back-header"]');
     expect(backHeader).toBeNull();
@@ -601,17 +483,12 @@ describe("DmSidebar", () => {
   });
 
   it("applies correct status color to DM status dot", () => {
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({ channelId: 1, userId: 1, username: "Alice", status: "online" }),
-        makeConvo({ channelId: 2, userId: 2, username: "Bob", status: "dnd" }),
-        makeConvo({ channelId: 3, userId: 3, username: "Charlie", status: "idle" }),
-        makeConvo({ channelId: 4, userId: 4, username: "Dave", status: "offline" }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({ channelId: 1, userId: 1, username: "Alice", status: "online" }),
+      makeConvo({ channelId: 2, userId: 2, username: "Bob", status: "dnd" }),
+      makeConvo({ channelId: 3, userId: 3, username: "Charlie", status: "idle" }),
+      makeConvo({ channelId: 4, userId: 4, username: "Dave", status: "offline" }),
+    ]);
 
     const statusDots = container.querySelectorAll<HTMLSpanElement>(".dm-status");
     const colors = Array.from(statusDots).map((dot) => dot.style.background);
@@ -627,13 +504,10 @@ describe("DmSidebar", () => {
   it("close button click does not trigger conversation select", () => {
     const onSelectConversation = vi.fn();
     const onCloseDm = vi.fn();
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ channelId: 42, userId: 42 })],
+    const sidebar = mountSidebar([makeConvo({ channelId: 42, userId: 42 })], {
       onSelectConversation,
-      onNewDm: vi.fn(),
       onCloseDm,
     });
-    sidebar.mount(container);
 
     const closeBtn = container.querySelector(".dm-close") as HTMLButtonElement;
     closeBtn.click();
@@ -646,15 +520,10 @@ describe("DmSidebar", () => {
   });
 
   it("clicking a DM item marks it active and deactivates siblings", () => {
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
-        makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({ channelId: 1, userId: 1, username: "Alice" }),
+      makeConvo({ channelId: 2, userId: 2, username: "Bob" }),
+    ]);
 
     const items = container.querySelectorAll(".dm-item");
     (items[0] as HTMLElement).click();
@@ -669,12 +538,7 @@ describe("DmSidebar", () => {
   });
 
   it("uses default avatar color when avatarColor is not provided", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ avatar: null, avatarColor: undefined })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ avatar: null, avatarColor: undefined })]);
 
     const avatar = container.querySelector(".dm-avatar") as HTMLDivElement;
     // Default background is #5865F2
@@ -684,12 +548,7 @@ describe("DmSidebar", () => {
   });
 
   it("uses custom avatar color when provided", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ avatar: null, avatarColor: "#ff0000" })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ avatar: null, avatarColor: "#ff0000" })]);
 
     const avatar = container.querySelector(".dm-avatar") as HTMLDivElement;
     expect(avatar.style.background).toBe("rgb(255, 0, 0)");
@@ -698,12 +557,7 @@ describe("DmSidebar", () => {
   });
 
   it("does not show unread dot for read conversations", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ unread: false })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ unread: false })]);
 
     const unreadDot = container.querySelector(".dm-unread");
     expect(unreadDot).toBeNull();
@@ -712,13 +566,7 @@ describe("DmSidebar", () => {
   });
 
   it("back header defaults to 'Server' when serverName not provided", () => {
-    const sidebar = createDmSidebar({
-      conversations: [],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-      onBack: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([], { onBack: vi.fn() });
 
     const backHeader = container.querySelector('[data-testid="dm-back-header"]');
     expect(backHeader!.textContent).toContain("Back to Server");
@@ -727,12 +575,7 @@ describe("DmSidebar", () => {
   });
 
   it("uses offline status color for unknown status values", () => {
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ status: undefined })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([makeConvo({ status: undefined })]);
 
     const statusDot = container.querySelector(".dm-status") as HTMLSpanElement;
     // undefined status falls back to "offline" key
@@ -744,20 +587,15 @@ describe("DmSidebar", () => {
   // Discord's DM list always shows the last line and when it arrived; the
   // data was already computed onto DmConversation but never drawn.
   it("renders the last-message preview and a relative timestamp per row", () => {
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({
-          channelId: 1,
-          userId: 1,
-          username: "Alice",
-          lastMessage: "see you at 6",
-          timestamp: "2020-06-15T12:00:00Z",
-        }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({
+        channelId: 1,
+        userId: 1,
+        username: "Alice",
+        lastMessage: "see you at 6",
+        timestamp: "2020-06-15T12:00:00Z",
+      }),
+    ]);
 
     expect(container.querySelector(".dm-preview")?.textContent).toBe("see you at 6");
     // A compact date for an older timestamp, not the raw ISO string.
@@ -768,12 +606,9 @@ describe("DmSidebar", () => {
 
   it("rolls a row's time from a clock time to a date at midnight", () => {
     vi.useFakeTimers({ now: new Date(2026, 8, 29, 23, 58) });
-    const sidebar = createDmSidebar({
-      conversations: [makeConvo({ timestamp: new Date(2026, 8, 29, 23, 50).toISOString() })],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({ timestamp: new Date(2026, 8, 29, 23, 50).toISOString() }),
+    ]);
     const time = () => container.querySelector(".dm-preview-time")?.textContent;
     expect(time()).toBe("11:50 PM");
 
@@ -785,14 +620,9 @@ describe("DmSidebar", () => {
   });
 
   it("rebuilds a row when only its preview or timestamp changes", () => {
-    const sidebar = createDmSidebar({
-      conversations: [
-        makeConvo({ channelId: 1, userId: 1, username: "Alice", lastMessage: "old" }),
-      ],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    const sidebar = mountSidebar([
+      makeConvo({ channelId: 1, userId: 1, username: "Alice", lastMessage: "old" }),
+    ]);
     const row = container.querySelector(".dm-item") as HTMLElement;
 
     sidebar.update([
@@ -833,13 +663,13 @@ describe("DmSidebar — unread and mention badges", () => {
     container.remove();
   });
 
+  const mountSidebar = (
+    conversations: readonly DmConversation[],
+    overrides: Partial<DmSidebarOptions> = {},
+  ): DmSidebar => mountDmSidebar(container, conversations, overrides);
+
   function mountWith(convo: DmConversation): void {
-    sidebar = createDmSidebar({
-      conversations: [convo],
-      onSelectConversation: vi.fn(),
-      onNewDm: vi.fn(),
-    });
-    sidebar.mount(container);
+    sidebar = mountSidebar([convo]);
   }
 
   it("renders the unread count, not a bare dot", () => {
@@ -913,12 +743,7 @@ describe("DmSidebar — unread and mention badges", () => {
 
     it("shows 'No direct messages yet' with a Start one button that calls onNewDm", () => {
       const onNewDm = vi.fn();
-      const sidebar = createDmSidebar({
-        conversations: [],
-        onSelectConversation: vi.fn(),
-        onNewDm,
-      });
-      sidebar.mount(container);
+      const sidebar = mountSidebar([], { onNewDm });
 
       expect(empty()?.hidden).toBe(false);
       expect(empty()?.textContent).toContain("No direct messages yet");
@@ -930,12 +755,7 @@ describe("DmSidebar — unread and mention badges", () => {
     });
 
     it("hides once a DM is added and returns when the list empties again", () => {
-      const sidebar = createDmSidebar({
-        conversations: [],
-        onSelectConversation: vi.fn(),
-        onNewDm: vi.fn(),
-      });
-      sidebar.mount(container);
+      const sidebar = mountSidebar([]);
       expect(empty()?.hidden).toBe(false);
 
       sidebar.update([makeConvo()]);
@@ -947,12 +767,7 @@ describe("DmSidebar — unread and mention badges", () => {
     });
 
     it("is not shown when conversations exist at mount", () => {
-      const sidebar = createDmSidebar({
-        conversations: [makeConvo()],
-        onSelectConversation: vi.fn(),
-        onNewDm: vi.fn(),
-      });
-      sidebar.mount(container);
+      const sidebar = mountSidebar([makeConvo()]);
       expect(empty()?.hidden).toBe(true);
       sidebar.destroy?.();
     });
@@ -977,13 +792,7 @@ describe("DmSidebar — unread and mention badges", () => {
         onRenameGroup: vi.fn(),
         ...extra,
       };
-      const sidebar = createDmSidebar({
-        conversations: [convo],
-        onSelectConversation: vi.fn(),
-        onNewDm: vi.fn(),
-        ...handlers,
-      });
-      sidebar.mount(container);
+      const sidebar = mountSidebar([convo], { ...handlers });
       container
         .querySelector(".dm-item")
         ?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 5, clientY: 5 }));

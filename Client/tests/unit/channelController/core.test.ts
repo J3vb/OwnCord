@@ -25,6 +25,7 @@ import {
 import {
   makeSlots,
   makeOpts,
+  mountController,
   useChannelControllerHarness,
 } from "../../helpers/channelControllerHarness";
 
@@ -86,10 +87,7 @@ describe("createChannelController", () => {
   });
 
   it("mounts channel components", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { opts, ctrl } = mountController();
 
     expect(ctrl.currentChannelId).toBe(42);
     expect(ctrl.messageList).not.toBeNull();
@@ -99,10 +97,7 @@ describe("createChannelController", () => {
   });
 
   it("sends channel_focus on mount", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { opts } = mountController();
 
     expect(opts.ws.send).toHaveBeenCalledWith({
       type: "channel_focus",
@@ -111,19 +106,13 @@ describe("createChannelController", () => {
   });
 
   it("loads messages on mount", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { opts } = mountController();
 
     expect(opts.msgCtrl.loadMessages).toHaveBeenCalledWith(42, expect.any(AbortSignal));
   });
 
   it("is no-op when same channel mounted", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { opts, ctrl } = mountController();
     vi.clearAllMocks();
 
     ctrl.mountChannel(42, "general");
@@ -133,10 +122,7 @@ describe("createChannelController", () => {
   });
 
   it("destroys old channel before mounting new one", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { ctrl } = mountController();
     ctrl.mountChannel(99, "random");
 
     expect(mockMessageListDestroy).toHaveBeenCalled();
@@ -149,10 +135,7 @@ describe("createChannelController", () => {
     // channel_focus only advances read state for the channel being entered;
     // nothing advances it for the channel being left, so leaving must mark it
     // read explicitly or its badges come back stale on the next `ready`.
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { ctrl } = mountController();
     expect(mockMarkChannelRead).not.toHaveBeenCalled();
 
     ctrl.mountChannel(99, "random");
@@ -180,9 +163,7 @@ describe("createChannelController", () => {
 
     it("sending from a detached window marks what was seen, not everything", () => {
       mockIsWindowDetached.mockReturnValueOnce(true);
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountController();
 
       capturedMessageInputOpts.onSend("hello", null, [], []);
 
@@ -191,9 +172,7 @@ describe("createChannelController", () => {
     });
 
     it("jumping to the present still marks at latest", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      mountController();
       capturedMessageListOpts.onJumpToPresent?.();
 
       expect(mockMarkChannelRead).toHaveBeenCalledWith(42);
@@ -201,10 +180,7 @@ describe("createChannelController", () => {
   });
 
   it("does not mark anything read on the very first mount (no previous channel)", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    mountController();
 
     expect(mockMarkChannelRead).not.toHaveBeenCalled();
   });
@@ -214,10 +190,7 @@ describe("createChannelController", () => {
     // the window being left stops updating the moment focus moves away.
     // loadMessages short-circuits on the loaded flag — leaving must drop it
     // or the revisit renders the old snapshot as if it were current.
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { opts, ctrl } = mountController();
     expect(mockInvalidateWindow).not.toHaveBeenCalled();
 
     ctrl.mountChannel(99, "random");
@@ -278,29 +251,20 @@ describe("createChannelController", () => {
   });
 
   it("does not invalidate any window on the very first mount, which fetches exactly once", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { opts } = mountController();
 
     expect(mockInvalidateWindow).not.toHaveBeenCalled();
     expect(opts.msgCtrl.loadMessages).toHaveBeenCalledTimes(1);
   });
 
   it("updates chat header name", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { opts } = mountController();
 
     expect(opts.chatHeaderName!.textContent).toBe("general");
   });
 
   it("destroyChannel resets state", () => {
-    const opts = makeOpts();
-    const ctrl = createChannelController(opts);
-
-    ctrl.mountChannel(42, "general");
+    const { ctrl } = mountController();
     ctrl.destroyChannel();
 
     expect(ctrl.currentChannelId).toBeNull();
@@ -317,9 +281,7 @@ describe("createChannelController", () => {
     });
 
     it("destroyChannel aborts the channel signal", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
 
       ctrl.destroyChannel();
 
@@ -334,9 +296,7 @@ describe("createChannelController", () => {
     });
 
     it("destroyChannel closes any open reaction picker — it survives every other teardown path otherwise", () => {
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { opts, ctrl } = mountController();
 
       ctrl.destroyChannel();
 
@@ -349,9 +309,7 @@ describe("createChannelController", () => {
       // to invalidate the outgoing channel via the previousChannelId path.
       // Without invalidation here, the channel keeps its "loaded" flag and
       // the next visit renders the pre-teardown snapshot as current.
-      const opts = makeOpts();
-      const ctrl = createChannelController(opts);
-      ctrl.mountChannel(42, "general");
+      const { ctrl } = mountController();
       mockInvalidateWindow.mockClear();
 
       ctrl.destroyChannel();

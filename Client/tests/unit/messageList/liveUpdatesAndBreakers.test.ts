@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
@@ -12,14 +13,16 @@ import {
 import { setConnectionStatus, uiStore } from "../../../src/stores/ui.store";
 import { expectConsole } from "../../helpers/console";
 import {
+  joinMember,
   makeMessage,
+  seedMember,
+  signInAsViewer,
   setMessages,
   setHasMore,
   setHistoryLoadState,
   MessageListComponent,
   useMessageListHarness,
 } from "../../helpers/messageListHarness";
-import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -159,16 +162,7 @@ describe("MessageList", () => {
     });
 
     it("repaints author identity on a roleRevision bump without rebuilding rows", () => {
-      membersStore.setState(() => ({
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "Alice", avatar: null, role: "member", status: "online" as const },
-          ],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      seedMember(1, "Alice");
       setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
       msgList.mount(container);
       const row1 = container.querySelector("[data-testid='message-1']");
@@ -191,13 +185,7 @@ describe("MessageList", () => {
     });
 
     it("recolours rendered names when the Role Colors preference is toggled", () => {
-      membersStore.setState(() => ({
-        members: new Map([
-          [1, { id: 1, username: "Alice", avatar: null, role: "admin", status: "online" as const }],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      seedMember(1, "Alice", "admin");
       setMessages(1, [makeMessage({ id: 1 })]);
       msgList.mount(container);
       const row1 = container.querySelector("[data-testid='message-1']");
@@ -225,26 +213,8 @@ describe("MessageList", () => {
     });
 
     it("re-resolves @mention highlighting on every rendered row on a rename (F3)", () => {
-      signInAs(
-        { id: 99, username: "me", avatar: null, role: "member" },
-        { token: "t", serverName: null },
-      );
-      membersStore.setState(() => ({
-        members: new Map([
-          [
-            10,
-            {
-              id: 10,
-              username: "alice",
-              avatar: null,
-              role: "member",
-              status: "online" as const,
-            },
-          ],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      signInAsViewer();
+      seedMember(10, "alice");
       // Row 1 is authored by alice; row 2 mentions alice but is authored by Bob,
       // so the pill lives on a row that member did not author.
       setMessages(1, [
@@ -276,17 +246,8 @@ describe("MessageList", () => {
     });
 
     it("wraps every newly-resolving @token across sibling prose nodes on a member join (F3)", () => {
-      signInAs(
-        { id: 99, username: "me", avatar: null, role: "member" },
-        { token: "t", serverName: null },
-      );
-      membersStore.setState(() => ({
-        members: new Map([
-          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      signInAsViewer();
+      seedMember(2, "Bob");
       setMessages(1, [
         makeMessage({
           id: 1,
@@ -337,17 +298,8 @@ describe("MessageList", () => {
     });
 
     it("does not promote an @token inside a rejected masked link to a pill (F3)", () => {
-      signInAs(
-        { id: 99, username: "me", avatar: null, role: "member" },
-        { token: "t", serverName: null },
-      );
-      membersStore.setState(() => ({
-        members: new Map([
-          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      signInAsViewer();
+      seedMember(2, "Bob");
       setMessages(1, [
         makeMessage({
           id: 1,
@@ -361,35 +313,15 @@ describe("MessageList", () => {
       // mention is highlighted at render time — nor must the resync add one.
       expect(row.querySelector(".mention")).toBeNull();
 
-      membersStore.setState((prev) => {
-        const next = new Map(prev.members);
-        next.set(12, {
-          id: 12,
-          username: "dave",
-          avatar: null,
-          role: "member",
-          status: "online" as const,
-        });
-        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
-      });
-      membersStore.flush();
+      joinMember(12, "dave");
 
       expect(row.querySelector(".mention")).toBeNull();
       expect(row.querySelector(".msg-text")!.textContent).toBe("[@dave](/settings)");
     });
 
     it("does not promote an @token inside a rejected bare URL to a pill (F3)", () => {
-      signInAs(
-        { id: 99, username: "me", avatar: null, role: "member" },
-        { token: "t", serverName: null },
-      );
-      membersStore.setState(() => ({
-        members: new Map([
-          [2, { id: 2, username: "Bob", avatar: null, role: "member", status: "online" as const }],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      signInAsViewer();
+      seedMember(2, "Bob");
       setMessages(1, [
         makeMessage({
           id: 1,
@@ -404,18 +336,7 @@ describe("MessageList", () => {
       expect(row.querySelector("a.msg-link")).toBeNull();
       expect(row.querySelector(".mention")).toBeNull();
 
-      membersStore.setState((prev) => {
-        const next = new Map(prev.members);
-        next.set(12, {
-          id: 12,
-          username: "dave",
-          avatar: null,
-          role: "member",
-          status: "online" as const,
-        });
-        return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
-      });
-      membersStore.flush();
+      joinMember(12, "dave");
 
       expect(row.querySelector(".mention")).toBeNull();
       expect(row.querySelector(".msg-text")!.textContent).toBe("see https://[/@dave");
@@ -460,16 +381,7 @@ describe("MessageList", () => {
     });
 
     it("repaints a reply's quoted author on a rename without rebuilding either row", () => {
-      membersStore.setState(() => ({
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "Alice", avatar: null, role: "member", status: "online" as const },
-          ],
-        ]),
-        typingUsers: new Map(),
-        roleRevision: 0,
-      }));
+      seedMember(1, "Alice");
       // Row 2 replies to row 1; row 2's own author (id 2) never changes.
       setMessages(1, [
         makeMessage({ id: 1 }),
@@ -640,9 +552,9 @@ describe("MessageList", () => {
   });
 
   describe("midnight rollover", () => {
-    it("relabels 'Today at' to 'Yesterday at' at midnight without a channel switch", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "relabels 'Today at' to 'Yesterday at' at midnight without a channel switch",
+      fakeTimersTest(() => {
         vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
         const msg = makeMessage({ id: 1, timestamp: new Date().toISOString() });
         setMessages(1, [msg]);
@@ -656,14 +568,12 @@ describe("MessageList", () => {
 
         expect(container.querySelector(".msg-time")!.textContent).toMatch(/^Yesterday at /);
         expect(container.querySelector('[data-testid="message-1"]')).toBe(row);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
 
-    it("releases the midnight timer on destroy", () => {
-      vi.useFakeTimers();
-      try {
+    it(
+      "releases the midnight timer on destroy",
+      fakeTimersTest(() => {
         vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
         setMessages(1, [makeMessage({ id: 1, timestamp: new Date().toISOString() })]);
         const pendingBeforeMount = vi.getTimerCount();
@@ -673,10 +583,8 @@ describe("MessageList", () => {
         msgList.destroy?.();
 
         expect(vi.getTimerCount()).toBe(pendingBeforeMount);
-      } finally {
-        vi.useRealTimers();
-      }
-    });
+      }),
+    );
   });
 
   describe("scrollToMessage vs renderWindow rebuild breaker", () => {

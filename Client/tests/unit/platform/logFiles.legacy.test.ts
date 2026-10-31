@@ -10,7 +10,7 @@
 import { vi } from "vitest";
 import type { LogEntry } from "../../../src/lib/logger";
 import type { LogFilesSeam } from "./logFiles.suite";
-import { describeLogFilesSuite } from "./logFiles.suite";
+import { describeLogFilesSuite, logFilesNativeControl, resetLogFileMocks } from "./logFiles.suite";
 
 const appLogDir = vi.fn();
 const join = vi.fn();
@@ -36,15 +36,7 @@ vi.mock("@lib/logger", () => ({
 describeLogFilesSuite(async () => {
   vi.resetModules();
   capturedListener = null;
-  for (const mock of [appLogDir, join, mkdir, writeTextFile, readDir, remove, exists]) {
-    mock.mockReset();
-  }
-  join.mockImplementation((base: string, sub: string) => Promise.resolve(`${base}/${sub}`));
-  exists.mockResolvedValue(true);
-  readDir.mockResolvedValue([]);
-  writeTextFile.mockResolvedValue(undefined);
-  mkdir.mockResolvedValue(undefined);
-  remove.mockResolvedValue(undefined);
+  resetLogFileMocks({ appLogDir, join, mkdir, writeTextFile, readDir, remove, exists });
 
   const mod = await import("../../../src/lib/logPersistence");
   const legacy: LogFilesSeam = {
@@ -56,24 +48,6 @@ describeLogFilesSuite(async () => {
 
   return {
     subject: legacy,
-    native: {
-      succeedWith() {
-        appLogDir.mockResolvedValue("/logs");
-      },
-      unavailable() {
-        appLogDir.mockRejectedValue(new Error("not running under the native host"));
-      },
-      logEntry() {
-        capturedListener?.({
-          timestamp: new Date().toISOString(),
-          level: "info",
-          component: "test",
-          message: "a log entry",
-        });
-      },
-      written() {
-        return writeTextFile.mock.calls.map((call) => call[1] as string);
-      },
-    },
+    native: logFilesNativeControl({ appLogDir, writeTextFile }, () => capturedListener),
   };
 });

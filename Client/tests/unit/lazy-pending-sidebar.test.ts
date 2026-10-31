@@ -5,6 +5,8 @@
  * module stays loaded.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as mocks from "../helpers/sidebarAreaMocks";
+import { defaultSidebarAreaOpts } from "../helpers/sidebarAreaOpts";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 const h = vi.hoisted(() => ({
@@ -36,126 +38,35 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-  getLogBuffer: () => [],
-  clearLogBuffer: vi.fn(),
-  addLogListener: () => () => {},
-  setLogLevel: vi.fn(),
-}));
+vi.mock("@lib/logger", () => mocks.loggerMock());
 
-vi.mock("@lib/ui/toast", () => ({
-  showToast: vi.fn(),
-}));
+vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 
-vi.mock("@lib/presence/profiles", () => ({
-  createProfileManager: vi.fn().mockReturnValue({
-    loadProfiles: vi.fn().mockResolvedValue(undefined),
-    getAll: vi.fn().mockReturnValue([]),
-    store: { getState: () => ({ profiles: [], healthStatuses: new Map() }) },
-  }),
-  createTauriBackend: vi.fn().mockReturnValue({}),
-}));
+vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 
-vi.mock("@components/ChannelSidebar", () => ({
-  createChannelSidebar: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/ChannelSidebar", () => mocks.channelSidebarMock());
 
-vi.mock("@components/DmSidebar", () => ({
-  createDmSidebar: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-    update: vi.fn(),
-  }),
-}));
+vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
 
-vi.mock("@components/MemberList", () => ({
-  createMemberList: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/MemberList", () => mocks.memberListMock());
 
-vi.mock("@components/UserBar", () => ({
-  createUserBar: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/UserBar", () => mocks.userBarMock());
 
-vi.mock("@components/VoiceWidget", () => ({
-  createVoiceWidget: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/VoiceWidget", () => mocks.voiceWidgetMock());
 
-vi.mock("@components/QuickSwitchOverlay", () => ({
-  createQuickSwitchOverlay: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 
-const mockOpenUrl = vi.fn(async (_url: string) => {});
-// The opener is the `open_external_url` command; `mockOpenUrl` records its URL.
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async (command: string, args?: { url: string }) => {
-    if (command !== "open_external_url") throw new Error(`unexpected invoke ${command}`);
-    return mockOpenUrl(args!.url);
-  },
-}));
+vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 
-vi.mock("@components/EditChannelModal", () => ({
-  createEditChannelModal: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
 
-vi.mock("@components/DeleteChannelModal", () => ({
-  createDeleteChannelModal: vi.fn().mockReturnValue({
-    mount: vi.fn(),
-    destroy: vi.fn(),
-  }),
-}));
+vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
 
-vi.mock("../../src/pages/main-page/VoiceCallbacks", () => ({
-  createVoiceWidgetCallbacks: vi.fn().mockReturnValue({
-    onDisconnect: vi.fn(),
-    onMuteToggle: vi.fn(),
-    onDeafenToggle: vi.fn(),
-    onCameraToggle: vi.fn(),
-    onScreenshareToggle: vi.fn(),
-  }),
-  createSidebarVoiceCallbacks: vi.fn().mockReturnValue({
-    onVoiceJoin: vi.fn(),
-    onVoiceLeave: vi.fn(),
-  }),
-  createVoiceModerationCallbacks: vi.fn().mockReturnValue({
-    onServerMute: vi.fn(),
-    onServerDeafen: vi.fn(),
-    onMove: vi.fn(),
-    onDisconnect: vi.fn(),
-  }),
-}));
+vi.mock("../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
 
-vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
-  createInviteManagerController: vi.fn().mockReturnValue({
-    open: vi.fn().mockResolvedValue(undefined),
-    cleanup: vi.fn(),
-  }),
-}));
+vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayManagersMock());
 
-import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
+import { createSidebarArea } from "../../src/pages/main-page/SidebarArea";
 import { setSidebarMode } from "../../src/stores/ui.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
 import { createDmSidebar } from "@components/DmSidebar";
@@ -167,48 +78,6 @@ const lastArgs = (fn: unknown): Callbacks => {
   const calls = (fn as ReturnType<typeof vi.fn>).mock.calls;
   return calls[calls.length - 1]![0] as Callbacks;
 };
-
-function defaultOpts(): SidebarAreaOptions {
-  return {
-    ws: {
-      send: vi.fn(),
-      close: vi.fn(),
-      on: vi.fn(() => vi.fn()),
-      off: vi.fn(),
-    } as unknown as SidebarAreaOptions["ws"],
-    api: {
-      createDm: vi.fn().mockResolvedValue({
-        channel_id: 200,
-        recipient: { id: 20, username: "Bob", avatar: "", status: "online" },
-      }),
-      closeDm: vi.fn().mockResolvedValue(undefined),
-      getInvites: vi.fn().mockResolvedValue([]),
-      createInvite: vi
-        .fn()
-        .mockResolvedValue({ code: "abc", expires_at: "", max_uses: 0, use_count: 0 }),
-      revokeInvite: vi.fn().mockResolvedValue(undefined),
-      adminCreateChannel: vi.fn().mockResolvedValue(undefined),
-      adminUpdateChannel: vi.fn().mockResolvedValue(undefined),
-      adminDeleteChannel: vi.fn().mockResolvedValue(undefined),
-      purgeMessages: vi.fn().mockResolvedValue({ channel_id: 1, ids: [3, 2], count: 2 }),
-      adminKickMember: vi.fn().mockResolvedValue(undefined),
-      adminBanMember: vi.fn().mockResolvedValue(undefined),
-      adminChangeRole: vi.fn().mockResolvedValue(undefined),
-      getConfig: vi.fn().mockReturnValue({ host: "localhost:8080" }),
-    } as unknown as SidebarAreaOptions["api"],
-    limiters: {
-      voice: { tryConsume: vi.fn().mockReturnValue(true) },
-      voiceVideo: { tryConsume: vi.fn().mockReturnValue(true) },
-    } as unknown as SidebarAreaOptions["limiters"],
-    presenceSender: {
-      send: vi.fn(),
-      rollbackRefused: vi.fn(),
-      destroy: vi.fn(),
-    },
-    getRoot: vi.fn().mockReturnValue(document.createElement("div")),
-    getToast: vi.fn().mockReturnValue({ show: vi.fn() }),
-  };
-}
 
 /** Helper to clean up a SidebarAreaResult */
 
@@ -231,7 +100,7 @@ describe("SidebarArea modals during their load", () => {
 
   function build(mode: "channels" | "dms"): void {
     setSidebarMode(mode);
-    result = createSidebarArea(defaultOpts());
+    result = createSidebarArea(defaultSidebarAreaOpts());
     container.appendChild(result.sidebarWrapper);
   }
 

@@ -4,7 +4,9 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { buildMessage } from "./messageFactory";
+import { membersStore } from "@stores/members.store";
 import { resetMessagesState, resetMembersState } from "./storeResets";
+import { signInAs } from "./storeSeeds";
 
 export function resetStores(): void {
   resetMessagesState();
@@ -78,4 +80,31 @@ export function useMessageListHarness(
     current().destroy?.();
     container.remove();
   });
+}
+
+/** Replaces the member list with a single online member. */
+export function seedMember(id: number, username: string, role = "member"): void {
+  membersStore.setState(() => ({
+    members: new Map([[id, { id, username, avatar: null, role, status: "online" as const }]]),
+    typingUsers: new Map(),
+    roleRevision: 0,
+  }));
+}
+
+/** Adds an online member and flushes, as a live member_join would. */
+export function joinMember(id: number, username: string): void {
+  membersStore.setState((prev) => {
+    const next = new Map(prev.members);
+    next.set(id, { id, username, avatar: null, role: "member", status: "online" as const });
+    return { ...prev, members: next, roleRevision: (prev.roleRevision ?? 0) + 1 };
+  });
+  membersStore.flush();
+}
+
+/** Signs in as user 99, who is not an author in the fixtures. */
+export function signInAsViewer(): void {
+  signInAs(
+    { id: 99, username: "me", avatar: null, role: "member" },
+    { token: "t", serverName: null },
+  );
 }

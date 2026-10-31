@@ -10,84 +10,26 @@
  *  - captureKeyPress: calls invoke("ptt_listen_for_key")
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as voiceSession from "../../helpers/voiceSessionMock";
+import * as ptt from "../../helpers/pttHarness";
+import { loggerMock } from "../../helpers/loggerMock";
 
-// ---------------------------------------------------------------------------
-// Shared mock state
-// ---------------------------------------------------------------------------
+vi.mock("@tauri-apps/api/core", () => ptt.tauriCoreMock());
+vi.mock("@tauri-apps/api/event", () => ptt.tauriEventMock());
+vi.mock("@lib/prefs/preferences", () => ptt.preferencesMock());
+vi.mock("@stores/voice.store", () => ptt.voiceStoreMock());
+vi.mock("@lib/logger", () => loggerMock());
+vi.mock("../../../src/lib/voice/livekitSession", () => ptt.livekitSessionMock());
 
-const mockInvoke = vi.fn();
-const mockListen = vi.fn();
-
-// Prefs storage
-const testPrefs = new Map<string, unknown>();
-
-// voiceStore state
-let mockCurrentChannelId: number | null = null;
-let mockLocalMuted = false;
-let mockLocalDeafened = false;
-let mockPttGated = false;
-let mockPttPollingLive = false;
-/** livekitSession.setPttGated: closes/opens the mic processor's gate and writes
- *  the store's pttGated (the real session does both; the mock mirrors the store
- *  write so later reads of pttGated see it). */
-const mockSetPttGated = vi.fn((gated: boolean) => {
-  mockPttGated = gated;
-});
-const mockSetMuted = vi.fn();
-const mockSetPttPollingLive = vi.fn((live: boolean) => {
-  mockPttPollingLive = live;
-});
-
-// ---------------------------------------------------------------------------
-// Module mocks (must be declared before importing the module under test)
-// ---------------------------------------------------------------------------
-
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (...args: unknown[]) => mockInvoke(...args),
-}));
-
-vi.mock("@tauri-apps/api/event", () => ({
-  listen: (...args: unknown[]) => mockListen(...args),
-}));
-
-vi.mock("@lib/prefs/preferences", () => ({
-  loadPref: (key: string, fallback: unknown) => testPrefs.get(key) ?? fallback,
-  savePref: (key: string, value: unknown) => {
-    testPrefs.set(key, value);
-  },
-}));
-
-vi.mock("@stores/voice.store", () => ({
-  voiceStore: {
-    getState: () => ({
-      currentChannelId: mockCurrentChannelId,
-      localMuted: mockLocalMuted,
-      localDeafened: mockLocalDeafened,
-      pttGated: mockPttGated,
-    }),
-  },
-  setPttPollingLive: (live: boolean) => mockSetPttPollingLive(live),
-  isPttPollingLive: () => mockPttPollingLive,
-}));
-
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  }),
-}));
-
-// PTT only ever calls setPttGated; setMuted is mocked so tests can assert it is
-// never touched (PTT no longer uses mute).
-vi.mock("../../../src/lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    setPttGated: (gated: boolean) => mockSetPttGated(gated),
-    setMuted: (muted: boolean) => mockSetMuted(muted),
-  }),
-);
+const {
+  mockInvoke,
+  mockListen,
+  testPrefs,
+  pttState,
+  mockSetPttGated,
+  mockSetMuted,
+  mockSetPttPollingLive,
+  resetAll,
+} = ptt;
 
 // ---------------------------------------------------------------------------
 // Import module under test (AFTER mocks)
@@ -101,33 +43,6 @@ const { init: initPtt, stop: stopPtt, updateKey: updatePttKey, captureKeyPress }
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Reset all mock state between tests. */
-function resetAll(): void {
-  testPrefs.clear();
-  mockCurrentChannelId = null;
-  mockLocalMuted = false;
-  mockLocalDeafened = false;
-  mockPttGated = false;
-  mockPttPollingLive = false;
-  mockSetPttGated.mockReset();
-  mockSetPttGated.mockImplementation((gated: boolean) => {
-    mockPttGated = gated;
-  });
-  mockSetMuted.mockReset();
-  mockSetPttPollingLive.mockReset();
-  mockSetPttPollingLive.mockImplementation((live: boolean) => {
-    mockPttPollingLive = live;
-  });
-  mockInvoke.mockReset();
-  mockListen.mockReset();
-  // Default: key polling is supported and every other command resolves with
-  // undefined; listen resolves with a no-op unlistener
-  mockInvoke.mockImplementation((cmd: string) =>
-    Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
-  );
-  mockListen.mockResolvedValue(() => {});
-}
 
 // ---------------------------------------------------------------------------
 // Tests: vkName
@@ -561,10 +476,10 @@ describe("updatePttKey gates the mic when binding a key mid-call", () => {
   it("closes the mic's PTT gate (never mutes) when a key is bound while already in a voice call", async () => {
     // Already in a voice call, joined with no PTT key bound — the mic was
     // published ungated (pttArmed was false at join time).
-    mockCurrentChannelId = 7;
-    mockPttGated = false;
-    mockLocalMuted = false;
-    mockLocalDeafened = false;
+    pttState.currentChannelId = 7;
+    pttState.pttGated = false;
+    pttState.localMuted = false;
+    pttState.localDeafened = false;
     mockInvoke.mockImplementation((cmd: string) =>
       Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
     );
@@ -583,8 +498,8 @@ describe("updatePttKey gates the mic when binding a key mid-call", () => {
   });
 
   it("does not gate the mic when binding a key while not in a voice call", async () => {
-    mockCurrentChannelId = null; // not in a call
-    mockPttGated = false;
+    pttState.currentChannelId = null; // not in a call
+    pttState.pttGated = false;
     mockInvoke.mockImplementation((cmd: string) =>
       Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
     );
@@ -597,8 +512,8 @@ describe("updatePttKey gates the mic when binding a key mid-call", () => {
   });
 
   it("does not gate the mic when the backend cannot actually observe key state", async () => {
-    mockCurrentChannelId = 7; // in a call
-    mockPttGated = false;
+    pttState.currentChannelId = 7; // in a call
+    pttState.pttGated = false;
     // ptt_polling_supported === false: macOS is_key_down stub / Wayland — no
     // ptt-state event can ever arrive, so gating here would strand the mic
     // muted forever with no press able to lift it.
@@ -614,8 +529,8 @@ describe("updatePttKey gates the mic when binding a key mid-call", () => {
   });
 
   it("does not re-gate when the mic is already PTT-gated", async () => {
-    mockCurrentChannelId = 7;
-    mockPttGated = true; // already gated (e.g. join-time gate already armed)
+    pttState.currentChannelId = 7;
+    pttState.pttGated = true; // already gated (e.g. join-time gate already armed)
     mockInvoke.mockImplementation((cmd: string) =>
       Promise.resolve(cmd === "ptt_polling_supported" ? true : undefined),
     );
@@ -676,7 +591,7 @@ describe("stopPtt ungates the mic when clearing the key mid-gate", () => {
 
     // Simulates livekitSession's join-time gate, still armed because the key
     // was never pressed before the user cleared the binding.
-    mockPttGated = true;
+    pttState.pttGated = true;
 
     await stopPtt();
 
@@ -690,9 +605,9 @@ describe("stopPtt ungates the mic when clearing the key mid-gate", () => {
     testPrefs.set("pttVk", 0x20);
     await initPtt();
 
-    mockPttGated = true;
-    mockLocalMuted = true;
-    mockLocalDeafened = true;
+    pttState.pttGated = true;
+    pttState.localMuted = true;
+    pttState.localDeafened = true;
 
     await stopPtt();
 
@@ -700,7 +615,7 @@ describe("stopPtt ungates the mic when clearing the key mid-gate", () => {
       expect(mockSetPttGated).toHaveBeenCalledWith(false);
     });
     expect(mockSetMuted).not.toHaveBeenCalled();
-    expect(mockLocalMuted).toBe(true);
+    expect(pttState.localMuted).toBe(true);
   });
 
   it("does nothing when pttGated was already false", async () => {
@@ -708,7 +623,7 @@ describe("stopPtt ungates the mic when clearing the key mid-gate", () => {
     await initPtt();
     mockSetPttGated.mockClear();
 
-    mockPttGated = false;
+    pttState.pttGated = false;
     await stopPtt();
     await new Promise((r) => setTimeout(r, 0));
 

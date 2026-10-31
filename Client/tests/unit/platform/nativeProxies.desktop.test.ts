@@ -8,12 +8,11 @@
 import { vi } from "vitest";
 import type { NativeProxiesSeam } from "./nativeProxies.suite";
 import { describeNativeProxiesSuite } from "./nativeProxies.suite";
+import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => lm.loggerMock());
 
 describeNativeProxiesSuite(async () => {
   vi.resetModules();

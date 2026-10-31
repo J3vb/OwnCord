@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import {
   startGameActivity,
   GAME_ACTIVITY_POLL_MS,
@@ -86,6 +86,30 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 6; i++) await Promise.resolve();
 }
 
+/** Starts a loop against a fresh socket and lets its first scan finish. */
+async function startWith(start: (fake: ReturnType<typeof fakeWs>) => unknown) {
+  const fake = fakeWs();
+  start(fake);
+  await flush();
+  return fake;
+}
+
+/** Makes every scan wait until the test releases it, in call order. */
+function holdScans(detect: Mock<() => Promise<DetectedGame | null>>) {
+  const releases: Array<(g: DetectedGame | null) => void> = [];
+  detect.mockImplementation(() => new Promise((resolve) => releases.push(resolve)));
+  return releases;
+}
+
+/** Makes each scan find a differently named game. */
+function newGameEachScan(detect: Mock<() => Promise<DetectedGame | null>>): void {
+  let n = 0;
+  detect.mockImplementation(async () => ({ ...factorio, name: `Game ${++n}` }));
+}
+
+const sentNames = (fake: ReturnType<typeof fakeWs>): Array<string | null> =>
+  fake.sent.map((s) => s.activity?.name ?? null);
+
 describe("game activity loop", () => {
   let loop: GameActivityLoop | null = null;
   let current: DetectedGame | null;
@@ -101,6 +125,11 @@ describe("game activity loop", () => {
       supported: () => supported,
     });
     return loop;
+  }
+
+  async function begin(game?: DetectedGame | null) {
+    if (game !== undefined) current = game;
+    return startWith(start);
   }
 
   beforeEach(() => {
@@ -120,10 +149,7 @@ describe("game activity loop", () => {
   });
 
   it("sends the game once and stays quiet while it does not change", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(fake.sent.map((s) => s.activity)).toEqual([
       { name: "Factorio", started_at: 1_761_206_400_000 },
     ]);
@@ -141,15 +167,12 @@ describe("game activity loop", () => {
   });
 
   it("sends a change of game, then null when the game exits", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     current = valorant;
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
     current = null;
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", "VALORANT", null]);
+    expect(sentNames(fake)).toEqual(["Factorio", "VALORANT", null]);
     // Cleared once: further quiet polls send nothing more.
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
     expect(fake.sent).toHaveLength(3);
@@ -197,10 +220,7 @@ describe("game activity loop", () => {
   });
 
   it("sends null at once when the setting is turned off, and stops scanning", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(fake.sent).toHaveLength(1);
 
     enabled = false;
@@ -217,9 +237,7 @@ describe("game activity loop", () => {
   });
 
   it("does not send a clear for a setting change when nothing was shown", async () => {
-    const fake = fakeWs();
-    start(fake);
-    await flush();
+    const fake = await begin();
     enabled = false;
     savePref(GAME_ACTIVITY_PREF_KEY, false);
     expect(fake.sent).toHaveLength(0);
@@ -238,10 +256,7 @@ describe("game activity loop", () => {
   });
 
   it("forgets a RATE_LIMITED set and sends again on the next poll", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     const first = fake.sent[0]!;
     // The dispatcher routes the refusal here; the loop claims it (no toast).
     expect(handleActivityRefusal("RATE_LIMITED", first.id)).toBe(true);
@@ -252,10 +267,7 @@ describe("game activity loop", () => {
   });
 
   it("sends again after the server's per-frame deadline refused the set", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(handleActivityRefusal("REQUEST_TIMEOUT", fake.sent[0]!.id)).toBe(true);
 
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
@@ -263,21 +275,15 @@ describe("game activity loop", () => {
   });
 
   it("after a refused set, sends null if the game is gone by the retry", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     handleActivityRefusal("RATE_LIMITED", fake.sent[0]!.id);
     current = null;
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null]);
+    expect(sentNames(fake)).toEqual(["Factorio", null]);
   });
 
   it("claims only its own frames' refusals", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(handleActivityRefusal("RATE_LIMITED", "some-other-frame")).toBe(false);
     expect(handleActivityRefusal("RATE_LIMITED", undefined)).toBe(false);
     // Nothing was forgotten, so nothing is re-sent.
@@ -286,20 +292,14 @@ describe("game activity loop", () => {
   });
 
   it("leaves a BAD_REQUEST name alone instead of retrying it every poll", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(handleActivityRefusal("BAD_REQUEST", fake.sent[0]!.id)).toBe(true);
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
     expect(fake.sent).toHaveLength(1);
   });
 
   it("asks again on the next poll after a set refused because the switch is off", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(fake.sent).toHaveLength(1);
     // The dispatcher routes the refusal here; the loop claims it (no toast).
     expect(handleActivityRefusal("GAME_ACTIVITY_DISABLED", fake.sent[0]!.id)).toBe(true);
@@ -313,10 +313,7 @@ describe("game activity loop", () => {
     afterEach(() => resetServerCapabilities());
 
     it("sends nothing, not even a null, when the switch goes off, and stops scanning", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       expect(fake.sent).toHaveLength(1);
 
       // The server cleared the game itself; the dispatcher turns the capability off.
@@ -330,10 +327,7 @@ describe("game activity loop", () => {
     });
 
     it("polls at once when the switch comes back on, and sends the game again", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       supported = false;
       applyGameActivityPolicy(false);
       await flush();
@@ -347,10 +341,7 @@ describe("game activity loop", () => {
     });
 
     it("sends the game again after the switch cycled even if it never saw the off frame", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       // The set was refused while off; the off frame itself was missed, and
       // the true frame that follows is no change for this client.
       handleActivityRefusal("GAME_ACTIVITY_DISABLED", fake.sent[0]!.id);
@@ -378,10 +369,7 @@ describe("game activity loop", () => {
     });
 
     it("stops listening when destroyed", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      await begin(factorio);
       loop?.destroy();
       loop = null;
       const scans = detect.mock.calls.length;
@@ -393,10 +381,7 @@ describe("game activity loop", () => {
   });
 
   it("re-sends the current game after every reconnect", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(fake.sent).toHaveLength(1);
 
     fake.setState("reconnecting");
@@ -434,16 +419,13 @@ describe("game activity loop", () => {
   });
 
   it("treats a rejected scan as no game", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(fake.sent).toHaveLength(1);
     detect.mockImplementation(async () => {
       throw new Error("boom");
     });
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null]);
+    expect(sentNames(fake)).toEqual(["Factorio", null]);
   });
 
   it("does not send while the socket is down", async () => {
@@ -499,19 +481,15 @@ describe("game activity loop", () => {
     });
 
     it("clears a shown game when the next name is only spaces", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       current = { ...factorio, name: "  " };
       await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
-      expect(fake.sent.map((x) => x.activity?.name ?? null)).toEqual(["Factorio", null]);
+      expect(sentNames(fake)).toEqual(["Factorio", null]);
     });
 
     it("does not start another scan while one is still running", async () => {
       const fake = fakeWs();
-      const releases: Array<(g: DetectedGame | null) => void> = [];
-      detect.mockImplementation(() => new Promise((resolve) => releases.push(resolve)));
+      const releases = holdScans(detect);
       start(fake);
       await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 2);
       expect(detect).toHaveBeenCalledTimes(1);
@@ -522,8 +500,7 @@ describe("game activity loop", () => {
 
     it("drops the answer of a scan that was running when the game choices changed", async () => {
       const fake = fakeWs();
-      const releases: Array<(g: DetectedGame | null) => void> = [];
-      detect.mockImplementation(() => new Promise((resolve) => releases.push(resolve)));
+      const releases = holdScans(detect);
       start(fake);
       await flush();
       saveGamePrefs(withRename(EMPTY_GAME_PREFS, "Factorio", "My Factory"));
@@ -535,8 +512,7 @@ describe("game activity loop", () => {
 
     it("lets the current connection's scan run on after an older connection's scan ends", async () => {
       const fake = fakeWs();
-      const releases: Array<(g: DetectedGame | null) => void> = [];
-      detect.mockImplementation(() => new Promise((resolve) => releases.push(resolve)));
+      const releases = holdScans(detect);
       start(fake);
       await flush();
       fake.setState("reconnecting");
@@ -551,8 +527,7 @@ describe("game activity loop", () => {
 
     it("forgets a choices change noticed by a scan that an older connection owned", async () => {
       const fake = fakeWs();
-      const releases: Array<(g: DetectedGame | null) => void> = [];
-      detect.mockImplementation(() => new Promise((resolve) => releases.push(resolve)));
+      const releases = holdScans(detect);
       start(fake);
       await flush();
       saveGamePrefs(withRename(EMPTY_GAME_PREFS, "Other", "Renamed"));
@@ -601,8 +576,7 @@ describe("game activity loop", () => {
 
     it("tracks the eight most recent frames for refusals", async () => {
       const fake = fakeWs();
-      let n = 0;
-      detect.mockImplementation(async () => ({ ...factorio, name: `Game ${++n}` }));
+      newGameEachScan(detect);
       start(fake);
       await flush();
       await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 7);
@@ -613,8 +587,7 @@ describe("game activity loop", () => {
 
     it("forgets the oldest frame once a ninth is sent", async () => {
       const fake = fakeWs();
-      let n = 0;
-      detect.mockImplementation(async () => ({ ...factorio, name: `Game ${++n}` }));
+      newGameEachScan(detect);
       start(fake);
       await flush();
       await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 8);
@@ -625,10 +598,7 @@ describe("game activity loop", () => {
     });
 
     it("claims a refusal once and logs it", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       const entries: LogEntry[] = [];
       const stop = addLogListener((entry) => entries.push(entry));
       setLogLevel("debug");
@@ -647,19 +617,13 @@ describe("game activity loop", () => {
     });
 
     it("still claims a refusal that arrives after the socket dropped", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       fake.setState("reconnecting");
       expect(handleActivityRefusal("BAD_REQUEST", fake.sent[0]!.id)).toBe(true);
     });
 
     it("sends no clear for a setting turned off while the socket is down", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       fake.setState("reconnecting");
       enabled = false;
       savePref(GAME_ACTIVITY_PREF_KEY, false);
@@ -667,10 +631,7 @@ describe("game activity loop", () => {
     });
 
     it("sends no clear for a setting turned off once the server stopped supporting it", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       supported = false;
       enabled = false;
       savePref(GAME_ACTIVITY_PREF_KEY, false);
@@ -678,10 +639,7 @@ describe("game activity loop", () => {
     });
 
     it("does not scan again when the server switch goes off, even if the capability still reads on", async () => {
-      const fake = fakeWs();
-      current = factorio;
-      start(fake);
-      await flush();
+      const fake = await begin(factorio);
       const scans = detect.mock.calls.length;
       applyGameActivityPolicy(false);
       await flush();
@@ -700,8 +658,7 @@ describe("game activity loop", () => {
 
     it("drops a scan that answers after the loop was destroyed", async () => {
       const fake = fakeWs();
-      const releases: Array<(g: DetectedGame | null) => void> = [];
-      detect.mockImplementation(() => new Promise((resolve) => releases.push(resolve)));
+      const releases = holdScans(detect);
       const l = start(fake);
       await flush();
       l.destroy();
@@ -726,6 +683,11 @@ describe("game activity loop: the user's own game choices", () => {
       supported: () => true,
     });
     return loop;
+  }
+
+  async function begin(game?: DetectedGame | null) {
+    if (game !== undefined) current = game;
+    return startWith(start);
   }
 
   beforeEach(() => {
@@ -756,10 +718,7 @@ describe("game activity loop: the user's own game choices", () => {
 
   it("sends the renamed name, and the detected name again once the rename is reset", async () => {
     saveGamePrefs(withRename(EMPTY_GAME_PREFS, "Factorio", "  My Factory  "));
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     expect(fake.sent.map((s) => s.activity?.name)).toEqual(["My Factory"]);
 
     // A rename made while the game runs is picked up at once, not on the next beat.
@@ -776,10 +735,7 @@ describe("game activity loop: the user's own game choices", () => {
     saveGamePrefs(
       withRename(withRename(EMPTY_GAME_PREFS, "Factorio", "Playing"), "VALORANT", "Playing"),
     );
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     current = valorant;
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
     expect(fake.sent.map((s) => s.activity ?? null)).toEqual([
@@ -793,10 +749,7 @@ describe("game activity loop: the user's own game choices", () => {
   });
 
   it("remembers every detected name, newest first, once", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    await begin(factorio);
     current = valorant;
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS);
     current = factorio;
@@ -806,11 +759,8 @@ describe("game activity loop: the user's own game choices", () => {
   });
 
   it("hiding the game being shown clears it at once when no other game runs, and never sends it again", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio"]);
+    const fake = await begin(factorio);
+    expect(sentNames(fake)).toEqual(["Factorio"]);
 
     // The host skips a hidden game, as the real one does.
     detect.mockImplementation(async (prefs) =>
@@ -818,26 +768,23 @@ describe("game activity loop: the user's own game choices", () => {
     );
     saveGamePrefs(withHidden(loadGamePrefs(), "Factorio", true));
     await flush();
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null]);
+    expect(sentNames(fake)).toEqual(["Factorio", null]);
 
     await vi.advanceTimersByTimeAsync(GAME_ACTIVITY_POLL_MS * 3);
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null]);
+    expect(sentNames(fake)).toEqual(["Factorio", null]);
 
     // Showing it again brings it back.
     saveGamePrefs(withHidden(loadGamePrefs(), "factorio", false));
     await flush();
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", null, "Factorio"]);
+    expect(sentNames(fake)).toEqual(["Factorio", null, "Factorio"]);
   });
 
   it("hides a game by its detected name even when it is shown under a rename", async () => {
     saveGamePrefs(withRename(EMPTY_GAME_PREFS, "Factorio", "My Factory"));
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     saveGamePrefs(withHidden(loadGamePrefs(), "FACTORIO", true));
     await flush();
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["My Factory", null]);
+    expect(sentNames(fake)).toEqual(["My Factory", null]);
   });
 
   it("drops an answer for a game hidden while the scan ran", async () => {
@@ -853,16 +800,13 @@ describe("game activity loop: the user's own game choices", () => {
   });
 
   it("falls through to the next game the host finds once one is hidden", async () => {
-    const fake = fakeWs();
-    current = factorio;
-    start(fake);
-    await flush();
+    const fake = await begin(factorio);
     detect.mockImplementation(async (prefs) =>
       (prefs as { hidden: string[] }).hidden.includes("Factorio") ? valorant : factorio,
     );
     saveGamePrefs(withHidden(loadGamePrefs(), "Factorio", true));
     await flush();
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["Factorio", "VALORANT"]);
+    expect(sentNames(fake)).toEqual(["Factorio", "VALORANT"]);
   });
 
   it("a hide while a scan is running drops that scan's answer and sends one frame from the next", async () => {
@@ -875,7 +819,7 @@ describe("game activity loop: the user's own game choices", () => {
     detect.mockImplementation(async () => valorant);
     release(factorio);
     await flush();
-    expect(fake.sent.map((s) => s.activity?.name ?? null)).toEqual(["VALORANT"]);
+    expect(sentNames(fake)).toEqual(["VALORANT"]);
   });
 
   it("does not record a manual game as a detected one", async () => {
@@ -914,9 +858,7 @@ describe("game activity loop: the user's own game choices", () => {
     }
     // Text that is not JSON at all.
     localStorage.setItem("owncord:settings:" + GAME_PREFS_KEY, "{not json");
-    const fake = fakeWs();
-    start(fake);
-    await flush();
+    const fake = await begin();
     expect(fake.sent.map((s) => s.activity?.name)).toEqual(["Factorio"]);
   });
 });
