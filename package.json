@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "changelogen": "^0.6.2",
+    "jscpd": "4.3.0",
     "prettier": "^3.9.10"
   }
 }

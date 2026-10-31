@@ -5,9 +5,9 @@
 // scripts/checks/test-duplication-baseline.json. A change that removes
 // duplication lowers the stored number with --update, which refuses to raise it.
 //
-// jscpd is not a dependency of this repository. The script runs
-// `npx jscpd@4` (it needs the network the first time), or reads a report
-// that is already on disk with --report <jscpd-report.json>.
+// jscpd is a pinned root devDependency, so `npm ci` at the repository root
+// is all the script needs (the Repository Hygiene job runs it there). It can
+// also read a report that is already on disk with --report <jscpd-report.json>.
 //
 // The settings below are the ones the baseline was measured with: a
 // 50-token minimum, and a line and size limit high enough that no file is
@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const BASELINE_PATH = path.join(ROOT, "scripts/checks/test-duplication-baseline.json");
+const JSCPD_BIN = path.join(ROOT, "node_modules/jscpd/bin/jscpd");
 export const JSCPD_ARGS = [
   "--min-tokens",
   "50",
@@ -67,7 +68,7 @@ export function nextBaseline(current, baseline) {
 function runJscpd() {
   const out = mkdtempSync(path.join(tmpdir(), "jscpd-tests-"));
   try {
-    execFileSync("npx", ["--yes", "jscpd@4", ...JSCPD_ARGS, "--output", out, "Client/tests"], {
+    execFileSync(process.execPath, [JSCPD_BIN, ...JSCPD_ARGS, "--output", out, "Client/tests"], {
       cwd: ROOT,
       stdio: ["ignore", "ignore", "inherit"],
     });
