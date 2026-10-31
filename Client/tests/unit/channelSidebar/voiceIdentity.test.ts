@@ -26,6 +26,34 @@ vi.mock("../../../src/features/profiles/openUserProfilePopup", () =>
 
 const { mockRePinPeerIdentity, mockShowToast } = mocks;
 
+/** Give peer 10 a published identity key. */
+function publishAliceKey(): void {
+  membersStore.setState((prev) => {
+    const members = new Map(prev.members);
+    members.set(10, {
+      id: 10,
+      username: "Alice",
+      avatar: null,
+      role: "member",
+      status: "online",
+      identityPublicKey: "alice-published-key-b64",
+    });
+    return { ...prev, members };
+  });
+}
+
+const waitForModal = (): Promise<void> =>
+  vi.waitFor(() => {
+    expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
+  });
+
+const waitForTrustButton = (): Promise<HTMLButtonElement> =>
+  vi.waitFor(() => {
+    const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    return btn;
+  });
+
 // ── E2EE identity verification badge on voice user rows (F3 TOFU) ──
 
 describe("ChannelSidebar voice identity badge", () => {
@@ -181,26 +209,13 @@ describe("ChannelSidebar voice identity badge", () => {
 
     // Opening is async (computes the changed key's fingerprint before mounting).
     (badgeFor(10) as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
-    });
+    await waitForModal();
   });
 
   it("shows the changed key's fingerprint in the mismatch modal for out-of-band verification", async () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     // The peer must have a published identity key for its fingerprint to be shown.
-    membersStore.setState((prev) => {
-      const members = new Map(prev.members);
-      members.set(10, {
-        id: 10,
-        username: "Alice",
-        avatar: null,
-        role: "member",
-        status: "online",
-        identityPublicKey: "alice-published-key-b64",
-      });
-      return { ...prev, members };
-    });
+    publishAliceKey();
     setPeerVerif(10, "mismatch", null);
     sidebar.mount(container);
 
@@ -215,27 +230,12 @@ describe("ChannelSidebar voice identity badge", () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
     // The peer must have a published key so its fingerprint is shown and there
     // is a concrete verified key to re-pin.
-    membersStore.setState((prev) => {
-      const members = new Map(prev.members);
-      members.set(10, {
-        id: 10,
-        username: "Alice",
-        avatar: null,
-        role: "member",
-        status: "online",
-        identityPublicKey: "alice-published-key-b64",
-      });
-      return { ...prev, members };
-    });
+    publishAliceKey();
     setPeerVerif(10, "mismatch", null);
     sidebar.mount(container);
 
     (badgeFor(10) as HTMLElement).click();
-    const trustBtn = await vi.waitFor(() => {
-      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
-      expect(btn).not.toBeNull();
-      return btn;
-    });
+    const trustBtn = await waitForTrustButton();
     trustBtn.click();
 
     // Pins the exact key whose fingerprint was displayed, not a bare userId.
@@ -253,27 +253,12 @@ describe("ChannelSidebar voice identity badge", () => {
   // key would get pinned (TOCTOU).
   it("pins the displayed key, not one the server swapped in during the verification window", async () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
-    membersStore.setState((prev) => {
-      const members = new Map(prev.members);
-      members.set(10, {
-        id: 10,
-        username: "Alice",
-        avatar: null,
-        role: "member",
-        status: "online",
-        identityPublicKey: "alice-published-key-b64",
-      });
-      return { ...prev, members };
-    });
+    publishAliceKey();
     setPeerVerif(10, "mismatch", null);
     sidebar.mount(container);
 
     (badgeFor(10) as HTMLElement).click();
-    const trustBtn = await vi.waitFor(() => {
-      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
-      expect(btn).not.toBeNull();
-      return btn;
-    });
+    const trustBtn = await waitForTrustButton();
 
     // Server mutates the peer's key while the modal is open and the human is
     // still comparing the fingerprint it displayed.
@@ -291,18 +276,7 @@ describe("ChannelSidebar voice identity badge", () => {
 
   it("does not re-pin when the fingerprint could not be computed (no blind accept)", async () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
-    membersStore.setState((prev) => {
-      const members = new Map(prev.members);
-      members.set(10, {
-        id: 10,
-        username: "Alice",
-        avatar: null,
-        role: "member",
-        status: "online",
-        identityPublicKey: "alice-published-key-b64",
-      });
-      return { ...prev, members };
-    });
+    publishAliceKey();
     setPeerVerif(10, "mismatch", null);
     // The changed key's fingerprint cannot be computed → the modal shows no
     // fingerprint, so Trust must not pin a key the user never got to verify.
@@ -310,11 +284,7 @@ describe("ChannelSidebar voice identity badge", () => {
     sidebar.mount(container);
 
     (badgeFor(10) as HTMLElement).click();
-    const trustBtn = await vi.waitFor(() => {
-      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
-      expect(btn).not.toBeNull();
-      return btn;
-    });
+    const trustBtn = await waitForTrustButton();
     expectConsole("warn", /\[peer-verification\] E2EE: could not compute changed-key fingerprint/);
     trustBtn.click();
 
@@ -327,28 +297,13 @@ describe("ChannelSidebar voice identity badge", () => {
     // not persist the new pin; the caller used to ignore that boolean, so
     // "Trust New Key" closed the modal and the peer stayed blocked silently.
     addVoiceUser(VOICE_CH, 10, "Alice");
-    membersStore.setState((prev) => {
-      const members = new Map(prev.members);
-      members.set(10, {
-        id: 10,
-        username: "Alice",
-        avatar: null,
-        role: "member",
-        status: "online",
-        identityPublicKey: "alice-published-key-b64",
-      });
-      return { ...prev, members };
-    });
+    publishAliceKey();
     setPeerVerif(10, "mismatch", null);
     mockRePinPeerIdentity.mockResolvedValueOnce(false);
     sidebar.mount(container);
 
     (badgeFor(10) as HTMLElement).click();
-    const trustBtn = await vi.waitFor(() => {
-      const btn = document.body.querySelector(".modal-overlay .btn-danger") as HTMLButtonElement;
-      expect(btn).not.toBeNull();
-      return btn;
-    });
+    const trustBtn = await waitForTrustButton();
     trustBtn.click();
 
     await vi.waitFor(() => {
@@ -362,9 +317,7 @@ describe("ChannelSidebar voice identity badge", () => {
     sidebar.mount(container);
 
     (badgeFor(10) as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
-    });
+    await waitForModal();
 
     sidebar.destroy?.();
     expect(document.body.querySelector(".modal-overlay")).toBeNull();
@@ -409,9 +362,7 @@ describe("ChannelSidebar identity-mismatch modal lifetime", () => {
     sidebar.mount(container);
 
     (badgeFor(10) as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
-    });
+    await waitForModal();
 
     // Unrelated re-render, the same shape as a message landing in another
     // channel (dispatcher -> incrementUnread -> new channels Map ->
@@ -424,18 +375,7 @@ describe("ChannelSidebar identity-mismatch modal lifetime", () => {
 
   it("still opens the mismatch modal when an unrelated re-render lands during the fingerprint compute", async () => {
     addVoiceUser(VOICE_CH, 10, "Alice");
-    membersStore.setState((prev) => {
-      const members = new Map(prev.members);
-      members.set(10, {
-        id: 10,
-        username: "Alice",
-        avatar: null,
-        role: "member",
-        status: "online",
-        identityPublicKey: "alice-published-key-b64",
-      });
-      return { ...prev, members };
-    });
+    publishAliceKey();
     setPeerVerif(10, "mismatch", null);
     sidebar.mount(container);
 
@@ -464,8 +404,6 @@ describe("ChannelSidebar identity-mismatch modal lifetime", () => {
 
     resolveFingerprint("FEED FACE 1234 5678");
 
-    await vi.waitFor(() => {
-      expect(document.body.querySelector(".modal-overlay")).not.toBeNull();
-    });
+    await waitForModal();
   });
 });

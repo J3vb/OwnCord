@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/sidebarAreaMocks";
+import { byName } from "../../helpers/tableCases";
 import { createSidebarArea } from "../../../src/pages/main-page/SidebarArea";
-import { channelsStore } from "../../../src/stores/channels.store";
+import { channelsStore, type Channel } from "../../../src/stores/channels.store";
 import { dmStore, addDmChannel } from "../../../src/stores/dm.store";
 import { uiStore, setSidebarMode } from "../../../src/stores/ui.store";
-import { membersStore } from "../../../src/stores/members.store";
 import { voiceStore, joinVoiceChannel, updateVoiceState } from "../../../src/stores/voice.store";
 import {
   isDmKeptForCall,
@@ -24,6 +24,16 @@ import {
   makeDm,
   defaultOpts,
   cleanup,
+  mountArea,
+  firstCallArg,
+  lastCallArg,
+  enterDmsMode,
+  openMemberPicker,
+  clickDmEntry,
+  makeChannel,
+  seedChannels,
+  seedMembers,
+  optsWithToast,
 } from "../../helpers/sidebarAreaHarness";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -69,10 +79,9 @@ describe("SidebarArea", () => {
 
   describe("DMs mode", () => {
     it("mounts DM sidebar when mode is dms", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createDmSidebar).toHaveBeenCalled();
       expect(getMockMount(createDmSidebar as MockedFn)).toHaveBeenCalled();
@@ -81,10 +90,9 @@ describe("SidebarArea", () => {
     });
 
     it("does not mount channel sidebar or member list in DMs mode", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createChannelSidebar).not.toHaveBeenCalled();
       expect(createMemberList).not.toHaveBeenCalled();
@@ -93,8 +101,7 @@ describe("SidebarArea", () => {
     });
 
     it("switches from channels to DMs mode when store changes", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createChannelSidebar).toHaveBeenCalledTimes(1);
 
@@ -107,10 +114,9 @@ describe("SidebarArea", () => {
     });
 
     it("switches from DMs back to channels mode when store changes", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createDmSidebar).toHaveBeenCalledTimes(1);
 
@@ -123,8 +129,7 @@ describe("SidebarArea", () => {
     });
 
     it("destroys previous sidebar content when switching modes", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const destroyFn = getMockDestroy(createChannelSidebar as MockedFn);
 
@@ -137,8 +142,7 @@ describe("SidebarArea", () => {
     });
 
     it("cleans up channel-mode extras (member list) when switching to DMs", () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const memberDestroyFn = getMockDestroy(createMemberList as MockedFn);
 
@@ -151,10 +155,9 @@ describe("SidebarArea", () => {
     });
 
     it("refreshes the DM sidebar rows in place when DM store changes in DMs mode", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const initialCallCount = (createDmSidebar as MockedFn).mock.calls.length;
       const update = getMockUpdate(createDmSidebar as MockedFn);
@@ -174,10 +177,9 @@ describe("SidebarArea", () => {
     // latter null, so a subscription on it would stop redrawing the list the
     // moment a group became the active conversation.
     it("refreshes the DM sidebar rows in place when the active channel changes in DMs mode", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const initialCallCount = (createDmSidebar as MockedFn).mock.calls.length;
 
@@ -229,11 +231,10 @@ describe("SidebarArea", () => {
     }
 
     it("keeps the search filter text across a DM store change without rebuilding", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
       mockDmSidebarWithSearchInput();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
       expect(searchInput).not.toBeNull();
@@ -254,11 +255,10 @@ describe("SidebarArea", () => {
     });
 
     it("keeps keyboard focus on the search input across a DM store change", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
       mockDmSidebarWithSearchInput();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       const searchInput = container.querySelector(".dm-search") as HTMLInputElement;
       searchInput.focus();
@@ -282,27 +282,15 @@ describe("SidebarArea", () => {
 
   describe("member picker modal", () => {
     it("shows member picker with non-current-user members", async () => {
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
-          ],
-          [
-            2,
-            { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const },
-          ],
-          [3, { id: 3, username: "Bob", avatar: null, role: "member", status: "idle" as const }],
-        ]),
-      }));
+      seedMembers([
+        { id: 1, username: "testuser", role: "admin", status: "online" },
+        { id: 2, username: "Alice", role: "member", status: "online" },
+        { id: 3, username: "Bob", role: "member", status: "idle" },
+      ]);
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      await openMemberPicker(container);
 
       const items = document.querySelectorAll(".dm-member-picker-item");
       expect(items.length).toBe(2);
@@ -311,12 +299,9 @@ describe("SidebarArea", () => {
     });
 
     it("does not open a second picker if one is already open", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      const addBtn = await openMemberPicker(container);
       addBtn.click();
       await vi.dynamicImportSettled();
 
@@ -327,12 +312,9 @@ describe("SidebarArea", () => {
     });
 
     it("closes picker on cancel button click", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      await openMemberPicker(container);
 
       const cancelBtn = document.querySelector(".btn-secondary") as HTMLElement;
       cancelBtn.click();
@@ -343,12 +325,9 @@ describe("SidebarArea", () => {
     });
 
     it("closes picker when clicking the overlay background", async () => {
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      await openMemberPicker(container);
 
       const overlay = document.querySelector(".modal-overlay") as HTMLElement;
       overlay.click();
@@ -359,27 +338,15 @@ describe("SidebarArea", () => {
     });
 
     it("clicking a member creates a DM and closes picker", async () => {
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
-          ],
-          [
-            2,
-            { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const },
-          ],
-        ]),
-      }));
+      seedMembers([
+        { id: 1, username: "testuser", role: "admin", status: "online" },
+        { id: 2, username: "Alice", role: "member", status: "online" },
+      ]);
 
       const opts = defaultOpts();
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      await openMemberPicker(container);
 
       // The picker is multi-select since group DMs: a click selects, and the
       // confirm button (labelled for the selection size) commits.
@@ -399,23 +366,14 @@ describe("SidebarArea", () => {
     });
 
     it("shows member avatar initial and status in picker", async () => {
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
-          ],
-          [2, { id: 2, username: "Alice", avatar: null, role: "member", status: "idle" as const }],
-        ]),
-      }));
+      seedMembers([
+        { id: 1, username: "testuser", role: "admin", status: "online" },
+        { id: 2, username: "Alice", role: "member", status: "idle" },
+      ]);
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      await openMemberPicker(container);
 
       const avatar = document.querySelector(".dm-avatar");
       expect(avatar!.textContent).toBe("A");
@@ -432,11 +390,9 @@ describe("SidebarArea", () => {
     it("clicking a DM entry switches to DMs mode and sets active channel", () => {
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
-      entry.click();
+      clickDmEntry(container);
 
       expect(uiStore.getState().sidebarMode).toBe("dms");
       expect(uiStore.getState().activeDmUserId).toBe(10);
@@ -446,35 +402,13 @@ describe("SidebarArea", () => {
     });
 
     it("saves current non-DM channel before switching to DMs", () => {
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, {
-          id: 1,
-          name: "general",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next, activeChannelId: 1 };
-      });
+      seedChannels([makeChannel({ id: 1, name: "general" })], { activeChannelId: 1 });
 
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
-      entry.click();
+      clickDmEntry(container);
 
       expect(uiStore.getState().sidebarMode).toBe("dms");
 
@@ -482,52 +416,19 @@ describe("SidebarArea", () => {
     });
 
     it("does not save DM channel as channelBeforeDm", () => {
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, {
-          id: 1,
-          name: "general",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        next.set(50, {
-          id: 50,
-          name: "DmCh",
-          type: "dm",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next, activeChannelId: 50 };
-      });
+      seedChannels(
+        [
+          makeChannel({ id: 1, name: "general" }),
+          makeChannel({ id: 50, name: "DmCh", type: "dm" }),
+        ],
+        { activeChannelId: 50 },
+      );
 
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
-      entry.click();
+      clickDmEntry(container);
       uiStore.flush();
 
       // DM was active but type was dm, so channelBeforeDm should be null:
@@ -535,8 +436,7 @@ describe("SidebarArea", () => {
       // channel (50) — it should fall back to the first text channel (1).
       expect(uiStore.getState().sidebarMode).toBe("dms");
 
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      const lastCall = lastCallArg(createDmSidebar as MockedFn);
       lastCall.onBack();
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
@@ -553,13 +453,12 @@ describe("SidebarArea", () => {
 
   describe("DM sidebar callbacks", () => {
     it("passes correct callbacks to createDmSidebar", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       expect(createDmSidebar).toHaveBeenCalled();
-      const callArgs = (createDmSidebar as MockedFn).mock.calls[0]![0];
+      const callArgs = firstCallArg(createDmSidebar as MockedFn);
       expect(typeof callArgs.onSelectConversation).toBe("function");
       expect(typeof callArgs.onCloseDm).toBe("function");
       expect(typeof callArgs.onNewDm).toBe("function");
@@ -569,11 +468,10 @@ describe("SidebarArea", () => {
     });
 
     it("onSelectConversation opens a DM that arrived after the sidebar was built", () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-      const callArgs = (createDmSidebar as MockedFn).mock.calls[0]![0];
+      const result = mountArea(container);
+      const callArgs = firstCallArg(createDmSidebar as MockedFn);
 
       addDmChannel(makeDm({ channelId: 100 }));
       dmStore.flush();
@@ -585,41 +483,18 @@ describe("SidebarArea", () => {
     });
 
     it("onBack restores previous channel and switches to channels mode", () => {
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, {
-          id: 1,
-          name: "general",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next, activeChannelId: 1 };
-      });
+      seedChannels([makeChannel({ id: 1, name: "general" })], { activeChannelId: 1 });
 
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
       // Click DM entry to save channelBeforeDm and switch to DMs mode
-      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
-      entry.click();
+      clickDmEntry(container);
       uiStore.flush();
 
       // Get the onBack callback from the latest createDmSidebar call
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      const lastCall = lastCallArg(createDmSidebar as MockedFn);
       lastCall.onBack();
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
@@ -628,178 +503,75 @@ describe("SidebarArea", () => {
       cleanup(result);
     });
 
-    it("onBack falls back to first text channel if no saved channel", () => {
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, {
-          id: 1,
-          name: "general",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        next.set(2, {
-          id: 2,
-          name: "voice",
-          type: "voice",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next };
-      });
+    it.each(
+      byName([
+        {
+          name: "onBack falls back to first text channel if no saved channel",
+          channels: [
+            makeChannel({ id: 1, name: "general" }),
+            makeChannel({ id: 2, name: "voice", type: "voice" }),
+          ],
+          extra: {},
+          expectedActive: 1,
+        },
+        {
+          // No plain "text" channel exists — only an announcement one.
+          name: "onBack falls back to an announcement channel when no text channel remains",
+          channels: [
+            makeChannel({ id: 5, name: "announcements", type: "announcement", canSend: false }),
+          ],
+          extra: {},
+          expectedActive: 5,
+        },
+        {
+          // #random (2) is on screen, and is not first in Map insertion order. DM mode
+          // was entered the way the "View all messages" button does it: a bare
+          // setSidebarMode, so channelBeforeDm is never recorded. Must not silently
+          // jump to #general (1) — the user never asked to leave #random.
+          name: "onBack keeps the current channel when DM mode was entered without recording channelBeforeDm ('View all messages' bypass)",
+          channels: [
+            makeChannel({ id: 1, name: "general" }),
+            makeChannel({ id: 2, name: "random" }),
+          ],
+          extra: { activeChannelId: 2 },
+          expectedActive: 2,
+        },
+      ]),
+    )("%s", (_name, { channels, extra, expectedActive }) => {
+      seedChannels(channels, extra);
+      enterDmsMode();
+      const result = mountArea(container);
 
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onBack();
+      lastCallArg(createDmSidebar as MockedFn).onBack();
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
-      expect(channelsStore.getState().activeChannelId).toBe(1);
+      expect(channelsStore.getState().activeChannelId).toBe(expectedActive);
 
       cleanup(result);
     });
 
-    it("onBack falls back to an announcement channel when no text channel remains", () => {
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(5, {
-          id: 5,
-          name: "announcements",
-          type: "announcement",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: false,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        // No plain "text" channel exists — only an announcement one.
-        return { ...prev, channels: next };
-      });
+    const closeDmFromSidebar = (
+      channelId: number,
+      opts = defaultOpts(),
+    ): ReturnType<typeof createSidebarArea> => {
+      const result = mountArea(container, opts);
+      lastCallArg(createDmSidebar as MockedFn).onCloseDm(channelId);
+      return result;
+    };
 
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onBack();
-
-      expect(uiStore.getState().sidebarMode).toBe("channels");
-      expect(channelsStore.getState().activeChannelId).toBe(5);
-
-      cleanup(result);
-    });
-
-    it("onBack keeps the current channel when DM mode was entered without recording channelBeforeDm ('View all messages' bypass)", () => {
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, {
-          id: 1,
-          name: "general",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        next.set(2, {
-          id: 2,
-          name: "random",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        // #random (2) is on screen, and is not first in Map insertion order.
-        return { ...prev, channels: next, activeChannelId: 2 };
-      });
-
-      // Enter DM mode the way SidebarDmSection's "View all messages" button
-      // does: a bare setSidebarMode with no selectDmConversation call, so
-      // channelBeforeDm is never recorded.
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onBack();
-
-      expect(uiStore.getState().sidebarMode).toBe("channels");
-      // Must not silently jump to #general (1), the first text channel in
-      // Map iteration order — the user never asked to leave #random.
-      expect(channelsStore.getState().activeChannelId).toBe(2);
-
-      cleanup(result);
-    });
+    const seedActiveAliceDm = (): void => {
+      addDmChannel(makeDm({ channelId: 100 }));
+      enterDmsMode();
+      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 100 }));
+    };
 
     it("onCloseDm removes DM and calls closeDm API", () => {
-      const dm = makeDm({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-      });
-      addDmChannel(dm);
-
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 100 }));
+      seedActiveAliceDm();
 
       const opts = defaultOpts();
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(100);
+      lastCallArg(createDmSidebar as MockedFn).onCloseDm(100);
 
       expect(opts.api.closeDm).toHaveBeenCalledWith(100);
 
@@ -826,17 +598,13 @@ describe("SidebarArea", () => {
         voiceStore.flush();
       };
       const closeFrom = (channelId: number, opts = defaultOpts()) => {
-        const result = createSidebarArea(opts);
-        mounted = result;
-        container.appendChild(result.sidebarWrapper);
-        const calls = (createDmSidebar as MockedFn).mock.calls;
-        calls[calls.length - 1]![0].onCloseDm(channelId);
-        return result;
+        mounted = closeDmFromSidebar(channelId, opts);
+        return mounted;
       };
 
       it("drops the roster once the server accepts the leave", async () => {
         addDmChannel(makeDm({ channelId: 100, isGroup: true }));
-        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        enterDmsMode();
         seedRoster(100);
 
         closeFrom(100);
@@ -849,7 +617,7 @@ describe("SidebarArea", () => {
 
       it("keeps the roster when the server refuses the leave", async () => {
         addDmChannel(makeDm({ channelId: 100, isGroup: true }));
-        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        enterDmsMode();
         seedRoster(100);
         const opts = defaultOpts();
         (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
@@ -865,7 +633,7 @@ describe("SidebarArea", () => {
 
       it("keeps the roster when a 1:1 DM is closed", async () => {
         addDmChannel(makeDm({ channelId: 100, isGroup: false }));
-        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        enterDmsMode();
         seedRoster(100);
         const opts = defaultOpts();
 
@@ -881,23 +649,11 @@ describe("SidebarArea", () => {
 
     // DP-34: the optimistic removal is rolled back when the server refuses.
     it("restores the DM row when closeDm rejects", async () => {
-      const dm = makeDm({
-        channelId: 100,
-        recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-      });
-      addDmChannel(dm);
-
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 100 }));
+      seedActiveAliceDm();
 
       const opts = defaultOpts();
       (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
-
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(100);
+      const result = closeDmFromSidebar(100, opts);
 
       // Gone immediately (optimistic), back once the request rejects.
       expect(dmStore.getState().channels).toHaveLength(0);
@@ -910,24 +666,16 @@ describe("SidebarArea", () => {
 
     // WP 3B-5 (D14): a local close must not end the DM's live call on a network blip.
     describe("closing a DM while in its call", () => {
-      const closeFromSidebar = (channelId: number, opts = defaultOpts()) => {
-        const result = createSidebarArea(opts);
-        container.appendChild(result.sidebarWrapper);
-        const calls = (createDmSidebar as MockedFn).mock.calls;
-        calls[calls.length - 1]![0].onCloseDm(channelId);
-        return result;
-      };
-
       afterEach(() => {
         resetKeptCallDms();
       });
 
       it("keeps a closed 1:1's call eligible for reconnect retries", () => {
         addDmChannel(makeDm({ channelId: 100 }));
-        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        enterDmsMode();
         joinVoiceChannel(100);
 
-        const result = closeFromSidebar(100);
+        const result = closeDmFromSidebar(100);
 
         expect(dmStore.getState().channels).toHaveLength(0);
         expect(isDmKeptForCall(100)).toBe(true);
@@ -936,10 +684,10 @@ describe("SidebarArea", () => {
 
       it("does not keep a group the user leaves, so its call still ends", () => {
         addDmChannel(makeDm({ channelId: 100, isGroup: true, name: "Crew" }));
-        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        enterDmsMode();
         joinVoiceChannel(100);
 
-        const result = closeFromSidebar(100);
+        const result = closeDmFromSidebar(100);
 
         expect(isDmKeptForCall(100)).toBe(false);
         cleanup(result);
@@ -947,10 +695,10 @@ describe("SidebarArea", () => {
 
       it("does not keep a 1:1 closed while the user is in a different call", () => {
         addDmChannel(makeDm({ channelId: 100 }));
-        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        enterDmsMode();
         joinVoiceChannel(55);
 
-        const result = closeFromSidebar(100);
+        const result = closeDmFromSidebar(100);
 
         expect(isDmKeptForCall(100)).toBe(false);
         cleanup(result);
@@ -958,12 +706,12 @@ describe("SidebarArea", () => {
 
       it("forgets the DM when the server refuses the close and the row returns", async () => {
         addDmChannel(makeDm({ channelId: 100 }));
-        uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+        enterDmsMode();
         joinVoiceChannel(100);
         const opts = defaultOpts();
         (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
 
-        const result = closeFromSidebar(100, opts);
+        const result = closeDmFromSidebar(100, opts);
 
         await vi.waitFor(() => {
           expect(dmStore.getState().channels.map((c) => c.channelId)).toContain(100);
@@ -977,12 +725,11 @@ describe("SidebarArea", () => {
       addDmChannel(makeDm({ channelId: 103 }));
       addDmChannel(makeDm({ channelId: 102 }));
       addDmChannel(makeDm({ channelId: 101 }));
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
       const opts = defaultOpts();
       (opts.api.closeDm as MockedFn).mockRejectedValue(new Error("nope"));
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
       const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
       dmSidebarCalls[dmSidebarCalls.length - 1]![0].onCloseDm(102);
@@ -998,13 +745,11 @@ describe("SidebarArea", () => {
       const dm = makeDm({ channelId: 100, isGroup: true, name: "Old Name" });
       addDmChannel(dm);
 
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      const lastCall = lastCallArg(createDmSidebar as MockedFn);
       lastCall.onRenameGroup(100);
 
       // createPromptModal is the real (unmocked) factory — it mounts to
@@ -1019,43 +764,17 @@ describe("SidebarArea", () => {
       expect(document.querySelector(".modal-prompt")).toBeNull();
     });
 
+    const closeLastDmWith = (
+      channels: readonly Channel[],
+    ): ReturnType<typeof createSidebarArea> => {
+      addDmChannel(makeDm({ channelId: 100 }));
+      enterDmsMode();
+      seedChannels(channels, { activeChannelId: 100 });
+      return closeDmFromSidebar(100);
+    };
+
     it("onCloseDm goes back to channels when last DM is closed", () => {
-      addDmChannel(
-        makeDm({
-          channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-        }),
-      );
-
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(1, {
-          id: 1,
-          name: "general",
-          type: "text",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next, activeChannelId: 100 };
-      });
-
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(100);
+      const result = closeLastDmWith([makeChannel({ id: 1, name: "general" })]);
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
 
@@ -1063,44 +782,11 @@ describe("SidebarArea", () => {
     });
 
     it("onCloseDm falls back to an announcement channel when the last DM closes with no text channel", () => {
-      addDmChannel(
-        makeDm({
-          channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-        }),
-      );
-
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(5, {
-          id: 5,
-          name: "announcements",
-          type: "announcement",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: false,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        // channelBeforeDm was never recorded (DM channel added directly, not
-        // via selectDmConversation) and no plain "text" channel exists.
-        return { ...prev, channels: next, activeChannelId: 100 };
-      });
-
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
-
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
-      lastCall.onCloseDm(100);
+      // channelBeforeDm was never recorded (DM channel added directly, not
+      // via selectDmConversation) and no plain "text" channel exists.
+      const result = closeLastDmWith([
+        makeChannel({ id: 5, name: "announcements", type: "announcement", canSend: false }),
+      ]);
 
       expect(uiStore.getState().sidebarMode).toBe("channels");
       expect(channelsStore.getState().activeChannelId).toBe(5);
@@ -1109,20 +795,13 @@ describe("SidebarArea", () => {
     });
 
     it("onSelectConversation selects a DM in DMs mode", () => {
-      addDmChannel(
-        makeDm({
-          channelId: 100,
-          recipient: { id: 10, username: "Alice", avatar: "", status: "online" },
-        }),
-      );
+      addDmChannel(makeDm({ channelId: 100 }));
 
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      const lastCall = lastCallArg(createDmSidebar as MockedFn);
       lastCall.onSelectConversation(100);
 
       expect(uiStore.getState().activeDmUserId).toBe(10);
@@ -1132,13 +811,11 @@ describe("SidebarArea", () => {
     });
 
     it("onNewDm opens member picker from DMs mode", async () => {
-      uiStore.setState((prev) => ({ ...prev, sidebarMode: "dms" }));
+      enterDmsMode();
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const dmSidebarCalls = (createDmSidebar as MockedFn).mock.calls;
-      const lastCall = dmSidebarCalls[dmSidebarCalls.length - 1]![0];
+      const lastCall = lastCallArg(createDmSidebar as MockedFn);
       lastCall.onNewDm();
       await vi.dynamicImportSettled();
 
@@ -1157,11 +834,9 @@ describe("SidebarArea", () => {
     it("adds DM channel to channelsStore when clicking a DM entry", () => {
       addDmChannel(makeDm({ channelId: 100, unreadCount: 3 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
-      entry.click();
+      clickDmEntry(container);
 
       const ch = channelsStore.getState().channels.get(100);
       expect(ch).toBeDefined();
@@ -1174,35 +849,13 @@ describe("SidebarArea", () => {
     });
 
     it("does not rewrite an existing channel whose name already matches", () => {
-      channelsStore.setState((prev) => {
-        const next = new Map(prev.channels);
-        next.set(100, {
-          id: 100,
-          name: "Alice",
-          type: "dm",
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: next };
-      });
+      seedChannels([makeChannel({ id: 100, name: "Alice", type: "dm" })]);
 
       addDmChannel(makeDm({ channelId: 100 }));
 
-      const result = createSidebarArea(defaultOpts());
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container);
 
-      const entry = container.querySelector("[data-testid='dm-entry']") as HTMLElement;
-      entry.click();
+      clickDmEntry(container);
 
       const ch = channelsStore.getState().channels.get(100);
       expect(ch!.name).toBe("Alice");
@@ -1217,37 +870,23 @@ describe("SidebarArea", () => {
 
   describe("createDm error handling", () => {
     it("shows error toast when DM creation fails", async () => {
-      const mockShow = vi.fn();
-      const opts = defaultOpts();
+      const { opts, toast } = optsWithToast();
       (opts.api.createDm as MockedFn).mockRejectedValue(new Error("Server error"));
-      (opts.getToast as MockedFn).mockReturnValue({ show: mockShow });
 
-      membersStore.setState((prev) => ({
-        ...prev,
-        members: new Map([
-          [
-            1,
-            { id: 1, username: "testuser", avatar: null, role: "admin", status: "online" as const },
-          ],
-          [
-            2,
-            { id: 2, username: "Alice", avatar: null, role: "member", status: "online" as const },
-          ],
-        ]),
-      }));
+      seedMembers([
+        { id: 1, username: "testuser", role: "admin", status: "online" },
+        { id: 2, username: "Alice", role: "member", status: "online" },
+      ]);
 
-      const result = createSidebarArea(opts);
-      container.appendChild(result.sidebarWrapper);
+      const result = mountArea(container, opts);
 
-      const addBtn = container.querySelector(".category-add-btn") as HTMLElement;
-      addBtn.click();
-      await vi.dynamicImportSettled();
+      await openMemberPicker(container);
       const item = document.querySelector(".dm-member-picker-item") as HTMLElement;
       item.click();
       (document.querySelector('[data-testid="dm-picker-create"]') as HTMLElement).click();
 
       await vi.waitFor(() => {
-        expect(mockShow).toHaveBeenCalledWith("Server error", "error");
+        expect(toast.show).toHaveBeenCalledWith("Server error", "error");
       });
 
       cleanup(result);

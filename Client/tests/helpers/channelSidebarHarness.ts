@@ -1,9 +1,11 @@
-import { vi } from "vitest";
+import { afterEach, beforeEach, vi, type Mock } from "vitest";
+import { createChannelSidebar } from "../../src/components/ChannelSidebar";
+import { mockOpenUserProfilePopup } from "./channelSidebarMocks";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
-import { type ReadyChannel } from "../../src/lib/types";
+import { type ReadyChannel, type VoiceStatePayload } from "../../src/lib/types";
 import { resetMembersState } from "./storeResets";
 import { signInAs, resetChannelsState } from "./storeSeeds";
 
@@ -53,7 +55,14 @@ export function resetStores(): void {
 }
 
 /** Add a connected voice user to a channel (via the same store path the WS uses). */
-export function addVoiceUser(channelId: number, userId: number, username: string): void {
+export function addVoiceUser(
+  channelId: number,
+  userId: number,
+  username: string,
+  flags: Partial<
+    Pick<VoiceStatePayload, "muted" | "deafened" | "speaking" | "camera" | "screenshare">
+  > = {},
+): void {
   updateVoiceState({
     channel_id: channelId,
     user_id: userId,
@@ -63,6 +72,7 @@ export function addVoiceUser(channelId: number, userId: number, username: string
     speaking: false,
     camera: false,
     screenshare: false,
+    ...flags,
   });
 }
 
@@ -130,4 +140,86 @@ export function voiceModCallbacks() {
 /** Set auth user so admin-gated features (context menus, drag, create channel) activate. */
 export function setAdminUser(): void {
   signInAs({ id: 1, username: "Admin", avatar: null, role: "admin" });
+}
+
+export interface SidebarFixture {
+  container: HTMLDivElement;
+  sidebar: ReturnType<typeof createChannelSidebar>;
+  onVoiceJoin: Mock<(channelId: number) => void>;
+  onOpenCall: Mock<() => void>;
+}
+
+/**
+ * Registers the hooks that give each test a reset store, a mounted-to-body
+ * container, fresh callback spies and a new sidebar. `bind` receives each
+ * fixture so the suite can keep it in locals; `current` returns whichever
+ * sidebar the test left live, so a test that rebuilds it still gets it destroyed.
+ */
+export function useSidebarFixture(
+  bind: (fixture: SidebarFixture) => void,
+  current: () => ReturnType<typeof createChannelSidebar>,
+): void {
+  let container: HTMLDivElement;
+
+  beforeEach(() => {
+    resetStores();
+    mockOpenUserProfilePopup.mockClear();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const onVoiceJoin = vi.fn<(channelId: number) => void>();
+    const onOpenCall = vi.fn<() => void>();
+    const sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall });
+    bind({ container, sidebar, onVoiceJoin, onOpenCall });
+  });
+
+  afterEach(() => {
+    current().destroy?.();
+    container.remove();
+    // Clean up any context menus left on document.body
+    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+    document.querySelectorAll(".user-vol-menu").forEach((el) => el.remove());
+  });
+}
+
+/** Put the local user in channel 3 beside one peer, replacing the whole voice state. */
+export function joinVoiceRoomWith(
+  userId: number,
+  username: string,
+  media: { camera?: boolean; screenshare?: boolean } = {},
+): void {
+  voiceStore.setState(() => ({
+    currentChannelId: 3,
+    voiceUsers: new Map([
+      [
+        3,
+        new Map([
+          [
+            userId,
+            {
+              userId,
+              username,
+              speaking: false,
+              muted: false,
+              deafened: false,
+              camera: media.camera ?? false,
+              screenshare: media.screenshare ?? false,
+            },
+          ],
+        ]),
+      ],
+    ]),
+    voiceConfigs: new Map(),
+    localMuted: false,
+    localDeafened: false,
+    localCamera: false,
+    localScreenshare: false,
+    joinedAt: null,
+    listenOnly: false,
+    voiceStatus: "idle",
+  }));
+}
+
+/** Dispatch a bubbling right-click (contextmenu) on `el` at the given client point. */
+export function rightClick(el: HTMLElement, clientX = 100, clientY = 200): void {
+  el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX, clientY }));
 }

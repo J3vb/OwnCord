@@ -6,7 +6,15 @@ import { voiceStore } from "../../../src/stores/voice.store";
 import { uiStore, setTransientError } from "../../../src/stores/ui.store";
 import { leaveVoice as mockLeaveVoice } from "@lib/voice/livekitSession";
 import { takeJoinRefusal } from "../../../src/features/voice/joinRequest";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  readyChannel,
+  readyDm,
+  readyMember,
+  patchAuth,
+  patchVoice,
+  mock,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -18,24 +26,14 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   it("keeps the session and sets no transient error for any server_restart reason", () => {
     setTransientError(null);
-    authStore.setState((prev) => ({
-      ...prev,
+    patchAuth({
       isAuthenticated: true,
       user: { id: 1, username: "stay-user", avatar: null, role: "member" },
-    }));
+    });
 
     for (const reason of ["update", "backup_restore", "setup", "shutdown", null]) {
       mock.dispatch("server_restart", { reason, delay_seconds: 5 });
@@ -48,11 +46,7 @@ describe("WS Dispatcher", () => {
 
   it("leaves the call intact through an update notice that is then aborted", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 42,
-      voiceStatus: "connected",
-    }));
+    patchVoice({ currentChannelId: 42, voiceStatus: "connected" });
 
     mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
     expectConsole("warn", /\[dispatcher\] Server restarting/);
@@ -70,16 +64,11 @@ describe("WS Dispatcher", () => {
 
   it("keeps the session through an announced restart and ends the call when the socket drops (Q4)", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
-    authStore.setState((prev) => ({
-      ...prev,
+    patchAuth({
       isAuthenticated: true,
       user: { id: 1, username: "call-user", avatar: null, role: "member" },
-    }));
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 42,
-      voiceStatus: "connected",
-    }));
+    });
+    patchVoice({ currentChannelId: 42, voiceStatus: "connected" });
 
     // The hub's teardown notice names the restart's intent, not "shutdown".
     mock.dispatch("server_restart", { reason: "update", delay_seconds: 5 });
@@ -107,11 +96,7 @@ describe("WS Dispatcher", () => {
 
   it("keeps the call through an ordinary socket drop with no restart announced", async () => {
     vi.mocked(mockLeaveVoice).mockClear();
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 42,
-      voiceStatus: "connected",
-    }));
+    patchVoice({ currentChannelId: 42, voiceStatus: "connected" });
 
     mock.dispatchState("reconnecting");
     await vi.runAllTimersAsync();
@@ -135,11 +120,19 @@ describe("WS Dispatcher", () => {
       mock.dispatchState("reconnecting");
     }
 
+    const voiceChannels = (): unknown[] => [readyChannel({ id: 42, name: "voice", type: "voice" })];
+
+    function expectNoRejoin(): void {
+      expect(mock.ws.send).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "voice_join" }),
+      );
+    }
+
     function readyAfterRestart(channels: unknown[], dmChannels: unknown[] = []): void {
       mock.dispatch("ready", {
         channels,
         dm_channels: dmChannels,
-        members: [{ id: 5, username: "me", avatar: null, role: "member", status: "online" }],
+        members: [readyMember({ id: 5, username: "me" })],
         // The restarted hub wiped voice_states: we are not in the call.
         voice_states: [],
         roles: [],
@@ -147,16 +140,11 @@ describe("WS Dispatcher", () => {
     }
 
     beforeEach(() => {
-      authStore.setState((prev) => ({
-        ...prev,
+      patchAuth({
         isAuthenticated: true,
         user: { id: 5, username: "me", avatar: null, role: "member" },
-      }));
-      voiceStore.setState((prev) => ({
-        ...prev,
-        currentChannelId: 42,
-        voiceStatus: "connected",
-      }));
+      });
+      patchVoice({ currentChannelId: 42, voiceStatus: "connected" });
       vi.mocked(mock.ws.send).mockClear();
       vi.mocked(mockLeaveVoice).mockClear();
     });
@@ -166,7 +154,7 @@ describe("WS Dispatcher", () => {
       await vi.runAllTimersAsync();
       expect(voiceStore.getState().currentChannelId).toBeNull();
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
       expect(mock.ws.send).toHaveBeenCalledWith(
         expect.objectContaining({ type: "voice_join", payload: { channel_id: 42 } }),
@@ -181,11 +169,9 @@ describe("WS Dispatcher", () => {
       mock.dispatch("voice_disconnected", { channel_id: 42, reason: "kicked" });
       await vi.runAllTimersAsync();
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
       expect(voiceStore.getState().currentChannelId).toBeNull();
     });
 
@@ -195,11 +181,9 @@ describe("WS Dispatcher", () => {
       mock.dispatch("voice_leave", { channel_id: 42, user_id: 5 });
       await vi.runAllTimersAsync();
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
     });
 
     it("does not rejoin after a moderator kick during the countdown", async () => {
@@ -209,11 +193,9 @@ describe("WS Dispatcher", () => {
       mock.dispatchState("reconnecting");
       await vi.runAllTimersAsync();
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
     });
 
     it("does not rejoin after the user leaves voice during the countdown", async () => {
@@ -222,17 +204,15 @@ describe("WS Dispatcher", () => {
       mock.dispatchState("reconnecting");
       await vi.runAllTimersAsync();
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
     });
 
     it("rejoins the channel the user switched to during the countdown", async () => {
       announceRestart();
       // The switch moves the store optimistically, then the server leaves the old channel.
-      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 43 }));
+      patchVoice({ currentChannelId: 43 });
       mock.dispatch("voice_leave", { channel_id: 42, user_id: 5 });
       mock.dispatchState("reconnecting");
       await vi.runAllTimersAsync();
@@ -252,11 +232,9 @@ describe("WS Dispatcher", () => {
       announceRestartAndDrop();
       await vi.runAllTimersAsync();
 
-      readyAfterRestart([{ id: 7, name: "general", type: "text", category: null, position: 0 }]);
+      readyAfterRestart([readyChannel({ id: 7 })]);
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
     });
 
     it("rejoins a DM call, which ready lists under dm_channels", async () => {
@@ -266,15 +244,11 @@ describe("WS Dispatcher", () => {
       readyAfterRestart(
         [],
         [
-          {
+          readyDm({
             channel_id: 42,
             recipient: { id: 6, username: "friend", avatar: "", status: "online" },
             recipients: [{ id: 6, username: "friend", avatar: "", status: "online" }],
-            last_message_id: null,
-            last_message: "",
-            last_message_at: "",
-            unread_count: 0,
-          },
+          }),
         ],
       );
 
@@ -289,7 +263,7 @@ describe("WS Dispatcher", () => {
       // D-2: a systemctl/docker restart that is back quickly looks like a blip.
       vi.setSystemTime(Date.now() + 60_000);
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
       const joins = vi
         .mocked(mock.ws.send)
@@ -303,11 +277,9 @@ describe("WS Dispatcher", () => {
       await vi.runAllTimersAsync();
       vi.setSystemTime(Date.now() + 3 * 60_000);
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
     });
 
     it("does not rejoin when ready arrives more than 10 minutes after the notice", async () => {
@@ -315,22 +287,18 @@ describe("WS Dispatcher", () => {
       await vi.runAllTimersAsync();
       vi.setSystemTime(Date.now() + 10 * 60_000 + 1);
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
     });
 
     it("does not rejoin an ordinary reconnect with no restart announced", async () => {
       mock.dispatchState("reconnecting");
       await vi.runAllTimersAsync();
 
-      readyAfterRestart([{ id: 42, name: "voice", type: "voice", category: null, position: 0 }]);
+      readyAfterRestart(voiceChannels());
 
-      expect(mock.ws.send).not.toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join" }),
-      );
+      expectNoRejoin();
     });
   });
 });

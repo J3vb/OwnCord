@@ -1,12 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
 import { restoreTZ, tzPinHonored } from "../../helpers/tz-pin";
-import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { setUserBlockedByMe } from "../../../src/stores/blocks.store";
 import { notifyIncomingMessage as mockNotifyIncomingMessage } from "../../../src/lib/notifications";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  authOkEvent,
+  dmRow,
+  setActiveChannel,
+  channelRow,
+  seedChannels,
+  patchAuth,
+  seedDms,
+  mock,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -18,16 +27,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   describe("chat_message notifications during a reconnect replay burst", () => {
     // The server writes auth_ok before the replay burst, so by the time
@@ -40,18 +40,10 @@ describe("WS Dispatcher", () => {
     });
 
     it("does not notify for a replay frame timestamped before the reconnect handshake", () => {
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
       const handshakeAt = Date.now();
       // Second auth_ok in the same dispatcher lifetime = a reconnect.
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
 
       mock.dispatch("chat_message", {
         id: 1,
@@ -67,17 +59,9 @@ describe("WS Dispatcher", () => {
     });
 
     it("still notifies for a genuinely live message after reconnecting", () => {
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
       const handshakeAt = Date.now();
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
 
       mock.dispatch("chat_message", {
         id: 2,
@@ -96,11 +80,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("does not gate messages on the session's very first connect (no prior handshake)", () => {
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
 
       // Old timestamp, but there was no earlier auth_ok — not a reconnect.
       mock.dispatch("chat_message", {
@@ -130,11 +110,7 @@ describe("WS Dispatcher", () => {
 
       // First connect. A live message here establishes the observed skew
       // before any reconnect exists to misclassify.
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
       mock.dispatch("chat_message", {
         id: 1,
         channel_id: 1,
@@ -149,11 +125,7 @@ describe("WS Dispatcher", () => {
       // Reconnect 1s later (client clock).
       vi.setSystemTime(t0 + 1000);
       const handshakeAt = Date.now();
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
 
       // A genuinely live message arrives 1s after the handshake (client
       // clock). Its server timestamp — still 30s behind — reads 29s
@@ -191,20 +163,12 @@ describe("WS Dispatcher", () => {
 
       // First connect — the channel is quiet, so no chat_message arrives and
       // serverClockSkewMs is never sampled.
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
 
       // Wi-Fi blips a few seconds later; ws.ts reconnects.
       vi.setSystemTime(t0 + 5000);
       const handshakeAt = Date.now();
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "admin" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch("auth_ok", authOkEvent());
 
       // A genuinely live message arrives well after the reconnect burst
       // would have finished — its server timestamp is 30 minutes behind
@@ -265,18 +229,10 @@ describe("WS Dispatcher", () => {
         // stable year-round, unlike the America/New_York probe elsewhere).
         expect(new Date(2026, 0, 15).getTimezoneOffset()).toBe(-540);
 
-        mock.dispatch("auth_ok", {
-          user: { id: 1, username: "alex", avatar: null, role: "admin" },
-          server_name: "TestServer",
-          motd: "",
-        });
+        mock.dispatch("auth_ok", authOkEvent());
         const handshakeAt = Date.now();
         // Second auth_ok in the same dispatcher lifetime = a reconnect.
-        mock.dispatch("auth_ok", {
-          user: { id: 1, username: "alex", avatar: null, role: "admin" },
-          server_name: "TestServer",
-          motd: "",
-        });
+        mock.dispatch("auth_ok", authOkEvent());
 
         // A genuinely live message, 1s after the handshake, stamped by the
         // server in its real wire form: naive UTC, no 'Z'.
@@ -302,31 +258,8 @@ describe("WS Dispatcher", () => {
 
   describe("mention counts", () => {
     function seedChannel(): void {
-      channelsStore.setState((prev) => {
-        const ch = new Map(prev.channels);
-        ch.set(5, {
-          id: 5,
-          name: "off-topic",
-          type: "text" as const,
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        });
-        return { ...prev, channels: ch, activeChannelId: 1 };
-      });
-      authStore.setState((prev) => ({
-        ...prev,
-        user: { id: 1, username: "alex", avatar: null, role: "member" },
-      }));
+      seedChannels([channelRow({ id: 5, name: "off-topic" })], { activeChannelId: 1 });
+      patchAuth({ user: { id: 1, username: "alex", avatar: null, role: "member" } });
     }
 
     function incoming(extra: Record<string, unknown>): void {
@@ -381,18 +314,16 @@ describe("WS Dispatcher", () => {
     // here-only mention delivered inside that burst.
     it("does not raise the mention badge for an @here-only mention replayed after a reconnect", () => {
       seedChannel();
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "member" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch(
+        "auth_ok",
+        authOkEvent({ user: { id: 1, username: "alex", avatar: null, role: "member" } }),
+      );
       const handshakeAt = Date.now();
       // Second auth_ok in this dispatcher's lifetime = a reconnect.
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "member" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch(
+        "auth_ok",
+        authOkEvent({ user: { id: 1, username: "alex", avatar: null, role: "member" } }),
+      );
 
       incoming({
         content: "@here standup",
@@ -428,22 +359,12 @@ describe("WS Dispatcher", () => {
 
       it("a direct mention in a DM raises the DM's unread count, not its mention count", () => {
         seedChannel();
-        dmStore.setState(() => ({
-          channels: [
-            {
-              channelId: 50,
-              recipient: { id: 2, username: "bob", avatar: "", status: "online" as const },
-              participants: [],
-              name: "",
-              isGroup: true,
-              lastMessageId: null,
-              lastMessage: "",
-              lastMessageAt: "",
-              unreadCount: 0,
-              mentionCount: 0,
-            },
-          ],
-        }));
+        seedDms([
+          dmRow({
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" as const },
+            isGroup: true,
+          }),
+        ]);
         incoming({ channel_id: 50, content: "ping @alex", mentions: [1] });
         const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
         expect(dm?.mentionCount).toBe(0);
@@ -466,17 +387,15 @@ describe("WS Dispatcher", () => {
 
     it("still raises the mention badge inside a replay burst for a direct mention alongside @here", () => {
       seedChannel();
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "member" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch(
+        "auth_ok",
+        authOkEvent({ user: { id: 1, username: "alex", avatar: null, role: "member" } }),
+      );
       const handshakeAt = Date.now();
-      mock.dispatch("auth_ok", {
-        user: { id: 1, username: "alex", avatar: null, role: "member" },
-        server_name: "TestServer",
-        motd: "",
-      });
+      mock.dispatch(
+        "auth_ok",
+        authOkEvent({ user: { id: 1, username: "alex", avatar: null, role: "member" } }),
+      );
 
       incoming({
         content: "@here @alex standup",
@@ -509,7 +428,7 @@ describe("WS Dispatcher", () => {
       const focus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
       onTestFinished(() => focus.mockRestore());
       seedChannel();
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 5 }));
+      setActiveChannel(5);
 
       mock.dispatch("mention_count", { channel_id: 5, count: 3 });
 
@@ -520,7 +439,7 @@ describe("WS Dispatcher", () => {
       const focus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
       onTestFinished(() => focus.mockRestore());
       seedChannel();
-      channelsStore.setState((prev) => ({ ...prev, activeChannelId: 5 }));
+      setActiveChannel(5);
 
       mock.dispatch("mention_count", { channel_id: 5, count: 3 });
 

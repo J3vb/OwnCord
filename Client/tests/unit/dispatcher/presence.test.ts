@@ -10,7 +10,17 @@ import {
   serverSupportsGameActivity,
   serverSupportsListeningActivity,
 } from "../../../src/lib/net/serverCapabilities";
-import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import {
+  useDispatcherHarness,
+  readyEvent,
+  dmRow,
+  readyDm,
+  memberRow,
+  readyMember,
+  seedMembers,
+  seedDms,
+  mock,
+} from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -21,36 +31,27 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
   dispatcherMocks.dispatchContextMock(await importOriginal<object>()),
 );
 
-describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
+function seedRoster(): void {
+  seedMembers([
+    memberRow({ id: 1, username: "alex" }),
+    memberRow({ id: 2, username: "bea" }),
+    memberRow({ id: 3, username: "cy" }),
+  ]);
+}
 
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+describe("WS Dispatcher", () => {
+  useDispatcherHarness();
 
   it("wires presence to members store", () => {
     // Add a member first
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(1, { id: 1, username: "alex", avatar: null, role: "admin", status: "online" as const });
-      return { ...prev, members: m };
-    });
+    seedMembers([memberRow({ id: 1, username: "alex", role: "admin" })]);
 
     mock.dispatch("presence", { user_id: 1, status: "idle" });
     expect(membersStore.getState().members.get(1)?.status).toBe("idle");
   });
 
   it("carries a custom status on presence, and leaves it alone when omitted", () => {
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(1, { id: 1, username: "alex", avatar: null, role: "admin", status: "online" as const });
-      return { ...prev, members: m };
-    });
+    seedMembers([memberRow({ id: 1, username: "alex", role: "admin" })]);
 
     mock.dispatch("presence", { user_id: 1, status: "idle", custom_status: "afk" });
     expect(membersStore.getState().members.get(1)?.customStatus).toBe("afk");
@@ -66,26 +67,11 @@ describe("WS Dispatcher", () => {
 
   describe("presence_batch", () => {
     const seed = (): void => {
-      membersStore.setState((prev) => {
-        const m = new Map(prev.members);
-        m.set(1, {
-          id: 1,
-          username: "alex",
-          avatar: null,
-          role: "admin",
-          status: "offline" as const,
-        });
-        m.set(2, {
-          id: 2,
-          username: "bea",
-          avatar: null,
-          role: "member",
-          status: "online" as const,
-          customStatus: "coding",
-        });
-        m.set(3, { id: 3, username: "cy", avatar: null, role: "member", status: "idle" as const });
-        return { ...prev, members: m };
-      });
+      seedMembers([
+        memberRow({ id: 1, username: "alex", role: "admin", status: "offline" }),
+        memberRow({ id: 2, username: "bea", customStatus: "coding" }),
+        memberRow({ id: 3, username: "cy", status: "idle" }),
+      ]);
     };
 
     it("applies every entry of a window batch, custom status included", () => {
@@ -127,23 +113,10 @@ describe("WS Dispatcher", () => {
 
   describe("game activity", () => {
     const factorio = { name: "Factorio", started_at: 1_761_206_400_000 };
-    const seed = (): void => {
-      membersStore.setState((prev) => {
-        const m = new Map(prev.members);
-        for (const [id, username] of [
-          [1, "alex"],
-          [2, "bea"],
-          [3, "cy"],
-        ] as const) {
-          m.set(id, { id, username, avatar: null, role: "member", status: "online" as const });
-        }
-        return { ...prev, members: m };
-      });
-    };
     const activityOf = (id: number) => membersStore.getState().members.get(id)?.activity;
 
     it("applies a presence frame's game and clears it on null", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
       expect(activityOf(1)).toEqual({ name: "Factorio", startedAt: 1_761_206_400_000 });
       mock.dispatch("presence", { user_id: 1, status: "online", activity: null });
@@ -151,14 +124,14 @@ describe("WS Dispatcher", () => {
     });
 
     it("leaves the shown game alone when a presence frame carries no activity key", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
       mock.dispatch("presence", { user_id: 1, status: "idle" });
       expect(activityOf(1)?.name).toBe("Factorio");
     });
 
     it("applies a window batch's games", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence_batch", {
         updates: [
           { user_id: 1, status: "online", custom_status: null, activity: factorio },
@@ -171,7 +144,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("a full snapshot replaces listed games and clears anyone it leaves out", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", { user_id: 3, status: "online", activity: factorio });
       mock.dispatch("presence", { user_id: 2, status: "online", activity: factorio });
       mock.dispatch("presence_batch", {
@@ -193,63 +166,48 @@ describe("WS Dispatcher", () => {
     });
 
     it("applies ready.activities to the roster and clears everyone else", () => {
-      mock.dispatch("ready", {
-        channels: [],
-        members: [
-          { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
-          { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
-        ],
-        activities: [{ user_id: 2, ...factorio }],
-        voice_states: [],
-        roles: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          members: [
+            readyMember({ id: 1, username: "alex", role: "admin" }),
+            readyMember({ id: 2, username: "bea" }),
+          ],
+          activities: [{ user_id: 2, ...factorio }],
+        }),
+      );
       expect(activityOf(1)).toBeNull();
       expect(activityOf(2)).toEqual({ name: "Factorio", startedAt: 1_761_206_400_000 });
 
       // The next full ready restates the set: bea stopped playing meanwhile.
-      mock.dispatch("ready", {
-        channels: [],
-        members: [
-          { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
-          { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
-        ],
-        activities: [],
-        voice_states: [],
-        roles: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          members: [
+            readyMember({ id: 1, username: "alex", role: "admin" }),
+            readyMember({ id: 2, username: "bea" }),
+          ],
+          activities: [],
+        }),
+      );
       expect(activityOf(2)).toBeNull();
     });
 
     it("a ready from a server without the key shows no games", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
-      mock.dispatch("ready", {
-        channels: [],
-        members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
-        voice_states: [],
-        roles: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          members: [readyMember({ id: 1, username: "alex", role: "admin" })],
+        }),
+      );
       expect(activityOf(1)).toBeNull();
     });
 
     it("copies a DM partner's game into the DM list from presence, batch and ready", () => {
       const partner = { id: 10, username: "bob", avatar: "", status: "online" };
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 50,
-            recipient: partner,
-            participants: [partner],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedDms([dmRow({ recipient: partner, participants: [partner] })]);
       const shown = () => dmStore.getState().channels[0]?.recipient.activity;
 
       mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
@@ -264,78 +222,47 @@ describe("WS Dispatcher", () => {
       mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
       mock.dispatch("presence_batch", { full: true, updates: [] });
       expect(shown()).toBeNull();
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        dm_channels: [
-          {
-            channel_id: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            last_message_id: null,
-            last_message: "",
-            last_message_at: "",
-            unread_count: 0,
-            mention_count: 0,
-          },
-        ],
-        activities: [{ user_id: 10, ...factorio }],
-        voice_states: [],
-        roles: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          dm_channels: [readyDm({ mention_count: 0 })],
+          activities: [{ user_id: 10, ...factorio }],
+        }),
+      );
       expect(shown()?.name).toBe("Factorio");
     });
 
     it("a DM opened after ready shows the game its partner is already playing", () => {
-      dmStore.setState(() => ({ channels: [] }));
-      mock.dispatch("ready", {
-        channels: [],
-        members: [{ id: 10, username: "bob", avatar: null, role: "member", status: "online" }],
-        activities: [{ user_id: 10, ...factorio }],
-        voice_states: [],
-        roles: [],
-      });
-      mock.dispatch("dm_channel_open", {
-        channel_id: 51,
-        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-        last_message_id: null,
-        last_message: "",
-        last_message_at: "",
-        unread_count: 0,
-      });
+      seedDms([]);
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          members: [readyMember({ id: 10, username: "bob" })],
+          activities: [{ user_id: 10, ...factorio }],
+        }),
+      );
+      mock.dispatch("dm_channel_open", readyDm({ channel_id: 51 }));
       expect(dmStore.getState().channels[0]?.recipient.activity?.name).toBe("Factorio");
     });
 
     describe("the per-server switch", () => {
       const user = { id: 1, username: "alex", avatar: null, role: "admin" };
       const partner = { id: 10, username: "bob", avatar: "", status: "online" };
+      const readyWithFactorioPlayer = (): void =>
+        mock.dispatch(
+          "ready",
+          readyEvent({
+            members: [readyMember({ id: 1, username: "alex", role: "admin" })],
+            capabilities: { game_activity: true },
+            activities: [{ user_id: 1, ...factorio }],
+          }),
+        );
       afterEach(() => resetServerCapabilities());
 
       it("game_activity_policy false clears every shown game and turns the capability off", () => {
-        seed();
-        mock.dispatch("ready", {
-          channels: [],
-          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
-          capabilities: { game_activity: true },
-          activities: [{ user_id: 1, ...factorio }],
-          voice_states: [],
-          roles: [],
-        });
-        dmStore.setState(() => ({
-          channels: [
-            {
-              channelId: 50,
-              recipient: partner,
-              participants: [partner],
-              name: "",
-              isGroup: false,
-              lastMessageId: null,
-              lastMessage: "",
-              lastMessageAt: "",
-              unreadCount: 0,
-              mentionCount: 0,
-            },
-          ],
-        }));
+        seedRoster();
+        readyWithFactorioPlayer();
+        seedDms([dmRow({ recipient: partner, participants: [partner] })]);
         mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
         expect(activityOf(1)?.name).toBe("Factorio");
         expect(serverSupportsGameActivity()).toBe(true);
@@ -352,15 +279,8 @@ describe("WS Dispatcher", () => {
       });
 
       it("auth_ok's game_activity_policy applies on a full connect and on a resume", () => {
-        seed();
-        mock.dispatch("ready", {
-          channels: [],
-          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
-          capabilities: { game_activity: true },
-          activities: [{ user_id: 1, ...factorio }],
-          voice_states: [],
-          roles: [],
-        });
+        seedRoster();
+        readyWithFactorioPlayer();
         // A resume gets no ready: the policy a missed frame carried arrives here.
         mock.dispatch("auth_ok", {
           user,
@@ -383,14 +303,14 @@ describe("WS Dispatcher", () => {
       });
 
       it("ignores a game on a presence frame or batch that outran the off frame", () => {
-        seed();
-        mock.dispatch("ready", {
-          channels: [],
-          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
-          capabilities: { game_activity: true },
-          voice_states: [],
-          roles: [],
-        });
+        seedRoster();
+        mock.dispatch(
+          "ready",
+          readyEvent({
+            members: [readyMember({ id: 1, username: "alex", role: "admin" })],
+            capabilities: { game_activity: true },
+          }),
+        );
         mock.dispatch("game_activity_policy", { enabled: false });
         mock.dispatch("presence", { user_id: 1, status: "online", activity: factorio });
         expect(activityOf(1) ?? null).toBeNull();
@@ -406,27 +326,13 @@ describe("WS Dispatcher", () => {
       });
 
       it("still shows games from a ready and presence before any policy is stated", () => {
-        mock.dispatch("ready", {
-          channels: [],
-          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
-          capabilities: { game_activity: true },
-          activities: [{ user_id: 1, ...factorio }],
-          voice_states: [],
-          roles: [],
-        });
+        readyWithFactorioPlayer();
         expect(activityOf(1)?.name).toBe("Factorio");
       });
 
       it("a GAME_ACTIVITY_DISABLED refusal never overrides the policy the server stated", () => {
-        seed();
-        mock.dispatch("ready", {
-          channels: [],
-          members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
-          capabilities: { game_activity: true },
-          activities: [{ user_id: 1, ...factorio }],
-          voice_states: [],
-          roles: [],
-        });
+        seedRoster();
+        readyWithFactorioPlayer();
         // auth_ok said on; a refusal sent before a later on frame arrives after it.
         mock.dispatch("auth_ok", {
           user,
@@ -448,13 +354,7 @@ describe("WS Dispatcher", () => {
 
       it("an auth_ok without the key (an older server) leaves the capability to ready", () => {
         mock.dispatch("auth_ok", { user, server_name: "S", motd: "", replay_source: "none" });
-        mock.dispatch("ready", {
-          channels: [],
-          members: [],
-          capabilities: { game_activity: true },
-          voice_states: [],
-          roles: [],
-        });
+        mock.dispatch("ready", readyEvent({ capabilities: { game_activity: true } }));
         expect(serverSupportsGameActivity()).toBe(true);
       });
     });
@@ -475,43 +375,15 @@ describe("WS Dispatcher", () => {
       startedAt: 1_761_206_400_000,
       durationMs: 337_000,
     };
-    const seed = (): void => {
-      membersStore.setState((prev) => {
-        const m = new Map(prev.members);
-        for (const [id, username] of [
-          [1, "alex"],
-          [2, "bea"],
-          [3, "cy"],
-        ] as const) {
-          m.set(id, { id, username, avatar: null, role: "member", status: "online" as const });
-        }
-        return { ...prev, members: m };
-      });
-    };
     const listeningOf = (id: number) => membersStore.getState().members.get(id)?.listening;
     const partner = { id: 10, username: "bob", avatar: "", status: "online" };
     const seedDm = (): void => {
-      dmStore.setState(() => ({
-        channels: [
-          {
-            channelId: 50,
-            recipient: partner,
-            participants: [partner],
-            name: "",
-            isGroup: false,
-            lastMessageId: null,
-            lastMessage: "",
-            lastMessageAt: "",
-            unreadCount: 0,
-            mentionCount: 0,
-          },
-        ],
-      }));
+      seedDms([dmRow({ recipient: partner, participants: [partner] })]);
     };
     afterEach(() => resetServerCapabilities());
 
     it("applies a presence frame's song and clears it on null", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
       expect(listeningOf(1)).toEqual(shownSong);
       mock.dispatch("presence", { user_id: 1, status: "online", listening: null });
@@ -519,14 +391,14 @@ describe("WS Dispatcher", () => {
     });
 
     it("leaves the shown song alone when a presence frame carries no listening key", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", { user_id: 1, status: "online", listening: song });
       mock.dispatch("presence", { user_id: 1, status: "idle" });
       expect(listeningOf(1)?.title).toBe("Blue in Green");
     });
 
     it("keeps the game and the song apart", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", {
         user_id: 1,
         status: "online",
@@ -545,7 +417,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("applies a presence_batch and lets a full snapshot clear the members it leaves out", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence_batch", {
         updates: [
           { user_id: 1, status: "online", custom_status: null, listening: song },
@@ -567,8 +439,8 @@ describe("WS Dispatcher", () => {
 
     it("applies ready.listening to the roster and clears everyone else", () => {
       const members = [
-        { id: 1, username: "alex", avatar: null, role: "admin", status: "online" },
-        { id: 2, username: "bea", avatar: null, role: "member", status: "online" },
+        readyMember({ id: 1, username: "alex", role: "admin" }),
+        readyMember({ id: 2, username: "bea" }),
       ];
       mock.dispatch("ready", {
         channels: [],
@@ -592,7 +464,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("keeps an unknown length as 0 and drops a blank title or player", () => {
-      seed();
+      seedRoster();
       mock.dispatch("presence", {
         user_id: 1,
         status: "online",
@@ -629,57 +501,39 @@ describe("WS Dispatcher", () => {
       mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
       mock.dispatch("presence_batch", { full: true, updates: [] });
       expect(shown()).toBeNull();
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        dm_channels: [
-          {
-            channel_id: 50,
-            recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-            last_message_id: null,
-            last_message: "",
-            last_message_at: "",
-            unread_count: 0,
-            mention_count: 0,
-          },
-        ],
-        listening: [{ user_id: 10, ...song }],
-        voice_states: [],
-        roles: [],
-      });
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          dm_channels: [readyDm({ mention_count: 0 })],
+          listening: [{ user_id: 10, ...song }],
+        }),
+      );
       expect(shown()?.title).toBe("Blue in Green");
     });
 
     it("a DM opened after ready shows the song its partner is already playing", () => {
-      dmStore.setState(() => ({ channels: [] }));
-      mock.dispatch("ready", {
-        channels: [],
-        members: [{ id: 10, username: "bob", avatar: null, role: "member", status: "online" }],
-        listening: [{ user_id: 10, ...song }],
-        voice_states: [],
-        roles: [],
-      });
-      mock.dispatch("dm_channel_open", {
-        channel_id: 51,
-        recipient: { id: 10, username: "bob", avatar: "", status: "online" },
-        last_message_id: null,
-        last_message: "",
-        last_message_at: "",
-        unread_count: 0,
-      });
+      seedDms([]);
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          members: [readyMember({ id: 10, username: "bob" })],
+          listening: [{ user_id: 10, ...song }],
+        }),
+      );
+      mock.dispatch("dm_channel_open", readyDm({ channel_id: 51 }));
       expect(dmStore.getState().channels[0]?.recipient.listening?.player).toBe("Spotify");
     });
 
     it("the per-server switch off clears every shown song and ignores a late one", () => {
-      seed();
-      mock.dispatch("ready", {
-        channels: [],
-        members: [{ id: 1, username: "alex", avatar: null, role: "admin", status: "online" }],
-        capabilities: { game_activity: true, listening_activity: true },
-        listening: [{ user_id: 1, ...song }],
-        voice_states: [],
-        roles: [],
-      });
+      seedRoster();
+      mock.dispatch(
+        "ready",
+        readyEvent({
+          members: [readyMember({ id: 1, username: "alex", role: "admin" })],
+          capabilities: { game_activity: true, listening_activity: true },
+          listening: [{ user_id: 1, ...song }],
+        }),
+      );
       seedDm();
       mock.dispatch("presence", { user_id: 10, status: "online", listening: song });
       expect(listeningOf(1)?.title).toBe("Blue in Green");
@@ -705,24 +559,14 @@ describe("WS Dispatcher", () => {
     });
 
     it("an older server (no listening_activity flag) never supports music, even with a policy", () => {
-      mock.dispatch("ready", {
-        channels: [],
-        members: [],
-        capabilities: { game_activity: true },
-        voice_states: [],
-        roles: [],
-      });
+      mock.dispatch("ready", readyEvent({ capabilities: { game_activity: true } }));
       mock.dispatch("game_activity_policy", { enabled: true });
       expect(serverSupportsListeningActivity()).toBe(false);
     });
   });
 
   it("wires user_update display_name into the member store", () => {
-    membersStore.setState((prev) => {
-      const m = new Map(prev.members);
-      m.set(1, { id: 1, username: "alex", avatar: null, role: "admin", status: "online" as const });
-      return { ...prev, members: m };
-    });
+    seedMembers([memberRow({ id: 1, username: "alex", role: "admin" })]);
 
     mock.dispatch("user_update", {
       user_id: 1,
@@ -775,23 +619,13 @@ describe("WS Dispatcher", () => {
   });
 
   describe("presence and user_update sync dmStore", () => {
-    const dmChannel = {
-      channelId: 50,
+    const dmChannel = dmRow({
       recipient: { id: 10, username: "bob", avatar: "old.png", status: "online" as const },
       participants: [{ id: 10, username: "bob", avatar: "old.png", status: "online" as const }],
-      name: "",
-      isGroup: false,
-      lastMessageId: null,
-      lastMessage: "",
-      lastMessageAt: "",
-      unreadCount: 0,
-      mentionCount: 0,
-    };
+    });
 
     beforeEach(() => {
-      dmStore.setState(() => ({
-        channels: [{ ...dmChannel, participants: [...dmChannel.participants] }],
-      }));
+      seedDms([{ ...dmChannel, participants: [...dmChannel.participants] }]);
     });
 
     it("updates the DM partner's status on presence, in recipient and participants", () => {

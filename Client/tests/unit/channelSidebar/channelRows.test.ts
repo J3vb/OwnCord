@@ -7,7 +7,7 @@ import {
   setChannels,
   updateChannel,
 } from "../../../src/stores/channels.store";
-import { voiceStore, updateVoiceState } from "../../../src/stores/voice.store";
+import { voiceStore } from "../../../src/stores/voice.store";
 import { resetStores, addVoiceUser, testChannels } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -482,16 +482,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders", () => {
   it("keeps the voice-user volume menu open when an unrelated peer's voice state changes", async () => {
     signInAs({ id: 99, username: "Me", avatar: null, role: "member" });
     setChannels(testChannels);
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 80,
-      username: "OtherUser",
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 80, "OtherUser");
     sidebar.mount(container);
 
     const voiceRow = container.querySelector(
@@ -505,16 +496,7 @@ describe("ChannelSidebar popovers survive unrelated re-renders", () => {
 
     // Unrelated re-render: a DIFFERENT peer joins/toggles state in the same
     // channel, firing the voice store's structural-signature subscription.
-    updateVoiceState({
-      channel_id: 3,
-      user_id: 81,
-      username: "AnotherUser",
-      muted: true,
-      deafened: false,
-      speaking: false,
-      camera: false,
-      screenshare: false,
-    });
+    addVoiceUser(3, 81, "AnotherUser", { muted: true });
     voiceStore.flush();
 
     expect(document.querySelector(".user-vol-menu")).not.toBeNull();
