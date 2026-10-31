@@ -14,6 +14,7 @@ import {
   emptyStream,
   fakeAudioStream,
   stubNavigator,
+  useTabEnv,
 } from "../../helpers/voiceAudioTabHarness";
 import { mountTab } from "../../helpers/voiceAudioTabMount";
 
@@ -39,7 +40,16 @@ describe("VoiceAudioTab camera preview", () => {
     installFakeAudio({ worklets: true });
   });
 
-  it("does not restore a stale camera stream after the tab is aborted", async () => {
+  it.each([
+    [
+      "does not restore a stale camera stream after the tab is aborted",
+      ({ ac }: ReturnType<typeof mountTab>) => ac.abort(),
+    ],
+    [
+      "does not restore a stale camera stream after the tab is cleaned up",
+      ({ tab }: ReturnType<typeof mountTab>) => tab.cleanup(),
+    ],
+  ])("%s", async (_name, teardown) => {
     let resolveVideo: ((stream: MediaStream) => void) | null = null;
     const stopVideoTrack = vi.fn();
     const videoStream = fakeAudioStream(stopVideoTrack);
@@ -61,50 +71,10 @@ describe("VoiceAudioTab camera preview", () => {
       },
     });
 
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const element = tab.build();
-    document.body.appendChild(element);
-    const preview = element.querySelector("video") as HTMLVideoElement;
+    const mounted = mountTab();
+    const preview = mounted.el.querySelector("video") as HTMLVideoElement;
 
-    ac.abort();
-    (resolveVideo as ((stream: MediaStream) => void) | null)?.(videoStream);
-
-    await vi.waitFor(() => {
-      expect(stopVideoTrack).toHaveBeenCalledTimes(1);
-      expect(preview.srcObject).toBeNull();
-    });
-  });
-
-  it("does not restore a stale camera stream after the tab is cleaned up", async () => {
-    let resolveVideo: ((stream: MediaStream) => void) | null = null;
-    const stopVideoTrack = vi.fn();
-    const videoStream = fakeAudioStream(stopVideoTrack);
-    const audioStream = emptyStream();
-
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        enumerateDevices: vi
-          .fn()
-          .mockResolvedValue([{ kind: "videoinput", deviceId: "camera-1", label: "Camera 1" }]),
-        getUserMedia: vi.fn().mockImplementation((constraints: MediaStreamConstraints) => {
-          if (constraints.video && constraints.audio === false) {
-            return new Promise<MediaStream>((resolve) => {
-              resolveVideo = resolve;
-            });
-          }
-          return Promise.resolve(audioStream);
-        }),
-      },
-    });
-
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const element = tab.build();
-    document.body.appendChild(element);
-    const preview = element.querySelector("video") as HTMLVideoElement;
-
-    tab.cleanup();
+    teardown(mounted);
     (resolveVideo as ((stream: MediaStream) => void) | null)?.(videoStream);
 
     await vi.waitFor(() => {
@@ -175,16 +145,7 @@ describe("VoiceAudioTab mic meter", () => {
 // ---------------------------------------------------------------------------
 
 describe("VoiceAudioTab UI structure", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorage.clear();
-    document.body.innerHTML = "";
-    installFakeAudio({ worklets: true });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  useTabEnv();
 
   it("builds a section element with settings-pane class", () => {
     stubNavigator();

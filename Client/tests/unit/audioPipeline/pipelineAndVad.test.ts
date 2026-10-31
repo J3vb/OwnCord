@@ -15,6 +15,7 @@ import {
   installFakeAudio,
 } from "../../helpers/fakeAudioContext";
 import {
+  useAudioPipelineEnv,
   micTrack,
   contextOf,
   inputGain,
@@ -26,30 +27,10 @@ import {
 vi.mock("@lib/prefs/preferences", () => mocks.prefsPreferencesMock());
 vi.mock("@lib/logger", () => mocks.loggerMock());
 
-const { prefs, logs } = mocks;
+const { prefs } = mocks;
 
 describe("AudioPipeline", () => {
-  beforeEach(() => {
-    prefs.clear();
-    for (const fn of Object.values(logs)) fn.mockClear();
-    installFakeAudio();
-    FakeAudioWorkletNode.instances = [];
-    vi.stubGlobal("AudioWorkletNode", FakeAudioWorkletNode);
-    vi.stubGlobal("navigator", {
-      ...navigator,
-      mediaDevices: {
-        getUserMedia: vi.fn(async () => new FakeMediaStream([fakeMediaStreamTrack("mic-2")])),
-        enumerateDevices: vi.fn(async () => []),
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      },
-    });
-    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
+  useAudioPipelineEnv();
 
   describe("push-to-talk gate", () => {
     it("is closed on the processor from the first sample when armed before the join's publish", async () => {
@@ -672,16 +653,10 @@ describe("startVadDetector", () => {
       const setOn = vi.fn(answer);
       return { source, setOn, detection: { source: source as never, setOn } };
     }
-    const speechGateMessages = (worklet: FakeAudioWorkletNode) =>
-      worklet.port.postMessage.mock.calls
-        .map(([m]) => m as { type: string; on?: boolean })
-        .filter((m) => m.type === "speechGate")
-        .map((m) => m.on);
-
-    it("feeds the worklet's second input and turns the rule on for automatic sensitivity, off for the slider", async () => {
+    /** An "auto" detector with RNNoise's verdict wired in, once its worklet is up. */
+    async function startAutoDetector(detection: ReturnType<typeof speechDetection>["detection"]) {
       const ctx = new FakeAudioContext();
       ctx.audioWorklet.addModule.mockResolvedValue(undefined);
-      const { source, setOn, detection } = speechDetection(async (on) => on);
       const detector = startVadDetector(
         ctx as never,
         ctx.createAnalyser() as never,
@@ -691,6 +666,18 @@ describe("startVadDetector", () => {
         detection,
       );
       await vi.waitFor(() => expect(FakeAudioWorkletNode.instances).toHaveLength(1));
+      return detector;
+    }
+
+    const speechGateMessages = (worklet: FakeAudioWorkletNode) =>
+      worklet.port.postMessage.mock.calls
+        .map(([m]) => m as { type: string; on?: boolean })
+        .filter((m) => m.type === "speechGate")
+        .map((m) => m.on);
+
+    it("feeds the worklet's second input and turns the rule on for automatic sensitivity, off for the slider", async () => {
+      const { source, setOn, detection } = speechDetection(async (on) => on);
+      const detector = await startAutoDetector(detection);
       const worklet = FakeAudioWorkletNode.instances[0]!;
       expect(source.connect).toHaveBeenCalledWith(worklet, 0, 1);
       await vi.waitFor(() => expect(speechGateMessages(worklet)).toEqual([true]));
@@ -706,18 +693,8 @@ describe("startVadDetector", () => {
     });
 
     it("leaves the gate on its level when RNNoise does not start", async () => {
-      const ctx = new FakeAudioContext();
-      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
       const { setOn, detection } = speechDetection(async () => false);
-      const detector = startVadDetector(
-        ctx as never,
-        ctx.createAnalyser() as never,
-        "auto",
-        { onGate: vi.fn() },
-        undefined,
-        detection,
-      );
-      await vi.waitFor(() => expect(FakeAudioWorkletNode.instances).toHaveLength(1));
+      const detector = await startAutoDetector(detection);
       await vi.waitFor(() => expect(setOn).toHaveBeenCalledWith(true));
       await Promise.resolve();
       expect(speechGateMessages(FakeAudioWorkletNode.instances[0]!)).toEqual([]);
@@ -725,21 +702,11 @@ describe("startVadDetector", () => {
     });
 
     it("does not turn the rule on when RNNoise answers after a stop or a switch to the slider", async () => {
-      const ctx = new FakeAudioContext();
-      ctx.audioWorklet.addModule.mockResolvedValue(undefined);
       const answers: Array<(on: boolean) => void> = [];
       const { detection } = speechDetection(
         (on) => new Promise<boolean>((resolve) => answers.push(() => resolve(on))),
       );
-      const detector = startVadDetector(
-        ctx as never,
-        ctx.createAnalyser() as never,
-        "auto",
-        { onGate: vi.fn() },
-        undefined,
-        detection,
-      );
-      await vi.waitFor(() => expect(FakeAudioWorkletNode.instances).toHaveLength(1));
+      const detector = await startAutoDetector(detection);
       const worklet = FakeAudioWorkletNode.instances[0]!;
       expect(answers).toHaveLength(1);
 

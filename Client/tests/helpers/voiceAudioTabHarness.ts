@@ -1,4 +1,5 @@
-import { vi } from "vitest";
+import { afterEach, beforeEach, vi } from "vitest";
+import { installFakeAudio } from "./fakeAudioContext";
 
 /** The volume sliders, not the Push to Talk release delay in the input mode card. */
 export const VOLUME_SLIDERS = 'input[type="range"]:not([data-testid="ptt-release-delay"])';
@@ -53,4 +54,18 @@ export function fakeAudioStream(stop: () => void = vi.fn()): MediaStream {
 /** A stream with no tracks. */
 export function emptyStream(): MediaStream {
   return { getTracks: () => [], getAudioTracks: () => [] } as unknown as MediaStream;
+}
+
+/** Registers the hooks that give a tab suite clean storage, fake audio and no stubbed globals left over. */
+export function useTabEnv(): void {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    document.body.innerHTML = "";
+    installFakeAudio({ worklets: true });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 }

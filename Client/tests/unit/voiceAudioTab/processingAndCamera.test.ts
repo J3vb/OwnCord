@@ -8,7 +8,7 @@ import {
   FakeAudioWorkletNode,
   installFakeAudio,
 } from "../../helpers/fakeAudioContext";
-import { fakeAudioStream, stubNavigator } from "../../helpers/voiceAudioTabHarness";
+import { fakeAudioStream, stubNavigator, useTabEnv } from "../../helpers/voiceAudioTabHarness";
 import { mountTab } from "../../helpers/voiceAudioTabMount";
 
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
@@ -29,16 +29,7 @@ const {
 // ---------------------------------------------------------------------------
 
 describe("VoiceAudioTab UI structure", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    localStorage.clear();
-    document.body.innerHTML = "";
-    installFakeAudio({ worklets: true });
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  useTabEnv();
 
   it("contains audio processing toggles", () => {
     stubNavigator();
