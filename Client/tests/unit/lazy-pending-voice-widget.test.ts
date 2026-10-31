@@ -3,28 +3,48 @@
  * builds a fresh module graph so the widget's import can be held open.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
-import * as sidebarMocks from "../helpers/sidebarAreaMocks";
-import { defaultOpts } from "../helpers/sidebarAreaHarness";
+import * as mocks from "../helpers/sidebarAreaMocks";
+import { defaultSidebarAreaOpts } from "../helpers/sidebarAreaOpts";
+import * as voiceSession from "../helpers/voiceSessionMock";
 
 const h = vi.hoisted(() => ({
   gate: null as null | { promise: Promise<void>; open: () => void; fail: () => void },
   loads: { value: 0 },
 }));
 
-vi.mock("@lib/voice/livekitSession", () => sidebarMocks.voiceLivekitSessionMock());
-vi.mock("@lib/logger", () => sidebarMocks.loggerMock());
-vi.mock("@lib/ui/toast", () => sidebarMocks.uiToastMock());
-vi.mock("@lib/presence/profiles", () => sidebarMocks.presenceProfilesMock());
-vi.mock("@components/ChannelSidebar", () => sidebarMocks.channelSidebarMock());
-vi.mock("@components/DmSidebar", () => sidebarMocks.dmSidebarMock());
-vi.mock("@components/MemberList", () => sidebarMocks.memberListMock());
-vi.mock("@components/UserBar", () => sidebarMocks.userBarMock());
-vi.mock("@components/QuickSwitchOverlay", () => sidebarMocks.quickSwitchOverlayMock());
-vi.mock("@tauri-apps/api/core", () => sidebarMocks.apiCoreMock());
-vi.mock("@components/EditChannelModal", () => sidebarMocks.editChannelModalMock());
-vi.mock("@components/DeleteChannelModal", () => sidebarMocks.deleteChannelModalMock());
-vi.mock("../../src/pages/main-page/VoiceCallbacks", () => sidebarMocks.pageVoiceCallbacksMock());
-vi.mock("../../src/pages/main-page/OverlayManagers", () => sidebarMocks.pageOverlayManagersMock());
+vi.mock("@lib/voice/livekitSession", () =>
+  voiceSession.withOverrides({
+    switchInputDevice: vi.fn().mockResolvedValue(undefined),
+    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
+    reapplyEnhancedNoiseSuppression: vi.fn().mockResolvedValue(undefined),
+  }),
+);
+
+vi.mock("@lib/logger", () => mocks.loggerMock());
+
+vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
+
+vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
+
+vi.mock("@components/ChannelSidebar", () => mocks.channelSidebarMock());
+
+vi.mock("@components/DmSidebar", () => mocks.dmSidebarMock());
+
+vi.mock("@components/MemberList", () => mocks.memberListMock());
+
+vi.mock("@components/UserBar", () => mocks.userBarMock());
+
+vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
+
+vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
+
+vi.mock("@components/EditChannelModal", () => mocks.editChannelModalMock());
+
+vi.mock("@components/DeleteChannelModal", () => mocks.deleteChannelModalMock());
+
+vi.mock("../../src/pages/main-page/VoiceCallbacks", () => mocks.pageVoiceCallbacksMock());
+
+vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.pageOverlayManagersMock());
 
 type SidebarModule = typeof import("../../src/pages/main-page/SidebarArea");
 type VoiceStore = typeof import("../../src/stores/voice.store");
@@ -78,7 +98,7 @@ describe("SidebarArea voice widget", () => {
   });
 
   function build(): void {
-    result = sidebar.createSidebarArea(defaultOpts());
+    result = sidebar.createSidebarArea(defaultSidebarAreaOpts());
     container.appendChild(result.sidebarWrapper);
   }
 
