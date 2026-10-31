@@ -15,8 +15,6 @@ import {
   setChannels,
 } from "../../src/stores/channels.store";
 import { dmStore, addDmToChannelsStore, setDmChannels } from "../../src/stores/dm.store";
-import type { DmChannel } from "../../src/stores/dm.store";
-import { messagesStore } from "../../src/stores/messages.store";
 import {
   leaveChannel,
   noteMessageSeen,
@@ -31,10 +29,10 @@ import {
 import { viewChannel } from "../../src/lib/prefs/lastChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
-import type { Message } from "../../src/stores/messages.store";
 import { expectConsole } from "../helpers/console";
 import { resetMessagesState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
+import { makeDmRow, pointerMessage, seedLoadedMessages } from "../helpers/readPointerFixtures";
 
 vi.mock("@lib/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
@@ -89,49 +87,6 @@ function ready(
     dm_channels: [],
   };
 }
-
-function msg(id: number): Message {
-  return {
-    id,
-    channelId: 1,
-    user: { id: 2, username: "alice", avatar: null },
-    content: `m${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
-}
-
-/** Seed a channel's loaded messages directly (setMessages takes server payloads). */
-function setMessages(channelId: number, messages: readonly Message[], _hasMore: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
-}
-
-const dmRow = (over: Partial<DmChannel> = {}): DmChannel => ({
-  channelId: 50,
-  recipient: { id: 7, username: "bob", avatar: "", status: "online" },
-  participants: [],
-  name: "",
-  isGroup: false,
-  lastMessageId: 30,
-  lastReadMessageId: 10,
-  lastMessage: "",
-  lastMessageAt: "",
-  unreadCount: 2,
-  mentionCount: 1,
-  ...over,
-});
 
 const chan = (id: number) => channelsStore.getState().channels.get(id);
 
@@ -318,8 +273,8 @@ describe("read pointer through the dispatcher", () => {
 
     it("updates a DM in dmStore and in its channelsStore mirror", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0, 5)], { read_pointer: true }));
-      setDmChannels([dmRow()]);
-      addDmToChannelsStore(dmRow());
+      setDmChannels([makeDmRow()]);
+      addDmToChannelsStore(makeDmRow());
       mock.simulateMessage("read_state", {
         channel_id: 50,
         last_read_message_id: 25,
@@ -336,7 +291,7 @@ describe("read pointer through the dispatcher", () => {
 
     it("updates a DM that was never opened (no mirror row)", () => {
       mock.simulateMessage("ready", ready([ch(1, 0, 0, 5)], { read_pointer: true }));
-      setDmChannels([dmRow()]);
+      setDmChannels([makeDmRow()]);
       mock.simulateMessage("read_state", {
         channel_id: 50,
         last_read_message_id: 25,
@@ -352,7 +307,12 @@ describe("read pointer through the dispatcher", () => {
     function pending(): void {
       mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
       setActiveChannel(1);
-      setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
+      seedLoadedMessages(1, [
+        pointerMessage(8),
+        pointerMessage(9),
+        pointerMessage(10),
+        pointerMessage(11),
+      ]);
       expect(markMessageUnread(1, 10)).toBe(9);
       expect(chan(1)?.lastReadMessageId).toBe(9);
     }
@@ -421,7 +381,12 @@ describe("read pointer through the dispatcher", () => {
     function pending(): void {
       mock.simulateMessage("ready", ready([ch(1, 0, 0, 10)], { read_pointer: true }));
       setActiveChannel(1);
-      setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
+      seedLoadedMessages(1, [
+        pointerMessage(8),
+        pointerMessage(9),
+        pointerMessage(10),
+        pointerMessage(11),
+      ]);
       expect(markMessageUnread(1, 10)).toBe(9);
     }
     const answer = { channel_id: 1, last_read_message_id: 9, unread_count: 2, mention_count: 1 };

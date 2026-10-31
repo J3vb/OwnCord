@@ -6,6 +6,7 @@ import type { Message } from "@stores/messages.store";
 import { buildMessage } from "./messageFactory";
 import { membersStore } from "@stores/members.store";
 import { resetMessagesState, resetMembersState } from "./storeResets";
+import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { signInAs } from "./storeSeeds";
 
 export function resetStores(): void {
@@ -17,10 +18,10 @@ export function makeMessage(overrides: Partial<Message> & { id: number }): Messa
   return buildMessage(overrides);
 }
 
-export function setMessages(channelId: number, messages: Message[]): void {
+export function setMessages(channelId: number, messages: readonly Message[]): void {
   messagesStore.setState((prev) => {
     const next = new Map(prev.messagesByChannel);
-    next.set(channelId, messages);
+    next.set(channelId, [...messages]);
     return { ...prev, messagesByChannel: next };
   });
 }
@@ -41,6 +42,64 @@ export function setHistoryLoadState(channelId: number, value: "loading" | "error
   });
 }
 
+/** Fresh options for a list on channel 1 as user 1, with every callback a new spy. */
+export function makeListOptions(overrides: Partial<MessageListOptions> = {}): MessageListOptions {
+  return {
+    channelId: 1,
+    channelName: "general",
+    currentUserId: 1,
+    onScrollTop: vi.fn(),
+    onReplyClick: vi.fn(),
+    onEditClick: vi.fn(),
+    onEditSave: vi.fn(() => true),
+    onEmptyEdit: vi.fn(),
+    onDeleteClick: vi.fn(),
+    onReactionClick: vi.fn(),
+    onPinClick: vi.fn(),
+    ...overrides,
+  };
+}
+
+/** Resolves after the next animation frame. */
+export function nextFrame(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+/** resetStores plus an emptied channel list, so an unread count cannot leak a NEW divider. */
+export function resetStoresAndChannels(): void {
+  resetStores();
+  setChannels([]);
+  setActiveChannel(null);
+}
+
+/**
+ * jsdom lays nothing out: stubs a tall scroller and fixed row heights (100 for a
+ * message, 32 otherwise). Returns the function that restores the originals.
+ */
+export function stubTallRowLayout(): () => void {
+  const scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+  const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get: () => 100_000,
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get(this: HTMLElement): number {
+      return this.classList.contains("message") ? 100 : 32;
+    },
+  });
+  return () => {
+    for (const [name, d] of [
+      ["scrollHeight", scrollHeight],
+      ["offsetHeight", offsetHeight],
+    ] as const) {
+      if (d) Object.defineProperty(HTMLElement.prototype, name, d);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    }
+  };
+}
+
 export type MessageListComponent = ReturnType<typeof createMessageList>;
 
 /** Registers the shared beforeEach/afterEach for every messageList test file. */
@@ -59,19 +118,7 @@ export function useMessageListHarness(
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions();
     const msgList = createMessageList(options);
     bind({ container, options, msgList });
   });

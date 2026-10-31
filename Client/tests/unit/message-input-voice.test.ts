@@ -4,12 +4,9 @@
 // stops the microphone and sends nothing.
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
+import * as mocks from "../helpers/messageInputMocks";
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
@@ -135,7 +132,7 @@ describe("recording and sending", () => {
       }),
     );
     const onSend = vi.fn();
-    const comp = mountComposer({ onUploadFile, onSend });
+    mountComposer({ onUploadFile, onSend });
     await record(2_000);
     expect(q('[data-testid="voice-bar"]')).not.toBeNull();
     expect(q(".message-input-wrap")?.classList.contains("voice-active")).toBe(true);

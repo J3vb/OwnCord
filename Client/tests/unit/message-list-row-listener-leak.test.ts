@@ -3,10 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import type { Message } from "@stores/messages.store";
 import { setConnectionStatus, uiStore } from "@stores/ui.store";
-import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import {
+  makeListOptions,
+  makeMessage,
+  resetStores,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 // Reaction controls lock while the socket is down (3A-3); these tests react online.
@@ -14,23 +17,6 @@ beforeEach(() => {
   setConnectionStatus("connected");
   uiStore.flush();
 });
-
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-}
-
-function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return buildMessage(overrides);
-}
-
-function setMessages(channelId: number, messages: Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, messages);
-    return { ...prev, messagesByChannel: next };
-  });
-}
 
 // OC-0286: renderVirtualItem hands every row's listeners to the
 // component-lifetime `ac.signal`, which only aborts in destroy(). A full
@@ -50,19 +36,7 @@ describe("MessageList row listener lifecycle", () => {
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions();
     msgList = createMessageList(options);
   });
 

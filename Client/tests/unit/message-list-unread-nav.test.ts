@@ -34,6 +34,8 @@ import { formatMessageTimestamp } from "@lib/text/formatting";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { resetChannelsState } from "../helpers/storeSeeds";
+import { makeListOptions } from "../helpers/messageListHarness";
+import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
 const ME = 1;
@@ -59,22 +61,14 @@ function resetStores(): void {
 /** Authors alternate between two other users so no row is ever grouped, and
  *  every message is within one minute so there is exactly one day divider. */
 function makeMessage(id: number, userId = 2 + (id % 2)): Message {
-  return {
-    id,
-    channelId: CHANNEL_ID,
-    user: { id: userId, username: `user${userId}`, avatar: null },
-    content: `Message ${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 12, 0, id % 60)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
+  return buildMessage(
+    { id },
+    {
+      channelId: CHANNEL_ID,
+      user: { id: userId, username: `user${userId}`, avatar: null },
+      timestamp: new Date(Date.UTC(2024, 0, 15, 12, 0, id % 60)).toISOString(),
+    },
+  );
 }
 
 function range(from: number, to: number): Message[] {
@@ -151,19 +145,7 @@ describe("MessageList — unread navigation", () => {
     resetStores();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: ME,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID, currentUserId: ME });
     sendMarkRead = vi.fn<(channelId: number) => void>();
     setMarkReadSender(sendMarkRead);
     hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);

@@ -27,28 +27,21 @@ import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/server
 import { setChannels, setActiveChannel, setRoles, channelsStore } from "@stores/channels.store";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { makeListOptions, stubTallRowLayout } from "../helpers/messageListHarness";
+import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
 
 function makeMessage(id: number, over: Partial<Message> = {}): Message {
-  return {
-    id,
-    channelId: CHANNEL_ID,
-    user: ME,
-    content: `Message ${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...over,
-  };
+  return buildMessage(
+    { id, ...over },
+    {
+      channelId: CHANNEL_ID,
+      user: ME,
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
+    },
+  );
 }
 
 function setMessages(messages: readonly Message[]): void {
@@ -63,8 +56,7 @@ describe("MessageList — inline editor lifecycle", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;
-  let scrollHeight: PropertyDescriptor | undefined;
-  let offsetHeight: PropertyDescriptor | undefined;
+  let restoreLayout: () => void;
 
   const row = (id: number): HTMLElement | null =>
     container.querySelector<HTMLElement>(`[data-testid='message-${id}']`);
@@ -91,48 +83,17 @@ describe("MessageList — inline editor lifecycle", () => {
     resetMembersState();
     setChannels([]);
     setActiveChannel(null);
-    scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
-    offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-    // jsdom lays nothing out: a tall scroller, and fixed row heights.
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get: () => 100_000,
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get(this: HTMLElement): number {
-        return this.classList.contains("message") ? 100 : 32;
-      },
-    });
+    restoreLayout = stubTallRowLayout();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onEditEnd: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID, onEditEnd: vi.fn() });
   });
 
   afterEach(() => {
     list?.destroy?.();
     list = null;
     container.remove();
-    for (const [name, d] of [
-      ["scrollHeight", scrollHeight],
-      ["offsetHeight", offsetHeight],
-    ] as const) {
-      if (d) Object.defineProperty(HTMLElement.prototype, name, d);
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
-    }
+    restoreLayout();
   });
 
   it("refuses to edit a sticker message", () => {

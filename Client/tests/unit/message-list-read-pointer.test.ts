@@ -31,6 +31,7 @@ import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/server
 import type { ReadyChannel } from "@lib/types";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import { setMessages } from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 import { resetChannelsState } from "../helpers/storeSeeds";
 
@@ -48,14 +49,6 @@ function msg(id: number): Message {
   return makeMessage({
     id,
     timestamp: new Date(Date.UTC(2024, 0, 15, 12, 0) + id * 600_000).toISOString(),
-  });
-}
-
-function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
   });
 }
 
@@ -141,7 +134,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
   describe("placed by the pointer", () => {
     it("goes above the first message past the pointer", () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(3, 2);
       mount();
       expect(lineAbove()).toBe("message-3");
@@ -150,14 +143,14 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     it("trusts the pointer over the count when they disagree", () => {
       // The count says 'the last 2'; the pointer says the last 3 (a blocked
       // author's message is not counted but is still unseen).
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(2, 2);
       mount();
       expect(lineAbove()).toBe("message-3");
     });
 
     it("keeps the count-based line when the server sent no pointer", () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(2, undefined);
       mount();
       expect(lineAbove()).toBe("message-4");
@@ -165,42 +158,42 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
     it("keeps the count-based line without the capability, even with a pointer", () => {
       applyReadyCapabilities({});
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(2, 1);
       mount();
       expect(lineAbove()).toBe("message-4");
     });
 
     it("draws no line when the channel was opened with nothing unread", () => {
-      setMessages([1, 2, 3].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3].map(msg));
       openChannel(0, 3);
       mount();
       expect(lineAbove()).toBeNull();
     });
 
     it("draws none above a live arrival in a channel that was fully read", () => {
-      setMessages([1, 2, 3].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3].map(msg));
       openChannel(0, 3);
       mount();
-      setMessages([1, 2, 3, 4].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4].map(msg));
       messagesStore.flush();
       expect(lineAbove()).toBeNull();
     });
 
     it("sits at the top when every loaded message is past the pointer", () => {
-      setMessages([10, 11, 12].map(msg));
+      setMessages(CHANNEL_ID, [10, 11, 12].map(msg));
       openChannel(40, 3);
       mount();
       expect(lineAbove()).toBe("message-10");
     });
 
     it("does not move when the live pointer does (read_state, a mark)", () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(3, 2);
       mount();
       writeReadPointer(CHANNEL_ID, 5, { unread: 0, mention: 0 });
       expect(getPointerOnOpen(CHANNEL_ID)).toBe(2);
-      setMessages([1, 2, 3, 4, 5, 6].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
       expect(lineAbove()).toBe("message-3");
     });
@@ -208,11 +201,11 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
   describe("a pointer line at the top of the window", () => {
     it("moves when older history is prepended", () => {
-      setMessages([10, 11, 12].map(msg));
+      setMessages(CHANNEL_ID, [10, 11, 12].map(msg));
       openChannel(5, 7);
       mount();
       expect(lineAbove()).toBe("message-10");
-      setMessages([5, 6, 7, 8, 9, 10, 11, 12].map(msg));
+      setMessages(CHANNEL_ID, [5, 6, 7, 8, 9, 10, 11, 12].map(msg));
       messagesStore.flush();
       expect(lineAbove()).toBe("message-8");
     });
@@ -220,7 +213,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
   describe("after a jump", () => {
     it("draws the line inside an around-window, and does not scroll to it", () => {
-      setMessages([100, 101, 102, 103, 104, 105, 106].map(msg));
+      setMessages(CHANNEL_ID, [100, 101, 102, 103, 104, 105, 106].map(msg));
       openChannel(0, 103);
       setDetached(true);
       mount();
@@ -230,7 +223,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("draws none when the around-window holds nothing past the pointer", () => {
-      setMessages([100, 101, 102].map(msg));
+      setMessages(CHANNEL_ID, [100, 101, 102].map(msg));
       openChannel(0, 500);
       setDetached(true);
       mount();
@@ -238,7 +231,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("draws none in an around-window without a pointer, as before", () => {
-      setMessages([100, 101, 102, 103].map(msg));
+      setMessages(CHANNEL_ID, [100, 101, 102, 103].map(msg));
       openChannel(2, undefined);
       setDetached(true);
       mount();
@@ -246,12 +239,12 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("moves to the new window when a jump replaces the loaded one", async () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(3, 2);
       mount();
       expect(lineAbove()).toBe("message-3");
       setDetached(true);
-      setMessages([200, 201, 202].map(msg));
+      setMessages(CHANNEL_ID, [200, 201, 202].map(msg));
       await vi.waitFor(() => expect(lineAbove()).toBe("message-200"));
     });
   });
@@ -269,7 +262,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     }
 
     beforeEach(() => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(0, 5);
     });
 
@@ -301,7 +294,10 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
     it("Alt+click on a link does nothing", async () => {
       options = makeOpts({ currentUserId: 99 });
-      setMessages([msg(1), makeMessage({ ...msg(2), content: "see https://example.com/x" })]);
+      setMessages(CHANNEL_ID, [
+        msg(1),
+        makeMessage({ ...msg(2), content: "see https://example.com/x" }),
+      ]);
       openChannel(0, 2);
       mount();
       const link = container.querySelector<HTMLElement>(".msg-text a")!;
@@ -467,7 +463,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     const scrollUp = (): void => scrollTo(300);
 
     it("reaching the bottom marks read up to the newest loaded message, by id", () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(3, 2);
       mount();
       scrollUp();
@@ -477,7 +473,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("scrolling at the bottom again sends nothing more", () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(3, 2);
       mount();
       scrollToEnd();
@@ -486,7 +482,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("sends nothing while the pointer already covers what is loaded", () => {
-      setMessages([1, 2, 3].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3].map(msg));
       openChannel(0, 3);
       mount();
       scrollToEnd();
@@ -494,7 +490,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("marks nothing while scrolled away from the tail", () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(3, 2);
       mount();
       scrollUp();
@@ -503,7 +499,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
 
     it("a partial scroll, then leaving, marks read up to the newest visible message", () => {
       const ids = Array.from({ length: 40 }, (_, i) => i + 1);
-      setMessages(ids.map(msg));
+      setMessages(CHANNEL_ID, ids.map(msg));
       openChannel(30, 5);
       mount();
       scrollTo(600);
@@ -524,7 +520,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("a partial scroll in a blurred window records nothing", () => {
-      setMessages(Array.from({ length: 40 }, (_, i) => i + 1).map(msg));
+      setMessages(CHANNEL_ID, Array.from({ length: 40 }, (_, i) => i + 1).map(msg));
       openChannel(30, 5);
       mount();
       hasFocus.mockReturnValue(false);
@@ -535,23 +531,26 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("a live arrival with the tail in view is marked read by its id", async () => {
-      setMessages([1, 2, 3].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3].map(msg));
       openChannel(0, 3);
       mount();
       scrollToEnd();
-      setMessages([1, 2, 3, 4].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4].map(msg));
       messagesStore.flush();
       await vi.advanceTimersByTimeAsync(1000);
       expect(marks).toEqual([[CHANNEL_ID, 4]]);
     });
 
     it("six live arrivals at the bottom within a second send at most one mark_read", async () => {
-      setMessages([1, 2, 3].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3].map(msg));
       openChannel(0, 3);
       mount();
       scrollToEnd();
       for (let id = 4; id <= 9; id++) {
-        setMessages(Array.from({ length: id }, (_, i) => msg(i + 1)));
+        setMessages(
+          CHANNEL_ID,
+          Array.from({ length: id }, (_, i) => msg(i + 1)),
+        );
         messagesStore.flush();
         // The auto-scroll that follows an append reaches the scroll handler.
         root().dispatchEvent(new Event("scroll"));
@@ -563,7 +562,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
     });
 
     it("Escape on a channel just marked unread marks it read at latest and ends the hold", async () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(0, 5);
       mount();
       scrollToEnd();
@@ -574,14 +573,14 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       list!.markReadAndJumpToPresent();
       expect(marks).toEqual([[CHANNEL_ID, undefined]]);
       expect(channelsStore.getState().channels.get(CHANNEL_ID)?.unreadCount).toBe(0);
-      setMessages([1, 2, 3, 4, 5, 6].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
       await vi.advanceTimersByTimeAsync(1000);
       expect(marks).toContainEqual([CHANNEL_ID, 6]);
     });
 
     it("a live arrival that releases the hold at the bottom is marked read", async () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(0, 5);
       mount();
       scrollToEnd();
@@ -591,14 +590,14 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
       await vi.waitFor(() => expect(unreads).toEqual([[CHANNEL_ID, 3]]));
       scrollUp();
       scrollToEnd();
-      setMessages([1, 2, 3, 4, 5, 6].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
       await vi.advanceTimersByTimeAsync(1000);
       expect(marks).toEqual([[CHANNEL_ID, 6]]);
     });
 
     it("Mark Unread is not undone by reaching the bottom or by a live arrival", async () => {
-      setMessages([1, 2, 3, 4, 5].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(msg));
       openChannel(0, 5);
       mount();
       scrollToEnd();
@@ -607,7 +606,7 @@ describe("MessageList: NEW line by read pointer and Mark Unread", () => {
         .dispatchEvent(new MouseEvent("click", { bubbles: true, altKey: true }));
       await vi.waitFor(() => expect(unreads).toEqual([[CHANNEL_ID, 3]]));
       scrollToEnd();
-      setMessages([1, 2, 3, 4, 5, 6].map(msg));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6].map(msg));
       messagesStore.flush();
       await vi.advanceTimersByTimeAsync(1300);
       expect(marks).toEqual([]);

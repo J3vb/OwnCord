@@ -44,10 +44,54 @@ export function mountMessageInput(
 }
 
 /** Picks files through the hidden file input, as the browser would. */
-export function selectFiles(container: HTMLDivElement, files: File[]): void {
+export function selectFiles(container: HTMLElement, files: File[]): void {
   const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-  Object.defineProperty(fileInput, "files", { value: files, writable: true });
+  Object.defineProperty(fileInput, "files", { value: files, writable: true, configurable: true });
   fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/** Picks one file through the hidden file input. */
+export function queueFile(container: HTMLElement, file: File): void {
+  selectFiles(container, [file]);
+}
+
+/** Clicks the composer's send button. */
+export function clickSend(container: HTMLElement): void {
+  (container.querySelector(".send-btn") as HTMLButtonElement).click();
+}
+
+/** The composer's attachment upload error text, or "" when none shows. */
+export function attachmentErrorText(container: HTMLElement): string {
+  return container.querySelector(".attachment-upload-error")?.textContent ?? "";
+}
+
+/** A small PDF fixture with the given file name. */
+export function pdfFile(name: string): File {
+  return new File(["x"], name, { type: "application/pdf" });
+}
+
+type Uploaded = { id: string; url: string; filename: string };
+
+/** Mounts a composer whose uploads resolve at once with sequential srv-N ids. */
+export function mountUploadingComposer(container: HTMLElement): {
+  comp: ReturnType<typeof createMessageInput>;
+  uploads: File[];
+  onUploadFile: ReturnType<typeof vi.fn>;
+  onDiscardUpload: ReturnType<typeof vi.fn>;
+  onSend: ReturnType<typeof vi.fn>;
+} {
+  let n = 0;
+  const uploads: File[] = [];
+  const onUploadFile = vi.fn(async (file: File): Promise<Uploaded> => {
+    uploads.push(file);
+    n += 1;
+    return { id: `srv-${n}`, url: `/f/${n}`, filename: file.name };
+  });
+  const onDiscardUpload = vi.fn(async () => {});
+  const onSend = vi.fn();
+  const comp = createMessageInput(makeOptions({ onSend, onUploadFile, onDiscardUpload }));
+  comp.mount(container);
+  return { comp, uploads, onUploadFile, onDiscardUpload, onSend };
 }
 
 /** A file just over the 100 MB upload limit. */

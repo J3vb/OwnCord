@@ -3,37 +3,15 @@
 // sends its id once it finishes (WP 2A-10).
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
+import * as mocks from "../helpers/messageInputMocks";
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
+import { createMessageInput } from "@components/MessageInput";
 import { useMountContainer } from "../helpers/mountContainer";
+import { clickSend, makeOptions, pdfFile, queueFile } from "../helpers/messageInputHarness";
 
 type UploadResult = { id: string; url: string; filename: string };
-
-const stubGifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
-
-function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
-  return {
-    channelId: 1,
-    channelName: "general",
-    gifApi: stubGifApi,
-    onSend: vi.fn(),
-    onTyping: vi.fn(),
-    ...overrides,
-  };
-}
 
 /** An upload handler whose single call the test settles by hand. */
 function controlledUpload() {
@@ -56,16 +34,6 @@ function controlledUpload() {
     progress: (f: number) => progress?.(f),
     signal: () => signal,
   };
-}
-
-function queueFile(container: HTMLElement, file: File): void {
-  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-  Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function send(container: HTMLElement): void {
-  (container.querySelector(".send-btn") as HTMLButtonElement).click();
 }
 
 describe("MessageInput upload in flight across a channel switch", () => {
@@ -100,7 +68,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
     up.resolve({ id: "srv-7", url: "/f/7", filename: "big.zip" });
     await vi.waitFor(() => expect(chip.classList.contains("uploading")).toBe(false));
     (container.querySelector(".msg-textarea") as HTMLTextAreaElement).value = "done";
-    send(container);
+    clickSend(container);
     expect(opts.onSend).toHaveBeenCalledWith(
       "done",
       null,
@@ -116,7 +84,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
     const opts = makeOptions({ onUploadFile: up.fn });
     const first = createMessageInput(opts);
     first.mount(container);
-    queueFile(container, new File(["x"], "doc.pdf", { type: "application/pdf" }));
+    queueFile(container, pdfFile("doc.pdf"));
     await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
     const draft = first.getDraft();
     first.destroy?.();
@@ -128,7 +96,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
     next.mount(container);
     next.restoreDraft(draft);
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
-    send(container);
+    clickSend(container);
     expect(opts.onSend).toHaveBeenCalledWith(
       "",
       null,
@@ -144,7 +112,7 @@ describe("MessageInput upload in flight across a channel switch", () => {
     const opts = makeOptions({ onUploadFile: up.fn });
     const first = createMessageInput(opts);
     first.mount(container);
-    queueFile(container, new File(["x"], "doc.pdf", { type: "application/pdf" }));
+    queueFile(container, pdfFile("doc.pdf"));
     await vi.waitFor(() => expect(up.fn).toHaveBeenCalled());
     const draft = first.getDraft();
     first.destroy?.();
@@ -199,11 +167,11 @@ describe("MessageInput upload in flight across a channel switch", () => {
       const opts = makeOptions({ onUploadFile });
       const first = createMessageInput(opts);
       first.mount(container);
-      queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+      queueFile(container, pdfFile("a.pdf"));
       await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
 
       vi.setSystemTime(Date.now() + 51 * 60 * 1000);
-      send(container);
+      clickSend(container);
       expect(onUploadFile).toHaveBeenCalledTimes(2);
       const draft = first.getDraft();
       first.destroy?.();
@@ -220,12 +188,12 @@ describe("MessageInput upload in flight across a channel switch", () => {
       expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
       expect(container.querySelector(".uploading")).toBeNull();
 
-      send(container);
+      clickSend(container);
       expect(opts.onSend).not.toHaveBeenCalled();
       expect(onUploadFile).toHaveBeenCalledTimes(3);
       await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
       vi.setSystemTime(Date.now() + 1000);
-      send(container);
+      clickSend(container);
       expect(opts.onSend).toHaveBeenCalledWith(
         "",
         null,

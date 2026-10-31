@@ -43,29 +43,23 @@ import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { makeListOptions, stubTallRowLayout } from "../helpers/messageListHarness";
+import { buildMessage } from "../helpers/messageFactory";
 
 const CHANNEL_ID = 1;
 
 function makeMessage(id: number, over: Partial<Message> = {}): Message {
-  return {
-    id,
-    channelId: CHANNEL_ID,
-    // One author per row with its own picture, so a refetch is attributable.
-    user: { id: 1000 + id, username: `User${id}`, avatar: `/api/v1/files/av${id}` },
-    content: `Message ${id} https://example.com/pic${id}.gif`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    // 10 minutes apart on one UTC day: never grouped, one day divider.
-    timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...over,
-  };
+  return buildMessage(
+    { id, ...over },
+    {
+      channelId: CHANNEL_ID,
+      // One author per row with its own picture, so a refetch is attributable.
+      user: { id: 1000 + id, username: `User${id}`, avatar: `/api/v1/files/av${id}` },
+      content: `Message ${id} https://example.com/pic${id}.gif`,
+      // 10 minutes apart on one UTC day: never grouped, one day divider.
+      timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
+    },
+  );
 }
 
 function range(from: number, to: number, over: Partial<Message> = {}): Message[] {
@@ -84,8 +78,7 @@ describe("MessageList — a history page keeps the rendered rows", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
   let options: MessageListOptions;
-  let scrollHeight: PropertyDescriptor | undefined;
-  let offsetHeight: PropertyDescriptor | undefined;
+  let restoreLayout: () => void;
 
   const rootEl = (): HTMLDivElement => container.querySelector(".messages-container")!;
   const row = (id: number): HTMLElement | null =>
@@ -135,34 +128,10 @@ describe("MessageList — a history page keeps the rendered rows", () => {
       "URL",
       Object.assign(URL, { createObjectURL: () => "blob:test", revokeObjectURL: () => {} }),
     );
-    scrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
-    offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
-    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
-      configurable: true,
-      get: () => 100_000,
-    });
-    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
-      configurable: true,
-      get(this: HTMLElement): number {
-        return this.classList.contains("message") ? 100 : 32;
-      },
-    });
+    restoreLayout = stubTallRowLayout();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1063,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onEditEnd: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID, currentUserId: 1063, onEditEnd: vi.fn() });
   });
 
   afterEach(() => {
@@ -170,13 +139,7 @@ describe("MessageList — a history page keeps the rendered rows", () => {
     list?.destroy?.();
     list = null;
     container.remove();
-    for (const [name, d] of [
-      ["scrollHeight", scrollHeight],
-      ["offsetHeight", offsetHeight],
-    ] as const) {
-      if (d) Object.defineProperty(HTMLElement.prototype, name, d);
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
-    }
+    restoreLayout();
   });
 
   const KEPT = [61, 62, 63, 64, 65, 66, 67, 68, 69, 70];

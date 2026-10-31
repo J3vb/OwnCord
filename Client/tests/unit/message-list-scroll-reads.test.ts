@@ -17,6 +17,7 @@ import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMembersState } from "../helpers/storeResets";
+import { makeListOptions } from "../helpers/messageListHarness";
 
 function makeMessage(id: number): Message {
   return buildMessage(
@@ -50,19 +51,7 @@ describe("MessageList scroll frame layout reads", () => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => rafs.push(cb));
     container = document.createElement("div");
     document.body.appendChild(container);
-    msgList = createMessageList({
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+    msgList = createMessageList(makeListOptions());
     msgList.mount(container);
     root = container.querySelector<HTMLElement>(".messages-container")!;
     scrollTop = 5000;

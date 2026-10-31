@@ -26,27 +26,13 @@ vi.mock("@lib/prefs/mediaVisibility", () => ({
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import type { Message } from "@stores/messages.store";
-import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import {
+  makeListOptions,
+  makeMessage,
+  resetStores,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
-
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-}
-
-function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return buildMessage(overrides);
-}
-
-function setMessages(channelId: number, messages: Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, messages);
-    return { ...prev, messagesByChannel: next };
-  });
-}
 
 describe("MessageList media release (GIF observer leak fix)", () => {
   let container: HTMLDivElement;
@@ -59,19 +45,7 @@ describe("MessageList media release (GIF observer leak fix)", () => {
     discardMediaMock.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions();
     msgList = createMessageList(options);
   });
 

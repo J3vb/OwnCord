@@ -2,12 +2,9 @@
 // to one per animation frame; programmatic changes still resize synchronously.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
+import * as mocks from "../helpers/messageInputMocks";
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 import { createMessageInput } from "@components/MessageInput";
 

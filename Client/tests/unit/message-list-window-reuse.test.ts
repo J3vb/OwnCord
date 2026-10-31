@@ -24,33 +24,16 @@ vi.mock("@lib/prefs/mediaVisibility", () => ({
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { messagesStore } from "@stores/messages.store";
-import type { Message } from "@stores/messages.store";
-import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import {
+  makeListOptions,
+  makeMessage,
+  nextFrame,
+  resetStores,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 const ROW_H = 61;
-
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-}
-
-function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return buildMessage(overrides);
-}
-
-function setMessages(channelId: number, messages: Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, messages);
-    return { ...prev, messagesByChannel: next };
-  });
-}
-
-const nextFrame = (): Promise<void> =>
-  new Promise((resolve) => requestAnimationFrame(() => resolve()));
 
 describe("MessageList incremental window shift", () => {
   let container: HTMLDivElement;
@@ -72,19 +55,7 @@ describe("MessageList incremental window shift", () => {
     discardMediaMock.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions();
     // Distinct authors so no row is grouped; each one estimates ROW_H.
     setMessages(
       1,

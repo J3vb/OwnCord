@@ -3,41 +3,13 @@
 // the `onProgress` callback the upload handler reports.
 import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
+import * as mocks from "../helpers/messageInputMocks";
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
-import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
+import { createMessageInput } from "@components/MessageInput";
 import { useMountContainer } from "../helpers/mountContainer";
-
-const stubGifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
-
-function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
-  return {
-    channelId: 1,
-    channelName: "general",
-    gifApi: stubGifApi,
-    onSend: vi.fn(),
-    onTyping: vi.fn(),
-    ...overrides,
-  };
-}
-
-function queueFile(container: HTMLElement, file: File): void {
-  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-  Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-}
+import { makeOptions, queueFile } from "../helpers/messageInputHarness";
 
 describe("MessageInput upload progress", () => {
   let container: HTMLDivElement;

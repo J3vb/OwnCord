@@ -2,43 +2,40 @@
 // deleted is never sent: past the age limit the chip re-uploads from its file,
 // or is marked expired when there is no file, and Send refuses until it is
 // fresh. Never a silent send without the file.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
-vi.mock("@components/EmojiPicker", () => ({
-  createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
-vi.mock("@components/GifPicker", () => ({
-  createGifPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
-}));
+import * as mocks from "../helpers/messageInputMocks";
+vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
+vi.mock("@components/GifPicker", () => mocks.gifPickerMock());
 
 import { createMessageInput, type MessageInputOptions } from "@components/MessageInput";
-import type { GifApi, GifFavoritesApi } from "@lib/media/gifProvider";
+import {
+  attachmentErrorText,
+  clickSend,
+  makeOptions,
+  mountMessageInput,
+  pdfFile,
+  queueFile,
+  useMessageInputContainer,
+} from "../helpers/messageInputHarness";
 
 const MIN = 60 * 1000;
 
-const stubGifApi: GifApi & GifFavoritesApi = {
-  gifSearch: vi.fn(async () => ({ results: [] })),
-  gifTrending: vi.fn(async () => ({ results: [] })),
-  gifFavorites: vi.fn(async () => ({ favorites: [] })),
-  addGifFavorite: vi.fn(async () => undefined),
-  removeGifFavorite: vi.fn(async () => undefined),
-};
-
-function makeOptions(overrides: Partial<MessageInputOptions> = {}): MessageInputOptions {
-  return {
-    channelId: 1,
-    channelName: "general",
-    gifApi: stubGifApi,
-    onSend: vi.fn(),
-    onTyping: vi.fn(),
-    ...overrides,
-  };
+/** Stages a.pdf and waits until its upload has settled. */
+async function stageSettledChip(container: HTMLElement): Promise<void> {
+  queueFile(container, pdfFile("a.pdf"));
+  await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
 }
 
-function queueFile(container: HTMLElement, file: File): void {
-  const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
-  Object.defineProperty(fileInput, "files", { value: [file], writable: true });
-  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+/** Expects the send to carry exactly one settled chip with this server id. */
+function expectSentWithChip(opts: MessageInputOptions, text: string, id: string): void {
+  expect(opts.onSend).toHaveBeenCalledWith(
+    text,
+    null,
+    [id],
+    [expect.objectContaining({ id })],
+    false,
+  );
 }
 
 function uploader(): MessageInputOptions["onUploadFile"] & ReturnType<typeof vi.fn> {
@@ -46,25 +43,14 @@ function uploader(): MessageInputOptions["onUploadFile"] & ReturnType<typeof vi.
   return vi.fn(async (file: File) => ({ id: `srv-${++n}`, url: `/f/${n}`, filename: file.name }));
 }
 
-function send(container: HTMLElement): void {
-  (container.querySelector(".send-btn") as HTMLButtonElement).click();
-}
-
-function errorText(container: HTMLElement): string {
-  return container.querySelector(".attachment-upload-error")?.textContent ?? "";
-}
-
 describe("MessageInput staged attachment age limit", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMessageInputContainer((el) => {
+    container = el;
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    container.remove();
   });
 
   it("re-uploads a chip older than 50 minutes at Send instead of sending its old id", async () => {
@@ -72,32 +58,23 @@ describe("MessageInput staged attachment age limit", () => {
     // that slept, so Send itself must catch the stale chip.
     vi.useFakeTimers({ toFake: ["Date"] });
     const onUploadFile = uploader();
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
 
-    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await stageSettledChip(container);
 
     vi.setSystemTime(Date.now() + 51 * MIN);
     textarea.value = "here it is";
-    send(container);
+    clickSend(container);
 
     expect(opts.onSend).not.toHaveBeenCalled();
     expect(onUploadFile).toHaveBeenCalledTimes(2);
-    expect(errorText(container)).toMatch(/send again/i);
+    expect(attachmentErrorText(container)).toMatch(/send again/i);
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
 
     vi.setSystemTime(Date.now() + 1000);
-    send(container);
-    expect(opts.onSend).toHaveBeenCalledWith(
-      "here it is",
-      null,
-      ["srv-2"],
-      [expect.objectContaining({ id: "srv-2" })],
-      false,
-    );
+    clickSend(container);
+    expectSentWithChip(opts, "here it is", "srv-2");
     comp.destroy?.();
   });
 
@@ -109,56 +86,38 @@ describe("MessageInput staged attachment age limit", () => {
       if (n === 2) throw new Error("network down");
       return { id: `srv-${n}`, url: `/f/${n}`, filename: file.name };
     });
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
-    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await stageSettledChip(container);
 
     vi.setSystemTime(Date.now() + 51 * MIN);
-    send(container);
-    await vi.waitFor(() => expect(errorText(container)).toMatch(/network down/));
+    clickSend(container);
+    await vi.waitFor(() => expect(attachmentErrorText(container)).toMatch(/network down/));
     expect(container.querySelectorAll(".attachment-preview-item").length).toBe(1);
     expect(container.querySelector(".uploading")).toBeNull();
 
     vi.setSystemTime(Date.now() + 1000);
-    send(container);
+    clickSend(container);
     expect(opts.onSend).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     expect(onUploadFile).toHaveBeenCalledTimes(3);
 
     vi.setSystemTime(Date.now() + 1000);
-    send(container);
-    expect(opts.onSend).toHaveBeenCalledWith(
-      "",
-      null,
-      ["srv-3"],
-      [expect.objectContaining({ id: "srv-3" })],
-      false,
-    );
+    clickSend(container);
+    expectSentWithChip(opts, "", "srv-3");
     comp.destroy?.();
   });
 
   it("sends a chip just under the limit unchanged", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const onUploadFile = uploader();
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
-    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await stageSettledChip(container);
 
     vi.setSystemTime(Date.now() + 49 * MIN);
-    send(container);
-    expect(opts.onSend).toHaveBeenCalledWith(
-      "",
-      null,
-      ["srv-1"],
-      [expect.objectContaining({ id: "srv-1" })],
-      false,
-    );
+    clickSend(container);
+    expectSentWithChip(opts, "", "srv-1");
     expect(onUploadFile).toHaveBeenCalledTimes(1);
     comp.destroy?.();
   });
@@ -166,11 +125,9 @@ describe("MessageInput staged attachment age limit", () => {
   it("never re-uploads in the background; Send refreshes the chip and clears the notice", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const onUploadFile = uploader();
-    const opts = makeOptions({ onUploadFile });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile });
 
-    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
+    queueFile(container, pdfFile("a.pdf"));
     await vi.advanceTimersByTimeAsync(0);
     expect(container.querySelector(".uploading")).toBeNull();
 
@@ -178,31 +135,23 @@ describe("MessageInput staged attachment age limit", () => {
     expect(onUploadFile).toHaveBeenCalledTimes(1);
     expect(container.querySelector(".expired")).toBeNull();
 
-    send(container);
+    clickSend(container);
     expect(opts.onSend).not.toHaveBeenCalled();
-    expect(errorText(container)).toMatch(/send again/i);
+    expect(attachmentErrorText(container)).toMatch(/send again/i);
     await vi.advanceTimersByTimeAsync(0);
     expect(onUploadFile).toHaveBeenCalledTimes(2);
     expect(container.querySelector(".uploading")).toBeNull();
-    expect(errorText(container)).toBe("");
+    expect(attachmentErrorText(container)).toBe("");
 
     await vi.advanceTimersByTimeAsync(1000);
-    send(container);
-    expect(opts.onSend).toHaveBeenCalledWith(
-      "",
-      null,
-      ["srv-2"],
-      [expect.objectContaining({ id: "srv-2" })],
-      false,
-    );
+    clickSend(container);
+    expectSentWithChip(opts, "", "srv-2");
     comp.destroy?.();
   });
 
   it("marks a restored chip expired at the limit and refuses Send until it is removed", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container);
     comp.restoreDraft({
       content: "with file",
       replyTo: null,
@@ -215,22 +164,20 @@ describe("MessageInput staged attachment age limit", () => {
     expect(chip.classList.contains("expired")).toBe(true);
     expect(chip.title).toMatch(/expired/i);
 
-    send(container);
+    clickSend(container);
     expect(opts.onSend).not.toHaveBeenCalled();
-    expect(errorText(container)).toMatch(/expired/i);
+    expect(attachmentErrorText(container)).toMatch(/expired/i);
 
     (chip.querySelector(".attachment-preview-remove") as HTMLButtonElement).click();
     await vi.advanceTimersByTimeAsync(1000);
-    send(container);
+    clickSend(container);
     expect(opts.onSend).toHaveBeenCalledWith("with file", null, [], [], false);
     comp.destroy?.();
   });
 
   it("refuses Send for a restored chip that aged past the limit before its timer ran", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    const opts = makeOptions();
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container);
     comp.restoreDraft({
       content: "with file",
       replyTo: null,
@@ -238,10 +185,10 @@ describe("MessageInput staged attachment age limit", () => {
     });
 
     vi.setSystemTime(Date.now() + 6 * MIN);
-    send(container);
+    clickSend(container);
 
     expect(opts.onSend).not.toHaveBeenCalled();
-    expect(errorText(container)).toMatch(/expired/i);
+    expect(attachmentErrorText(container)).toMatch(/expired/i);
     expect(container.querySelector(".attachment-preview-item")!.classList.contains("expired")).toBe(
       true,
     );
@@ -259,28 +206,19 @@ describe("MessageInput staged attachment age limit", () => {
     const onDiscardUpload = vi.fn(async (id: string) => {
       order.push(`discard ${id}`);
     });
-    const opts = makeOptions({ onUploadFile, onDiscardUpload });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile, onDiscardUpload });
 
-    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await stageSettledChip(container);
 
     vi.setSystemTime(Date.now() + 51 * MIN);
-    send(container);
+    clickSend(container);
     expect(container.querySelector(".uploading")).not.toBeNull();
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
     expect(order).toEqual(["upload srv-1", "discard srv-1", "upload srv-2"]);
 
     vi.setSystemTime(Date.now() + 1000);
-    send(container);
-    expect(opts.onSend).toHaveBeenCalledWith(
-      "",
-      null,
-      ["srv-2"],
-      [expect.objectContaining({ id: "srv-2" })],
-      false,
-    );
+    clickSend(container);
+    expectSentWithChip(opts, "", "srv-2");
     comp.destroy?.();
   });
 
@@ -290,28 +228,19 @@ describe("MessageInput staged attachment age limit", () => {
     const onDiscardUpload = vi.fn(async () => {
       throw new Error("offline");
     });
-    const opts = makeOptions({ onUploadFile, onDiscardUpload });
-    const comp = createMessageInput(opts);
-    comp.mount(container);
+    const { opts, comp } = mountMessageInput(container, { onUploadFile, onDiscardUpload });
 
-    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await stageSettledChip(container);
 
     vi.setSystemTime(Date.now() + 51 * MIN);
-    send(container);
+    clickSend(container);
     await vi.waitFor(() => expect(onUploadFile).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
-    expect(errorText(container)).toBe("");
+    expect(attachmentErrorText(container)).toBe("");
 
     vi.setSystemTime(Date.now() + 1000);
-    send(container);
-    expect(opts.onSend).toHaveBeenCalledWith(
-      "",
-      null,
-      ["srv-2"],
-      [expect.objectContaining({ id: "srv-2" })],
-      false,
-    );
+    clickSend(container);
+    expectSentWithChip(opts, "", "srv-2");
     comp.destroy?.();
   });
 
@@ -332,8 +261,7 @@ describe("MessageInput staged attachment age limit", () => {
     const comp = createMessageInput(makeOptions({ onUploadFile, onDiscardUpload }));
     comp.mount(container);
 
-    queueFile(container, new File(["x"], "a.pdf", { type: "application/pdf" }));
-    await vi.waitFor(() => expect(container.querySelector(".uploading")).toBeNull());
+    await stageSettledChip(container);
     queueFile(container, new File(["y"], "b.pdf", { type: "application/pdf" }));
     await vi.waitFor(() => expect(container.querySelector(".uploading")).not.toBeNull());
 
