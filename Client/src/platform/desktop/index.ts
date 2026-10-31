@@ -17,6 +17,7 @@ import { fileSaver } from "./fileSave";
 import { http } from "./http";
 import { identity } from "./identity";
 import { logFiles } from "./logFiles";
+import { nativeFiles } from "./nativeFiles";
 import { nativeProxies } from "./nativeProxies";
 import { nativeVoice } from "./nativeVoice";
 import { notifier } from "./notifications";
@@ -51,6 +52,7 @@ export const desktop: Platform = {
   http,
   identity,
   logFiles,
+  nativeFiles,
   nativeProxies,
   nativeVoice,
   notifier,

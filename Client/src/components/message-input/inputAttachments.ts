@@ -4,6 +4,7 @@
  */
 import { Disposable } from "@lib/disposable";
 import { dialogOpen } from "@lib/ui/dialogOpen";
+import { desktop } from "../../platform/desktop";
 import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { errorText } from "@lib/api";
@@ -24,6 +25,7 @@ import {
   paintSpoilerButton,
 } from "./inputShared";
 import type { InputState, InputApi } from "./inputState";
+import type { NativeFile } from "../../platform/contracts/nativeFiles";
 import type { MessageInputOptions, DraftUpload } from "../MessageInput";
 
 /** Start uploading `file`, after `before` when given; the returned upload
@@ -70,6 +72,18 @@ function startUpload(
   return handle;
 }
 
+/** Clipboard text a file manager writes for copied files: nothing, or one
+ *  file URI or absolute path per line. */
+export function looksLikeFileList(text: string): boolean {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+  if (lines.length === 0) return text === "";
+  // "/home/me/a.png", never a slash command such as "/shrug".
+  return lines.every((l) => l.startsWith("file://") || /^\/[^/\s][^/]*\/./.test(l));
+}
+
 export function createInputAttachments(st: InputState, api: InputApi) {
   /** "Upload to #channel" over the chat while a file from the OS is dragged
    *  over a slot that takes the drop. It ignores the pointer, so the drop
@@ -94,31 +108,28 @@ export function createInputAttachments(st: InputState, api: InputApi) {
     const hide = (): void => {
       overlay.hidden = true;
     };
+    const showOver = (target: EventTarget | null): void => {
+      if (!acceptsDropAt(target)) {
+        hide();
+        return;
+      }
+      if (!overlay.hidden) return;
+      const r = area.getBoundingClientRect();
+      overlay.style.top = `${r.top}px`;
+      overlay.style.left = `${r.left}px`;
+      overlay.style.width = `${r.width}px`;
+      overlay.style.height = `${r.height}px`;
+      overlay.hidden = false;
+    };
     document.addEventListener(
       "dragover",
       (e: DragEvent) => {
         if (e.dataTransfer?.types.includes("Files") !== true) return;
-        const target = e.target;
-        const accepts =
-          target instanceof Element &&
-          target.closest(DROP_SLOTS) !== null &&
-          st.disabledReason === null &&
-          !uploadsDisabledByServer() &&
-          !dialogOpen();
-        if (!accepts) {
-          hide();
-          return;
-        }
-        if (!overlay.hidden) return;
-        const r = area.getBoundingClientRect();
-        overlay.style.top = `${r.top}px`;
-        overlay.style.left = `${r.left}px`;
-        overlay.style.width = `${r.width}px`;
-        overlay.style.height = `${r.height}px`;
-        overlay.hidden = false;
+        showOver(e.target);
       },
       { signal: st.signal },
     );
+    wireNativeDrops(showOver, hide);
     // A null relatedTarget is the drag leaving the window.
     document.addEventListener(
       "dragleave",
@@ -129,6 +140,39 @@ export function createInputAttachments(st: InputState, api: InputApi) {
     );
     document.addEventListener("drop", hide, { signal: st.signal });
     document.addEventListener("dragend", hide, { signal: st.signal });
+  }
+
+  /** A file dragged in from the OS lands on `target`: true when this
+   *  composer takes it. */
+  function acceptsDropAt(target: EventTarget | null): boolean {
+    return (
+      target instanceof Element &&
+      target.closest(DROP_SLOTS) !== null &&
+      st.disabledReason === null &&
+      !uploadsDisabledByServer() &&
+      !dialogOpen()
+    );
+  }
+
+  /** Drops the host reads itself (Linux): the overlay follows the native
+   *  drag, and a drop over a slot that takes it attaches the files. */
+  function wireNativeDrops(showOver: (target: Element | null) => void, hide: () => void): void {
+    if (!desktop.nativeFiles.available) return;
+    const stop = desktop.nativeFiles.onDrag((drag) => {
+      if (st.signal.aborted) return;
+      if (drag.kind === "leave") {
+        hide();
+        return;
+      }
+      const target = document.elementFromPoint(drag.x, drag.y);
+      if (drag.kind === "over") {
+        showOver(target);
+        return;
+      }
+      hide();
+      if (acceptsDropAt(target)) void handleNativeFiles(drag.files);
+    });
+    st.signal.addEventListener("abort", stop, { once: true });
   }
 
   function isStale(a: (typeof st.pendingAttachments)[number]): boolean {
@@ -314,36 +358,96 @@ export function createInputAttachments(st: InputState, api: InputApi) {
     item.appendChild(btn);
   }
 
-  async function handlePasteFile(file: File, draftText?: string): Promise<void> {
-    if (st.options.onUploadFile === undefined || st.attachmentPreviewBar === null) return;
-    if (st.disabledReason !== null) return;
+  /** Show why a file of this name and size cannot be attached; true when refused. */
+  function refuseFile(name: string, size: number): boolean {
     if (uploadsDisabledByServer()) {
       api.showUploadError(messagingText("attach.serverDisabled"));
-      return;
+      return true;
     }
-
     // Any file type the server's file-type policy allows may be attached:
     // the server also sniffs the content, refuses its blocked types and
     // serves unsafe ones as downloads.
-    const refused = refusedExtension(file.name);
+    const refused = refusedExtension(name);
     if (refused !== null) {
       api.showUploadError(
         refused === ""
-          ? messagingText("error.fileTypeNoExtension", { filename: file.name })
-          : messagingText("error.fileTypeBlocked", { filename: file.name, ext: refused }),
+          ? messagingText("error.fileTypeNoExtension", { filename: name })
+          : messagingText("error.fileTypeBlocked", { filename: name, ext: refused }),
       );
-      return;
+      return true;
     }
     const maxBytes = authStore.getState().uploadPolicy?.max_upload_bytes ?? FALLBACK_MAX_FILE_SIZE;
-    if (file.size > maxBytes) {
+    if (size > maxBytes) {
       api.showUploadError(
         messagingText("error.fileTooLarge", {
-          filename: file.name,
+          filename: name,
           limit: String(Math.floor(maxBytes / (1024 * 1024))),
         }),
       );
-      return;
+      return true;
     }
+    return false;
+  }
+
+  /** Attach files the host read from the OS (a Linux drop or paste). Each is
+   *  checked by name and size before its bytes are read. */
+  async function handleNativeFiles(files: readonly NativeFile[]): Promise<void> {
+    if (st.options.onUploadFile === undefined || st.attachmentPreviewBar === null) return;
+    if (st.disabledReason !== null) return;
+    const accepted = files.filter((f) => !refuseFile(f.name, f.size));
+    // Read together, attached in the order they were dropped.
+    const reads = await Promise.all(
+      accepted.map((f) =>
+        f.read().then(
+          (file) => ({ ok: true as const, file }),
+          (err: unknown) => ({ ok: false as const, err }),
+        ),
+      ),
+    );
+    if (st.signal.aborted) return;
+    for (const read of reads) {
+      if (read.ok) {
+        void handlePasteFile(read.file);
+        continue;
+      }
+      api.showUploadError(
+        messagingText("error.uploadFailedDetail", {
+          detail: errorText(read.err, messagingText("error.uploadFailed")),
+        }),
+      );
+    }
+  }
+
+  /** A Ctrl+V of files copied in the Linux file manager: the webview sees
+   *  only their paths as text (or nothing), so the host reads the clipboard.
+   *  Takes the paste when its text could be a file list, and puts the text
+   *  back when the clipboard held no files after all. */
+  function pasteNativeFiles(e: ClipboardEvent): boolean {
+    if (!desktop.nativeFiles.available || st.textarea === null) return false;
+    if (st.options.onUploadFile === undefined) return false;
+    const data = e.clipboardData;
+    if (data === null) return false;
+    const text = data.getData("text/plain");
+    if (!data.types.includes("text/uri-list") && !looksLikeFileList(text)) return false;
+    e.preventDefault();
+    const textarea = st.textarea;
+    void desktop.nativeFiles.clipboardFiles().then((files) => {
+      if (st.signal.aborted) return;
+      if (files.length > 0) {
+        void handleNativeFiles(files);
+        return;
+      }
+      if (text === "") return;
+      textarea.setRangeText(text, textarea.selectionStart, textarea.selectionEnd, "end");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    return true;
+  }
+
+  async function handlePasteFile(file: File, draftText?: string): Promise<void> {
+    if (st.options.onUploadFile === undefined || st.attachmentPreviewBar === null) return;
+    if (st.disabledReason !== null) return;
+    if (refuseFile(file.name, file.size)) return;
 
     // Cap the queue at the server's hard limit. Refusing here -- before the
     // upload starts -- keeps the composer's state and the eventual send in
@@ -477,6 +581,8 @@ export function createInputAttachments(st: InputState, api: InputApi) {
     toggleSpoiler,
     appendSpoilerButton,
     handlePasteFile,
+    handleNativeFiles,
+    pasteNativeFiles,
     startUpload,
     runUpload,
     restoreDraftText,

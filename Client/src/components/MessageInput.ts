@@ -540,7 +540,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
           pastedFile = true;
           void api.handlePasteFile(file);
         }
-        if (!pastedFile) api.pasteLongTextAsFile(e);
+        if (pastedFile || api.pasteNativeFiles(e)) return;
+        api.pasteLongTextAsFile(e);
       },
       { signal: st.signal },
     );

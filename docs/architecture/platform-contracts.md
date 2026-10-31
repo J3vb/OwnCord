@@ -100,18 +100,20 @@ platform invoke bindings, including all conditional platform/feature handlers:
 
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
-| Files under `Client/src/` importing `@tauri-apps/*`        | 25    |
-| Distinct `invoke` command names called from `Client/src/`  | 95    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 98    |
+| Files under `Client/src/` importing `@tauri-apps/*`        | 26    |
+| Distinct `invoke` command names called from `Client/src/`  | 97    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 100   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
 | Files under `Client/src/platform/`                         | 56    |
 
-The handler count covers the 98 distinct registrations
+The handler count covers the 100 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
-`#[cfg(feature = "devtools")]` and the forty-three `native_voice_*` commands
-behind `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 97 on Linux
+`#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
+and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
+files dragged in or copied from the file manager) behind
+`#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 99 on Linux
 and 54 elsewhere. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
@@ -136,6 +138,7 @@ accept_cert_fingerprint
 app_audio_available
 check_client_update
 clear_call_notification
+clipboard_files
 delete_credential
 delete_identity_key
 delete_pending_messages
@@ -209,6 +212,7 @@ ptt_polling_supported
 ptt_set_key
 ptt_start
 ptt_stop
+read_staged_file
 save_credential
 save_identity_key
 save_pending_messages

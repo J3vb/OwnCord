@@ -18,6 +18,8 @@ mod external_content;
 mod external_open;
 #[cfg(not(windows))]
 mod fallback_crypto;
+#[cfg(target_os = "linux")]
+mod file_transfer;
 mod game_activity;
 mod http_pool;
 mod http_proxy;
@@ -312,6 +314,10 @@ pub fn run() {
             tray::open_log_folder,
             external_open::open_external_url,
             #[cfg(target_os = "linux")]
+            file_transfer::read_staged_file,
+            #[cfg(target_os = "linux")]
+            file_transfer::clipboard_files,
+            #[cfg(target_os = "linux")]
             native_voice::native_voice_build_info,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_key,
@@ -488,6 +494,16 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         )
     };
     if let Some(config) = app.config().app.windows.first().cloned() {
+        // WebKitGTK gives a drop only the file manager's uri-list, so on
+        // Linux the host takes drops and reads the files (file_transfer.rs).
+        // WebView2 hands the page real files, so Windows keeps it off.
+        #[cfg(target_os = "linux")]
+        let config = {
+            app.manage(file_transfer::StagedFiles::new());
+            let mut config = config;
+            config.drag_drop_enabled = true;
+            config
+        };
         let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?;
         #[cfg(desktop)]
         let builder = {
@@ -529,6 +545,8 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 );
                 window_prefs::on_close_requested(&handle, &main, api);
             }
+            #[cfg(target_os = "linux")]
+            tauri::WindowEvent::DragDrop(drag) => file_transfer::on_drag_drop(&handle, drag),
             _ => {}
         });
     }

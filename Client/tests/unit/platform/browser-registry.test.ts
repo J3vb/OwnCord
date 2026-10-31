@@ -30,6 +30,7 @@ describe("browser platform registry", () => {
         "identity",
         "logFiles",
         "mediaDetector",
+        "nativeFiles",
         "nativeProxies",
         "nativeVoice",
         "notifier",
