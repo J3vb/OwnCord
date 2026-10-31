@@ -54,21 +54,17 @@ export function legacySensitivityToDbScale(sensitivity: number): number {
 
 const SCALE_PREF = "voiceSensitivityScale";
 
-/** The old slider's default position. */
-const LEGACY_DEFAULT_SENSITIVITY = 50;
-
 /** Move a saved sensitivity from the old amplitude-linear scale onto this
- *  one, once, so the gate keeps the level the user had. A manual-mode
- *  profile that never moved the slider gated at the old default, which
- *  sits lower on this scale: it is written out so that gate stays too.
- *  Runs at startup, after automatic sensitivity's own migration. */
+ *  one, once, so the gate keeps the level the user chose. A profile that
+ *  never moved the slider has nothing saved and follows the default on
+ *  this scale, manual or automatic (the owner's call: everyone starts from
+ *  the same gate). Runs at startup, after automatic sensitivity's own
+ *  migration. */
 export function migrateVoiceSensitivityScale(): void {
   if (loadPref<string>(SCALE_PREF, "") === "db") return;
   const saved = loadPref<number>("voiceSensitivity", Number.NaN);
   if (Number.isFinite(saved)) {
     savePref("voiceSensitivity", legacySensitivityToDbScale(saved));
-  } else if (loadPref<boolean>("autoInputSensitivity", true) === false) {
-    savePref("voiceSensitivity", legacySensitivityToDbScale(LEGACY_DEFAULT_SENSITIVITY));
   }
   savePref(SCALE_PREF, "db");
 }
