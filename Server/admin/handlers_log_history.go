@@ -6,8 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -34,7 +34,9 @@ const (
 	logHistoryOrderSlack = time.Minute
 	// logHistoryDaySlack lets a file dated the day after "to" still be read:
 	// a line logged just before midnight can land in the next day's file.
-	logHistoryDaySlack = 24 * time.Hour
+	logHistoryDaySlack  = 24 * time.Hour
+	logHistoryOpenTries = 5
+	logHistoryOpenRetry = 20 * time.Millisecond
 )
 
 // logHistoryResponse is GET /logs/history's answer. Entries are newest first.
@@ -281,17 +283,32 @@ func readLogHistory(ctx context.Context, dir string, q logHistoryQuery) (logHist
 	return resp, nil
 }
 
+// openLogFile opens a history file, trying again for a moment while Windows
+// holds it busy, which happens while the cleanup deletes it.
+func openLogFile(ctx context.Context, path string) (*os.File, error) {
+	for range logHistoryOpenTries - 1 {
+		f, err := os.Open(path) //nolint:gosec // G304: path is built from a name checked by parseLogFileName
+		if err == nil || !logFileBusy(err) {
+			return f, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("opening log history file: %w", ctx.Err())
+		case <-time.After(logHistoryOpenRetry):
+		}
+	}
+	f, err := os.Open(path) //nolint:gosec // G304: path is built from a name checked by parseLogFileName
+	return f, err
+}
+
 // readLogFile scans one file backwards from end, adding matches to resp. It
 // reports true when the page is complete, the scan limit was hit, or the scan
 // went past "from", so no older file needs reading. A file deleted by cleanup
 // after it was listed reads as empty.
 func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *logHistoryQuery, resp *logHistoryResponse, scanned *int64) (bool, error) {
-	f, err := os.Open(filepath.Join(dir, key.name())) //nolint:gosec // G304: key comes from listLogFiles or a cursor checked by parseLogFileName
+	f, err := openLogFile(ctx, filepath.Join(dir, key.name()))
 	if err != nil {
-		// On Windows a file the cleanup has just deleted stays listed until
-		// its last handle closes, and opening it fails with access denied.
-		// Either way it is gone.
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+		if logFileGone(err) {
 			return false, nil
 		}
 		return false, err
