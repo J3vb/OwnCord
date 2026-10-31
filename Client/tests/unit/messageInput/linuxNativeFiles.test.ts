@@ -53,6 +53,10 @@ function nativeFile(
   return f;
 }
 
+function pointAt(el: Element | null): void {
+  document.elementFromPoint = vi.fn(() => el);
+}
+
 function emit(drag: NativeFileDrag): void {
   for (const h of native.handlers) h(drag);
 }
@@ -105,10 +109,6 @@ describe("Linux native files", () => {
     const overlay = container.querySelector("[data-testid=drop-overlay]") as HTMLDivElement;
     const textarea = container.querySelector(".msg-textarea") as HTMLTextAreaElement;
     return { comp, onUploadFile, messages, header, overlay, textarea };
-  }
-
-  function pointAt(el: Element | null): void {
-    document.elementFromPoint = vi.fn(() => el);
   }
 
   it("attaches files dropped on the chat and shows the overlay while dragging", async () => {
