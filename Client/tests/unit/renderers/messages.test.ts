@@ -20,6 +20,7 @@ import {
   makeMessage,
   makeOpts,
   useRenderersHarness,
+  mountMessage,
 } from "../../helpers/renderersHarness";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
@@ -165,9 +166,7 @@ describe("renderers", () => {
   describe("renderMessage", () => {
     it("renders a basic message with author and content", () => {
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { el, ac } = mountMessage(container, msg);
 
       expect(el.getAttribute("data-testid")).toBe("message-1");
       expect(container.querySelector(".msg-author")?.textContent).toBe("Alice");
@@ -186,9 +185,7 @@ describe("renderers", () => {
         },
         reactions: [{ emoji: "👍", count: 1, me: false }],
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { el, ac } = mountMessage(container, msg);
 
       const box = el.querySelector(".msg-forward");
       expect(box?.querySelector(".msg-forward-head")?.textContent).toBe("Forwarded");
@@ -200,17 +197,14 @@ describe("renderers", () => {
 
     it("draws an ordinary message without the frame", () => {
       const msg = makeMessage();
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+      const { ac } = mountMessage(container, msg);
       expect(container.querySelector(".msg-forward")).toBeNull();
       ac.abort();
     });
 
     it("marks the author name and avatar as a keyboard-reachable profile control", () => {
       const msg = makeMessage({ user: { id: 42, username: "Alice", avatar: null } });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const author = container.querySelector(".msg-author");
       expect(author?.getAttribute("data-user-id")).toBe("42");
@@ -246,9 +240,7 @@ describe("renderers", () => {
 
     it("marks a pending optimistic row and hides the action bar", () => {
       const msg = makeMessage({ status: "pending", correlationId: "c1", id: 0 });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { el, ac } = mountMessage(container, msg);
 
       expect(el.classList.contains("pending")).toBe(true);
       // No hover actions on an unsent row.
@@ -264,9 +256,7 @@ describe("renderers", () => {
         id: 0,
         errorCode: "REQUEST_TIMEOUT",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
         "The server is busy — retry in a moment",
@@ -405,9 +395,7 @@ describe("renderers", () => {
         id: 0,
         errorCode: "UPLOAD_CANCELLED",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
         "Upload cancelled",
@@ -423,9 +411,7 @@ describe("renderers", () => {
         id: 0,
         errorCode: "NETWORK",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { el, ac } = mountMessage(container, msg);
 
       expect(el.classList.contains("failed")).toBe(true);
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
@@ -445,9 +431,7 @@ describe("renderers", () => {
         id: 0,
         errorCode: "OFFLINE_NO_RECOVERY",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
         "Could not save this message — retry now or it is lost on restart",
@@ -464,9 +448,7 @@ describe("renderers", () => {
         content: "queued before the restore",
         errorCode: "BEFORE_RESTORE",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { el, ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-send-failed-text")?.textContent).toBe(
         "The server was restored — check the conversation before sending this again.",
@@ -478,9 +460,7 @@ describe("renderers", () => {
 
     it("renders deleted message with italic text", () => {
       const msg = makeMessage({ deleted: true });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const text = container.querySelector(".msg-text");
       expect(text?.textContent).toBe("[message deleted]");
@@ -491,9 +471,7 @@ describe("renderers", () => {
 
     it("shows (edited) tag for edited messages", () => {
       const msg = makeMessage({ editedAt: "2025-01-15T13:00:00Z" });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const edited = container.querySelector(".msg-edited");
       expect(edited).not.toBeNull();
@@ -507,8 +485,7 @@ describe("renderers", () => {
         timestamp: "2025-01-15T12:00:00Z",
         editedAt: "2025-01-16T13:05:00Z",
       });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+      const { ac } = mountMessage(container, msg);
 
       const full = /^\w+day, \w+ \d{1,2}, \d{4}( at |, )\d{1,2}:\d{2}\s?(AM|PM)$/;
       const timeTitle = container.querySelector(".msg-time")?.getAttribute("title") ?? "";
@@ -527,9 +504,7 @@ describe("renderers", () => {
         user: { id: 0, username: "System", avatar: null },
         content: "Alice joined the server",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".system-msg")).not.toBeNull();
 
@@ -565,9 +540,7 @@ describe("renderers", () => {
 
     it("shows action buttons for non-deleted messages", () => {
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const actionsBar = container.querySelector(".msg-actions-bar");
       expect(actionsBar).not.toBeNull();
@@ -578,9 +551,7 @@ describe("renderers", () => {
     it("gives icon-only action buttons explicit accessible names", () => {
       seedMessageManager();
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(
         container.querySelector("[data-testid='msg-react-1']")?.getAttribute("aria-label"),
@@ -604,9 +575,7 @@ describe("renderers", () => {
     it("updates the pin button accessible name for pinned messages", () => {
       seedMessageManager();
       const msg = makeMessage({ pinned: true });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector("[data-testid='msg-pin-1']")?.getAttribute("aria-label")).toBe(
         "Unpin",
@@ -617,9 +586,7 @@ describe("renderers", () => {
 
     it("does not show action buttons for deleted messages", () => {
       const msg = makeMessage({ deleted: true });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const actionsBar = container.querySelector(".msg-actions-bar");
       expect(actionsBar).toBeNull();
@@ -634,9 +601,7 @@ describe("renderers", () => {
           { emoji: "\u2764\uFE0F", count: 1, me: true },
         ],
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const reactionChips = container.querySelectorAll(".reaction-chip:not(.add-reaction)");
       expect(reactionChips.length).toBe(2);
@@ -650,9 +615,7 @@ describe("renderers", () => {
       const msg = makeMessage({
         reactions: [{ emoji: "\uD83D\uDC4D", count: 3, me: false }],
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const chip = container.querySelector(
         ".reaction-chip:not(.add-reaction)",
@@ -675,9 +638,7 @@ describe("renderers", () => {
       const msg = makeMessage({
         reactions: [{ emoji: "\uD83D\uDC4D", count: 2, me: false }],
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       const chip = container.querySelector(".reaction-chip:not(.add-reaction)") as HTMLElement;
       chip.dispatchEvent(new Event("mouseenter"));
@@ -702,9 +663,7 @@ describe("renderers", () => {
           },
         ],
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
       await vi.waitFor(() => {
         expectConsole("error", "[attachments] Failed to fetch attachment image");
       });
@@ -726,9 +685,7 @@ describe("renderers", () => {
           },
         ],
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-file")).not.toBeNull();
       expect(container.querySelector(".msg-file-name")?.textContent).toBe("doc.pdf");
@@ -807,9 +764,7 @@ describe("renderers", () => {
         deleted: true,
         content: "https://example.com/photo.png",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-image")).toBeNull();
       expect(container.querySelector(".msg-embed-link")).toBeNull();
@@ -823,9 +778,7 @@ describe("renderers", () => {
         deleted: true,
         editedAt: "2025-01-15T13:00:00Z",
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".msg-edited")).toBeNull();
 
@@ -837,9 +790,7 @@ describe("renderers", () => {
         deleted: true,
         reactions: [{ emoji: "\uD83D\uDC4D", count: 1, me: false }],
       });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], makeOpts(), ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg);
 
       expect(container.querySelector(".reaction-chip")).toBeNull();
 

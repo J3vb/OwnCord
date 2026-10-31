@@ -91,3 +91,52 @@ export function useMediaHarness(): void {
     document.body.innerHTML = "";
   });
 }
+
+export function lightboxImg(): HTMLElement {
+  return document.body.querySelector(".image-lightbox img") as HTMLElement;
+}
+
+export function pressDocKey(key: string): void {
+  document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+}
+
+/** Gives jsdom's layout-less <img> a 400x300 box at the origin. */
+export function stubImgRect(img: HTMLElement): void {
+  vi.spyOn(img, "getBoundingClientRect").mockReturnValue({
+    left: 0,
+    top: 0,
+    width: 400,
+    height: 300,
+    right: 400,
+    bottom: 300,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+}
+
+/** Presses at (x, y) and releases as a click at (clickX, y). */
+export function clickImgAt(img: HTMLElement, x: number, y: number, clickX = x): void {
+  const init = { clientY: y, bubbles: true, cancelable: true };
+  img.dispatchEvent(new MouseEvent("mousedown", { ...init, clientX: x }));
+  img.dispatchEvent(new MouseEvent("click", { ...init, clientX: clickX }));
+}
+
+export function wheelOn(target: HTMLElement, deltaY: number): void {
+  target.dispatchEvent(
+    new WheelEvent("wheel", {
+      deltaY,
+      clientX: 200,
+      clientY: 150,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+/** The scale() factor in the image's transform; fails when there is none. */
+export function scaleOf(img: HTMLElement): number {
+  const scaleMatch = img.style.transform.match(/scale\(([^)]+)\)/);
+  expect(scaleMatch).not.toBeNull();
+  return parseFloat(scaleMatch![1]!);
+}

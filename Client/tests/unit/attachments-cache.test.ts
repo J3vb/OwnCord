@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 
 const { fetchMock, putSpy, brokerImageMock, idbData, idbStub } = vi.hoisted(() => ({
   fetchMock: vi.fn<any>(),
@@ -19,39 +20,29 @@ const { fetchMock, putSpy, brokerImageMock, idbData, idbStub } = vi.hoisted(() =
 /** When set, a transaction completes only when the test calls `fire()`. */
 const holdTx: { fire: (() => void) | null; hold: boolean } = { fire: null, hold: false };
 
-// B9-8: this suite exercises content the viewer has already consented to;
-// the consent gate itself is proven in src/features/content-consent/external.test.ts.
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentExternalMock(importOriginal),
+);
 
-vi.mock("@tauri-apps/plugin-http", () => ({
-  fetch: fetchMock,
-}));
+vi.mock("@tauri-apps/plugin-http", () => mocks.httpPluginMock(fetchMock));
 
 // These caches hold server content only (B7-16): the URLs below are the
 // configured server's, reached through the (mocked) TOFU proxy.
 vi.mock("@lib/net/httpProxy", () => ({
   ensureHttpProxy: vi.fn().mockResolvedValue("http://127.0.0.1:49812"),
 }));
-vi.mock("@stores/auth.store", () => ({
-  getToken: () => null,
-  authStore: { getState: () => ({ uploadPolicy: null }) },
-}));
-vi.mock("../../src/platform/desktop/externalContent", () => ({
-  externalContent: { preview: vi.fn(), image: brokerImageMock },
-}));
+vi.mock("@stores/auth.store", () => mocks.authStoreMock(() => null));
+vi.mock("../../src/platform/desktop/externalContent", () =>
+  mocks.externalContentMock(vi.fn(), brokerImageMock),
+);
 
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
-}));
+vi.mock("@lib/logger", () => mocks.loggerMock());
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn() }));
-vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
-vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
+vi.mock("@lib/icons", () => mocks.iconsMock());
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
+vi.mock("../../src/features/messaging/content/media", () => mocks.contentMediaMock());
 
 vi.stubGlobal("indexedDB", {
   open: () => {
@@ -169,12 +160,7 @@ vi.stubGlobal("indexedDB", {
       onerror: null,
       onupgradeneeded: null,
     };
-    Promise.resolve().then(() => {
-      const upgrade = req.onupgradeneeded as ((ev: Event) => void) | null;
-      upgrade?.(new Event("upgradeneeded"));
-      const success = req.onsuccess as ((ev: Event) => void) | null;
-      success?.(new Event("success"));
-    });
+    mocks.settleOpenRequest(req);
     return req;
   },
 });
@@ -196,12 +182,55 @@ import {
 } from "../../src/features/messaging/content/attachments";
 import { createAvatarElement } from "../../src/features/profiles/avatar";
 
-function imageResponse() {
-  return {
-    ok: true,
-    headers: { get: () => "image/png" },
-    arrayBuffer: vi.fn().mockResolvedValue(Uint8Array.from([1, 2, 3]).buffer),
-  };
+const { imageResponse } = mocks;
+
+/** Resets the server-side caches and installs fresh blob: URL stubs. */
+function resetServerCaches(options: { putSpy: boolean }): void {
+  fetchMock.mockReset();
+  if (options.putSpy) putSpy.mockReset();
+  idbData.clear();
+  clearAttachmentCaches();
+  setServerHost("example.com");
+  setAttachmentCacheScope("example.com#1");
+  document.body.innerHTML = "";
+  let next = 0;
+  URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
+  URL.revokeObjectURL = vi.fn();
+}
+
+/** Makes the broker answer every image with `value` and stubs blob: URLs named `<prefix>-n`.
+ *  Returns the revoke spy. */
+function arrangeBroker(prefix: string, value: Blob = new Blob(["x"])): Mock<(url: string) => void> {
+  clearExternalImageCache();
+  brokerImageMock.mockReset();
+  brokerImageMock.mockResolvedValue({ ok: true, value });
+  let next = 0;
+  URL.createObjectURL = vi.fn(() => `blob:${prefix}-${++next}`);
+  const revoke = vi.fn<(url: string) => void>();
+  URL.revokeObjectURL = revoke;
+  return revoke;
+}
+
+/** The next fetch stays pending until the returned function resolves it. */
+function holdNextFetch(): { resolve: (value: ReturnType<typeof imageResponse>) => void } {
+  const held = { resolve: (_value: ReturnType<typeof imageResponse>): void => {} };
+  fetchMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        held.resolve = resolve;
+      }),
+  );
+  return held;
+}
+
+function shotAttachment(url: string) {
+  return renderAttachment({
+    id: "att-1",
+    url,
+    filename: "shot.png",
+    size: 3,
+    mime: "image/png",
+  });
 }
 
 // The tests rewrite the stub's store directly, so each starts on a new
@@ -212,16 +241,7 @@ beforeEach(() => {
 
 describe("attachment cache clearing", () => {
   beforeEach(() => {
-    fetchMock.mockReset();
-    putSpy.mockReset();
-    idbData.clear();
-    clearAttachmentCaches();
-    setServerHost("example.com");
-    setAttachmentCacheScope("example.com#1");
-    document.body.innerHTML = "";
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
-    URL.revokeObjectURL = vi.fn();
+    resetServerCaches({ putSpy: true });
   });
 
   it("never writes an external image into the memory or IndexedDB cache", async () => {
@@ -242,20 +262,14 @@ describe("attachment cache clearing", () => {
   });
 
   it("does not repopulate caches from an in-flight fetch after clear", async () => {
-    let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
-    fetchMock.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveFetch = resolve;
-        }),
-    );
+    const resolveFetch = holdNextFetch();
 
     const pending = fetchImageAsObjectUrl("https://example.com/image.png");
     await vi.waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
     clearAttachmentCaches();
-    resolveFetch?.(imageResponse());
+    resolveFetch.resolve(imageResponse());
 
     await expect(pending).resolves.toBeNull();
     expect(putSpy).not.toHaveBeenCalled();
@@ -305,13 +319,7 @@ describe("attachment cache clearing", () => {
   });
 
   it("stops showing a loading placeholder when a mid-fetch clear invalidates the result", async () => {
-    let resolveFetch: ((value: ReturnType<typeof imageResponse>) => void) | undefined;
-    fetchMock.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveFetch = resolve;
-        }),
-    );
+    const resolveFetch = holdNextFetch();
 
     const element = renderAttachment({
       id: "att-1",
@@ -330,7 +338,7 @@ describe("attachment cache clearing", () => {
     expect(placeholder.classList.contains("loading")).toBe(true);
 
     clearAttachmentCaches();
-    resolveFetch?.(imageResponse());
+    resolveFetch.resolve(imageResponse());
 
     // The placeholder is replaced by the failure line, so nothing in the
     // attachment reads as still loading.
@@ -368,12 +376,7 @@ describe("attachment cache clearing", () => {
   });
 
   it("re-requests an on-screen image whose blob: URL the LRU cap evicted", async () => {
-    clearExternalImageCache();
-    brokerImageMock.mockReset();
-    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:live-${++next}`);
-    URL.revokeObjectURL = vi.fn();
+    arrangeBroker("live");
     const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
 
     const img = document.createElement("img");
@@ -407,12 +410,7 @@ describe("attachment cache clearing", () => {
   });
 
   it("re-requests an image the manual cache clear revoked", async () => {
-    clearExternalImageCache();
-    brokerImageMock.mockReset();
-    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:clear-${++next}`);
-    URL.revokeObjectURL = vi.fn();
+    arrangeBroker("clear");
     const source = { url: "https://cdn.elsewhere.example/still-shown.gif" };
 
     const img = document.createElement("img");
@@ -426,12 +424,7 @@ describe("attachment cache clearing", () => {
   });
 
   it("re-requests an external avatar whose blob: URL the LRU cap evicted", async () => {
-    clearExternalImageCache();
-    brokerImageMock.mockReset();
-    brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:avatar-${++next}`);
-    URL.revokeObjectURL = vi.fn();
+    arrangeBroker("avatar");
 
     const avatar = createAvatarElement(
       {
@@ -467,16 +460,10 @@ describe("attachment cache clearing", () => {
   it("bounds broker-fetched blob: URLs by bytes", async () => {
     // A broker image may be 16 MB, so a count cap alone can pin ~1.6 GB of
     // blob memory outside the JS heap.
-    clearExternalImageCache();
-    brokerImageMock.mockReset();
-    brokerImageMock.mockResolvedValue({
-      ok: true,
-      value: bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
-    });
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:bytes-${++next}`);
-    const revoke = vi.fn();
-    URL.revokeObjectURL = revoke;
+    const revoke = arrangeBroker(
+      "bytes",
+      bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
+    );
     const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
 
     const first = (await fetchExternalImage({ url: url(1) }))!;
@@ -493,15 +480,7 @@ describe("attachment cache clearing", () => {
   });
 
   it("an evicted-by-bytes external image is re-requested when shown again", async () => {
-    clearExternalImageCache();
-    brokerImageMock.mockReset();
-    brokerImageMock.mockResolvedValue({
-      ok: true,
-      value: bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)),
-    });
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:bytes-live-${++next}`);
-    URL.revokeObjectURL = vi.fn();
+    arrangeBroker("bytes-live", bigBlob(Math.floor(EXTERNAL_IMAGE_CACHE_MAX_BYTES * 0.4)));
     const url = (i: number): string => `https://cdn.elsewhere.example/${i}.png`;
 
     const img = document.createElement("img");
@@ -524,13 +503,7 @@ describe("attachment cache clearing", () => {
     let revoke: Mock<(url: string) => void>;
 
     beforeEach(() => {
-      clearExternalImageCache();
-      brokerImageMock.mockReset();
-      brokerImageMock.mockResolvedValue({ ok: true, value: new Blob(["x"]) });
-      let next = 0;
-      URL.createObjectURL = vi.fn(() => `blob:lru-${++next}`);
-      revoke = vi.fn<(url: string) => void>();
-      URL.revokeObjectURL = revoke;
+      revoke = arrangeBroker("lru");
     });
 
     afterEach(() => {
@@ -785,15 +758,7 @@ describe("one download per attachment", () => {
   };
 
   beforeEach(() => {
-    fetchMock.mockReset();
-    idbData.clear();
-    clearAttachmentCaches();
-    setServerHost("example.com");
-    setAttachmentCacheScope("example.com#1");
-    document.body.innerHTML = "";
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
-    URL.revokeObjectURL = vi.fn();
+    resetServerCaches({ putSpy: false });
   });
 
   /** Two rows show the attachment, then a channel switch away and back
@@ -870,27 +835,12 @@ describe("server image caches", () => {
   }
 
   beforeEach(() => {
-    fetchMock.mockReset();
-    putSpy.mockReset();
-    idbData.clear();
-    clearAttachmentCaches();
-    setServerHost("example.com");
-    setAttachmentCacheScope("example.com#1");
-    document.body.innerHTML = "";
-    let next = 0;
-    URL.createObjectURL = vi.fn(() => `blob:server-${++next}`);
-    URL.revokeObjectURL = vi.fn();
+    resetServerCaches({ putSpy: true });
   });
 
   it("shows a server image from a blob: URL, never a data: URI", async () => {
     fetchMock.mockResolvedValue(imageResponse());
-    const element = renderAttachment({
-      id: "att-1",
-      url: url(1),
-      filename: "shot.png",
-      size: 3,
-      mime: "image/png",
-    });
+    const element = shotAttachment(url(1));
 
     await vi.waitFor(() => {
       expect(element.querySelector("img")?.getAttribute("src")).toBe("blob:server-1");
@@ -986,13 +936,7 @@ describe("server image caches", () => {
 
   it("re-requests an on-screen server image whose blob: URL was evicted", async () => {
     fetchMock.mockResolvedValue(imageResponse());
-    const element = renderAttachment({
-      id: "att-1",
-      url: url(1),
-      filename: "shot.png",
-      size: 3,
-      mime: "image/png",
-    });
+    const element = shotAttachment(url(1));
     await vi.waitFor(() => expect(element.querySelector("img")).not.toBeNull());
     const img = element.querySelector("img")!;
     expect(img.getAttribute("src")).toBe("blob:server-1");

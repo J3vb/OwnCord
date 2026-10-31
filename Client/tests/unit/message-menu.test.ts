@@ -52,6 +52,8 @@ function rightClick(target: Element, init: MouseEventInit = {}): MouseEvent {
 }
 
 const menu = (): HTMLElement | null => document.querySelector<HTMLElement>(MENU);
+const sheet = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>('[data-testid="message-sheet"]');
 
 function items(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>(`${MENU} [role="menuitem"]`)];
@@ -328,6 +330,48 @@ describe("message right-click menu", () => {
     // Off the link the same message has no link rows.
     await open(text());
     expect(names()).not.toContain("Copy Link");
+  });
+
+  describe("on a phone", () => {
+    const sheetItem = (testId: string): HTMLElement | null =>
+      sheet()?.querySelector<HTMLElement>(`[data-testid="${testId}"]`) ?? null;
+    async function press(target: Element): Promise<void> {
+      rightClick(target);
+      await vi.waitFor(() => expect(sheet()).not.toBeNull());
+    }
+
+    beforeEach(() => {
+      vi.stubGlobal("matchMedia", (q: string) => ({ matches: q.includes("pointer: coarse") }));
+    });
+    afterEach(() => {
+      sheet()?.remove();
+      document
+        .querySelectorAll(".bottom-sheet, .bottom-sheet-backdrop")
+        .forEach((el) => el.remove());
+      vi.unstubAllGlobals();
+    });
+
+    it("a message with one link offers it wherever the row is pressed", async () => {
+      mount([
+        makeMessage({ content: "see <https://example.com/page> and <https://example.com/page>" }),
+      ]);
+      await press(text());
+      expect(sheetItem("msg-menu-open-link")).not.toBeNull();
+      expect(sheetItem("msg-menu-copy-message-link")).not.toBeNull();
+      sheetItem("msg-menu-copy-link")!.click();
+      expect(writeText).toHaveBeenCalledWith("https://example.com/page");
+    });
+
+    it("a message with two different links offers only the one pressed", async () => {
+      mount([makeMessage({ content: "<https://a.example/> or <https://b.example/>" })]);
+      await press(text());
+      expect(sheetItem("msg-menu-copy-link")).toBeNull();
+      sheet()?.remove();
+      const second = text().querySelectorAll<HTMLAnchorElement>('a[href^="http"]')[1]!;
+      await press(second);
+      sheetItem("msg-menu-copy-link")!.click();
+      expect(writeText).toHaveBeenCalledWith(second.getAttribute("href"));
+    });
   });
 
   it("image right-click opens the image menu, not this one", async () => {

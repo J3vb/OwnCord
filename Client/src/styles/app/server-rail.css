@@ -128,6 +128,26 @@
 .server-rail-dm {
   background: transparent;
 }
+.server-rail-call-badge {
+  position: absolute;
+  right: 4px;
+  bottom: -3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--bg-tertiary);
+  background: var(--green);
+  color: #fff;
+  pointer-events: none;
+}
+.server-rail-call-badge .icon {
+  width: 10px;
+  height: 10px;
+}
 .server-rail-dm-avatar {
   display: flex;
   align-items: center;
@@ -224,8 +244,8 @@
 
 /* With the rail showing, DMs live behind Home and the rail does the
    switching, so the sidebar's DM section, its OC mark and the user bar's
-   switch button step aside. The narrow drawer layout has no rail and keeps
-   them. */
+   switch button step aside. A narrow desktop window has no rail and keeps
+   them; a phone's drawer has the rail and drops them too (below). */
 @media (min-width: 801px) {
   .app.has-server-rail .sidebar-dm-section,
   .app.has-server-rail .unified-sidebar-header .server-icon-sm,
@@ -294,8 +314,14 @@
   .server-rail-slot.drawer-open .server-rail-folder {
     width: 56px;
   }
-  .app.has-server-rail .user-bar [data-testid="disconnect-btn"] {
+  /* DMs live behind the rail's Home button here too, as on the desktop. */
+  .app.has-server-rail .user-bar [data-testid="disconnect-btn"],
+  .app.has-server-rail .sidebar-dm-section,
+  .app.has-server-rail .unified-sidebar-header .server-icon-sm {
     display: none;
+  }
+  .app.has-server-rail .unified-sidebar-header > .server-icon-sm + * {
+    max-width: 100%;
   }
 }
 

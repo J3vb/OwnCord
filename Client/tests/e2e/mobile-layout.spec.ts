@@ -343,10 +343,17 @@ for (const profile of PROFILES) {
     }) => {
       await signIn(page);
       await page.locator("[data-testid='sidebar-toggle']").tap();
+      // As on the desktop, DMs live behind Home, not above the channel list.
+      await expect(drawer(page).locator(".channel-list .channel-item").first()).toBeVisible();
+      const dmSection = drawer(page).locator(".sidebar-dm-section");
+      await expect(dmSection).toHaveCount(1);
+      await expect(dmSection).toBeHidden();
+      await expect(drawer(page).locator(".unified-sidebar-header .server-icon-sm")).toBeHidden();
       const home = rail(page).locator("[data-testid='server-rail-home']");
       await home.tap();
       await expect(home).toHaveAttribute("aria-current", "true");
       await expect(drawer(page)).toHaveClass(/drawer-open/);
+      await expect(drawer(page).locator(".dm-sidebar-header")).toBeVisible();
       // Tapping the connected server's icon goes back to its channels.
       await rail(page).locator("[data-testid='server-rail-server']").first().tap();
       await expect(home).not.toHaveAttribute("aria-current", "true");

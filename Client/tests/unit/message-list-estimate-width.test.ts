@@ -15,6 +15,7 @@ import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import { makeListOptions } from "../helpers/messageListHarness";
 
 const CHANNEL_ID = 1;
 
@@ -103,20 +104,10 @@ describe("MessageList: estimates follow the list's width", () => {
       next.set(CHANNEL_ID, messages);
       return { ...prev, messagesByChannel: next };
     });
-    const options: MessageListOptions = {
+    const options: MessageListOptions = makeListOptions({
       channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
       onEditEnd: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    });
     list = createMessageList(options);
     list.mount(container);
     await frame();
@@ -146,20 +137,7 @@ describe("MessageList: estimates follow the list's width", () => {
       next.set(CHANNEL_ID, messages);
       return { ...prev, messagesByChannel: next };
     });
-    list = createMessageList({
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onEditEnd: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+    list = createMessageList(makeListOptions({ channelId: CHANNEL_ID, onEditEnd: vi.fn() }));
     list.mount(container);
     await frame();
     rootEl().scrollTop = 30000;

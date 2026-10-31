@@ -16,6 +16,7 @@ import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { clearRowHeights } from "@components/message-list/rowHeights";
 import { buildMessage } from "../helpers/messageFactory";
 import { resetMembersState } from "../helpers/storeResets";
+import { makeListOptions } from "../helpers/messageListHarness";
 
 const CHANNEL_ID = 1;
 const ROW = 100;
@@ -160,20 +161,7 @@ describe("MessageList: rows resizing after they are drawn", () => {
   });
 
   const makeList = (): ReturnType<typeof createMessageList> =>
-    createMessageList({
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onEditEnd: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+    createMessageList(makeListOptions({ channelId: CHANNEL_ID, onEditEnd: vi.fn() }));
 
   afterEach(() => {
     list?.destroy?.();

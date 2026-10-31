@@ -4,49 +4,30 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // <img> (discardMedia) before discarding rendered rows, otherwise the
 // IntersectionObserver + allTracked set + pending timers retain every GIF
 // ever rendered.
-const { observeMediaMock, discardMediaMock } = vi.hoisted(() => ({
-  observeMediaMock: vi.fn(),
-  discardMediaMock: vi.fn(),
-}));
 // B9-8: this suite exercises content the viewer has already consented to;
 // the consent gate itself is proven in src/features/content-consent/external.test.ts.
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
+import * as mocks from "../helpers/messageListMocks";
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentedExternalMock(importOriginal),
+);
 
 // No native host: the GIF stays loading, so the suite sees only the observer.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: () => new Promise(() => {}) }));
 
-vi.mock("@lib/prefs/mediaVisibility", () => ({
-  observeMedia: observeMediaMock,
-  discardMedia: discardMediaMock,
-}));
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock());
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import type { Message } from "@stores/messages.store";
-import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import {
+  makeListOptions,
+  makeMessage,
+  resetStores,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-}
-
-function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return buildMessage(overrides);
-}
-
-function setMessages(channelId: number, messages: Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, messages);
-    return { ...prev, messagesByChannel: next };
-  });
-}
+const { observeMediaMock, discardMediaMock } = mocks;
 
 describe("MessageList media release (GIF observer leak fix)", () => {
   let container: HTMLDivElement;
@@ -59,19 +40,7 @@ describe("MessageList media release (GIF observer leak fix)", () => {
     discardMediaMock.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions();
     msgList = createMessageList(options);
   });
 

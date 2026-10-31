@@ -20,6 +20,7 @@ import type { Message } from "@stores/messages.store";
 import { INITIAL_STATE } from "../../src/features/messaging/messageModel";
 import { buildMessage } from "../helpers/messageFactory";
 import "../helpers/resizeObserverStub";
+import { makeListOptions } from "../helpers/messageListHarness";
 
 function makeMessage(id: number): Message {
   return buildMessage({ id });
@@ -39,19 +40,7 @@ describe("older-history Retry row", () => {
   let list: MessageListComponent;
 
   function mountWith(onScrollTop: MessageListOptions["onScrollTop"]): HTMLDivElement {
-    const options: MessageListOptions = {
-      channelId: 1,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop,
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    const options: MessageListOptions = makeListOptions({ onScrollTop });
     list = createMessageList(options);
     list.mount(container);
     return container.querySelector(".messages-container") as HTMLDivElement;

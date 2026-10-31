@@ -3,7 +3,7 @@
  * (3A-10c): renderers.ts hands renderAttachment the message's images and the
  * attachment's own index, and a store deletion closes the open viewer.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const { fetchMock } = vi.hoisted(() => ({ fetchMock: vi.fn() }));
 
@@ -19,34 +19,17 @@ vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") 
 vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
 
 import { renderMessage } from "../../src/components/message-list/renderers";
-import {
-  clearAttachmentCaches,
-  closeActiveLightbox,
-  setServerHost,
-} from "../../src/features/messaging/content/attachments";
+import { closeActiveLightbox } from "../../src/features/messaging/content/attachments";
 import { messagesStore, type Message } from "../../src/stores/messages.store";
-import type { MessageListOptions } from "../../src/components/MessageList";
+import {
+  att,
+  listOpts,
+  makeAttachmentMessage,
+  useImageRowEnv,
+} from "../helpers/attachmentMessages";
 
-const okImage = {
-  ok: true,
-  headers: { get: () => "image/png" },
-  arrayBuffer: () => Promise.resolve(new Uint8Array([1]).buffer),
-};
-const att = (id: string, filename: string, mime: string) => ({
-  id,
-  filename,
-  size: 10,
-  mime,
-  url: `/api/v1/files/${id}`,
-});
-
-function makeMessage(overrides: Partial<Message> = {}): Message {
-  return {
-    id: 7,
-    channelId: 1,
-    user: { id: 10, username: "Alice", avatar: null },
-    content: "pics",
-    replyTo: null,
+const makeMessage = (overrides: Partial<Message> = {}): Message =>
+  makeAttachmentMessage({
     attachments: [
       att("a", "a.png", "image/png"),
       att("v", "clip.mp4", "video/mp4"),
@@ -54,25 +37,15 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
       att("f", "notes.txt", "text/plain"),
       att("c", "c.png", "image/png"),
     ],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2025-01-15T12:30:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
     ...overrides,
-  };
-}
+  });
 
-const opts = { channelId: 1, channelName: "general", currentUserId: 10 } as MessageListOptions;
 const ac = new AbortController();
 const counter = (): string | null | undefined =>
   document.querySelector(".image-lightbox-counter")?.textContent;
 
 async function renderRow(msg: Message): Promise<HTMLImageElement[]> {
-  const el = renderMessage(msg, false, [msg], opts, ac.signal);
+  const el = renderMessage(msg, false, [msg], listOpts, ac.signal);
   document.body.appendChild(el);
   let imgs: HTMLImageElement[] = [];
   const count = msg.attachments.filter((a) => a.mime.startsWith("image/")).length;
@@ -83,22 +56,7 @@ async function renderRow(msg: Message): Promise<HTMLImageElement[]> {
   return imgs;
 }
 
-beforeEach(() => {
-  clearAttachmentCaches();
-  fetchMock.mockReset();
-  fetchMock.mockResolvedValue(okImage);
-  let n = 0;
-  URL.createObjectURL = vi.fn(() => `blob:img-${++n}`);
-  URL.revokeObjectURL = vi.fn();
-  setServerHost("localhost:8080");
-  messagesStore.setState((prev) => ({ ...prev, messagesByChannel: new Map() }));
-});
-
-afterEach(() => {
-  closeActiveLightbox();
-  document.body.replaceChildren();
-  setServerHost("");
-});
+useImageRowEnv(fetchMock);
 
 describe("renderers lightbox sequence", () => {
   it("passes the message's images and the clicked index; videos and files are excluded", async () => {

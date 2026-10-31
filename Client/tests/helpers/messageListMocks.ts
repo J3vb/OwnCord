@@ -27,3 +27,21 @@ export async function listAttachmentsMock(importOriginal: <T>() => Promise<T>) {
     await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImageAsObjectUrlMock };
 }
+
+export const { observeMediaMock, discardMediaMock } = {
+  observeMediaMock: vi.fn(),
+  discardMediaMock: vi.fn(),
+};
+
+/** The media-visibility manager as spies, so a test can see what a list tracks and releases. */
+export function mediaVisibilityMock() {
+  return { observeMedia: observeMediaMock, discardMedia: discardMediaMock };
+}
+
+/** Treats every external link as one the viewer already consented to. */
+export async function consentedExternalMock(importOriginal: <T>() => Promise<T>) {
+  return {
+    ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
+    externalAllowed: () => true,
+  };
+}

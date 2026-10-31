@@ -4,7 +4,7 @@
  * stay on the message they were reading, and the list must report that
  * message as its reading anchor so a detached window can refetch around it.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
@@ -20,6 +20,7 @@ import { readingAnchor } from "../../src/features/messaging/readingAnchor";
 import type { MessageResponse } from "@lib/types";
 import { resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { makeListOptions } from "../helpers/messageListHarness";
 
 const CHANNEL_ID = 1;
 
@@ -59,19 +60,7 @@ describe("MessageList — a full-ready resync keeps the reading position (P2-T4)
     resetMembersState();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID });
     // jsdom lays nothing out, so isNearBottom() would always be true; stub a
     // real gap so it reflects the scrollTop the test sets.
     scrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
