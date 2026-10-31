@@ -8,12 +8,12 @@ import { leaveVoice as mockLeaveVoice } from "@lib/voice/livekitSession";
 import { takeJoinRefusal } from "../../../src/features/voice/joinRequest";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   readyChannel,
   readyDm,
   readyMember,
   patchAuth,
   patchVoice,
+  mock,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -26,16 +26,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   it("keeps the session and sets no transient error for any server_restart reason", () => {
     setTransientError(null);

@@ -8,11 +8,11 @@ import {
 } from "@lib/voice/livekitSession";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   setMeUser,
   readyEvent,
   readyMember,
   patchVoice,
+  mock,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -25,16 +25,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   // OC-0014: a moderator deafen/mute has no SFU equivalent — the client is
   // the only place it takes effect (via setDeafened/setMuted, which gate

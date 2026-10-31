@@ -7,13 +7,14 @@ import { setUserBlockedByMe } from "../../../src/stores/blocks.store";
 import { notifyIncomingMessage as mockNotifyIncomingMessage } from "../../../src/lib/notifications";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   authOkEvent,
   dmRow,
   setActiveChannel,
   channelRow,
   seedChannels,
   patchAuth,
+  seedDms,
+  mock,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -26,16 +27,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   describe("chat_message notifications during a reconnect replay burst", () => {
     // The server writes auth_ok before the replay burst, so by the time
@@ -367,14 +359,12 @@ describe("WS Dispatcher", () => {
 
       it("a direct mention in a DM raises the DM's unread count, not its mention count", () => {
         seedChannel();
-        dmStore.setState(() => ({
-          channels: [
-            dmRow({
-              recipient: { id: 2, username: "bob", avatar: "", status: "online" as const },
-              isGroup: true,
-            }),
-          ],
-        }));
+        seedDms([
+          dmRow({
+            recipient: { id: 2, username: "bob", avatar: "", status: "online" as const },
+            isGroup: true,
+          }),
+        ]);
         incoming({ channel_id: 50, content: "ping @alex", mentions: [1] });
         const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
         expect(dm?.mentionCount).toBe(0);

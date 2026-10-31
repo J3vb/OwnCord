@@ -6,13 +6,15 @@ import { voiceStore, joinVoiceChannel, leaveVoiceChannel } from "../../../src/st
 import { dmStore } from "../../../src/stores/dm.store";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   dmRow,
   setActiveChannel,
   setMeUser,
   readyDm,
   channelRow,
   seedChannels,
+  chatMessageEvent,
+  seedDms,
+  mock,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -25,40 +27,37 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 );
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
+  useDispatcherHarness();
 
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  const dm50 = () => dmStore.getState().channels.find((c) => c.channelId === 50);
+
+  function bobSays(id: number, content: string, extra: Record<string, unknown> = {}): void {
+    mock.dispatch(
+      "chat_message",
+      chatMessageEvent({
+        id,
+        channel_id: 50,
+        user: { id: 10, username: "bob", avatar: "" },
+        content,
+        ...extra,
+      }),
+    );
+  }
 
   describe("chat_message DM store updates", () => {
     const dmChannel = dmRow();
 
     beforeEach(() => {
-      dmStore.setState(() => ({ channels: [{ ...dmChannel }] }));
+      seedDms([{ ...dmChannel }]);
     });
 
     it("updates DM last message with unread for non-active, non-own message", () => {
       setActiveChannel(1);
       setMeUser();
 
-      mock.dispatch("chat_message", {
-        id: 500,
-        channel_id: 50,
-        user: { id: 10, username: "bob", avatar: "" },
-        content: "hey there",
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
+      bobSays(500, "hey there");
 
-      const dms = dmStore.getState().channels;
-      const dm = dms.find((c) => c.channelId === 50);
+      const dm = dm50();
       expect(dm?.lastMessage).toBe("hey there");
       expect(dm?.unreadCount).toBe(1);
     });
@@ -67,18 +66,17 @@ describe("WS Dispatcher", () => {
       setActiveChannel(1);
       setMeUser();
 
-      mock.dispatch("chat_message", {
-        id: 501,
-        channel_id: 50,
-        user: { id: 5, username: "me", avatar: null },
-        content: "my DM reply",
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
+      mock.dispatch(
+        "chat_message",
+        chatMessageEvent({
+          id: 501,
+          channel_id: 50,
+          user: { id: 5, username: "me", avatar: null },
+          content: "my DM reply",
+        }),
+      );
 
-      const dms = dmStore.getState().channels;
-      const dm = dms.find((c) => c.channelId === 50);
+      const dm = dm50();
       expect(dm?.lastMessage).toBe("my DM reply");
       expect(dm?.unreadCount).toBe(0);
     });
@@ -90,18 +88,9 @@ describe("WS Dispatcher", () => {
       setActiveChannel(50);
       setMeUser();
 
-      mock.dispatch("chat_message", {
-        id: 502,
-        channel_id: 50,
-        user: { id: 10, username: "bob", avatar: "" },
-        content: "active DM msg",
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
+      bobSays(502, "active DM msg");
 
-      const dms = dmStore.getState().channels;
-      const dm = dms.find((c) => c.channelId === 50);
+      const dm = dm50();
       expect(dm?.lastMessage).toBe("active DM msg");
       expect(dm?.unreadCount).toBe(0);
     });
@@ -115,18 +104,9 @@ describe("WS Dispatcher", () => {
       setMeUser();
       messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([50]) }));
 
-      mock.dispatch("chat_message", {
-        id: 503,
-        channel_id: 50,
-        user: { id: 10, username: "bob", avatar: "" },
-        content: "arrived while reading back-history",
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
+      bobSays(503, "arrived while reading back-history");
 
-      const dms = dmStore.getState().channels;
-      const dm = dms.find((c) => c.channelId === 50);
+      const dm = dm50();
       expect(dm?.lastMessage).toBe("arrived while reading back-history");
       expect(dm?.unreadCount).toBe(1);
     });
@@ -135,21 +115,12 @@ describe("WS Dispatcher", () => {
       setActiveChannel(1);
       setMeUser();
 
-      mock.dispatch("chat_message", {
-        id: 504,
-        channel_id: 50,
-        user: { id: 10, username: "bob", avatar: "" },
-        content: "hey @me",
-        mentions: [5],
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
+      bobSays(504, "hey @me", { mentions: [5] });
 
       // The badge must fire live: dmStore's mentionCount is what DmSidebar
       // renders (mute-immune), and channelsStore's incrementMention no-ops
       // for DM ids. Without this, the badge appears only after a reconnect.
-      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      const dm = dm50();
       expect(dm?.mentionCount).toBe(1);
       expect(dm?.unreadCount).toBe(1);
     });
@@ -161,18 +132,9 @@ describe("WS Dispatcher", () => {
       setActiveChannel(50);
       setMeUser();
 
-      mock.dispatch("chat_message", {
-        id: 505,
-        channel_id: 50,
-        user: { id: 10, username: "bob", avatar: "" },
-        content: "hey @me",
-        mentions: [5],
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
+      bobSays(505, "hey @me", { mentions: [5] });
 
-      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      const dm = dm50();
       expect(dm?.mentionCount).toBe(0);
     });
 
@@ -194,18 +156,9 @@ describe("WS Dispatcher", () => {
       }));
 
       // The same message redelivered as a queued chat_message.
-      mock.dispatch("chat_message", {
-        id: 504,
-        channel_id: 50,
-        user: { id: 10, username: "bob", avatar: "" },
-        content: "hey @me",
-        mentions: [5],
-        reply_to: null,
-        attachments: [],
-        timestamp: "2026-03-15T10:00:00Z",
-      });
+      bobSays(504, "hey @me", { mentions: [5] });
 
-      const dm = dmStore.getState().channels.find((c) => c.channelId === 50);
+      const dm = dm50();
       expect(dm?.unreadCount).toBe(1);
       expect(dm?.mentionCount).toBe(1);
     });
@@ -266,9 +219,7 @@ describe("WS Dispatcher", () => {
 
     it("should call removeDmChannel on dm_channel_close", () => {
       // Seed a DM channel first
-      dmStore.setState(() => ({
-        channels: [dmRow()],
-      }));
+      seedDms([dmRow()]);
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
       expect(dmStore.getState().channels).toHaveLength(0);
@@ -291,7 +242,7 @@ describe("WS Dispatcher", () => {
       };
 
       it("drops the roster when a group DM is closed (left or removed)", () => {
-        dmStore.setState(() => ({ channels: [callDm(70, true)] }));
+        seedDms([callDm(70, true)]);
         seedCall(70);
         expect(voiceStore.getState().voiceUsers.get(70)?.size).toBe(1);
 
@@ -302,7 +253,7 @@ describe("WS Dispatcher", () => {
       });
 
       it("keeps the roster when a 1:1 DM is closed", () => {
-        dmStore.setState(() => ({ channels: [callDm(71, false)] }));
+        seedDms([callDm(71, false)]);
         seedCall(71);
 
         mock.dispatch("dm_channel_close", { channel_id: 71 });
@@ -312,7 +263,7 @@ describe("WS Dispatcher", () => {
       });
 
       it("leaves the roster to voice_leave while the local user is in that call", () => {
-        dmStore.setState(() => ({ channels: [callDm(72, true)] }));
+        seedDms([callDm(72, true)]);
         seedCall(72);
         joinVoiceChannel(72);
         voiceStore.flush();
@@ -326,7 +277,7 @@ describe("WS Dispatcher", () => {
       });
 
       it("drops a roster left from an earlier membership when the group is re-added", () => {
-        dmStore.setState(() => ({ channels: [callDm(73, true)] }));
+        seedDms([callDm(73, true)]);
         seedCall(73);
         joinVoiceChannel(73);
         voiceStore.flush();
@@ -352,15 +303,13 @@ describe("WS Dispatcher", () => {
     });
 
     it("falls back to another open DM when the closed DM was active", () => {
-      dmStore.setState(() => ({
-        channels: [
-          dmRow(),
-          dmRow({
-            channelId: 60,
-            recipient: { id: 11, username: "carl", avatar: "", status: "online" },
-          }),
-        ],
-      }));
+      seedDms([
+        dmRow(),
+        dmRow({
+          channelId: 60,
+          recipient: { id: 11, username: "carl", avatar: "", status: "online" },
+        }),
+      ]);
       setActiveChannel(50);
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
@@ -378,17 +327,15 @@ describe("WS Dispatcher", () => {
     // activated survives forever (it's now "active", so new messages take the
     // isDmActive branch and never increment it back).
     it("clears the dmStore unread badge on the DM it falls back to activating", () => {
-      dmStore.setState(() => ({
-        channels: [
-          dmRow(),
-          dmRow({
-            channelId: 60,
-            recipient: { id: 11, username: "carl", avatar: "", status: "online" },
-            unreadCount: 3,
-            mentionCount: 1,
-          }),
-        ],
-      }));
+      seedDms([
+        dmRow(),
+        dmRow({
+          channelId: 60,
+          recipient: { id: 11, username: "carl", avatar: "", status: "online" },
+          unreadCount: 3,
+          mentionCount: 1,
+        }),
+      ]);
       setActiveChannel(50);
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
@@ -405,18 +352,16 @@ describe("WS Dispatcher", () => {
     // synthesizing it here, activating channel 60 lands on an id
     // ChannelController can't resolve and blanks the chat area permanently.
     it("synthesizes the channelsStore mirror row when falling back to a DM never opened this session", () => {
-      dmStore.setState(() => ({
-        channels: [
-          dmRow(),
-          dmRow({
-            channelId: 60,
-            recipient: { id: 11, username: "carl", avatar: "", status: "online" },
-            participants: [{ id: 11, username: "carl", avatar: "", status: "online" }],
-            unreadCount: 2,
-            mentionCount: 1,
-          }),
-        ],
-      }));
+      seedDms([
+        dmRow(),
+        dmRow({
+          channelId: 60,
+          recipient: { id: 11, username: "carl", avatar: "", status: "online" },
+          participants: [{ id: 11, username: "carl", avatar: "", status: "online" }],
+          unreadCount: 2,
+          mentionCount: 1,
+        }),
+      ]);
       setActiveChannel(50);
       // Channel 60 has no channelsStore row yet — the bug this test locks.
       expect(channelsStore.getState().channels.has(60)).toBe(false);
@@ -437,9 +382,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("falls back to the first text channel when the closed DM was active and no DMs remain", () => {
-      dmStore.setState(() => ({
-        channels: [dmRow()],
-      }));
+      seedDms([dmRow()]);
       seedChannels([channelRow({ id: 1, name: "general" })], { activeChannelId: 50 });
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });
@@ -448,9 +391,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("falls back to an announcement channel when the closed DM was active, no DMs remain, and there is no text channel", () => {
-      dmStore.setState(() => ({
-        channels: [dmRow()],
-      }));
+      seedDms([dmRow()]);
       seedChannels([channelRow({ id: 30, name: "news", type: "announcement", canSend: false })], {
         activeChannelId: 50,
       });
@@ -461,9 +402,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("does not change the active channel when the closed DM was not active", () => {
-      dmStore.setState(() => ({
-        channels: [dmRow()],
-      }));
+      seedDms([dmRow()]);
       setActiveChannel(1);
 
       mock.dispatch("dm_channel_close", { channel_id: 50 });

@@ -18,11 +18,11 @@ import { takeVoiceMoved } from "../../../src/features/voice/moveHint";
 import { noteJoinSent, takeJoinRefusal } from "../../../src/features/voice/joinRequest";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   setMeUser,
   readyEvent,
   readyChannel,
   patchVoice,
+  mock,
 } from "../../helpers/dispatcherHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
@@ -38,16 +38,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 const { mockShowToast } = dispatcherMocks;
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   it("wires voice_state to voice store", () => {
     mock.dispatch("voice_state", {

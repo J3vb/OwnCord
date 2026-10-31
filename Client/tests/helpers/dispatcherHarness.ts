@@ -132,15 +132,19 @@ export function resetDispatcherStores(): void {
   stickersStore.flush();
 }
 
+/** The mock socket of the running test; the harness replaces it before each test. */
+export let mock: DispatcherMock;
+
+/** Tears down the dispatcher wired to `mock`; `replaceDispatcher` swaps it. */
+export let cleanup: () => void;
+
 /**
- * How a test file reads the harness's per-test state. The file declares
- * `let mock` and `let cleanup` itself (tests reassign `cleanup` when they
- * re-wire the dispatcher with other dependencies), the harness writes them
- * through `wired` and reads the current teardown through `currentCleanup`.
+ * Tears down the dispatcher the harness wired and wires a new one to the same
+ * socket with `api`, so a test can hand it REST fakes.
  */
-export interface DispatcherHarnessBinding {
-  wired(mock: DispatcherMock, cleanup: () => void): void;
-  currentCleanup(): () => void;
+export function replaceDispatcher(api?: Parameters<typeof wireDispatcher>[1]): void {
+  cleanup();
+  cleanup = wireDispatcher(mock.ws, api);
 }
 
 /**
@@ -149,19 +153,19 @@ export interface DispatcherHarnessBinding {
  * it, and teardown that first asserts no lazy voice import is still in flight.
  * Call it inside the describe, before the tests.
  */
-export function useDispatcherHarness(binding: DispatcherHarnessBinding): void {
+export function useDispatcherHarness(): void {
   beforeEach(() => {
     resetJoinRequest();
     vi.useFakeTimers();
     resetDispatcherStores();
 
-    const mock = createMockWs();
-    binding.wired(mock, wireDispatcher(mock.ws));
+    mock = createMockWs();
+    cleanup = wireDispatcher(mock.ws);
   });
 
   afterEach(async () => {
     await expectLazyVoiceImportsSettled();
-    binding.currentCleanup()();
+    cleanup();
     vi.useRealTimers();
   });
 }
@@ -286,4 +290,19 @@ export function patchVoice(patch: Partial<VoiceState>): void {
 /** Merge `patch` into authStore, leaving every other field as it is. */
 export function patchAuth(patch: Partial<AuthState>): void {
   authStore.setState((prev) => ({ ...prev, ...patch }));
+}
+
+/** A `chat_message` payload; `overrides` names at least id, channel_id, user and content. */
+export function chatMessageEvent(overrides: Fields): Fields {
+  return {
+    reply_to: null,
+    attachments: [],
+    timestamp: "2026-03-15T10:00:00Z",
+    ...overrides,
+  };
+}
+
+/** Replace dmStore's DM list with `rows`. */
+export function seedDms(rows: readonly DmChannel[]): void {
+  dmStore.setState(() => ({ channels: [...rows] }));
 }

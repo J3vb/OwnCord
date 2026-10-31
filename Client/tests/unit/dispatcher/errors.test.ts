@@ -5,7 +5,6 @@ import { expectConsole } from "../../helpers/console";
 import { authStore } from "../../../src/stores/auth.store";
 import { addOptimisticMessage, getChannelMessages } from "../../../src/stores/messages.store";
 import { membersStore } from "../../../src/stores/members.store";
-import { dmStore } from "../../../src/stores/dm.store";
 import { blocksStore } from "../../../src/stores/blocks.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import { safetyText } from "../../../src/i18n/safety";
@@ -14,11 +13,12 @@ import { createPresenceLimiter } from "../../../src/lib/net/rateLimiter";
 import { loadCustomStatus, saveCustomStatus } from "../../../src/lib/presence/userStatus";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   dmRow,
   memberRow,
   seedMembers,
   patchAuth,
+  seedDms,
+  mock,
 } from "../../helpers/dispatcherHarness";
 import { resetMessagesState } from "../../helpers/storeResets";
 
@@ -34,16 +34,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 const { mockShowToast } = dispatcherMocks;
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   it("wires error BANNED to clear auth and show error", () => {
     patchAuth({
@@ -284,14 +275,12 @@ describe("WS Dispatcher", () => {
   });
 
   it("gates the DM composer (blockedByThem) when a DM send is refused with FORBIDDEN", () => {
-    dmStore.setState(() => ({
-      channels: [
-        dmRow({
-          channelId: 7,
-          recipient: { id: 5, username: "alice", avatar: "", status: "online" },
-        }),
-      ],
-    }));
+    seedDms([
+      dmRow({
+        channelId: 7,
+        recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+      }),
+    ]);
     addOptimisticMessage({
       correlationId: "corr-dm",
       channelId: 7,
@@ -331,20 +320,18 @@ describe("WS Dispatcher", () => {
     // means something else, e.g. stale membership) — recipient is just
     // participants[0] for a group, so flagging it here would incorrectly
     // gate an unrelated 1:1 DM with that same person.
-    dmStore.setState(() => ({
-      channels: [
-        dmRow({
-          channelId: 8,
-          recipient: { id: 5, username: "alice", avatar: "", status: "online" },
-          participants: [
-            { id: 5, username: "alice", avatar: "", status: "online" },
-            { id: 6, username: "bob", avatar: "", status: "online" },
-          ],
-          name: "Crew",
-          isGroup: true,
-        }),
-      ],
-    }));
+    seedDms([
+      dmRow({
+        channelId: 8,
+        recipient: { id: 5, username: "alice", avatar: "", status: "online" },
+        participants: [
+          { id: 5, username: "alice", avatar: "", status: "online" },
+          { id: 6, username: "bob", avatar: "", status: "online" },
+        ],
+        name: "Crew",
+        isGroup: true,
+      }),
+    ]);
     addOptimisticMessage({
       correlationId: "corr-group",
       channelId: 8,

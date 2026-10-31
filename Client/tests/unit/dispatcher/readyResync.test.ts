@@ -29,7 +29,6 @@ import type { MessageResponse } from "../../../src/lib/types";
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../../src/lib/net/identity";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   readyChannel,
   readyEvent,
   setActiveChannel,
@@ -39,6 +38,9 @@ import {
   channelRow,
   seedChannels,
   patchAuth,
+  seedDms,
+  mock,
+  replaceDispatcher,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -53,24 +55,14 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 const mockEnsurePublished = vi.mocked(_ensureIdentityKeyPublished);
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   // Re-wires the dispatcher with the given deps (and an empty block list),
   // after tearing down the one the harness wired.
   function rewire(
     deps: Omit<NonNullable<Parameters<typeof wireDispatcher>[1]>, "listBlocks">,
   ): void {
-    cleanup();
-    cleanup = wireDispatcher(mock.ws, {
+    replaceDispatcher({
       listBlocks: vi.fn().mockResolvedValue({ blocked_user_ids: [] }),
       ...deps,
     });
@@ -208,9 +200,7 @@ describe("WS Dispatcher", () => {
   it("ready with an empty dm_channels array clears stale DM rows", () => {
     // The server always sends dm_channels; [] is an authoritative "no open
     // DMs" (all closed on another device), not "nothing to say".
-    dmStore.setState(() => ({
-      channels: [dmRow()],
-    }));
+    seedDms([dmRow()]);
 
     mock.dispatch("ready", readyEvent({ dm_channels: [] }));
 

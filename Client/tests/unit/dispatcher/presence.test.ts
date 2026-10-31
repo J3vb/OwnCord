@@ -12,13 +12,14 @@ import {
 } from "../../../src/lib/net/serverCapabilities";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   readyEvent,
   dmRow,
   readyDm,
   memberRow,
   readyMember,
   seedMembers,
+  seedDms,
+  mock,
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
@@ -39,16 +40,7 @@ function seedRoster(): void {
 }
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   it("wires presence to members store", () => {
     // Add a member first
@@ -215,9 +207,7 @@ describe("WS Dispatcher", () => {
 
     it("copies a DM partner's game into the DM list from presence, batch and ready", () => {
       const partner = { id: 10, username: "bob", avatar: "", status: "online" };
-      dmStore.setState(() => ({
-        channels: [dmRow({ recipient: partner, participants: [partner] })],
-      }));
+      seedDms([dmRow({ recipient: partner, participants: [partner] })]);
       const shown = () => dmStore.getState().channels[0]?.recipient.activity;
 
       mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
@@ -243,7 +233,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("a DM opened after ready shows the game its partner is already playing", () => {
-      dmStore.setState(() => ({ channels: [] }));
+      seedDms([]);
       mock.dispatch(
         "ready",
         readyEvent({
@@ -270,9 +260,7 @@ describe("WS Dispatcher", () => {
             activities: [{ user_id: 1, ...factorio }],
           }),
         );
-        dmStore.setState(() => ({
-          channels: [dmRow({ recipient: partner, participants: [partner] })],
-        }));
+        seedDms([dmRow({ recipient: partner, participants: [partner] })]);
         mock.dispatch("presence", { user_id: 10, status: "online", activity: factorio });
         expect(activityOf(1)?.name).toBe("Factorio");
         expect(serverSupportsGameActivity()).toBe(true);
@@ -409,9 +397,7 @@ describe("WS Dispatcher", () => {
     const listeningOf = (id: number) => membersStore.getState().members.get(id)?.listening;
     const partner = { id: 10, username: "bob", avatar: "", status: "online" };
     const seedDm = (): void => {
-      dmStore.setState(() => ({
-        channels: [dmRow({ recipient: partner, participants: [partner] })],
-      }));
+      seedDms([dmRow({ recipient: partner, participants: [partner] })]);
     };
     afterEach(() => resetServerCapabilities());
 
@@ -545,7 +531,7 @@ describe("WS Dispatcher", () => {
     });
 
     it("a DM opened after ready shows the song its partner is already playing", () => {
-      dmStore.setState(() => ({ channels: [] }));
+      seedDms([]);
       mock.dispatch(
         "ready",
         readyEvent({
@@ -658,9 +644,7 @@ describe("WS Dispatcher", () => {
     });
 
     beforeEach(() => {
-      dmStore.setState(() => ({
-        channels: [{ ...dmChannel, participants: [...dmChannel.participants] }],
-      }));
+      seedDms([{ ...dmChannel, participants: [...dmChannel.participants] }]);
     });
 
     it("updates the DM partner's status on presence, in recipient and participants", () => {

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { wireDispatcher } from "../../../src/lib/dispatcher";
 import { expectConsole } from "../../helpers/console";
 import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore, setRoles, getRoleIdByName } from "../../../src/stores/channels.store";
@@ -11,7 +10,6 @@ import { uiStore, setUpdateRequiredHost } from "../../../src/stores/ui.store";
 import { PROTOCOL_EPOCH } from "../../../src/lib/protocolTypes";
 import {
   useDispatcherHarness,
-  type DispatcherMock,
   authOkEvent,
   setActiveChannel,
   setMeUser,
@@ -21,6 +19,9 @@ import {
   seedChannels,
   seedMembers,
   patchAuth,
+  mock,
+  cleanup,
+  replaceDispatcher,
 } from "../../helpers/dispatcherHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
 
@@ -36,16 +37,7 @@ vi.mock("../../../src/features/connection/dispatchContext", async (importOrigina
 const { mockShowToast } = dispatcherMocks;
 
 describe("WS Dispatcher", () => {
-  let cleanup: () => void;
-  let mock: DispatcherMock;
-
-  useDispatcherHarness({
-    wired: (m, c) => {
-      mock = m;
-      cleanup = c;
-    },
-    currentCleanup: () => cleanup,
-  });
+  useDispatcherHarness();
 
   it("wires auth_ok to auth store", () => {
     mock.dispatch("auth_ok", authOkEvent({ motd: "Welcome!" }));
@@ -112,10 +104,9 @@ describe("WS Dispatcher", () => {
   });
 
   it("marks the server host as needing a client update when auth_error refuses this client's epoch as too old", () => {
-    cleanup();
     setUpdateRequiredHost(null);
     const getConfig = vi.fn(() => ({ host: "chat.example:8443", token: "t" }));
-    cleanup = wireDispatcher(mock.ws, { listBlocks: vi.fn().mockResolvedValue([]), getConfig });
+    replaceDispatcher({ listBlocks: vi.fn().mockResolvedValue([]), getConfig });
 
     mock.dispatch("auth_error", {
       message: "update the client",
@@ -140,10 +131,9 @@ describe("WS Dispatcher", () => {
   });
 
   it("marks the host with the server-older epochs when the SERVER is the older side, but not on an ordinary auth_error", () => {
-    cleanup();
     setUpdateRequiredHost(null);
     const getConfig = vi.fn(() => ({ host: "chat.example:8443", token: "t" }));
-    cleanup = wireDispatcher(mock.ws, { listBlocks: vi.fn().mockResolvedValue([]), getConfig });
+    replaceDispatcher({ listBlocks: vi.fn().mockResolvedValue([]), getConfig });
 
     mock.dispatch("auth_error", {
       message: "update the server",
@@ -466,9 +456,8 @@ describe("WS Dispatcher", () => {
   });
 
   it("on ready clears being-blocked state and refreshes blocked-by-me via api", async () => {
-    cleanup(); // tear down the no-api dispatcher wired in beforeEach
     const listBlocks = vi.fn().mockResolvedValue({ blocked_user_ids: [11, 22] });
-    cleanup = wireDispatcher(mock.ws, { listBlocks });
+    replaceDispatcher({ listBlocks });
 
     // Pre-seed a stale being-blocked entry that a fresh ready must clear.
     blocksStore.setState(() => ({ blockedByMe: new Set(), blockedByThem: new Set([5]) }));
@@ -488,7 +477,6 @@ describe("WS Dispatcher", () => {
   // but its reply can land after the user's own fresher action — applying it
   // unconditionally reverts what the user just did.
   it("does not let a slow-to-resolve ready-time listBlocks revert a fresher local unblock", async () => {
-    cleanup(); // tear down the no-api dispatcher wired in beforeEach
     let resolveListBlocks!: (v: { blocked_user_ids: number[] }) => void;
     const listBlocks = vi.fn(
       () =>
@@ -496,7 +484,7 @@ describe("WS Dispatcher", () => {
           resolveListBlocks = resolve;
         }),
     );
-    cleanup = wireDispatcher(mock.ws, { listBlocks });
+    replaceDispatcher({ listBlocks });
 
     // Local user 42 is blocked from a previous session.
     blocksStore.setState(() => ({ blockedByMe: new Set([42]), blockedByThem: new Set() }));
