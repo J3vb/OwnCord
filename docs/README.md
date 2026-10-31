@@ -35,28 +35,30 @@ Knowing the kind tells you how far to trust a page:
 
 ## Guides
 
-| Document                                     | What it covers                                                                                                                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [quick-start.md](quick-start.md)             | Get a server running in as few steps as possible.                                                                                                                         |
-| [deployment.md](deployment.md)               | Run a server: pick Docker, a Linux service or Windows, first run, next steps.                                                                                             |
-| [hosting/](hosting/)                         | Short guides for server owners: Docker, Windows, TLS and proxies, backups, upgrades, monitoring, troubleshooting, and a technical reference.                              |
-| [linux-install.md](linux-install.md)         | Install the desktop app on Linux: .deb, AppImage, tray, keyring, Wayland and uninstall.                                                                                   |
-| [known-limitations.md](known-limitations.md) | What the beta does not do, and a short FAQ.                                                                                                                               |
-| [moderation.md](moderation.md)               | For owners, admins and moderators: roles, reports, actions, appeals and who can join.                                                                                     |
-| [accessibility.md](accessibility.md)         | Keyboard, screen reader, text size, contrast and motion support, and the known gaps.                                                                                      |
-| [STATUS.md](STATUS.md)                       | The current release, nightly test health and the roadmap.                                                                                                                 |
-| [contributing.md](contributing.md)           | Set up, the branch and pull request model, coding standards, and how to run the CI checks.                                                                                |
-| [code-style.md](code-style.md)               | Formatting, lint rules, error handling and test conventions for any code change.                                                                                          |
-| [summaries/](summaries/README.md)            | Short overviews of the product, architecture, design system, database and API, for agents and new contributors.                                                           |
-| [security.md](security.md)                   | Keeping a server and its accounts safe: hardening checklist, two-factor, recovery, deletion records.                                                                      |
-| [security-model.md](security-model.md)       | For contributors: the security model, the rules every change follows, and the detail behind security.md.                                                                  |
-| [trust-model.md](trust-model.md)             | Who can read what, in plain words. The code and test references are in [architecture/trust-model-evidence.md](architecture/trust-model-evidence.md).                      |
-| [capacity.md](capacity.md)                   | How many people one server carries, and on what hardware. The method and every run are in [architecture/capacity-measurements.md](architecture/capacity-measurements.md). |
-| [livekit-setup.md](livekit-setup.md)         | Set up the LiveKit server for voice and video.                                                                                                                            |
-| [port-forwarding.md](port-forwarding.md)     | Make a server reachable from outside your home network.                                                                                                                   |
-| [tailscale.md](tailscale.md)                 | Remote access without port forwarding.                                                                                                                                    |
-| [testing-behavior.md](testing-behavior.md)   | Which test lane catches which broken behaviour, and its limits.                                                                                                           |
-| [mcp-introspect.md](mcp-introspect.md)       | A development-only MCP server for looking inside a running server.                                                                                                        |
+| Document                                               | What it covers                                                                                                                                                            |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [quick-start.md](quick-start.md)                       | Get a server running in as few steps as possible.                                                                                                                         |
+| [deployment.md](deployment.md)                         | Run a server: pick Docker, a Linux service or Windows, first run, next steps.                                                                                             |
+| [hosting/](hosting/)                                   | Short guides for server owners: Docker, Windows, TLS and proxies, backups, upgrades, monitoring, troubleshooting, and a technical reference.                              |
+| [linux-install.md](linux-install.md)                   | Install the desktop app on Linux: .deb, AppImage, tray, keyring, Wayland and uninstall.                                                                                   |
+| [known-limitations.md](known-limitations.md)           | What the beta does not do, and a short FAQ.                                                                                                                               |
+| [moderation.md](moderation.md)                         | For owners, admins and moderators: roles, reports, actions, appeals and who can join.                                                                                     |
+| [accessibility.md](accessibility.md)                   | Keyboard, screen reader, text size, contrast and motion support, and the known gaps.                                                                                      |
+| [STATUS.md](STATUS.md)                                 | The current release, nightly test health and the roadmap.                                                                                                                 |
+| [contributing.md](contributing.md)                     | From a fresh clone to a merged pull request: setup, the main commands, branches, commits and tests.                                                                       |
+| [contributing-reference.md](contributing-reference.md) | Every command, the git hooks, how CI picks its jobs, the test tiers and the dependency rules.                                                                             |
+| [maintainers.md](maintainers.md)                       | Cutting a release, README screenshots and update signing keys.                                                                                                            |
+| [code-style.md](code-style.md)                         | Formatting, lint rules, error handling and test conventions for any code change.                                                                                          |
+| [summaries/](summaries/README.md)                      | Short overviews of the product, architecture, design system, database and API, for agents and new contributors.                                                           |
+| [security.md](security.md)                             | Keeping a server and its accounts safe: hardening checklist, two-factor, recovery, deletion records.                                                                      |
+| [security-model.md](security-model.md)                 | For contributors: the security model, the rules every change follows, and the detail behind security.md.                                                                  |
+| [trust-model.md](trust-model.md)                       | Who can read what, in plain words. The code and test references are in [architecture/trust-model-evidence.md](architecture/trust-model-evidence.md).                      |
+| [capacity.md](capacity.md)                             | How many people one server carries, and on what hardware. The method and every run are in [architecture/capacity-measurements.md](architecture/capacity-measurements.md). |
+| [livekit-setup.md](livekit-setup.md)                   | Set up the LiveKit server for voice and video.                                                                                                                            |
+| [port-forwarding.md](port-forwarding.md)               | Make a server reachable from outside your home network.                                                                                                                   |
+| [tailscale.md](tailscale.md)                           | Remote access without port forwarding.                                                                                                                                    |
+| [testing-behavior.md](testing-behavior.md)             | Which test lane catches which broken behaviour, and its limits.                                                                                                           |
+| [mcp-introspect.md](mcp-introspect.md)                 | A development-only MCP server for looking inside a running server.                                                                                                        |
 
 ## Reference
 
