@@ -360,9 +360,11 @@ enum Producer {
     Device {
         pipeline: gst::Pipeline,
         sink: AppSink,
-        /// Set while a chosen camera mode pins the pipeline and no frame has
-        /// arrived yet: a failure then rebuilds it once without the pin.
-        unpinned: Option<String>,
+        /// Set until the first frame while the pipeline is pinned to a camera
+        /// mode or opens the V4L2 node directly: a failure then rebuilds it
+        /// once, unpinned and from the device monitor's own element (which
+        /// shares a camera another app holds through PipeWire).
+        fallback: Option<String>,
     },
     Synthetic {
         width: u32,
@@ -389,44 +391,41 @@ impl Producer {
     }
 
     fn device(id: &str, options: &CaptureOptions) -> Result<Self, String> {
-        let (source, device_caps) = device_source(id)?;
+        let (source, device_caps, direct) = device_source(id, true)?;
         let mode = device_caps
             .as_ref()
             .map(|caps| camera_modes(caps))
             .and_then(|modes| pick_mode(&modes, options));
         if let Some(mode) = mode {
             log::info!("[native_voice] camera mode {mode:?}");
-            match build_pipeline(source, Some(&mode.caps())).and_then(play) {
-                Ok((pipeline, sink)) => {
-                    return Ok(Self::Device {
-                        pipeline,
-                        sink,
-                        unpinned: Some(id.to_string()),
-                    });
-                }
-                Err(e) => log::warn!("[native_voice] camera mode {mode:?} refused: {e}"),
-            }
-            return Self::unpinned(id);
         }
-        build_pipeline(source, None)
-            .and_then(play)
-            .map(|(pipeline, sink)| Self::Device {
+        let fallback = (mode.is_some() || direct).then(|| id.to_string());
+        let pin = mode.map(|m| m.caps());
+        match build_pipeline(source, pin.as_ref()).and_then(play) {
+            Ok((pipeline, sink)) => Ok(Self::Device {
                 pipeline,
                 sink,
-                unpinned: None,
-            })
+                fallback,
+            }),
+            Err(e) if fallback.is_some() => {
+                log::warn!("[native_voice] camera refused ({mode:?}, direct {direct}): {e}");
+                Self::fallback(id)
+            }
+            Err(e) => Err(e),
+        }
     }
 
-    /// Capture `id` in whatever mode its source picks, with a fresh source
-    /// element (the old one belongs to the pipeline that was given up).
-    fn unpinned(id: &str) -> Result<Self, String> {
-        let (source, _) = device_source(id)?;
+    /// Capture `id` in whatever mode its source picks, from the monitor's own
+    /// element, with a fresh source (the old one belongs to the pipeline that
+    /// was given up).
+    fn fallback(id: &str) -> Result<Self, String> {
+        let (source, _, _) = device_source(id, false)?;
         build_pipeline(source, None)
             .and_then(play)
             .map(|(pipeline, sink)| Self::Device {
                 pipeline,
                 sink,
-                unpinned: None,
+                fallback: None,
             })
     }
 
@@ -435,7 +434,7 @@ impl Producer {
             Self::Device {
                 pipeline,
                 sink,
-                unpinned,
+                fallback,
             } => {
                 // A device unplugged mid-capture ends the stream: the pipeline
                 // posts an error or EOS on its bus. Report it so capture stops
@@ -448,13 +447,13 @@ impl Producer {
                         ) {
                             // The chosen mode would not negotiate: let the
                             // source pick its own, as before modes were chosen.
-                            let Some(id) = unpinned.take() else {
+                            let Some(id) = fallback.take() else {
                                 return Grab::Failed;
                             };
-                            log::warn!("[native_voice] camera mode failed; capturing unpinned");
+                            log::warn!("[native_voice] camera failed to start; retrying through the device monitor, unpinned");
                             // Release the device before the new pipeline opens it.
                             let _ = pipeline.set_state(gst::State::Null);
-                            return match Self::unpinned(&id) {
+                            return match Self::fallback(&id) {
                                 Ok(fresh) => {
                                     *self = fresh;
                                     Grab::Pending
@@ -466,7 +465,7 @@ impl Producer {
                 }
                 let sample = sink.try_pull_sample(gst::ClockTime::ZERO);
                 if sample.is_some() {
-                    unpinned.take();
+                    fallback.take();
                 }
                 match sample {
                     Some(sample) => {
@@ -502,9 +501,14 @@ impl Drop for Producer {
 
 /// The source element for a device id, with the modes the device lists when
 /// the monitor knows it: the monitor's own element when the id round-trips
-/// (V4L2 and PipeWire), else a `v4l2src`/`pipewiresrc` by path.
-fn device_source(id: &str) -> Result<(gst::Element, Option<gst::Caps>), String> {
-    let found = match monitor_element(id) {
+/// (V4L2 and PipeWire), else a `v4l2src`/`pipewiresrc` by path. With
+/// `direct`, a PipeWire camera backed by a V4L2 node opens that node instead
+/// ([`direct_v4l2`]); the returned flag says it did.
+fn device_source(
+    id: &str,
+    direct: bool,
+) -> Result<(gst::Element, Option<gst::Caps>, bool), String> {
+    let found = match monitor_element(id, direct) {
         Some(found) => found,
         None => {
             let (factory, prop) = if id.starts_with('/') {
@@ -515,7 +519,7 @@ fn device_source(id: &str) -> Result<(gst::Element, Option<gst::Caps>), String> 
             gst::ElementFactory::make(factory)
                 .property(prop, id)
                 .build()
-                .map(|element| (element, None))
+                .map(|element| (element, None, false))
                 .map_err(|_| format!("{NO_DEVICE}: {id}"))?
         }
     };
@@ -536,7 +540,7 @@ fn copy_out_of_pipewire(source: &gst::Element) {
 
 /// Re-find the monitored device with this id and let it build its element; the
 /// monitor knows which backend (V4L2, PipeWire) the id belongs to.
-fn monitor_element(id: &str) -> Option<(gst::Element, Option<gst::Caps>)> {
+fn monitor_element(id: &str, direct: bool) -> Option<(gst::Element, Option<gst::Caps>, bool)> {
     if gst::init().is_err() {
         return None;
     }
@@ -548,9 +552,11 @@ fn monitor_element(id: &str) -> Option<(gst::Element, Option<gst::Caps>)> {
         .iter()
         .find(|d| device_id(d).as_deref() == Some(id))
         .and_then(|d| {
-            direct_v4l2(d)
-                .or_else(|| d.create_element(None).ok())
-                .map(|e| (e, d.caps()))
+            let caps = d.caps();
+            match direct.then(|| direct_v4l2(d)).flatten() {
+                Some(e) => Some((e, caps, true)),
+                None => d.create_element(None).ok().map(|e| (e, caps, false)),
+            }
         });
     monitor.stop();
     found
@@ -1296,8 +1302,6 @@ mod tests {
         assert_eq!(pick_mode(&[], &options), None);
     }
 
-    /// A pinned mode is a capsfilter between the source and decodebin: a
-    /// source that can produce the mode negotiates it and frames flow.
     #[test]
     fn a_pipewire_v4l2_camera_resolves_to_its_video_node() {
         if gst::init().is_err() {
@@ -1363,6 +1367,8 @@ mod tests {
         copy_out_of_pipewire(&other);
     }
 
+    /// A pinned mode is a capsfilter between the source and decodebin: a
+    /// source that can produce the mode negotiates it and frames flow.
     #[test]
     fn a_pinned_mode_reaches_the_appsink() {
         if gst::init().is_err() {
