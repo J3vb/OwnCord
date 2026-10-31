@@ -504,19 +504,34 @@ impl Drop for Producer {
 /// the monitor knows it: the monitor's own element when the id round-trips
 /// (V4L2 and PipeWire), else a `v4l2src`/`pipewiresrc` by path.
 fn device_source(id: &str) -> Result<(gst::Element, Option<gst::Caps>), String> {
-    if let Some(found) = monitor_element(id) {
-        return Ok(found);
-    }
-    let (factory, prop) = if id.starts_with('/') {
-        ("v4l2src", "device")
-    } else {
-        ("pipewiresrc", "path")
+    let found = match monitor_element(id) {
+        Some(found) => found,
+        None => {
+            let (factory, prop) = if id.starts_with('/') {
+                ("v4l2src", "device")
+            } else {
+                ("pipewiresrc", "path")
+            };
+            gst::ElementFactory::make(factory)
+                .property(prop, id)
+                .build()
+                .map(|element| (element, None))
+                .map_err(|_| format!("{NO_DEVICE}: {id}"))?
+        }
     };
-    gst::ElementFactory::make(factory)
-        .property(prop, id)
-        .build()
-        .map(|element| (element, None))
-        .map_err(|_| format!("{NO_DEVICE}: {id}"))
+    copy_out_of_pipewire(&found.0);
+    Ok(found)
+}
+
+/// A `pipewiresrc` hands out the camera's own buffers by default, and the
+/// camera service refills them while the frame is still on its way through
+/// the pipeline. With the few buffers a built-in (libcamera) camera keeps,
+/// the picture then cycles through the same handful of frames. Copying each
+/// frame out as it arrives costs one memcpy per frame and keeps it intact.
+fn copy_out_of_pipewire(source: &gst::Element) {
+    if source.find_property("always-copy").is_some() {
+        source.set_property("always-copy", true);
+    }
 }
 
 /// Re-find the monitored device with this id and let it build its element; the
@@ -1245,6 +1260,25 @@ mod tests {
 
     /// A pinned mode is a capsfilter between the source and decodebin: a
     /// source that can produce the mode negotiates it and frames flow.
+    #[test]
+    fn a_pipewire_source_copies_frames_out_and_a_v4l2_source_is_left_alone() {
+        if gst::init().is_err() {
+            eprintln!("no GStreamer runtime; skipping the pipewiresrc copy proof");
+            return;
+        }
+        if let Ok(pw) = gst::ElementFactory::make("pipewiresrc").build() {
+            if pw.find_property("always-copy").is_some() {
+                pw.set_property("always-copy", false);
+                copy_out_of_pipewire(&pw);
+                assert!(pw.property::<bool>("always-copy"));
+            }
+        }
+        let other = gst::ElementFactory::make("videotestsrc")
+            .build()
+            .expect("videotestsrc");
+        copy_out_of_pipewire(&other);
+    }
+
     #[test]
     fn a_pinned_mode_reaches_the_appsink() {
         if gst::init().is_err() {

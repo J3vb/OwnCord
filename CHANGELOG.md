@@ -103,6 +103,10 @@ and only when it changes something a contributor or fork holder must do
 
 ### Fixed
 
+**Voice**
+
+- On Linux, a built-in laptop camera (one that runs through PipeWire) could show the same few frames over and over. Each frame is now copied out as it arrives, so the picture moves normally. USB webcams were not affected.
+
 **Admin panel**
 
 - "Back up now" and "Restore" showed an error after 30 seconds on a big database even though the work finished (and a retried backup made a second copy) — both now run to completion.
