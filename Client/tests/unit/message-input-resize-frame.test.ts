@@ -1,6 +1,7 @@
 // CL-05: typing coalesces the textarea auto/measure cycle (a forced layout)
 // to one per animation frame; programmatic changes still resize synchronously.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import * as mocks from "../helpers/messageInputMocks";
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
@@ -15,9 +16,18 @@ describe("MessageInput textarea resize", () => {
   let frames: FrameRequestCallback[];
   let mounted: ReturnType<typeof createMessageInput> | null;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      mounted?.destroy?.();
+      delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
+      vi.unstubAllGlobals();
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     reads = 0;
     contentHeight = 40;
     frames = [];
@@ -33,13 +43,6 @@ describe("MessageInput textarea resize", () => {
         return contentHeight;
       },
     });
-  });
-
-  afterEach(() => {
-    mounted?.destroy?.();
-    delete (HTMLTextAreaElement.prototype as { scrollHeight?: number }).scrollHeight;
-    vi.unstubAllGlobals();
-    container.remove();
   });
 
   function mountInput(onDraftChange = vi.fn()) {

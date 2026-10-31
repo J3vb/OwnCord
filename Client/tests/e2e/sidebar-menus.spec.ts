@@ -28,6 +28,7 @@ import {
   dmChannel,
   groupDmChannel,
   dispatchContextMenu,
+  useLeftMemberList,
 } from "./helpers";
 import { captureCalls, fetchCalls, waitForFetchCall } from "./support/ipcCapture";
 
@@ -275,9 +276,7 @@ test.describe("DM sidebar — group rename", () => {
 test.describe("Member list section", () => {
   test.beforeEach(async ({ page }) => {
     // The default moved to the right column in 3C-6c; this is the left section.
-    await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
-    });
+    await useLeftMemberList(page);
     await mockDmSession(page);
     await page.goto("/");
     await submitLoginAndWait(page);
@@ -382,6 +381,16 @@ test.describe("Banned members section", () => {
 // Per-user volume menu on a voice roster row
 // ---------------------------------------------------------------------------
 
+/** Right-clicks the voice roster row of `uid` and returns it with its open volume menu. */
+async function openVolumeMenu(page: Page, uid: number) {
+  const row = page.locator(`.voice-user-item[data-voice-uid='${uid}']`);
+  await expect(row).toBeVisible({ timeout: 5_000 });
+  await row.click({ button: "right" });
+  const menu = page.locator(".user-vol-menu");
+  await expect(menu).toBeVisible({ timeout: 3_000 });
+  return { row, menu, slider: menu.locator("input.settings-slider") };
+}
+
 test.describe("Per-user volume menu", () => {
   test.beforeEach(async ({ page }) => {
     await mockTauriFullSessionWithVoice(page);
@@ -392,12 +401,7 @@ test.describe("Per-user volume menu", () => {
   test("the slider changes the label and the value persists when the menu is reopened", async ({
     page,
   }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='2']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-
-    await row.click({ button: "right" });
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
+    const { row, menu } = await openVolumeMenu(page, 2);
     await expect(menu.locator(".context-menu-item", { hasText: "moderator1" })).toBeVisible();
     await expect(
       menu.locator(".context-menu-item", { hasText: "User Volume: 100%" }),
@@ -426,13 +430,7 @@ test.describe("Per-user volume menu", () => {
   });
 
   test("Reset Volume returns the slider and label to 100%", async ({ page }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='3']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click({ button: "right" });
-
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
-    const slider = menu.locator("input.settings-slider");
+    const { row, menu, slider } = await openVolumeMenu(page, 3);
     await slider.focus();
     for (let i = 0; i < 5; i++) {
       await slider.press("ArrowLeft");
@@ -459,13 +457,7 @@ test.describe("Per-user volume menu", () => {
   test("the slider goes to 200% and Mute marks the row while keeping the level", async ({
     page,
   }) => {
-    const row = page.locator(".voice-user-item[data-voice-uid='2']");
-    await expect(row).toBeVisible({ timeout: 5_000 });
-    await row.click({ button: "right" });
-
-    const menu = page.locator(".user-vol-menu");
-    await expect(menu).toBeVisible({ timeout: 3_000 });
-    const slider = menu.locator("input.settings-slider");
+    const { row, menu, slider } = await openVolumeMenu(page, 2);
     await slider.focus();
     await slider.press("End");
     await expect(menu.locator(".slider-val")).toHaveText("200%");

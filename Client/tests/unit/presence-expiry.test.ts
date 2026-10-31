@@ -17,7 +17,7 @@ import {
   saveUserStatus,
 } from "@lib/presence/userStatus";
 import type { WsClient } from "@lib/ws";
-import { signInAs } from "../helpers/storeSeeds";
+import { signInAs, seedOnlineMember } from "../helpers/storeSeeds";
 
 type Frame = { type: string; payload: Record<string, unknown> };
 
@@ -45,11 +45,7 @@ describe("presence_update custom_status_expires_in", () => {
       { id: 7, username: "alice", avatar: null, role: "member" },
       { token: "t", serverName: "S" },
     );
-    membersStore.setState((p) => ({
-      ...p,
-      members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
-    }));
-    membersStore.flush();
+    seedOnlineMember(7, "alice");
   });
 
   afterEach(() => {

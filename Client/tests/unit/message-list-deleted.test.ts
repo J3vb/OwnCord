@@ -11,7 +11,7 @@ import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore, deleteMessage, bulkDeleteMessages } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
-import { buildMessage, spacedTimestamp } from "../helpers/messageFactory";
+import { buildMinuteMessage, spacedTimestamp } from "../helpers/messageFactory";
 import {
   makeListOptions,
   resetStoresAndChannels,
@@ -24,13 +24,7 @@ const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
 const BOB = { id: 2, username: "Bob", avatar: null };
 
-function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return buildMessage(overrides, {
-    channelId: CHANNEL_ID,
-    user: ME,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 12, overrides.id)).toISOString(),
-  });
-}
+const makeMessage = buildMinuteMessage;
 
 /** Ten minutes apart (past the 7-minute group window), so no two rows group. */
 function spaced(id: number): Message {

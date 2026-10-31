@@ -4,6 +4,7 @@
  * behave like call rows: no grouping, no hover bar, Copy ID only, no folding.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
@@ -190,22 +191,25 @@ describe("group row gates", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList>;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+      setDeveloperMode(false);
+      resetGateStores();
+      dmStore.setState(() => ({ channels: [] }));
+    },
+  );
+
   beforeEach(() => {
     resetGateStores();
     localStorage.clear();
     signInAs("moderator");
     setChannel({ type: "dm" });
     seedDm();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    list?.destroy?.();
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    setDeveloperMode(false);
-    resetGateStores();
-    dmStore.setState(() => ({ channels: [] }));
   });
 
   function mount(rows: readonly Message[]): void {

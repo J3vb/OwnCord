@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
 
@@ -30,6 +31,19 @@ describe("Create Thread in the message menu", () => {
     return [...document.querySelectorAll<HTMLElement>(".message-context-menu [role='menuitem']")];
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      document.querySelectorAll(".context-menu").forEach((el) => el.remove());
+      resetServerCapabilities();
+      resetThreadsStore();
+      resetGateStores();
+    },
+  );
+
   beforeEach(() => {
     resetGateStores();
     signInAs("member");
@@ -37,16 +51,6 @@ describe("Create Thread in the message menu", () => {
     resetMembersState();
     applyReadyCapabilities({ threads: true });
     onCreate.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    list?.destroy?.();
-    container.remove();
-    document.querySelectorAll(".context-menu").forEach((el) => el.remove());
-    resetServerCapabilities();
-    resetThreadsStore();
-    resetGateStores();
   });
 
   function mount(over = {}): void {

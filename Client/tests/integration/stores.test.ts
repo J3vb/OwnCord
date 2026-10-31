@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { resetMessagesState } from "../helpers/storeResets";
 import { wireDispatcher } from "@lib/dispatcher";
 
 // ── Stores ──────────────────────────────────────────────────────────
@@ -39,14 +40,7 @@ function resetAllStores(): void {
     members: new Map(),
     typingUsers: new Map(),
   }));
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
+  resetMessagesState();
   resetVoiceState();
   authStore.setState(() => ({
     token: null,

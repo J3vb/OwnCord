@@ -8,7 +8,7 @@
  * notification-sound.test.ts's.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as voiceWidget from "../helpers/voiceWidgetHarness";
+import { resetVoiceState } from "../helpers/storeSeeds";
 
 const { testPrefs, playVoiceSound } = vi.hoisted(() => ({
   testPrefs: new Map<string, unknown>(),
@@ -90,7 +90,7 @@ beforeEach(() => {
     motd: null,
     isAuthenticated: true,
   }));
-  voiceWidget.resetVoiceState();
+  resetVoiceState();
   stop = startVoiceUiSounds();
 });
 

@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import {
   createEditChannelModal,
   clampVoiceLimit,
@@ -25,15 +26,14 @@ import {
 describe("EditChannelModal", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll("[data-testid='edit-channel-modal']").forEach((el) => el.remove());
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      document.querySelectorAll("[data-testid='edit-channel-modal']").forEach((el) => el.remove());
+    },
+  );
 
   function saveWithNsfw(): void {
     (

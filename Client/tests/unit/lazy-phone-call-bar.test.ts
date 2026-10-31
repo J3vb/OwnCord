@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { usePhone } from "../helpers/phoneMedia";
 import {
   createLazyPhoneCallBar,
   type LazyPhoneCallBar,
@@ -17,13 +18,6 @@ import {
 import "../../src/components/PhoneCallBar";
 
 const VOICE = 10;
-
-function usePhone(on: boolean): void {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((q: string) => ({ matches: on && q.includes("pointer: coarse") })),
-  );
-}
 
 /** The bar's code loads on demand; wait for it to land and mount. */
 async function settle(): Promise<void> {

@@ -5,10 +5,21 @@
  * and account settings against the real production build.
  */
 
+import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "../native-fixture-persistent";
 import { SKIP_SERVER, hasCredentials, ensureLoggedIn, openSettings } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
+
+/** Opens settings and clicks the tab matching `name`; skips the test when the build has none. */
+async function openTabIfPresent(page: Page, name: RegExp, label: string): Promise<Locator> {
+  await openSettings(page);
+  const tab = page.locator(".settings-sidebar button.settings-nav-item", { hasText: name });
+  const exists = await tab.isVisible().catch(() => false);
+  test.skip(!exists, `No ${label} tab found`);
+  await tab.click();
+  return tab;
+}
 
 test.describe("Settings Overlay", () => {
   test.beforeEach(async ({ nativePage }) => {
@@ -46,28 +57,12 @@ test.describe("Settings Overlay", () => {
   });
 
   test("appearance tab exists and is navigable", async ({ nativePage }) => {
-    await openSettings(nativePage);
-
-    const appearanceTab = nativePage.locator(".settings-sidebar button.settings-nav-item", {
-      hasText: /appearance/i,
-    });
-    const exists = await appearanceTab.isVisible().catch(() => false);
-    test.skip(!exists, "No Appearance tab found");
-
-    await appearanceTab.click();
+    const appearanceTab = await openTabIfPresent(nativePage, /appearance/i, "Appearance");
     await expect(appearanceTab).toHaveClass(/active/);
   });
 
   test("theme options are displayed in appearance tab", async ({ nativePage }) => {
-    await openSettings(nativePage);
-
-    const appearanceTab = nativePage.locator(".settings-sidebar button.settings-nav-item", {
-      hasText: /appearance/i,
-    });
-    const exists = await appearanceTab.isVisible().catch(() => false);
-    test.skip(!exists, "No Appearance tab found");
-
-    await appearanceTab.click();
+    await openTabIfPresent(nativePage, /appearance/i, "Appearance");
 
     // Theme options container with individual theme buttons
     const themeOptions = nativePage.locator(".theme-opt");
@@ -76,15 +71,7 @@ test.describe("Settings Overlay", () => {
   });
 
   test("account tab shows user information", async ({ nativePage }) => {
-    await openSettings(nativePage);
-
-    const accountTab = nativePage.locator(".settings-sidebar button.settings-nav-item", {
-      hasText: /account/i,
-    });
-    const exists = await accountTab.isVisible().catch(() => false);
-    test.skip(!exists, "No Account tab found");
-
-    await accountTab.click();
+    const accountTab = await openTabIfPresent(nativePage, /account/i, "Account");
     await expect(accountTab).toHaveClass(/active/);
   });
 

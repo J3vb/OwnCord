@@ -2,12 +2,12 @@ import { afterEach, beforeEach, vi, type Mock } from "vitest";
 import { createChannelSidebar } from "../../src/components/ChannelSidebar";
 import { mockOpenUserProfilePopup } from "./channelSidebarMocks";
 import { authStore } from "../../src/stores/auth.store";
-import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { type ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "./storeResets";
-import { signInAs, resetChannelsState } from "./storeSeeds";
+import { signInAs, resetChannelsState, resetVoiceState } from "./storeSeeds";
+import { resetUiState } from "./dmHarness";
 
 export { addVoiceUser } from "./voiceUsers";
 
@@ -20,39 +20,10 @@ export function resetStores(): void {
     motd: null,
     isAuthenticated: false,
   }));
-  uiStore.setState(() => ({
-    sidebarCollapsed: false,
-    memberListVisible: true,
-    settingsOpen: false,
-    activeModal: null,
-    theme: "dark" as const,
-    // Default to a live socket: the voice join/leave affordance is only usable
-    // when connected. Frozen-state behavior is exercised explicitly below.
-    connectionStatus: "connected" as const,
-    connectionDialFailed: false,
-    transientError: null,
-    sessionReplaced: false,
-    persistentError: null,
-    updateRequiredHost: null,
-    collapsedCategories: new Set<string>(),
-    sidebarMode: "channels" as const,
-    activeDmUserId: null,
-    activeView: null,
-    settingsTab: null,
-  }));
-  voiceStore.setState(() => ({
-    currentChannelId: null,
-    voiceUsers: new Map(),
-    voiceConfigs: new Map(),
-    localMuted: false,
-    localDeafened: false,
-    localCamera: false,
-    localScreenshare: false,
-    joinedAt: null,
-    listenOnly: false,
-    voiceStatus: "idle",
-    peerVerifications: new Map(),
-  }));
+  // Default to a live socket: the voice join/leave affordance is only usable
+  // when connected. Frozen-state behavior is exercised explicitly below.
+  resetUiState({ connectionStatus: "connected" });
+  resetVoiceState();
   resetMembersState();
 }
 
@@ -243,4 +214,14 @@ export function joinVoiceRoomWith(
 /** Dispatch a bubbling right-click (contextmenu) on `el` at the given client point. */
 export function rightClick(el: HTMLElement, clientX = 100, clientY = 200): void {
   el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX, clientY }));
+}
+
+/** useSidebarFixture with the fixture kept on one object; tests may replace `sidebar`. */
+export function useWiredSidebarFixture(): SidebarFixture {
+  const fx = {} as SidebarFixture;
+  useSidebarFixture(
+    (f) => Object.assign(fx, f),
+    () => fx.sidebar,
+  );
+  return fx;
 }

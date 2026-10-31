@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { CHANNEL_TYPES, createCreateChannelModal } from "@components/CreateChannelModal";
 import type { CreateChannelModalOptions } from "@components/CreateChannelModal";
 import { NO_CATEGORY, setChannels, type CategoryRef } from "@stores/channels.store";
@@ -59,16 +60,17 @@ describe("Forum in the type list", () => {
 describe("CreateChannelModal", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    // Clean up any modals attached to document.body
-    document.querySelectorAll("[data-testid='create-channel-modal']").forEach((el) => el.remove());
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      // Clean up any modals attached to document.body
+      document
+        .querySelectorAll("[data-testid='create-channel-modal']")
+        .forEach((el) => el.remove());
+    },
+  );
 
   /** A bare string is a name-only category (a server that sends no ids). */
   function makeModal(

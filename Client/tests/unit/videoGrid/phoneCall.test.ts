@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { usePhone } from "../../helpers/phoneMedia";
 import * as mocks from "../../helpers/videoGridMocks";
 import { type VideoGridComponent, type TileConfig } from "../../../src/components/VideoGrid";
 import {
@@ -27,13 +28,6 @@ vi.mock("../../../src/lib/ui/backHistory", () => ({
     };
   },
 }));
-
-function usePhone(on: boolean): void {
-  vi.stubGlobal(
-    "matchMedia",
-    vi.fn((q: string) => ({ matches: on && q.includes("pointer: coarse") })),
-  );
-}
 
 const SHARE = 2 + 1_000_000;
 const shareCfg: TileConfig = { isSelf: false, audioUserId: 2, isScreenshare: true, name: "Otto" };

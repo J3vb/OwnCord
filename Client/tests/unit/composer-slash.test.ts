@@ -1,6 +1,7 @@
 // 3A-10a: the composer's slash commands — the rewrite in handleSend and the
 // "/" suggestion popup (shared inline-autocomplete machinery).
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.mock("@components/EmojiPicker", () => ({
   createEmojiPicker: () => ({ element: document.createElement("div"), destroy: vi.fn() }),
@@ -33,9 +34,14 @@ describe("composer slash commands (3A-10a)", () => {
     );
   };
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => input.destroy?.(),
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     onSend = vi.fn<MessageInputOptions["onSend"]>();
     input = createMessageInput({
       channelId: 1,
@@ -44,11 +50,6 @@ describe("composer slash commands (3A-10a)", () => {
       onTyping: vi.fn(),
     });
     input.mount(container);
-  });
-
-  afterEach(() => {
-    input.destroy?.();
-    container.remove();
   });
 
   describe("sending", () => {

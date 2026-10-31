@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stubEmptyMediaDevices } from "../helpers/mediaDevicesStub";
 import * as logMock from "../helpers/loggerMock";
 
 // --- Hoisted mocks ---
@@ -122,13 +123,7 @@ describe("DeviceManager", () => {
     };
 
     // Stub navigator.mediaDevices
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        enumerateDevices: vi.fn().mockResolvedValue([]),
-      },
-    });
+    stubEmptyMediaDevices();
   });
 
   afterEach(() => {

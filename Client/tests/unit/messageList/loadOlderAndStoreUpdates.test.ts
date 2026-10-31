@@ -2,15 +2,13 @@ import { describe, it, expect, vi, type Mock } from "vitest";
 import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
 import { createMessageList } from "@components/MessageList";
-import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
 import {
   makeMessage,
   setMessages,
   setHasMore,
-  MessageListComponent,
-  useMessageListHarness,
+  useWiredMessageList,
 } from "../../helpers/messageListHarness";
 
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
@@ -30,64 +28,53 @@ function pendingScrollTop(): { onScrollTop: Mock<() => Promise<void>>; resolveLo
 }
 
 describe("MessageList", () => {
-  let container: HTMLDivElement;
-  let msgList: MessageListComponent;
-  let options: MessageListOptions;
-
-  useMessageListHarness(
-    (wired) => {
-      container = wired.container;
-      options = wired.options;
-      msgList = wired.msgList;
-    },
-    () => msgList,
-  );
+  const w = useWiredMessageList();
 
   it("calls onScrollTop when scrolling near the top and there are more messages", () => {
     setHasMore(1, true);
     setMessages(1, [makeMessage({ id: 1 })]);
-    msgList.mount(container);
+    w.msgList.mount(w.container);
 
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
     // jsdom scrollTop defaults to 0 which is already < SCROLL_TOP_THRESHOLD(50)
     // Manually trigger the scroll event
     root.dispatchEvent(new Event("scroll"));
 
-    expect(options.onScrollTop).toHaveBeenCalledOnce();
+    expect(w.options.onScrollTop).toHaveBeenCalledOnce();
   });
 
   it("does not call onScrollTop when no more messages are available", () => {
     setHasMore(1, false);
     setMessages(1, [makeMessage({ id: 1 })]);
-    msgList.mount(container);
+    w.msgList.mount(w.container);
 
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
     root.dispatchEvent(new Event("scroll"));
 
-    expect(options.onScrollTop).not.toHaveBeenCalled();
+    expect(w.options.onScrollTop).not.toHaveBeenCalled();
   });
 
   it("does not call onScrollTop twice without new messages arriving", () => {
     setHasMore(1, true);
     setMessages(1, [makeMessage({ id: 1 })]);
-    msgList.mount(container);
+    w.msgList.mount(w.container);
 
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
     root.dispatchEvent(new Event("scroll"));
     root.dispatchEvent(new Event("scroll"));
 
     // loadingOlder guard prevents double-calling
-    expect(options.onScrollTop).toHaveBeenCalledTimes(1);
+    expect(w.options.onScrollTop).toHaveBeenCalledTimes(1);
   });
 
   it("resets loadingOlder flag when new messages arrive after scroll-top", () => {
     setHasMore(1, true);
     setMessages(1, [makeMessage({ id: 1 })]);
-    msgList.mount(container);
+    w.msgList.mount(w.container);
 
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
     root.dispatchEvent(new Event("scroll"));
-    expect(options.onScrollTop).toHaveBeenCalledTimes(1);
+    expect(w.options.onScrollTop).toHaveBeenCalledTimes(1);
 
     // Simulate new messages arriving (load-more response)
     setMessages(1, [makeMessage({ id: 0, content: "Older message" }), makeMessage({ id: 1 })]);
@@ -95,7 +82,7 @@ describe("MessageList", () => {
 
     // Now scrolling to top again should trigger onScrollTop again
     root.dispatchEvent(new Event("scroll"));
-    expect(options.onScrollTop).toHaveBeenCalledTimes(2);
+    expect(w.options.onScrollTop).toHaveBeenCalledTimes(2);
   });
 
   it("clears loadingOlder once the onScrollTop promise settles, even when no new messages arrived (failed fetch)", async () => {
@@ -110,10 +97,10 @@ describe("MessageList", () => {
     // Recreate with the overriding onScrollTop — it's declared readonly, so
     // it must be set at construction rather than mutated on the shared
     // `options` object from beforeEach.
-    msgList = createMessageList({ ...options, onScrollTop });
-    msgList.mount(container);
+    w.msgList = createMessageList({ ...w.options, onScrollTop });
+    w.msgList.mount(w.container);
 
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
     root.dispatchEvent(new Event("scroll"));
     expect(onScrollTop).toHaveBeenCalledTimes(1);
 
@@ -148,9 +135,9 @@ describe("MessageList", () => {
       setMessages(1, [makeMessage({ id: 1 })]);
       messagesStore.flush();
       const onScrollTop = vi.fn(() => Promise.resolve());
-      msgList = createMessageList({ ...options, onScrollTop });
-      msgList.mount(container);
-      const root = container.querySelector(".messages-container") as HTMLDivElement;
+      w.msgList = createMessageList({ ...w.options, onScrollTop });
+      w.msgList.mount(w.container);
+      const root = w.container.querySelector(".messages-container") as HTMLDivElement;
       Object.defineProperty(root, "clientHeight", { configurable: true, value: 600 });
 
       root.scrollTop = 900;
@@ -184,10 +171,10 @@ describe("MessageList", () => {
     messagesStore.flush();
 
     const { onScrollTop, resolveLoad } = pendingScrollTop();
-    msgList = createMessageList({ ...options, onScrollTop });
-    msgList.mount(container);
+    w.msgList = createMessageList({ ...w.options, onScrollTop });
+    w.msgList.mount(w.container);
 
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
     root.dispatchEvent(new Event("scroll"));
     expect(onScrollTop).toHaveBeenCalledTimes(1);
 
@@ -214,22 +201,22 @@ describe("MessageList", () => {
       1,
       Array.from({ length: 300 }, (_, i) => makeMessage({ id: i + 1 })),
     );
-    msgList.mount(container);
+    w.msgList.mount(w.container);
 
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
     Object.defineProperty(root, "clientHeight", { configurable: true, value: 600 });
 
     // Three viewports down is still far enough from the top.
     root.scrollTop = 1800;
     root.dispatchEvent(new Event("scroll"));
-    expect(options.onScrollTop).not.toHaveBeenCalled();
+    expect(w.options.onScrollTop).not.toHaveBeenCalled();
 
     // About 1.5 viewports from the top: the older page must already be on its
     // way, long before the reader hits the top edge.
     root.scrollTop = 900;
     root.dispatchEvent(new Event("scroll"));
     root.dispatchEvent(new Event("scroll"));
-    expect(options.onScrollTop).toHaveBeenCalledOnce();
+    expect(w.options.onScrollTop).toHaveBeenCalledOnce();
   });
 
   it("shows a loading row at the top while the older page is pending, on success and failure", async () => {
@@ -237,10 +224,10 @@ describe("MessageList", () => {
     setMessages(1, [makeMessage({ id: 10 })]);
     messagesStore.flush();
     const { onScrollTop, resolveLoad } = pendingScrollTop();
-    msgList = createMessageList({ ...options, onScrollTop });
-    msgList.mount(container);
-    const root = container.querySelector(".messages-container") as HTMLDivElement;
-    const loadingRow = (): Element | null => container.querySelector(".messages-older-loading");
+    w.msgList = createMessageList({ ...w.options, onScrollTop });
+    w.msgList.mount(w.container);
+    const root = w.container.querySelector(".messages-container") as HTMLDivElement;
+    const loadingRow = (): Element | null => w.container.querySelector(".messages-older-loading");
     expect(loadingRow()).toBeNull();
 
     // Success: the page lands, then the fetch settles.
@@ -272,10 +259,10 @@ describe("MessageList", () => {
         makeMessage({ id: 1, content: "First" }),
         makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
       ]);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
 
-      const row1Before = container.querySelector("[data-testid='message-1']");
-      const row2Before = container.querySelector("[data-testid='message-2']");
+      const row1Before = w.container.querySelector("[data-testid='message-1']");
+      const row2Before = w.container.querySelector("[data-testid='message-2']");
       expect(row1Before).not.toBeNull();
       expect(row2Before).not.toBeNull();
 
@@ -286,9 +273,9 @@ describe("MessageList", () => {
       ]);
       messagesStore.flush();
 
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1Before);
-      expect(container.querySelector("[data-testid='message-2']")).toBe(row2Before);
-      expect(container.querySelector("[data-testid='message-3']")).not.toBeNull();
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1Before);
+      expect(w.container.querySelector("[data-testid='message-2']")).toBe(row2Before);
+      expect(w.container.querySelector("[data-testid='message-3']")).not.toBeNull();
     });
 
     it("appended rows preserve order, grouping, and day dividers vs a full rebuild", () => {
@@ -297,7 +284,7 @@ describe("MessageList", () => {
         makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
       ];
       setMessages(1, initial);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
 
       const appended = [
         // Same user within threshold → must render grouped.
@@ -314,13 +301,13 @@ describe("MessageList", () => {
       setMessages(1, finalMessages);
       messagesStore.flush();
 
-      const content = container.querySelector(".virtual-content")!;
+      const content = w.container.querySelector(".virtual-content")!;
 
       // Reference render: a fresh list mounted with the final message set
       // (full rebuild path) must produce the same structure.
       const refContainer = document.createElement("div");
       document.body.appendChild(refContainer);
-      const refList = createMessageList(options);
+      const refList = createMessageList(w.options);
       refList.mount(refContainer);
       const refContent = refContainer.querySelector(".virtual-content")!;
 
@@ -329,10 +316,10 @@ describe("MessageList", () => {
       expect(describeChildren(content)).toEqual(describeChildren(refContent));
 
       // Explicit semantic checks on the appended tail.
-      expect(container.querySelectorAll(".msg-day-divider").length).toBe(2);
-      const row3 = container.querySelector("[data-testid='message-3']")!;
+      expect(w.container.querySelectorAll(".msg-day-divider").length).toBe(2);
+      const row3 = w.container.querySelector("[data-testid='message-3']")!;
       expect(row3.classList.contains("grouped")).toBe(true);
-      const row4 = container.querySelector("[data-testid='message-4']")!;
+      const row4 = w.container.querySelector("[data-testid='message-4']")!;
       expect(row4.classList.contains("grouped")).toBe(false);
       const ids = Array.from(content.querySelectorAll("[data-testid^='message-']")).map((el) =>
         el.getAttribute("data-testid"),
@@ -348,7 +335,7 @@ describe("MessageList", () => {
         makeMessage({ id: 1, content: "Original" }),
         makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
       ]);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
 
       // Replace message 1's object (an edit) — not a suffix extension.
       setMessages(1, [
@@ -357,7 +344,7 @@ describe("MessageList", () => {
       ]);
       messagesStore.flush();
 
-      const row1 = container.querySelector("[data-testid='message-1']");
+      const row1 = w.container.querySelector("[data-testid='message-1']");
       expect(row1).not.toBeNull();
       expect(row1!.textContent).toContain("Edited");
     });
@@ -376,7 +363,7 @@ describe("MessageList", () => {
       });
     }
     const row = (id: number): Element | null =>
-      container.querySelector(`[data-testid='message-${id}']`);
+      w.container.querySelector(`[data-testid='message-${id}']`);
     const current = (): readonly Message[] => messagesStore.getState().messagesByChannel.get(1)!;
     function replace(id: number, patch: Partial<Message>): void {
       setMessages(
@@ -391,16 +378,16 @@ describe("MessageList", () => {
         1,
         Array.from({ length: 40 }, (_, i) => ungrouped(i + 1)),
       );
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       // jsdom mounts at the tail; bring the oldest rows into the window.
-      expect(msgList.scrollToMessage(2)).toBe(true);
+      expect(w.msgList.scrollToMessage(2)).toBe(true);
       const row2 = row(2);
       const row5 = row(5);
       const row10 = row(10);
       expect(row2).not.toBeNull();
       expect(row5).not.toBeNull();
       expect(row10).not.toBeNull();
-      const reply10 = container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-10']")!;
+      const reply10 = w.container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-10']")!;
       reply10.focus();
 
       replace(5, { reactions: [{ emoji: "👍", count: 1, me: false }] });
@@ -414,7 +401,7 @@ describe("MessageList", () => {
 
     it("re-renders an edited row in place", () => {
       setMessages(1, [1, 2, 3].map(ungrouped));
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const [row1, row2, row3] = [row(1), row(2), row(3)];
 
       replace(2, { content: "Edited", editedAt: "2024-01-15T12:10:00Z" });
@@ -423,7 +410,7 @@ describe("MessageList", () => {
       expect(row(3)).toBe(row3);
       expect(row(2)).not.toBe(row2);
       expect(row(2)!.textContent).toContain("Edited");
-      const ids = [...container.querySelectorAll("[data-testid^='message-']")].map(
+      const ids = [...w.container.querySelectorAll("[data-testid^='message-']")].map(
         (el) => (el as HTMLElement).dataset.testid,
       );
       expect(ids).toEqual(["message-1", "message-2", "message-3"]);
@@ -443,7 +430,7 @@ describe("MessageList", () => {
         bob(3),
         bob(4),
       ]);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const [row1, row3, row4] = [row(1), row(3), row(4)];
       expect(row3!.classList.contains("grouped")).toBe(true);
 
@@ -467,7 +454,7 @@ describe("MessageList", () => {
         timestamp: "2024-01-15T12:30:00Z",
       });
       setMessages(1, [1, 2, 3].map(ungrouped).concat(optimistic));
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const [row1, row2, row3] = [row(1), row(2), row(3)];
       expect(row(0)).not.toBeNull();
 
@@ -486,7 +473,7 @@ describe("MessageList", () => {
 
     it("re-renders a loaded reply whose parent was edited", () => {
       setMessages(1, [ungrouped(1), ungrouped(2), { ...ungrouped(3), replyTo: 1 }]);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const [row2, row3] = [row(2), row(3)];
 
       replace(1, { content: "Parent edited" });
@@ -498,7 +485,7 @@ describe("MessageList", () => {
 
     it("keeps a loaded reply's row when its parent only gains a reaction", () => {
       setMessages(1, [ungrouped(1), ungrouped(2), { ...ungrouped(3), replyTo: 1 }]);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const [row1, row3] = [row(1), row(3)];
 
       replace(1, { reactions: [{ emoji: "👍", count: 1, me: false }] });
@@ -509,7 +496,7 @@ describe("MessageList", () => {
 
     it("re-renders a loaded reply whose parent arrives", () => {
       setMessages(1, [ungrouped(1), ungrouped(4), { ...ungrouped(5), replyTo: 2 }]);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const [row1, row5] = [row(1), row(5)];
       expect(row5!.querySelector(".msg-reply-ref")!.textContent).not.toContain("Message 2");
 
@@ -528,7 +515,7 @@ describe("MessageList", () => {
     it("drops head rows and appends tail rows without rebuilding the rows that stay", () => {
       const all = Array.from({ length: 63 }, (_, i) => ungrouped(i + 1));
       setMessages(1, all.slice(0, 60));
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const kept = [45, 50, 60].map((id) => [id, row(id)] as const);
       for (const [, el] of kept) expect(el).not.toBeNull();
 

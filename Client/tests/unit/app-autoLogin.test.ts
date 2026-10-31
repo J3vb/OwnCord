@@ -10,6 +10,7 @@
  * never replaced by a resume, a server wait ending with its API session.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred as gate, type Deferred } from "../helpers/deferred";
 import { SessionScope } from "@lib/net/sessionScope";
 import type { ProfileManager } from "@lib/presence/profiles";
 
@@ -68,7 +69,7 @@ const beta: P = {
 };
 
 let profiles: P[];
-let loadGate: { promise: Promise<void>; resolve: () => void; reject: (e: unknown) => void };
+let loadGate: Deferred<void>;
 let loadProfiles: ReturnType<typeof vi.fn>;
 let session: SessionScope;
 let owner: SessionScope;
@@ -89,16 +90,6 @@ let ensureProfileExists: ReturnType<typeof vi.fn>;
 let startup: () => void;
 let cancel: () => void;
 let forgetHost: (host: string) => void;
-
-function gate(): typeof loadGate {
-  let resolve!: () => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<void>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 10; i++) await Promise.resolve();

@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import { pressComposingEnter } from "../helpers/keyEvents";
 
 vi.mock("@components/message-list/sticker", () => ({ loadStickerImage: vi.fn() }));
 
@@ -19,16 +21,17 @@ function load(list = SET): void {
 
 describe("StickerPicker", () => {
   let container: HTMLDivElement;
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => localStorage.clear(),
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     clearStickers();
     stickersStore.flush();
-  });
-  afterEach(() => {
-    container.remove();
-    localStorage.clear();
   });
 
   function make(overrides: { canManage?: boolean } = {}) {
@@ -133,14 +136,7 @@ describe("StickerPicker", () => {
     load();
     const { picker, onSelect } = make();
     search(picker.element, "sleep");
-    picker.element.querySelector(".sp-search")!.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(picker.element.querySelector(".sp-search")!);
     expect(onSelect).not.toHaveBeenCalled();
     picker.destroy();
   });

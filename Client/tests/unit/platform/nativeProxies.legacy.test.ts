@@ -8,7 +8,7 @@
 // concurrent starts, so each test needs a fresh module instance.
 import { vi } from "vitest";
 import type { NativeProxiesSeam } from "./nativeProxies.suite";
-import { describeNativeProxiesSuite } from "./nativeProxies.suite";
+import { describeNativeProxiesSuite, httpNativeControl } from "./nativeProxies.suite";
 import * as lm from "../../helpers/loggerMock";
 
 const invoke = vi.fn();
@@ -22,14 +22,6 @@ describeNativeProxiesSuite(async () => {
   const legacy: NativeProxiesSeam = { ensureHttpProxy: mod.ensureHttpProxy };
   return {
     subject: legacy,
-    native: {
-      succeedWith(port: number) {
-        let n = 0;
-        invoke.mockImplementation(() => Promise.resolve({ port: port + n++, token: "tun" }));
-      },
-      failWith(error: unknown) {
-        invoke.mockRejectedValue(error);
-      },
-    },
+    native: httpNativeControl(invoke),
   };
 });

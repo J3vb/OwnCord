@@ -178,3 +178,23 @@ export function recordLabelled(calls: string[], sent: SentBody[]): (request: Pan
     if (typeof body !== "undefined") sent.push({ call: `${method} ${path}`, body });
   };
 }
+
+/** Replaces window.confirm and records the messages it was asked. */
+export function stubConfirm(dom: JSDOM, answer: boolean): string[] {
+  const asked: string[] = [];
+  dom.window.confirm = (message?: string) => {
+    asked.push(String(message ?? ""));
+    return answer;
+  };
+  return asked;
+}
+
+/** Renders the Settings page into `#content`. */
+export async function mountSettings(
+  bridge: { renderSettings: () => Promise<string> },
+  doc: Document,
+): Promise<void> {
+  const content = doc.getElementById("content");
+  if (!content) throw new Error("expected #content");
+  content.innerHTML = await bridge.renderSettings();
+}

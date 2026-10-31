@@ -59,26 +59,14 @@ vi.mock("@lib/net/identity", () => ({
 vi.mock("@lib/voice/livekitSession", async () => {
   const { clearPeerVerification, clearPeerVerifications } = await import("@stores/voice.store");
   return {
-    handleVoiceToken: vi.fn(async () => {}),
+    ...(await import("../helpers/dispatcherMocks")).livekitSessionMock(),
     handleParticipantLeft: vi.fn(async (userId: number) => {
       clearPeerVerification(userId);
     }),
-    handleE2EEAnnounce: vi.fn(async () => {}),
-    handleE2EEOffer: vi.fn(async () => {}),
     leaveVoice: vi.fn(() => {
       clearPeerVerifications();
     }),
-    cleanupAll: vi.fn(),
     isVoiceConnected: vi.fn(() => false),
-    isVoiceSessionActive: vi.fn(() => false),
-    isAutoReconnecting: vi.fn(() => false),
-    failPendingRejoin: vi.fn(),
-    setMuted: vi.fn(),
-    setDeafened: vi.fn(),
-    disableCamera: vi.fn(async () => {}),
-    disableScreenshare: vi.fn(async () => {}),
-    reconcileVideoFlags: vi.fn(),
-    resendWatching: vi.fn(),
   };
 });
 

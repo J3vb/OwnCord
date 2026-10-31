@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { buildAccessibilityTab } from "../../src/features/settings/AccessibilityTab";
 
 // ---------------------------------------------------------------------------
@@ -51,17 +52,19 @@ describe("AccessibilityTab", () => {
   let container: HTMLDivElement;
   const ac = new AbortController();
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      document.documentElement.className = "";
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     document.documentElement.className = "";
     vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    container.remove();
-    document.documentElement.className = "";
   });
 
   // -----------------------------------------------------------------------

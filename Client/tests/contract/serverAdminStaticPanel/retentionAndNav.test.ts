@@ -15,6 +15,18 @@ import {
   defaultRespond,
 } from "../../helpers/serverAdminStaticPanelHarness";
 
+/** The /me answer for the Owner account, under `serverName`. */
+const ownerMe = (serverName: string) => ({
+  id: 1,
+  username: "ada",
+  role_name: "Owner",
+  permissions: ADMINISTRATOR,
+  role_position: 100,
+  is_owner: true,
+  server_name: serverName,
+  version: "1.2.0",
+});
+
 describe("Server/admin/static — panel behaviour", () => {
   let dom: JSDOM | undefined;
 
@@ -22,6 +34,17 @@ describe("Server/admin/static — panel behaviour", () => {
     dom?.window?.close();
     dom = undefined;
   });
+
+  /** Opens the retention apply dialog for a 14-day window over the booted panel. */
+  async function openRetentionDialog(booted: Awaited<ReturnType<typeof boot>>) {
+    dom = booted.dom;
+    const { bridge } = booted;
+    const doc = dom.window.document;
+    bridge.state.retentionRevision = "revision-1";
+    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
+    await bridge.openApplyRetention();
+    return { bridge, doc };
+  }
 
   // OC-0389. Four mounted retention routes and the retention_days setting had
   // no caller at all, so a policy that continuously and irreversibly deletes
@@ -156,12 +179,7 @@ describe("Server/admin/static — panel behaviour", () => {
     const booted = await boot(calls, (p) =>
       p === "/retention/preview" ? { json: proposedPreview } : { json: { needs_setup: false } },
     );
-    dom = booted.dom;
-    const { bridge } = booted;
-    const doc = dom.window.document;
-    bridge.state.retentionRevision = "revision-1";
-    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
-    await bridge.openApplyRetention();
+    const { bridge, doc } = await openRetentionDialog(booted);
     expect(calls.find((c) => c.method === "POST" && c.path === "/retention/preview")?.body).toEqual(
       { proposed: { scope: "server", days: 14 }, revision: "revision-1" },
     );
@@ -190,12 +208,7 @@ describe("Server/admin/static — panel behaviour", () => {
           : { json: proposedPreview }
         : { json: { needs_setup: false } },
     );
-    dom = booted.dom;
-    const { bridge } = booted;
-    const doc = dom.window.document;
-    bridge.state.retentionRevision = "revision-1";
-    doc.getElementById("content")!.innerHTML = '<input id="retentionDays" value="14">';
-    await bridge.openApplyRetention();
+    const { bridge, doc } = await openRetentionDialog(booted);
     (doc.getElementById("retentionDays") as HTMLInputElement).value = "1";
     await bridge.applyRetention();
     expect(calls.some((c) => c.method === "PATCH")).toBe(false);
@@ -303,19 +316,7 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let pending = [{ id: 1 }, { id: 2 }];
     const respond: Responder = (p) => {
-      if (p === "/me")
-        return {
-          json: {
-            id: 1,
-            username: "ada",
-            role_name: "Owner",
-            permissions: ADMINISTRATOR,
-            role_position: 100,
-            is_owner: true,
-            server_name: "Lab <b>",
-            version: "1.2.0",
-          },
-        };
+      if (p === "/me") return { json: ownerMe("Lab <b>") };
       if (p.startsWith("/registrations")) {
         // Answers like the route: at most `limit` rows, 50 by default.
         const limit = /[?&]limit=(\d+)/.exec(p);
@@ -412,19 +413,7 @@ describe("Server/admin/static — panel behaviour", () => {
     const calls: FetchCall[] = [];
     let warnings = [{ id: "a" }];
     const respond: Responder = (p) => {
-      if (p === "/me")
-        return {
-          json: {
-            id: 1,
-            username: "ada",
-            role_name: "Owner",
-            permissions: ADMINISTRATOR,
-            role_position: 100,
-            is_owner: true,
-            server_name: "Lab",
-            version: "1.2.0",
-          },
-        };
+      if (p === "/me") return { json: ownerMe("Lab") };
       if (p === "/attention") return { json: { warnings } };
       if (p === "/registrations") return { json: [] };
       if (p === "/updates") return { json: { update_available: false } };

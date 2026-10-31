@@ -96,6 +96,22 @@ const tile = (host: Element, id: string) => host.querySelector(`#${id}`)!;
 const text = (host: Element, id: string, part: string) =>
   tile(host, id).querySelector(`.${part}`)?.textContent;
 
+/** A responder that answers `/system/stats` with `STATS` until `hold` is set, then parks each request until `release` is called. */
+function holdableStats() {
+  const gate = {
+    hold: false,
+    release: undefined as ((v: unknown) => void) | undefined,
+    respond: (p: string): unknown => {
+      if (!p.startsWith("/system/stats")) return {};
+      if (!gate.hold) return STATS;
+      return new Promise((resolve) => {
+        gate.release = resolve;
+      });
+    },
+  };
+  return gate;
+}
+
 describe("Server/admin/static — Dashboard health row", () => {
   let dom: JSDOM | undefined;
 
@@ -217,27 +233,20 @@ describe("Server/admin/static — Dashboard health row", () => {
   // Leaving the Dashboard while a poll is in flight: the late answer must
   // not repaint or restart the timer.
   it("drops a poll answered after leaving the Dashboard and stops polling", async () => {
-    let release: ((v: unknown) => void) | undefined;
-    let hold = false;
-    const booted = await boot([], (p) => {
-      if (!p.startsWith("/system/stats")) return {};
-      if (!hold) return STATS;
-      return new Promise((resolve) => {
-        release = resolve;
-      });
-    });
+    const gate = holdableStats();
+    const booted = await boot([], gate.respond);
     dom = booted.dom;
     const { bridge } = booted;
     bridge.state.me = { permissions: ADMINISTRATOR };
     render(dom, await bridge.renderDashboard());
     const before = bridge.health.data;
 
-    hold = true;
+    gate.hold = true;
     const inFlight = bridge.pollHealth(bridge.health.seq, "tok");
     await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
-    expect(release).toBeDefined();
+    expect(gate.release).toBeDefined();
     bridge.state.section = "users";
-    release!({ ...STATS, current: { ...STATS.current, machine_cpu: 99 } });
+    gate.release!({ ...STATS, current: { ...STATS.current, machine_cpu: 99 } });
     await inFlight;
 
     expect(bridge.health.data).toBe(before);
@@ -248,26 +257,19 @@ describe("Server/admin/static — Dashboard health row", () => {
   // A re-render (Refresh, or leaving and coming back) starts a new
   // generation; the old loop's late answer is dropped.
   it("drops an answer from a superseded render", async () => {
-    let release: ((v: unknown) => void) | undefined;
-    let hold = false;
-    const booted = await boot([], (p) => {
-      if (!p.startsWith("/system/stats")) return {};
-      if (!hold) return STATS;
-      return new Promise((resolve) => {
-        release = resolve;
-      });
-    });
+    const gate = holdableStats();
+    const booted = await boot([], gate.respond);
     dom = booted.dom;
     const { bridge } = booted;
     bridge.state.me = { permissions: ADMINISTRATOR };
     render(dom, await bridge.renderDashboard());
     const oldSeq = bridge.health.seq;
 
-    hold = true;
+    gate.hold = true;
     const stale = bridge.pollHealth(oldSeq, "tok");
     await new Promise((resolve) => dom!.window.setTimeout(resolve, 0));
-    const staleRelease = release!;
-    hold = false;
+    const staleRelease = gate.release!;
+    gate.hold = false;
     await bridge.startHealthPoll();
     expect(bridge.health.seq).toBe(oldSeq + 1);
     const timer = bridge.health.timer;

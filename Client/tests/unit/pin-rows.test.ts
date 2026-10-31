@@ -4,7 +4,9 @@
  * it is deleted or purged, and a link that opens the pins panel. Delete follows
  * the ordinary message rule; nothing else is offered.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resetMessagesState } from "../helpers/storeResets";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
 import { renderMessage } from "@components/message-list/renderers";
@@ -147,14 +149,7 @@ describe("pin row rendering", () => {
 
 const liveRow = (): Message => pinRow({ replyTo: 4, referencedMessage: null });
 const seed = (rows: Message[]): void => {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, rows]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
+  resetMessagesState({ messagesByChannel: new Map([[1, rows]]) });
 };
 const rowNow = (): Message =>
   messagesStore
@@ -184,17 +179,22 @@ describe("pin row actions", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | undefined;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = undefined;
+      document
+        .querySelectorAll(".context-menu, .message-context-menu")
+        .forEach((el) => el.remove());
+      setDeveloperMode(false);
+      resetGateStores();
+    },
+  );
+
   beforeEach(() => {
-    resetGateStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    list?.destroy?.();
-    list = undefined;
-    container.remove();
-    document.querySelectorAll(".context-menu, .message-context-menu").forEach((el) => el.remove());
-    setDeveloperMode(false);
     resetGateStores();
   });
 
@@ -261,14 +261,7 @@ describe("pin row actions", () => {
     signInAs("member");
     setChannel({ type: "text" });
     const row = pinRow({ user: { id: ME, username: "me", avatar: null } });
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map([[1, [row]]]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState({ messagesByChannel: new Map([[1, [row]]]) });
     const onDeleteClick = vi.fn();
     list = createMessageList(makeOpts({ onDeleteClick }));
     list.mount(container);
@@ -291,16 +284,11 @@ describe("pin row actions", () => {
   it("no menu for another member's pin row without delete rights", async () => {
     signInAs("member");
     setChannel({ type: "text", canDeleteOthers: false });
-    messagesStore.setState(() => ({
+    resetMessagesState({
       messagesByChannel: new Map([
         [1, [pinRow({ user: { id: OTHER, username: "a", avatar: null } })]],
       ]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    });
     list = createMessageList(makeOpts());
     list.mount(container);
     container

@@ -2,6 +2,7 @@
 // the webview's `devicechange`, so a plug or unplug in a call falls back and
 // restores through DeviceManager's existing rules.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { stubEmptyMediaDevices } from "../helpers/mediaDevicesStub";
 import { loggerMock } from "../helpers/loggerMock";
 
 const { prefs, nativeWatch } = vi.hoisted(() => ({
@@ -82,13 +83,7 @@ describe("DeviceManager on the native device watch", () => {
     outputs = [{ deviceId: "speakers" }, { deviceId: "headset" }];
     dm = new DeviceManager();
     room = makeRoom();
-    vi.stubGlobal("navigator", {
-      mediaDevices: {
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        enumerateDevices: vi.fn().mockResolvedValue([]),
-      },
-    });
+    stubEmptyMediaDevices();
   });
 
   afterEach(() => {

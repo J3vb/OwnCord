@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { createDeferred as deferred } from "../helpers/deferred";
 
 const toastMock = vi.hoisted(() => ({ showToast: vi.fn() }));
 vi.mock("@lib/ui/toast", () => toastMock);
@@ -30,22 +31,6 @@ function makeApi(initial: readonly GifFavorite[] = []): GifFavoritesApi {
 }
 
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
-
-interface Deferred<T> {
-  readonly promise: Promise<T>;
-  readonly resolve: (value: T) => void;
-  readonly reject: (reason: unknown) => void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
 
 const titles = (): string[] => gifFavoritesStore.getState().favorites.map((f) => f.title);
 

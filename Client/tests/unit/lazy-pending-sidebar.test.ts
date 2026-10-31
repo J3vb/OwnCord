@@ -4,7 +4,8 @@
  * code arrives. The first test for each modal is the failing one: a loaded
  * module stays loaded.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as mocks from "../helpers/sidebarAreaMocks";
 import { defaultSidebarAreaOpts } from "../helpers/sidebarAreaOpts";
 import * as voiceSession from "../helpers/voiceSessionMock";
@@ -85,17 +86,20 @@ describe("SidebarArea modals during their load", () => {
   let container: HTMLDivElement;
   let result: ReturnType<typeof createSidebarArea>;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      for (const unsub of result.unsubscribers) unsub();
+      setSidebarMode("channels");
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     h.createModal.mockReset().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
     h.createPicker.mockReset().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() });
     vi.mocked(showToast).mockClear();
-  });
-  afterEach(() => {
-    for (const unsub of result.unsubscribers) unsub();
-    setSidebarMode("channels");
-    container.remove();
   });
 
   function build(mode: "channels" | "dms"): void {

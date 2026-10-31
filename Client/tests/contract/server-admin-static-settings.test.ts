@@ -188,6 +188,24 @@ async function render(
   return content;
 }
 
+/** Clears `calls`, saves the Settings form, and returns the body of the PATCH it sent. */
+async function savedSettingsPatch(booted: { bridge: Bridge }, calls: FetchCall[]) {
+  calls.length = 0;
+  await booted.bridge.saveSettings();
+  return calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body;
+}
+
+/** Renders Settings for `perm` over a server whose stored settings carry `stored`. */
+async function renderStored(stored: Record<string, string>, perm: string, owner: boolean) {
+  const booted = await boot(
+    [],
+    respondWith({ "GET /settings": { json: { ...LOADED_SETTINGS, ...stored } } }),
+  );
+  booted.bridge.state.me = { permissions: booted.bridge.PERM[perm], is_owner: owner };
+  await render(booted.bridge, booted.dom.window, booted.bridge.renderSettings);
+  return booted;
+}
+
 interface OpenOptions {
   calls?: FetchCall[];
   overrides?: Record<string, { status?: number; json?: unknown }>;
@@ -343,9 +361,7 @@ describe("Server/admin/static — Settings page", () => {
 
     radios[3]!.checked = true;
     radios[3]!.dispatchEvent(new window.Event("change", { bubbles: true }));
-    calls.length = 0;
-    await booted.bridge.saveSettings();
-    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+    expect(await savedSettingsPatch(booted, calls)).toEqual({
       registration_mode: "open",
     });
   });
@@ -943,23 +959,13 @@ describe("Server/admin/static — upload file types", () => {
     allowed.value = ".PNG, jpg jpg";
     allowed.dispatchEvent(new window.Event("input", { bubbles: true }));
     expect(save.disabled).toBe(false);
-    calls.length = 0;
-    await booted.bridge.saveSettings();
-    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+    expect(await savedSettingsPatch(booted, calls)).toEqual({
       upload_allowed_extensions: "png,jpg",
     });
   });
 
   it("shows a list the owner saved instead of config.yaml's", async () => {
-    const booted = await boot(
-      [],
-      respondWith({
-        "GET /settings": { json: { ...LOADED_SETTINGS, upload_blocked_extensions: "" } },
-      }),
-    );
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    dom = (await renderStored({ upload_blocked_extensions: "" }, "ADMINISTRATOR", true)).dom;
     expect(field(dom.window.document, "upload_blocked_extensions").value).toBe("");
   });
 
@@ -983,9 +989,7 @@ describe("Server/admin/static — upload file types", () => {
     input("server_name", "Renamed");
     await booted.bridge.saveSettings();
     input("motd", "New MOTD");
-    calls.length = 0;
-    await booted.bridge.saveSettings();
-    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+    expect(await savedSettingsPatch(booted, calls)).toEqual({
       motd: "New MOTD",
     });
   });
@@ -1031,23 +1035,13 @@ describe("Server/admin/static — voice_owner_movable switch", () => {
 
     sw.click();
     expect(save.disabled).toBe(false);
-    calls.length = 0;
-    await booted.bridge.saveSettings();
-    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+    expect(await savedSettingsPatch(booted, calls)).toEqual({
       voice_owner_movable: "false",
     });
   });
 
   it("shows a stored false as off", async () => {
-    const booted = await boot(
-      [],
-      respondWith({
-        "GET /settings": { json: { ...LOADED_SETTINGS, voice_owner_movable: "false" } },
-      }),
-    );
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.ADMINISTRATOR, is_owner: true };
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    dom = (await renderStored({ voice_owner_movable: "false" }, "ADMINISTRATOR", true)).dom;
     expect(toggle(dom.window.document)!.getAttribute("aria-checked")).toBe("false");
   });
 
@@ -1089,23 +1083,13 @@ describe("Server/admin/static — game_activity_enabled switch", () => {
 
     sw.click();
     expect(save.disabled).toBe(false);
-    calls.length = 0;
-    await booted.bridge.saveSettings();
-    expect(calls.find((c) => c.path === "/settings" && c.method === "PATCH")?.body).toEqual({
+    expect(await savedSettingsPatch(booted, calls)).toEqual({
       game_activity_enabled: "false",
     });
   });
 
   it("shows a stored false as off", async () => {
-    const booted = await boot(
-      [],
-      respondWith({
-        "GET /settings": { json: { ...LOADED_SETTINGS, game_activity_enabled: "false" } },
-      }),
-    );
-    dom = booted.dom;
-    booted.bridge.state.me = { permissions: booted.bridge.PERM.MANAGE_SERVER, is_owner: false };
-    await render(booted.bridge, dom.window, booted.bridge.renderSettings);
+    dom = (await renderStored({ game_activity_enabled: "false" }, "MANAGE_SERVER", false)).dom;
     expect(toggle(dom.window.document)!.getAttribute("aria-checked")).toBe("false");
   });
 });

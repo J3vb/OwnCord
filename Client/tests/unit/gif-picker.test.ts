@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createGifPicker } from "@components/GifPicker";
 import { messagingText } from "../../src/i18n/messaging";
 import { gifFavoritesText } from "../../src/i18n/gifFavorites";
@@ -152,13 +153,21 @@ function typeInto(input: HTMLInputElement, value: string): void {
 // ---------------------------------------------------------------------------
 
 describe("GifPicker", () => {
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      vi.useRealTimers();
+      vi.clearAllMocks();
+    },
+  );
+
   beforeEach(() => {
     vi.useFakeTimers();
-
     // Default: trending returns data, search returns search data
     vi.mocked(getTrendingGifs).mockResolvedValue(lastPage(TRENDING_GIFS));
     vi.mocked(searchGifs).mockResolvedValue(lastPage(SEARCH_GIFS));
-
     URL.createObjectURL = createObjectURLMock;
     URL.revokeObjectURL = vi.fn();
     imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/gif" }) });
@@ -167,15 +176,6 @@ describe("GifPicker", () => {
       value: { title: null, description: null, siteName: null, image: null },
     });
     clearExternalImageCache();
-
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.clearAllMocks();
-    container.remove();
   });
 
   // ── Structure ─────────────────────────────────────────────────────────────

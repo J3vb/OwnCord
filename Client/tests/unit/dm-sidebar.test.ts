@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { avatarAttachmentsMock } from "../helpers/avatarAttachmentsMock";
 import { makeDmConversation } from "../helpers/dmSidebarHost";
@@ -56,15 +57,15 @@ describe("DmSidebar", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   };
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => vi.useRealTimers(),
+  );
+
   beforeEach(() => {
     fetchImageAsObjectUrl.mockReset();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    vi.useRealTimers();
   });
 
   it("renders the sidebar with search input", () => {
@@ -625,16 +626,18 @@ describe("DmSidebar — unread and mention badges", () => {
   let container: HTMLDivElement;
   let sidebar: ReturnType<typeof createDmSidebar> | null = null;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    sidebar = null;
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      sidebar?.destroy?.();
+      sidebar = null;
+    },
+  );
 
-  afterEach(() => {
-    sidebar?.destroy?.();
+  beforeEach(() => {
     sidebar = null;
-    container.remove();
   });
 
   const mountSidebar = (

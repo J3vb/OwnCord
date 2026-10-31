@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import {
   createMemberPickerModal,
   type MemberPickerOptions,
@@ -62,16 +63,18 @@ function openPicker(overrides: Partial<MemberPickerOptions> = {}): MountableComp
 }
 
 describe("createMemberPickerModal", () => {
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      // Clean up any stray modal overlays
+      document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+    },
+  );
+
   beforeEach(() => {
     resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    // Clean up any stray modal overlays
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
   });
 
   // --- Basic rendering ---

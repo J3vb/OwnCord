@@ -21,6 +21,25 @@ import {
   defaultRespond,
 } from "../../helpers/serverAdminStaticPanelHarness";
 
+/** The Users page rendered over a server that answers with `count` users. */
+async function renderUserPage(count: number) {
+  const calls: FetchCall[] = [];
+  const users = Array.from({ length: count }, (_, i) => ({
+    id: i + 2,
+    username: "u" + (i + 2),
+    role_id: 4,
+    status: "offline",
+    banned: false,
+  }));
+  const respond: Responder = (p, _method) => {
+    if (p.startsWith("/users?")) return { json: users };
+    if (p === "/registrations") return { json: [] };
+    return { json: {} };
+  };
+  const booted = await bootAsAdmin(calls, respond);
+  return { calls, booted, html: await booted.bridge.renderUsers() };
+}
+
 describe("Server/admin/static — panel behaviour", () => {
   // OC-0350. POST /api/v1/auth/login answers a TOTP account with 200,
   // {partial_token, requires_2fa:true} and NO token. Before the fix the
@@ -181,22 +200,7 @@ describe("Server/admin/static — panel behaviour", () => {
 
   // OC-0361 and OC-0390 and OC-0364, over one rendered Users page.
   it("does not offer a next page for an exactly-full page, and offers erasure apart from force-logout", async () => {
-    const calls: FetchCall[] = [];
-    const users = Array.from({ length: 50 }, (_, i) => ({
-      id: i + 2,
-      username: "u" + (i + 2),
-      role_id: 4,
-      status: "offline",
-      banned: false,
-    }));
-    const respond: Responder = (p, _method) => {
-      if (p.startsWith("/users?")) return { json: users };
-      if (p === "/registrations") return { json: [] };
-      return { json: {} };
-    };
-    const booted = await bootAsAdmin(calls, respond);
-
-    const html = await booted.bridge.renderUsers();
+    const { calls, booted, html } = await renderUserPage(50);
 
     // limit+1, the way MessageService.GetMessages asks.
     const usersCall = calls.find((c) => c.path.startsWith("/users?"));
@@ -225,22 +229,7 @@ describe("Server/admin/static — panel behaviour", () => {
   });
 
   it("offers a next page when an overflow row comes back", async () => {
-    const calls: FetchCall[] = [];
-    const users = Array.from({ length: 51 }, (_, i) => ({
-      id: i + 2,
-      username: "u" + (i + 2),
-      role_id: 4,
-      status: "offline",
-      banned: false,
-    }));
-    const respond: Responder = (p, _method) => {
-      if (p.startsWith("/users?")) return { json: users };
-      if (p === "/registrations") return { json: [] };
-      return { json: {} };
-    };
-    const booted = await bootAsAdmin(calls, respond);
-
-    const html = await booted.bridge.renderUsers();
+    const { html } = await renderUserPage(51);
     expect(html).toMatch(
       /<button class="page-btn" {2}data-action="turnUsersPage" data-args="\[1\]"/,
     );

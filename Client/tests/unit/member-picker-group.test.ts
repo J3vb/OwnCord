@@ -1,48 +1,27 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { memberRow, useMemberPickerHarness } from "../helpers/memberPickerHarness";
 import { createMemberPickerModal } from "../../src/pages/main-page/MemberPickerModal";
 import { membersStore } from "@stores/members.store";
-import { authStore } from "@stores/auth.store";
 import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";
 
 function seedMembers(count: number): void {
-  const members = new Map<number, ReturnType<typeof member>>();
-  members.set(1, member(1, "me"));
+  const members = new Map<number, ReturnType<typeof memberRow>>();
+  members.set(1, memberRow(1, "me"));
   for (let i = 2; i <= count + 1; i++) {
-    members.set(i, member(i, `user${i}`));
+    members.set(i, memberRow(i, `user${i}`));
   }
   membersStore.setState((prev) => ({ ...prev, members }));
 }
 
-function member(id: number, username: string) {
-  return {
-    id,
-    username,
-    avatar: null,
-    role: "member",
-    status: "online" as const,
-    displayName: null,
-  };
-}
-
 let container: HTMLDivElement;
-// Every picker a test opens, destroyed in afterEach so its document keydown
+// Every picker a test opens is destroyed in afterEach so its document keydown
 // listener does not outlive the test.
-const opened: { destroy?(): void }[] = [];
-
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  authStore.setState((prev) => ({
-    ...prev,
-    user: { id: 1, username: "me", avatar: null, role: "member" } as never,
-  }));
-  seedMembers(4);
+const { opened } = useMemberPickerHarness((c) => {
+  container = c;
 });
 
-afterEach(() => {
-  for (const picker of opened.splice(0)) picker.destroy?.();
-  container.remove();
-  document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+beforeEach(() => {
+  seedMembers(4);
 });
 
 function open(opts: Partial<Parameters<typeof createMemberPickerModal>[0]> = {}) {

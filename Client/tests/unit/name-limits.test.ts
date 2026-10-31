@@ -269,14 +269,12 @@ describe("register form username", () => {
 describe("status picker custom status", () => {
   let container: HTMLDivElement;
   let picker: StatusPickerComponent | null = null;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((c) => {
+    container = c;
   });
   afterEach(() => {
     picker?.destroy?.();
     picker = null;
-    container.remove();
   });
 
   it("shows a hint, and an over-limit value is not sent", () => {
@@ -313,15 +311,15 @@ describe("status picker custom status", () => {
 
 describe("prompt modal (group DM rename)", () => {
   let container: HTMLDivElement;
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    container.remove();
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
+    },
+  );
 
   const input = (): HTMLInputElement =>
     document.querySelector<HTMLInputElement>("[data-testid='prompt-input']")!;
@@ -374,9 +372,14 @@ describe("prompt modal (group DM rename)", () => {
 
 describe("new group DM name field", () => {
   let container: HTMLDivElement;
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => document.querySelectorAll(".modal-overlay").forEach((el) => el.remove()),
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     authStore.setState((prev) => ({
       ...prev,
       user: { id: 1, username: "me", avatar: null, role: "member" } as never,
@@ -395,10 +398,6 @@ describe("new group DM name field", () => {
       ]),
     );
     membersStore.setState((prev) => ({ ...prev, members }));
-  });
-  afterEach(() => {
-    container.remove();
-    document.querySelectorAll(".modal-overlay").forEach((el) => el.remove());
   });
 
   it("does not create a group with an over-limit name and keeps the picker open", () => {

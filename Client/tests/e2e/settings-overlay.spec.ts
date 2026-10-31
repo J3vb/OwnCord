@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { openSettings, switchSettingsTab, startFullSession } from "./helpers";
 import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
@@ -6,6 +7,19 @@ import { ZOOM_VIEWPORT, expectScreenReflows } from "./support/zoom-reflow";
 // ---------------------------------------------------------------------------
 // Tests: Settings Overlay — structure
 // ---------------------------------------------------------------------------
+
+/** Runs the connection test without the microphone check; returns the active settings pane. */
+async function runDiagnostics(page: Page) {
+  const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
+  await pane
+    .getByRole("checkbox", { name: "Include a brief microphone permission check" })
+    .uncheck();
+  await page.getByTestId("diagnostics-start").click();
+  await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete", {
+    timeout: 15_000,
+  });
+  return pane;
+}
 
 test.describe("Settings Overlay", () => {
   test.beforeEach(async ({ page }) => {
@@ -349,14 +363,7 @@ test.describe("Settings — Diagnostics & logs Tab", () => {
   test("names every control, rings the disclosure summaries and keeps status text readable", async ({
     page,
   }) => {
-    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
-    await pane
-      .getByRole("checkbox", { name: "Include a brief microphone permission check" })
-      .uncheck();
-    await page.getByTestId("diagnostics-start").click();
-    await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete", {
-      timeout: 15_000,
-    });
+    const pane = await runDiagnostics(page);
     expect(await findUnnamedControls(pane)).toEqual([]);
 
     const failures: string[] = [];
@@ -386,14 +393,7 @@ test.describe("Settings — Diagnostics & logs Tab", () => {
   test("steps through the connection stages by keyboard and reflows at 200 % zoom", async ({
     page,
   }, testInfo) => {
-    const pane = page.locator("[data-testid='settings-overlay'] .settings-pane.active");
-    await pane
-      .getByRole("checkbox", { name: "Include a brief microphone permission check" })
-      .uncheck();
-    await page.getByTestId("diagnostics-start").click();
-    await expect(page.getByTestId("diagnostics-status")).toContainText("Test complete", {
-      timeout: 15_000,
-    });
+    const pane = await runDiagnostics(page);
     const stages = pane.locator("ol.diag-stepper > li");
     await expect(stages).toHaveCount(6);
 

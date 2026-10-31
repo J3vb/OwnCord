@@ -32,33 +32,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // The dispatcher pulls in notifications; the voice handlers reach LiveKit and
 // the identity publisher. None is under test here, so each is stubbed the way
 // the unit dispatcher tests stub it.
-vi.mock("@lib/notifications", () => ({
-  notifyIncomingMessage: vi.fn(),
-  notifyMention: vi.fn(),
-  notifyChannelActivity: vi.fn(),
-  cleanupNotificationAudio: vi.fn(),
-}));
-vi.mock("@lib/voice/livekitSession", () => ({
-  handleVoiceToken: vi.fn(async () => {}),
-  handleParticipantLeft: vi.fn(async () => {}),
-  handleE2EEAnnounce: vi.fn(async () => {}),
-  handleE2EEOffer: vi.fn(async () => {}),
-  leaveVoice: vi.fn(),
-  cleanupAll: vi.fn(),
-  isVoiceSessionActive: vi.fn(() => false),
-  isAutoReconnecting: vi.fn(() => false),
-  failPendingRejoin: vi.fn(),
-  setMuted: vi.fn(),
-  setDeafened: vi.fn(),
-  disableCamera: vi.fn(async () => {}),
-  disableScreenshare: vi.fn(async () => {}),
-}));
+vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
-vi.mock("@lib/voice/screenShare", () => ({ rollbackPendingVideo: vi.fn(() => undefined) }));
+vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("@lib/voice/screenShare", () => dispatcherMocks.screenShareMock());
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 
+import * as dispatcherMocks from "../helpers/dispatcherMocks";
 import { wireDispatcher } from "../../src/lib/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";

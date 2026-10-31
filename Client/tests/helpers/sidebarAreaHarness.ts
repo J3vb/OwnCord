@@ -4,7 +4,6 @@ import { dmStore, addDmChannel } from "../../src/stores/dm.store";
 import { membersStore, type Member } from "../../src/stores/members.store";
 import { channelsStore, type Channel, type ChannelsState } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
-import { authStore } from "../../src/stores/auth.store";
 import { voiceStore, joinVoiceChannel } from "../../src/stores/voice.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { createChannelSidebar } from "@components/ChannelSidebar";
@@ -17,7 +16,7 @@ import { createEditChannelModal } from "@components/EditChannelModal";
 import { createDeleteChannelModal } from "@components/DeleteChannelModal";
 import { defaultSidebarAreaOpts } from "./sidebarAreaOpts";
 import { resetMembersState } from "./storeResets";
-import { makeChannelRow, resetChannelsState, resetVoiceState } from "./storeSeeds";
+import { makeChannelRow, resetChannelsState, resetVoiceState, signInAsAdmin } from "./storeSeeds";
 import { resetUiState } from "./dmHarness";
 
 // ---------------------------------------------------------------------------
@@ -49,13 +48,7 @@ export function resetStores(): void {
   resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
   resetUiState();
-  authStore.setState(() => ({
-    token: "test-token",
-    user: { id: 1, username: "testuser", role: "admin", avatar: null, totp_enabled: false },
-    serverName: "Test Server",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAsAdmin("testuser", { token: "test-token" });
   resetMembersState();
   resetVoiceState();
   localStorage.removeItem("owncord:member-list-height");

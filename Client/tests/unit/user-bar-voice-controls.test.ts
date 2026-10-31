@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { createUserBar } from "@components/UserBar";
 import { voiceStore, resetVoiceStore, joinVoiceChannel } from "@stores/voice.store";
 import { channelsStore, setChannels, updateChannel } from "@stores/channels.store";
@@ -41,6 +42,13 @@ describe("UserBar mute and deafen", () => {
   const icon = (btn: HTMLButtonElement): string | null =>
     btn.querySelector("svg")!.getAttribute("data-icon");
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => comp?.destroy?.(),
+  );
+
   beforeEach(() => {
     resetVoiceStore();
     signInAs(
@@ -50,13 +58,6 @@ describe("UserBar mute and deafen", () => {
     connection.status = "connected";
     onMuteToggle = vi.fn<() => void>();
     onDeafenToggle = vi.fn<() => void>();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    comp?.destroy?.();
-    container.remove();
   });
 
   it("puts the mic and headphone buttons before Settings", () => {

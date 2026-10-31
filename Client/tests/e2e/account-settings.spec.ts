@@ -86,6 +86,13 @@ async function openConnectPage(page: Page): Promise<void> {
   await page.goto("/");
 }
 
+async function submitCredentials(page: Page, password: string): Promise<void> {
+  await page.locator("#host").fill("localhost:8443");
+  await page.locator("#username").fill("user");
+  await page.locator("#password").fill(password);
+  await page.locator("button.btn-primary[type='submit']").click();
+}
+
 // ---------------------------------------------------------------------------
 // Connect form: field-linked validation (BPR-091)
 // ---------------------------------------------------------------------------
@@ -119,10 +126,7 @@ test.describe("connect form validation is field-linked", () => {
     );
     await page.goto("/");
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("user");
-    await page.locator("#password").fill("short");
-    await page.locator("button.btn-primary[type='submit']").click();
+    await submitCredentials(page, "short");
 
     const password = page.locator("#password");
     await expect(page.locator(".error-banner.visible")).toHaveText(/at least 8 characters/);
@@ -166,10 +170,7 @@ test.describe("connect form validation is field-linked", () => {
     );
     await page.goto("/");
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("user");
-    await page.locator("#password").fill("password123");
-    await page.locator("button.btn-primary[type='submit']").click();
+    await submitCredentials(page, "password123");
 
     const code = page.locator(".totp-overlay input[autocomplete='one-time-code']");
     await expect(code).toBeFocused();

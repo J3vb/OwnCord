@@ -61,7 +61,8 @@ import {
   userIds,
   type Sender,
 } from "./serverApi";
-import { installRealTransport } from "../support/real-transport";
+import { openContextMenuOn } from "../helpers";
+import { installRealTransport, recordTraffic, traffic } from "../support/real-transport";
 import { TEST_PASSWORD, type TestServer } from "../support/server";
 import { Q1, textContrast } from "../support/accessibility";
 
@@ -88,30 +89,6 @@ async function status(
   });
   return response.status;
 }
-
-/** Record every HTTP destination and broker call the renderer asks for from now. */
-async function recordTraffic(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as {
-      __TAURI_INTERNALS__: { invoke: (c: string, a?: Record<string, unknown>) => Promise<unknown> };
-      __traffic: string[];
-    };
-    w.__traffic = [];
-    const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
-    w.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
-      if (command === "plugin:http|fetch") {
-        const { method, url } = args.clientConfig as { method: string; url: string };
-        w.__traffic.push(`${method} ${new URL(url).pathname}${new URL(url).search}`);
-      } else if (command.startsWith("external_")) {
-        w.__traffic.push(`broker ${command}`);
-      }
-      return inner(command, args);
-    };
-  });
-}
-
-const traffic = (page: Page): Promise<string[]> =>
-  page.evaluate(() => (window as unknown as { __traffic: string[] }).__traffic);
 
 test.describe("moderation journey (real server)", () => {
   test("report → warn → notice → appeal → decision, end to end in the client", async ({
@@ -432,19 +409,7 @@ test.describe("first-contact journey (real server)", () => {
       await expect(bob.locator("[data-testid='member-list']")).toBeVisible();
       const strangerId = (await userIds(server))("stranger");
       const row = bob.locator(`[data-testid='member-${strangerId}']`);
-      await expect(row).toBeVisible();
-      await row.evaluate((el) =>
-        el.dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            cancelable: true,
-            clientX: 640,
-            clientY: 80,
-            button: 2,
-          }),
-        ),
-      );
-      const menu = bob.locator(".context-menu").first();
+      const menu = await openContextMenuOn(bob, row);
       const block = menu.locator("[data-testid='block-toggle']");
       await expect(block).toHaveText("Block");
       await block.click();

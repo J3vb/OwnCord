@@ -5,7 +5,7 @@
 // internal.
 import { vi } from "vitest";
 import type { HttpClient } from "../../../src/platform/contracts/http";
-import { describeHttpClientSuite } from "./http.suite";
+import { describeHttpClientSuite, fetchStub } from "./http.suite";
 
 const { fetchMock } = vi.hoisted(() => ({
   fetchMock: vi.fn<(url: string, init?: RequestInit) => Promise<Response>>(),
@@ -16,34 +16,12 @@ vi.mock("@tauri-apps/plugin-http", () => ({ fetch: fetchMock }));
 const mod = await import("../../../src/platform/desktop/http");
 const desktopBinding: HttpClient = mod.http;
 
-const requested: string[] = [];
-
-function reset(): void {
-  fetchMock.mockReset();
-  requested.length = 0;
-  fetchMock.mockImplementation((url: string) => {
-    requested.push(url);
-    return Promise.resolve(new Response(null, { status: 200 }));
-  });
-}
+const { reset, native } = fetchStub(fetchMock);
 
 describeHttpClientSuite(async () => {
   reset();
   return {
     subject: desktopBinding,
-    native: {
-      respondsWith(response: Response) {
-        reset();
-        fetchMock.mockImplementation((url: string) => {
-          requested.push(url);
-          return Promise.resolve(response);
-        });
-      },
-      failsWith(error: unknown) {
-        reset();
-        fetchMock.mockRejectedValue(error);
-      },
-      requested: () => [...requested],
-    },
+    native,
   };
 });

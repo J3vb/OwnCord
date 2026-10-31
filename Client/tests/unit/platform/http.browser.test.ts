@@ -4,21 +4,11 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { HttpClient } from "../../../src/platform/contracts/http";
 import { http } from "../../../src/platform/browser/http";
-import { describeHttpClientSuite } from "./http.suite";
+import { describeHttpClientSuite, fetchStub } from "./http.suite";
 
 const browserBinding: HttpClient = http;
 const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
-const requested: string[] = [];
-
-function reset(): void {
-  fetchMock.mockReset();
-  requested.length = 0;
-  fetchMock.mockImplementation((url: string) => {
-    requested.push(url);
-    return Promise.resolve(new Response(null, { status: 200 }));
-  });
-  vi.stubGlobal("fetch", fetchMock);
-}
+const { reset, native } = fetchStub(fetchMock, () => vi.stubGlobal("fetch", fetchMock));
 
 afterAll(() => {
   vi.unstubAllGlobals();
@@ -28,20 +18,7 @@ describeHttpClientSuite(async () => {
   reset();
   return {
     subject: browserBinding,
-    native: {
-      respondsWith(response: Response) {
-        reset();
-        fetchMock.mockImplementation((url: string) => {
-          requested.push(url);
-          return Promise.resolve(response);
-        });
-      },
-      failsWith(error: unknown) {
-        reset();
-        fetchMock.mockRejectedValue(error);
-      },
-      requested: () => [...requested],
-    },
+    native,
   };
 });
 

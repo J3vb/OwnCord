@@ -150,33 +150,15 @@ export function livekitClientMock() {
   };
 }
 
-export function voiceStoreMock() {
+/** The voice-store action stubs every LiveKit session suite needs as plain `vi.fn()`s. */
+export function voiceStoreActionStubs() {
   return {
-    voiceStore: {
-      getState: vi.fn(() => mockVoiceState),
-      get: vi.fn(() => ({})),
-      set: vi.fn(),
-      subscribe: vi.fn(),
-      subscribeSelector: vi.fn(() => () => {}),
-    },
     setLocalMuted: vi.fn(),
     setLocalDeafened: vi.fn(),
     setLocalCamera: vi.fn(),
     setLocalScreenshare: vi.fn(),
     bumpLocalShareRev: vi.fn(),
     setPttGated: vi.fn(),
-    // The PTT-poller-live flag lives in the store (so ptt.ts can write it at
-    // startup without importing the LiveKit SDK), so the mock has to carry real
-    // read/write behaviour rather than a bare vi.fn — restoreLocalVoiceState
-    // reads it back through isPttPollingLive().
-    setPttPollingLive: vi.fn((live: boolean) => {
-      mockPttPollingLive.value = live;
-    }),
-    isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
-    onPttPollingLiveChange: vi.fn((listener: () => void) => {
-      pttPollingListeners.push(listener);
-      return () => {};
-    }),
     setSpeakers: vi.fn(),
     leaveVoiceChannel: vi.fn(),
     setListenOnly: vi.fn(),
@@ -190,6 +172,31 @@ export function voiceStoreMock() {
     setLocalSessionFingerprint: vi.fn(),
     setLocalSafetyNumber: vi.fn(),
     setEncryptionDegraded: vi.fn(),
+  };
+}
+
+export function voiceStoreMock() {
+  return {
+    voiceStore: {
+      getState: vi.fn(() => mockVoiceState),
+      get: vi.fn(() => ({})),
+      set: vi.fn(),
+      subscribe: vi.fn(),
+      subscribeSelector: vi.fn(() => () => {}),
+    },
+    ...voiceStoreActionStubs(),
+    // The PTT-poller-live flag lives in the store (so ptt.ts can write it at
+    // startup without importing the LiveKit SDK), so the mock has to carry real
+    // read/write behaviour rather than a bare vi.fn — restoreLocalVoiceState
+    // reads it back through isPttPollingLive().
+    setPttPollingLive: vi.fn((live: boolean) => {
+      mockPttPollingLive.value = live;
+    }),
+    isPttPollingLive: vi.fn(() => mockPttPollingLive.value),
+    onPttPollingLiveChange: vi.fn((listener: () => void) => {
+      pttPollingListeners.push(listener);
+      return () => {};
+    }),
   };
 }
 

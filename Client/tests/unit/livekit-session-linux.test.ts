@@ -13,6 +13,7 @@
 //     path, and a capture the desktop ends stops the share.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as logMock from "../helpers/loggerMock";
+import * as mocks from "../helpers/livekitSessionMocks";
 import type { NativeVoiceEnvelope } from "../../src/platform/contracts/nativeVoice";
 
 const mockVoiceState = vi.hoisted(() => ({
@@ -92,28 +93,10 @@ vi.mock("@stores/voice.store", () => ({
     subscribe: vi.fn(),
     subscribeSelector: vi.fn(() => () => {}),
   },
-  setLocalMuted: vi.fn(),
-  setLocalDeafened: vi.fn(),
-  setLocalCamera: vi.fn(),
-  setLocalScreenshare: vi.fn(),
-  bumpLocalShareRev: vi.fn(),
-  setPttGated: vi.fn(),
+  ...mocks.voiceStoreActionStubs(),
   setPttPollingLive: vi.fn(),
   isPttPollingLive: vi.fn(() => false),
   onPttPollingLiveChange: vi.fn(() => () => {}),
-  setSpeakers: vi.fn(),
-  leaveVoiceChannel: vi.fn(),
-  setListenOnly: vi.fn(),
-  setShareDenied: vi.fn(),
-  setLocalGateSpeaking: vi.fn(),
-  restateSelfVoiceState: vi.fn(),
-  setVoiceStatus: vi.fn(),
-  setPeerVerification: vi.fn(),
-  clearPeerVerification: vi.fn(),
-  clearPeerVerifications: vi.fn(),
-  setLocalSessionFingerprint: vi.fn(),
-  setLocalSafetyNumber: vi.fn(),
-  setEncryptionDegraded: vi.fn(),
 }));
 
 const host = vi.hoisted(() => ({

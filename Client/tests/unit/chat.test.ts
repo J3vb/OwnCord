@@ -4,7 +4,8 @@
  * typing indicator, reaction bar, message actions, and message input.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 // ---------------------------------------------------------------------------
 // MessageList helpers (we test the exported component's behavior via DOM)
@@ -64,14 +65,12 @@ function newList(
 describe("MessageList", () => {
   let container: HTMLDivElement;
 
-  beforeEach(() => {
-    resetStores();
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((c) => {
+    container = c;
   });
 
-  afterEach(() => {
-    container.remove();
+  beforeEach(() => {
+    resetStores();
   });
 
   function mountList(overrides: Partial<MessageListOptions> = {}): ReturnType<typeof newList> {
@@ -334,6 +333,10 @@ import { setTyping } from "../../src/stores/members.store";
 describe("TypingIndicator", () => {
   let container: HTMLDivElement;
 
+  useMountContainer((c) => {
+    container = c;
+  });
+
   beforeEach(() => {
     resetStores();
     setMembers([
@@ -343,12 +346,6 @@ describe("TypingIndicator", () => {
       { id: 4, username: "Dana", avatar: null, role: "member", status: "online" },
       { id: 10, username: "Me", avatar: null, role: "member", status: "online" },
     ]);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
   });
 
   it("is hidden when no one is typing", () => {
@@ -440,7 +437,6 @@ import { makeListOptions } from "../helpers/messageListHarness";
 import type { MessageInputOptions } from "../../src/components/MessageInput";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
-import { useMountContainer } from "../helpers/mountContainer";
 
 describe("MessageInput", () => {
   let container: HTMLDivElement;

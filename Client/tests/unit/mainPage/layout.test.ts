@@ -15,7 +15,7 @@ import {
   fakeApi,
   textChannel,
   dmChannel,
-  useMainPageHarness,
+  useWiredMainPage,
   useMainPageScope,
   mountPage,
   seedChannels,
@@ -54,20 +54,12 @@ const {
 } = mocks;
 
 describe("MainPage — activeChannelId subscriber", () => {
-  let container: HTMLDivElement;
-  let page: ReturnType<typeof createMainPage>;
-
-  useMainPageHarness({
-    wired: (c) => {
-      container = c;
-    },
-    currentPage: () => page,
-  });
+  const m = useWiredMainPage();
 
   it("mounts the channel when an active channel is set", () => {
     seedChannels([textChannel(1, "general")], 1);
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     expect(mockMountChannel).toHaveBeenCalledWith(1, "general", "text");
   });
@@ -75,7 +67,7 @@ describe("MainPage — activeChannelId subscriber", () => {
   it("destroys the mounted channel when the active channel is cleared (deleted/closed while offline)", () => {
     seedChannels([textChannel(1, "general")], 1);
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
     expect(mockMountChannel).toHaveBeenCalledWith(1, "general", "text");
 
     // The channel is gone and nothing replaces it as active — this is what
@@ -90,7 +82,7 @@ describe("MainPage — activeChannelId subscriber", () => {
   it("mounts the newly active channel when switching between two channels", () => {
     seedChannels([textChannel(1, "general"), textChannel(2, "random", 1)], 1);
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     setActiveChannel(2);
     channelsStore.flush();

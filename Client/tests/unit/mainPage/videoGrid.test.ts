@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore, setActiveChannel } from "../../../src/stores/channels.store";
 import { voiceStore, updateVoiceUserProfile } from "../../../src/stores/voice.store";
 import { membersStore, updateMemberProfile } from "../../../src/stores/members.store";
@@ -9,7 +8,7 @@ import {
   fakeApi,
   textChannel,
   dmChannel,
-  useMainPageHarness,
+  useWiredMainPage,
   mountPage,
   seedChannels,
   voiceChannel,
@@ -49,20 +48,19 @@ const {
 } = mocks;
 
 describe("MainPage — video grid, DM profile panel, calls, settings", () => {
-  let container: HTMLDivElement;
-  let page: ReturnType<typeof createMainPage>;
+  const m = useWiredMainPage();
 
-  useMainPageHarness({
-    wired: (c) => {
-      container = c;
-    },
-    currentPage: () => page,
-  });
+  /** Joins voice channel 9 alone and opens its call view from the sidebar. */
+  const joinLoungeAndOpenCall = (): void => {
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 9, voiceUsers: roster(9, []) }));
+    voiceStore.flush();
+    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+  };
 
   it("dismisses the video grid when switching to a non-voice channel (dm/announcement), not just 'text'", () => {
     seedChannels([textChannel(1, "general"), dmChannel(2, "dm-with-bob")], 1);
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     // Open the call view while in voice with the camera on (the real,
     // unmocked VideoModeController drives this off voiceStore).
@@ -91,15 +89,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("opening the call view of a voice channel selects it and keeps its chat beside the grid", () => {
     seedChannels([textChannel(1, "general"), voiceChannel(9, "lounge", 1)], 1);
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 9,
-      voiceUsers: roster(9, []),
-    }));
-    voiceStore.flush();
-    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+    joinLoungeAndOpenCall();
 
     const { chatArea, slots } = capturedChatAreaRef.current!;
     expect(channelsStore.getState().activeChannelId).toBe(9);
@@ -124,15 +116,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       1,
     );
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
-    voiceStore.setState((prev) => ({
-      ...prev,
-      currentChannelId: 9,
-      voiceUsers: roster(9, []),
-    }));
-    voiceStore.flush();
-    (mockCreateSidebarArea.mock.calls.at(-1)![0] as { onOpenCall: () => void }).onOpenCall();
+    joinLoungeAndOpenCall();
     const { slots } = capturedChatAreaRef.current!;
     expect(slots.videoGridSlot.style.display).toBe("block");
 
@@ -145,7 +131,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("does not clear a just-added remote video tile when a voice-channel switch left the camera/screenshare signature unchanged", () => {
     seedChannels([textChannel(1, "general")], 1);
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     // Alice joins voice channel A (9). Someone's camera briefly toggles the
     // signature so the real VideoModeController actually runs checkVideoMode
@@ -194,7 +180,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("applies a cross-channel roster click's channel change before watching, so clearStreams cannot drop the watch", () => {
     seedChannels([textChannel(1, "general"), voiceChannel(10, "lounge", 1)], 1);
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     voiceStore.setState((prev) => ({
       ...prev,
@@ -224,7 +210,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("opens the call view from the joined channel, and keeps its avatar tiles in step with who joins (1B-1)", () => {
     seedChannels([textChannel(1, "general")], 1);
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     voiceStore.setState((prev) => ({
       ...prev,
@@ -271,7 +257,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
       roleRevision: 0,
     }));
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     voiceStore.setState((prev) => ({
       ...prev,
@@ -309,7 +295,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it('keeps "(You)" on the self-view tile when the server echoes our own voice_state', () => {
     seedChannels([textChannel(1, "general")], 1);
 
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     // resetStores authenticates user 1 ("alice"). This is the server's own
     // voice_state echo landing in voiceUsers for the local user — updateVoiceState
@@ -333,7 +319,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("brackets a bare IPv6 host when building the auto-updater URL", () => {
     seedChannels([textChannel(1, "general")], 1);
 
-    page = mountPage(container, fakeWs(), fakeApi("2001:db8::1"));
+    m.page = mountPage(m.container, fakeWs(), fakeApi("2001:db8::1"));
 
     // A bare IPv6 literal spliced into a URL authority is not parseable — the
     // host parser enters the port state at the first colon — so build_updater
@@ -349,7 +335,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("leaves a DNS host unbracketed in the auto-updater URL", () => {
     seedChannels([textChannel(1, "general")], 1);
 
-    page = mountPage(container, fakeWs(), fakeApi("chat.example.com:8443"));
+    m.page = mountPage(m.container, fakeWs(), fakeApi("chat.example.com:8443"));
 
     expect(mockCreateUpdateNotifier).toHaveBeenCalledWith({
       serverUrl: "https://chat.example.com:8443",
@@ -359,7 +345,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
     const { disableScreenshare } = await import("@lib/voice/livekitSession");
-    page = mountPage(container);
+    m.page = mountPage(m.container);
     const grid = capturedChatAreaRef.current!.videoGrid;
     const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as { onStopSharing: () => void };
 
@@ -392,7 +378,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("the header's video call button joins the DM call and turns the camera on once connected (3B-1)", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
@@ -402,23 +388,23 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
     voiceStore.flush();
     expect(lk.enableCamera).toHaveBeenCalledTimes(1);
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("the header's group name click renames the open DM through the sidebar (3B-1)", () => {
     openOneToOneDm(50);
-    page = mountPage(container);
+    m.page = mountPage(m.container);
 
     chatAreaProps().onRenameGroup();
 
     expect(mockRenameGroup).toHaveBeenCalledWith(50);
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("Video while already connected in the DM's call turns the camera on at once (3B-1)", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     const lk = await import("@lib/voice/livekitSession");
     voiceStore.setState((prev) => ({
       ...prev,
@@ -432,13 +418,13 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     chatAreaProps().onStartVideoCall();
 
     expect(lk.enableCamera).toHaveBeenCalledTimes(1);
-    page.destroy?.();
+    m.page.destroy?.();
   });
 
   it("a Video start refused by join backoff does not arm the camera for a later plain join (3B-1)", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
     const { noteJoinFailed } = await import("../../../src/features/voice/joinBackoff");
@@ -452,7 +438,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.flush();
 
     expect(lk.enableCamera).not.toHaveBeenCalled();
-    page.destroy?.();
+    m.page.destroy?.();
     const { noteJoinSucceeded } = await import("../../../src/features/voice/joinBackoff");
     noteJoinSucceeded();
   });
@@ -460,7 +446,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   it("a plain header call leaves the camera off (3B-1)", async () => {
     const ws = fakeWs();
     connectedDm(50);
-    page = await mountSettled(container, ws);
+    m.page = await mountSettled(m.container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
@@ -468,6 +454,6 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: 50, voiceStatus: "connected" }));
     voiceStore.flush();
     expect(lk.enableCamera).not.toHaveBeenCalled();
-    page.destroy?.();
+    m.page.destroy?.();
   });
 });

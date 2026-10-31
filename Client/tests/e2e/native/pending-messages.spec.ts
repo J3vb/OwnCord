@@ -88,41 +88,38 @@ test("pending message encrypted native storage survives process restart, isolate
       },
       info,
     );
-    await app.close({ preserveProfile: true });
-
-    app = await startNativeApp(undefined, { preserveProfile: true });
-    await withNativeArtifacts(
-      app,
-      async () => {
-        await signIn(app!.page, host);
-        expect(await nativeInvoke(app!.page, "load_pending_messages", owner)).toBe(value);
-        expect(await nativeInvoke(app!.page, "load_pending_messages", otherAccount)).toBeNull();
-        await expect(nativeInvoke(app!.page, "load_pending_messages", otherServer)).rejects.toThrow(
-          /not the active session host/,
-        );
-        // Native limits apply even when a caller bypasses the TypeScript queue.
-        await expect(
-          nativeInvoke(app!.page, "save_pending_messages", {
-            ...owner,
-            value: JSON.stringify(["x".repeat(128 * 1024)]),
-          }),
-        ).rejects.toThrow();
-        expect(await nativeInvoke(app!.page, "load_pending_messages", owner)).toBe(value);
-        await nativeInvoke(app!.page, "delete_pending_messages", owner);
-      },
-      info,
-    );
-    await app.close({ preserveProfile: true });
-
-    app = await startNativeApp(undefined, { preserveProfile: true });
-    await withNativeArtifacts(
-      app,
-      async () => {
-        await signIn(app!.page, host);
-        expect(await nativeInvoke(app!.page, "load_pending_messages", owner)).toBeNull();
-      },
-      info,
-    );
+    // Restart the app over the same profile and sign in again.
+    const restart = async (body: () => Promise<void>): Promise<void> => {
+      await app!.close({ preserveProfile: true });
+      app = await startNativeApp(undefined, { preserveProfile: true });
+      await withNativeArtifacts(
+        app,
+        async () => {
+          await signIn(app!.page, host);
+          await body();
+        },
+        info,
+      );
+    };
+    await restart(async () => {
+      expect(await nativeInvoke(app!.page, "load_pending_messages", owner)).toBe(value);
+      expect(await nativeInvoke(app!.page, "load_pending_messages", otherAccount)).toBeNull();
+      await expect(nativeInvoke(app!.page, "load_pending_messages", otherServer)).rejects.toThrow(
+        /not the active session host/,
+      );
+      // Native limits apply even when a caller bypasses the TypeScript queue.
+      await expect(
+        nativeInvoke(app!.page, "save_pending_messages", {
+          ...owner,
+          value: JSON.stringify(["x".repeat(128 * 1024)]),
+        }),
+      ).rejects.toThrow();
+      expect(await nativeInvoke(app!.page, "load_pending_messages", owner)).toBe(value);
+      await nativeInvoke(app!.page, "delete_pending_messages", owner);
+    });
+    await restart(async () => {
+      expect(await nativeInvoke(app!.page, "load_pending_messages", owner)).toBeNull();
+    });
   } finally {
     if (app && !app.page.isClosed()) {
       await nativeInvoke(app.page, "delete_pending_messages", owner).catch(() => undefined);

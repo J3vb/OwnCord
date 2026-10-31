@@ -20,19 +20,12 @@ import {
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
-import { resetMembersState } from "../helpers/storeResets";
+import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { mountMessageInput } from "../helpers/messageInputHarness";
 
 function seed(messages: readonly Message[]): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map([[1, [...messages]]]),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
+  resetMessagesState({ messagesByChannel: new Map([[1, [...messages]]]) });
 }
 
 /** Replace the stored messages as a store update would, then deliver it. */

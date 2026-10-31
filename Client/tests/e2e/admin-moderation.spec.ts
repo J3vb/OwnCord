@@ -66,6 +66,15 @@ async function openMemberMenu(page: Page, testId: string) {
   return openContextMenuOn(page, page.locator(`[data-testid='${testId}']`));
 }
 
+/** The JSON body of the PATCH the client sent for member 2. */
+async function memberPatchBody(page: Page): Promise<Record<string, unknown>> {
+  const call = await waitForFetchCall(
+    page,
+    (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
+  );
+  return JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+}
+
 test.describe("Admin moderation — member context menu", () => {
   test.beforeEach(async ({ page }) => {
     await mockModerationSession(page);
@@ -86,11 +95,7 @@ test.describe("Admin moderation — member context menu", () => {
     await dialog.locator("[data-testid='ban-duration-select']").selectOption({ label: "1 day" });
     await dialog.locator("[data-testid='ban-confirm']").click();
 
-    const call = await waitForFetchCall(
-      page,
-      (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
-    );
-    const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+    const body = await memberPatchBody(page);
     expect(body.banned).toBe(true);
     expect(body.ban_reason).toBe("spamming #general");
     expect(body.ban_duration_hours).toBe(24);
@@ -107,11 +112,7 @@ test.describe("Admin moderation — member context menu", () => {
     await menu.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
     await page.locator("[data-testid='ban-dialog'] [data-testid='ban-confirm']").click();
 
-    const call = await waitForFetchCall(
-      page,
-      (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
-    );
-    const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+    const body = await memberPatchBody(page);
     expect(body.banned).toBe(true);
     expect(body.ban_reason).toBe("");
     expect(body).not.toHaveProperty("ban_duration_hours");
@@ -141,11 +142,7 @@ test.describe("Admin moderation — member context menu", () => {
       .selectOption({ label: "Previous 24 hours" });
     await dialog.locator("[data-testid='ban-confirm']").click();
 
-    const call = await waitForFetchCall(
-      page,
-      (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
-    );
-    const body = JSON.parse(call.body ?? "{}") as Record<string, unknown>;
+    const body = await memberPatchBody(page);
     expect(body.banned).toBe(true);
     expect(body.delete_message_seconds).toBe(86400);
     expect(body).not.toHaveProperty("role_id");

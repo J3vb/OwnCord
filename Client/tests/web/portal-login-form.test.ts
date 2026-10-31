@@ -3,7 +3,8 @@
  * Runs in the `web` project, where `__OWNCORD_WEB__` is true and the platform
  * registry is the browser one.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.hoisted(() => {
   vi.stubGlobal("isSecureContext", true);
@@ -20,12 +21,8 @@ import { makeCallbacks } from "../helpers/connectPageHarness";
 const HOST = location.host;
 
 let container: HTMLDivElement;
-beforeEach(() => {
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-afterEach(() => {
-  container.remove();
+useMountContainer((c) => {
+  container = c;
 });
 
 function mountPortal(overrides: Partial<ConnectPageCallbacks> = {}) {

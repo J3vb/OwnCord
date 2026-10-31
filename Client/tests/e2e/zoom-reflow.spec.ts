@@ -39,6 +39,7 @@ import {
   expectScreenReflows,
   type ZoomScreen,
 } from "./support/zoom-reflow";
+import { APPEAL_ACTION, appealRow, modRow } from "./support/moderationFixtures";
 
 test.use({ viewport: ZOOM_VIEWPORT, deviceScaleFactor: 1 });
 
@@ -97,20 +98,6 @@ const MY_REPORTS = [
 
 const MINE = "d".repeat(32);
 
-const modRow = (id: string, state: string, assignee: number, reason: string, target = "user") => ({
-  id,
-  reporter_name: "synthetic-reporter",
-  subject_name: "otheruser",
-  target_type: target,
-  target_ref: target === "message" ? "55" : "2",
-  reason,
-  state,
-  assignee_id: assignee,
-  outcome: "",
-  created_at: "2026-09-05T10:00:00Z",
-  updated_at: "2026-09-05T10:00:00Z",
-});
-
 const modDetail = (
   id: string,
   state: string,
@@ -139,31 +126,11 @@ const modDetail = (
 
 const APPEALS_Q = "/api/v1/moderation/appeals";
 const HELD = "a".repeat(32);
-const appealRow = (id: string, over: object) => ({
-  id,
-  action_id: 12,
-  appellant_id: 2,
-  body: "",
-  state: "assigned",
-  assignee_id: 1,
-  decided_by: 0,
-  decision_note: "",
-  created_at: "2026-09-06T10:00:00Z",
-  decided_at: null,
-  ...over,
-});
 const APPEALS = [appealRow(HELD, {})];
 const APPEAL_DETAIL = {
   ...appealRow(HELD, {}),
   body: "Synthetic statement from the appellant.",
-  action: {
-    id: 12,
-    kind: "timeout",
-    actor_id: 2,
-    reason: "Synthetic timeout reason shown to the member.",
-    created_at: "2026-09-05T10:50:00Z",
-    expires_at: "2999-01-01T00:00:00Z",
-  },
+  action: APPEAL_ACTION,
   report_id: "r".repeat(32),
 };
 
@@ -286,6 +253,14 @@ test.describe("B9 OS 200 % zoom reflow", () => {
 
   test.describe("message requests", () => {
     async function openInbox(page: Page): Promise<void> {
+      await boot(
+        page,
+        [
+          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+          { pattern: "/api/v1/dm-requests", status: 200, body: { requests: REQUESTS } },
+        ],
+        true,
+      );
       await openDrawer(page);
       await page.locator("[data-testid='dm-entry']").first().click();
       await openDrawer(page);
@@ -296,14 +271,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     test("the requests inbox fits and its decisions stay reachable at 200 % zoom", async ({
       page,
     }, testInfo) => {
-      await boot(
-        page,
-        [
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-          { pattern: "/api/v1/dm-requests", status: 200, body: { requests: REQUESTS } },
-        ],
-        true,
-      );
       await openInbox(page);
       const item = page.locator("[data-testid='request-item']").first();
       const screen: ZoomScreen = {
@@ -319,14 +286,6 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the request Block confirm fits at 200 % zoom", async ({ page }, testInfo) => {
-      await boot(
-        page,
-        [
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-          { pattern: "/api/v1/dm-requests", status: 200, body: { requests: REQUESTS } },
-        ],
-        true,
-      );
       await openInbox(page);
       await page
         .locator("[data-testid='request-item']")
@@ -392,6 +351,17 @@ test.describe("B9 OS 200 % zoom reflow", () => {
   test.describe("Moderation Center", () => {
     const QUEUE = [modRow(MINE, "assigned", 1, "harassment", "message")];
 
+    const reportRoutes = () => [
+      ROUTE_MESSAGES_EMPTY,
+      { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
+      {
+        pattern: `/api/v1/moderation/queue/${MINE}`,
+        method: "GET",
+        status: 200,
+        body: modDetail(MINE, "assigned", 1, "harassment", "message"),
+      },
+    ];
+
     async function openReport(page: Page): Promise<Locator> {
       await openDrawer(page);
       await page.getByTestId("moderation-btn").focus();
@@ -423,16 +393,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the moderation review and its actions fit at 200 % zoom", async ({ page }, testInfo) => {
-      await boot(page, [
-        ROUTE_MESSAGES_EMPTY,
-        { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
-        {
-          pattern: `/api/v1/moderation/queue/${MINE}`,
-          method: "GET",
-          status: 200,
-          body: modDetail(MINE, "assigned", 1, "harassment", "message"),
-        },
-      ]);
+      await boot(page, reportRoutes());
       const center = await openReport(page);
       const work = center.getByTestId("mod-work");
       const acts = center.getByTestId("mod-act");
@@ -460,16 +421,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
     });
 
     test("the ban confirm fits at 200 % zoom", async ({ page }, testInfo) => {
-      await boot(page, [
-        ROUTE_MESSAGES_EMPTY,
-        { pattern: "/api/v1/moderation/queue", method: "GET", status: 200, body: QUEUE },
-        {
-          pattern: `/api/v1/moderation/queue/${MINE}`,
-          method: "GET",
-          status: 200,
-          body: modDetail(MINE, "assigned", 1, "harassment", "message"),
-        },
-      ]);
+      await boot(page, reportRoutes());
       await openReport(page);
       await page.getByRole("button", { name: "Ban member" }).click();
       const dialog = page.getByRole("dialog", { name: "Ban this member?" });

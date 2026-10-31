@@ -1,9 +1,11 @@
 // WP LP-5: the voice widget's ping and bars on Linux. Nothing between the
 // widget and the host is mocked except the host itself: a real stats poller
 // reads a real `NativeRoom`, connected through a stubbed `platform/desktop`.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import type { NativeVoiceStats } from "../../src/platform/contracts/nativeVoice";
+import { audio, nativeStatsSample } from "../helpers/nativeVoiceStats";
 
 const host = vi.hoisted(() => ({
   stats: null as unknown,
@@ -39,53 +41,25 @@ import { createNativeRoom } from "../../src/features/voice/native/nativeRoom";
 import { voiceStore, type VoiceStatus, type VoiceUser } from "../../src/stores/voice.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
 
-const audio = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
-  enhancedNoiseSuppression: false,
-};
-
-const reply = (rttSeconds: number): NativeVoiceStats => ({
-  atMs: 1000,
-  publisher: [
-    {
-      type: "candidate-pair",
-      id: "CP1",
-      currentRoundTripTime: rttSeconds,
-      bytesSent: 900,
-      bytesReceived: 1200,
-    },
-    { type: "outbound-rtp", id: "OA1", kind: "audio", packetsSent: 100, bytesSent: 4000 },
-    {
-      type: "inbound-rtp",
-      id: "IA1",
-      kind: "audio",
-      packetsReceived: 100,
-      bytesReceived: 3000,
-      packetsLost: 0,
-      jitter: 0.004,
-    },
-  ],
-  subscriber: [],
-  remoteVideo: {},
-  localVideo: {},
-});
+const reply = (rttSeconds: number): NativeVoiceStats => nativeStatsSample(rttSeconds);
 
 describe("VoiceWidget on a native room", () => {
   let container: HTMLDivElement;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      host.room = null;
+      host.stats = null;
+      vi.useRealTimers();
+    },
+  );
+
   beforeEach(() => {
     vi.useFakeTimers();
     setConnectionStatus("connected");
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
-    host.room = null;
-    host.stats = null;
-    vi.useRealTimers();
   });
 
   function showWidget(): { destroy?: () => void } {

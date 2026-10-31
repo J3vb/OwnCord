@@ -11,6 +11,7 @@ import {
   horizontalOverflow,
   undersizedTargets,
 } from "./support/a11yHarness";
+import { APPEAL_ACTION, appealRow } from "./support/moderationFixtures";
 
 // ---------------------------------------------------------------------------
 // B9-17: the Moderation Center's Appeals tab against the owner's Q1 checks —
@@ -27,47 +28,24 @@ import {
 const HELD = "a".repeat(32);
 const DONE = "d".repeat(32);
 
-const ACTION = {
-  id: 12,
-  kind: "timeout",
-  actor_id: 2,
-  reason: "Synthetic timeout reason shown to the member.",
-  created_at: "2026-09-05T10:50:00Z",
-  expires_at: "2999-01-01T00:00:00Z",
-};
-
-const row = (id: string, over: object) => ({
-  id,
-  action_id: 12,
-  appellant_id: 2,
-  body: "",
-  state: "assigned",
-  assignee_id: 1,
-  decided_by: 0,
-  decision_note: "",
-  created_at: "2026-09-06T10:00:00Z",
-  decided_at: null,
-  ...over,
-});
-
-const QUEUE = [row(HELD, {}), row(DONE, { state: "overturned" })];
+const QUEUE = [appealRow(HELD, {}), appealRow(DONE, { state: "overturned" })];
 
 const HELD_DETAIL = {
-  ...row(HELD, {}),
+  ...appealRow(HELD, {}),
   body: "Synthetic statement from the appellant.",
-  action: ACTION,
+  action: APPEAL_ACTION,
   report_id: "r".repeat(32),
 };
 
 const DONE_DETAIL = {
-  ...row(DONE, {
+  ...appealRow(DONE, {
     state: "overturned",
     decided_by: 1,
     decided_at: "2026-09-07T10:00:00Z",
     decision_note: "Synthetic note sent to the appellant.",
   }),
   body: "",
-  action: { ...ACTION, kind: "removal", expires_at: undefined },
+  action: { ...APPEAL_ACTION, kind: "removal", expires_at: undefined },
 };
 
 async function boot(page: Page, prefs?: AppearancePrefs): Promise<void> {

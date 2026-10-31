@@ -3,7 +3,8 @@
  * act inside the load window: each trigger runs before the pending import has
  * resolved, so what they check is what happens to a click that lands mid-load.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as mocks from "../helpers/messageInputMocks";
 
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
@@ -22,15 +23,16 @@ describe("composer pickers during their load", () => {
   const emojiBtn = (): HTMLElement => container.querySelector(".emoji-btn")!;
   const gifBtn = (): HTMLElement => container.querySelector(".gif-btn")!;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => comp.destroy?.(),
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     comp = createMessageInput(options());
     comp.mount(container);
-  });
-  afterEach(() => {
-    comp.destroy?.();
-    container.remove();
   });
 
   it("a second emoji toggle before the code arrives mounts nothing", async () => {

@@ -4,7 +4,8 @@
  * has nothing to switch to on a single-server page, is never reached. Runs in
  * the `web` project, where `__OWNCORD_WEB__` is true.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 vi.hoisted(() => {
   vi.stubGlobal("isSecureContext", true);
@@ -49,6 +50,13 @@ function options(api: object): SidebarAreaOptions {
 }
 
 let container: HTMLDivElement;
+useMountContainer(
+  (c) => {
+    container = c;
+  },
+  () => vi.clearAllMocks(),
+);
+
 beforeEach(() => {
   authStore.setState(() => ({
     token: "t",
@@ -57,12 +65,6 @@ beforeEach(() => {
     motd: null,
     isAuthenticated: true,
   }));
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-afterEach(() => {
-  container.remove();
-  vi.clearAllMocks();
 });
 
 describe("portal user bar", () => {

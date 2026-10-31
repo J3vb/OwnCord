@@ -7,7 +7,8 @@
 // in the DOM once the user leaves the section. The logger has no redaction,
 // so this is the only thing standing between a careless `log.debug(body)`
 // and a secret in the persisted log files.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 const { mockFetch } = vi.hoisted(() => ({ mockFetch: vi.fn() }));
@@ -96,6 +97,18 @@ function expectNoLeak(): void {
   expect(cachesOpen).not.toHaveBeenCalled();
 }
 
+useMountContainer(
+  (c) => {
+    container = c;
+  },
+  () => {
+    stopListening();
+    setLogLevel("warn");
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  },
+);
+
 beforeEach(() => {
   mockFetch.mockReset();
   localStorage.clear();
@@ -118,16 +131,6 @@ beforeEach(() => {
   });
   vi.stubGlobal("indexedDB", { open: idbOpen });
   vi.stubGlobal("caches", { open: cachesOpen });
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  container.remove();
-  stopListening();
-  setLogLevel("warn");
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 describe("recovery secrets never reach a log, storage or a lingering DOM node", () => {

@@ -49,6 +49,23 @@ async function openInvites(
   return controller;
 }
 
+/** A controller whose getInvites stays pending until `resolveInvites` is called. */
+function controllerWithPendingInvites() {
+  let resolveInvites: (value: unknown[]) => void = () => {};
+  const pending = new Promise<unknown[]>((resolve) => {
+    resolveInvites = resolve;
+  });
+  const api = makeMockApi({ getInvites: vi.fn().mockReturnValue(pending) });
+  const controller = createInviteManagerController({ api: api as never, getRoot: () => root });
+  return { api, controller, resolveInvites };
+}
+
+/** Opens the manager over `invites` and returns the codes it was handed. */
+async function shownInviteCodes(invites: unknown[]): Promise<string[]> {
+  await openInvites(makeMockApi({ getInvites: vi.fn().mockResolvedValue(invites) }));
+  return firstCallOpts<InviteListOpts>(createInviteManager).invites.map((i) => i.code);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -68,38 +85,26 @@ describe("createInviteManagerController", () => {
     // revoked invite rendered like a live one hands out a code that always
     // fails. The list endpoint deliberately still includes revoked invites
     // (for admin visibility elsewhere), so the client must filter here.
-    const api = makeMockApi({
-      getInvites: vi
-        .fn()
-        .mockResolvedValue([
-          makeInviteResponse({ code: "live1", max_uses: null, creator_username: "me" }),
-          makeInviteResponse({ code: "dead1", revoked: true }),
-        ]),
-    });
+    const codes = await shownInviteCodes([
+      makeInviteResponse({ code: "live1", max_uses: null, creator_username: "me" }),
+      makeInviteResponse({ code: "dead1", revoked: true }),
+    ]);
 
-    await openInvites(api);
-
-    const opts = firstCallOpts<InviteListOpts>(createInviteManager);
-    expect(opts.invites.map((i) => i.code)).toEqual(["live1"]);
+    expect(codes).toEqual(["live1"]);
   });
 
   it("filters out expired invites so Copy cannot hand out a dead code (F4)", async () => {
-    const api = makeMockApi({
-      getInvites: vi.fn().mockResolvedValue([
-        makeInviteResponse({
-          code: "live1",
-          max_uses: null,
-          creator_username: "me",
-          expires_at: "2099-01-01T00:00:00Z",
-        }),
-        makeInviteResponse({ code: "expired1", expires_at: "2000-01-01T00:00:00Z" }),
-      ]),
-    });
+    const codes = await shownInviteCodes([
+      makeInviteResponse({
+        code: "live1",
+        max_uses: null,
+        creator_username: "me",
+        expires_at: "2099-01-01T00:00:00Z",
+      }),
+      makeInviteResponse({ code: "expired1", expires_at: "2000-01-01T00:00:00Z" }),
+    ]);
 
-    await openInvites(api);
-
-    const opts = firstCallOpts<InviteListOpts>(createInviteManager);
-    expect(opts.invites.map((i) => i.code)).toEqual(["live1"]);
+    expect(codes).toEqual(["live1"]);
   });
 
   it("onRevokeInvite catches API error and re-throws for component handling", async () => {
@@ -424,21 +429,12 @@ describe("createInviteManagerController (additional)", () => {
     // `instance !== null` guard alone lets a second call in while the first
     // is still fetching — this is the concurrent case the sequential test
     // above does not exercise.
-    let resolveInvites: (value: unknown[]) => void;
-    const pending = new Promise<unknown[]>((resolve) => {
-      resolveInvites = resolve;
-    });
-    const api = makeMockApi({ getInvites: vi.fn().mockReturnValue(pending) });
-
-    const controller = createInviteManagerController({
-      api: api as never,
-      getRoot: () => root,
-    });
+    const { api, controller, resolveInvites } = controllerWithPendingInvites();
 
     const first = controller.open();
     const second = controller.open(); // fires while getInvites is still pending
 
-    resolveInvites!([makeInviteResponse()]);
+    resolveInvites([makeInviteResponse()]);
     await Promise.all([first, second]);
 
     expect(createInviteManager).toHaveBeenCalledOnce();
@@ -446,20 +442,11 @@ describe("createInviteManagerController (additional)", () => {
   });
 
   it("a cleanup while getInvites is in flight leaves the manager unmounted", async () => {
-    let resolveInvites: (value: unknown[]) => void;
-    const pending = new Promise<unknown[]>((resolve) => {
-      resolveInvites = resolve;
-    });
-    const api = makeMockApi({ getInvites: vi.fn().mockReturnValue(pending) });
-
-    const controller = createInviteManagerController({
-      api: api as never,
-      getRoot: () => root,
-    });
+    const { controller, resolveInvites } = controllerWithPendingInvites();
 
     const opening = controller.open();
     controller.cleanup();
-    resolveInvites!([makeInviteResponse()]);
+    resolveInvites([makeInviteResponse()]);
     await opening;
 
     expect(createInviteManager).not.toHaveBeenCalled();

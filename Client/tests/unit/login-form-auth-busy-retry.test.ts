@@ -5,7 +5,8 @@
 // the bound. Retries stay at least 15 s apart so one client never spends the
 // per-IP login limit (5 a minute, refused attempts included). A per-IP 429
 // (RATE_LIMITED) is not retried.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { ApiClientError } from "../../src/lib/api";
 import { connectText } from "../../src/i18n/connect";
 import * as mocks from "../helpers/connectPageMocks";
@@ -29,17 +30,19 @@ function busy(retryAfterMs?: number): ApiClientError {
 describe("LoginForm retries a busy server", () => {
   let container: HTMLDivElement;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    },
+  );
+
   beforeEach(() => {
     vi.useFakeTimers();
     mockLoadCredential.mockResolvedValue(null);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
-    vi.restoreAllMocks();
-    vi.useRealTimers();
   });
 
   async function submitSaved(page: ConnectPageHandle): Promise<void> {

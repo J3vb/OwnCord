@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
@@ -45,15 +46,13 @@ const samplePins: PinnedMessage[] = [
 describe("PinnedMessages", () => {
   let container: HTMLDivElement;
 
+  useMountContainer((c) => {
+    container = c;
+  });
+
   beforeEach(() => {
     fetchImageAsObjectUrl.mockReset();
     fetchImageAsObjectUrl.mockResolvedValue(null);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
   });
 
   function makePanel(overrides?: Partial<PinnedMessagesOptions>) {

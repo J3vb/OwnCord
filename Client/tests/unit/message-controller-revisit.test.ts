@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { loggerMock } from "../helpers/loggerMock";
+import { useMountContainer } from "../helpers/mountContainer";
 
 // P4-01 R3: a revisit keeps the older history the reader had loaded. The
 // revisit pages backwards from the newest message (100-row server pages) until
@@ -12,6 +13,7 @@ vi.mock("@lib/logger", () => loggerMock());
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";
 import { createMessageList } from "@components/MessageList";
+import { makeListOptions } from "../helpers/messageListHarness";
 import {
   getChannelMessages,
   getHistoryLoadState,
@@ -301,15 +303,12 @@ describe("revisit keeps and revalidates older loaded history", () => {
     let container: HTMLDivElement;
     let list: ReturnType<typeof createMessageList>;
 
-    beforeEach(() => {
-      container = document.createElement("div");
-      document.body.appendChild(container);
-    });
-
-    afterEach(() => {
-      list.destroy?.();
-      container.remove();
-    });
+    useMountContainer(
+      (c) => {
+        container = c;
+      },
+      () => list.destroy?.(),
+    );
 
     it("keeps the rendered rows' nodes and the older rows through the revisit's refetch", async () => {
       cacheWindow(126, 200);
@@ -317,19 +316,7 @@ describe("revisit keeps and revalidates older loaded history", () => {
       openWithUnread(5);
       // ChannelController mounts the list over the cached rows, then loads.
       setChannelLoading(CH);
-      list = createMessageList({
-        channelId: CH,
-        channelName: "general",
-        currentUserId: 1,
-        onScrollTop: vi.fn(),
-        onReplyClick: vi.fn(),
-        onEditClick: vi.fn(),
-        onEditSave: vi.fn(() => true),
-        onEmptyEdit: vi.fn(),
-        onDeleteClick: vi.fn(),
-        onReactionClick: vi.fn(),
-        onPinClick: vi.fn(),
-      });
+      list = createMessageList(makeListOptions({ channelId: CH }));
       list.mount(container);
       const node = (id: number): Element | null =>
         container.querySelector(`[data-testid='message-${id}']`);

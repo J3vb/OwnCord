@@ -2,7 +2,8 @@
 // record -> upload -> send path, and the two edge cases the design pins:
 // a failed upload keeps the clip (Retry, sent once) and a destroyed composer
 // stops the microphone and sends nothing.
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import * as mocks from "../helpers/messageInputMocks";
 vi.mock("@components/EmojiPicker", () => mocks.emojiPickerMock());
@@ -57,6 +58,20 @@ beforeAll(async () => {
   await import("../../src/features/voice-messages/voiceComposer");
 });
 
+useMountContainer(
+  (c) => {
+    container = c;
+  },
+  () => {
+    for (const comp of made.splice(0)) comp.destroy?.();
+    resetServerCapabilities();
+    authStore.setState((s) => ({ ...s, uploadPolicy: null }));
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  },
+);
+
 beforeEach(() => {
   vi.useFakeTimers();
   resetFakes();
@@ -69,18 +84,6 @@ beforeEach(() => {
   vi.stubGlobal("AudioContext", FakeAudioContext);
   applyReadyCapabilities({ voice_messages: true });
   authStore.setState((s) => ({ ...s, uploadPolicy: { max_upload_bytes: 10 * 1024 * 1024 } }));
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  for (const comp of made.splice(0)) comp.destroy?.();
-  container.remove();
-  resetServerCapabilities();
-  authStore.setState((s) => ({ ...s, uploadPolicy: null }));
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-  vi.useRealTimers();
 });
 
 describe("mic button gates", () => {

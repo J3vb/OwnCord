@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import type { ReadyChannel } from "../../src/lib/types";
 import type { SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
 import { dmStore } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
@@ -77,4 +78,29 @@ export function resetSidebarStoresAsMember(): void {
     sidebarMode: "channels" as const,
   }));
   signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
+}
+
+/** A text channel with unread and mentions, a quiet one, a voice channel and a forum. */
+export function readStateChannels(): ReadyChannel[] {
+  return [
+    {
+      id: 1,
+      name: "general",
+      type: "text",
+      category: "Text Channels",
+      position: 0,
+      unread_count: 3,
+      mention_count: 1,
+    },
+    {
+      id: 2,
+      name: "random",
+      type: "text",
+      category: "Text Channels",
+      position: 1,
+      unread_count: 0,
+    },
+    { id: 3, name: "lobby", type: "voice", category: "Voice Channels", position: 0 },
+    { id: 4, name: "feedback", type: "forum", category: "Text Channels", position: 2 },
+  ];
 }

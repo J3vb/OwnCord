@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { addVoiceUser } from "../helpers/voiceUsers";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
@@ -102,6 +103,16 @@ describe("drag a voice user onto another channel", () => {
     mouse(r, "click", x, y, 0);
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      sidebar.destroy?.();
+      document.querySelectorAll(".voice-user-drag-ghost").forEach((el) => el.remove());
+    },
+  );
+
   beforeEach(() => {
     resetChannelsState();
     voiceStore.setState((prev) => ({ ...prev, currentChannelId: null, voiceUsers: new Map() }));
@@ -110,14 +121,6 @@ describe("drag a voice user onto another channel", () => {
     mockOpenUserProfilePopup.mockClear();
     onMove = vi.fn<(userId: number, toChannelId: number) => void>();
     onReorderChannel = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    sidebar.destroy?.();
-    container.remove();
-    document.querySelectorAll(".voice-user-drag-ghost").forEach((el) => el.remove());
   });
 
   it("does not make rows draggable with only can_moderate_voice", () => {

@@ -4,7 +4,8 @@
  * MANAGE_MESSAGES (delete, pin) or "allowed" (react) when an older server
  * sends none.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 import { createMessageList } from "@components/MessageList";
 import { channelBitOrRole } from "@lib/permissions";
@@ -89,19 +90,21 @@ describe("channel permission bits (3A-13)", () => {
   const reactBtn = (): HTMLElement =>
     container.querySelector<HTMLElement>("[data-testid='msg-react-11']")!;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+    },
+  );
+
   beforeEach(() => {
     resetChannelsState();
     resetMessagesState();
     setConnectionStatus("connected");
     uiStore.flush();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    container.remove();
   });
 
   describe("store mapping", () => {

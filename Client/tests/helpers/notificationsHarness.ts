@@ -4,50 +4,19 @@ import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
-import type { ChatMessagePayload } from "../../src/lib/types";
 import { mockOscillator, testPrefs } from "./notificationsMocks";
 import { signInAs } from "./storeSeeds";
 import { dmRecipient, makeDm } from "./dmHarness";
+import { makeChannel } from "./channelFactory";
+import { makePayload } from "./chatPayload";
 
-export function makePayload(overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload {
-  return {
-    id: 1,
-    channel_id: 1,
-    user: { id: 2, username: "TestUser", avatar: null },
-    content: "Hello world",
-    reply_to: null,
-    attachments: [],
-    timestamp: new Date().toISOString(),
-    ...overrides,
-  } as ChatMessagePayload;
-}
+export { makePayload };
 
 /** One text channel, "general" (id 1), as the only channel; `activeChannelId` is the one being viewed. */
 export function seedGeneralChannel(activeChannelId: number | null): void {
   channelsStore.setState(() => ({
     categories: [],
-    channels: new Map([
-      [
-        1,
-        {
-          id: 1,
-          name: "general",
-          type: "text" as const,
-          category: null,
-          position: 0,
-          unreadCount: 0,
-          mentionCount: 0,
-          lastMessageId: null,
-          canSend: true,
-          topic: "",
-          slowMode: 0,
-          nsfw: false,
-          isPrivate: false,
-          voiceMaxUsers: 0,
-          voiceMaxVideo: 0,
-        },
-      ],
-    ]),
+    channels: new Map([[1, makeChannel()]]),
     activeChannelId,
     roles: [],
   }));
@@ -104,6 +73,28 @@ export async function freshSendNotification(): Promise<SendNotificationMock> {
   const { sendNotification } = await import("@tauri-apps/plugin-notification");
   (sendNotification as SendNotificationMock).mockClear();
   return sendNotification as SendNotificationMock;
+}
+
+/** The notification plugin's sendNotification and the window, with their call history and the chime cleared. */
+export async function freshAlertSpies() {
+  const { sendNotification } = await import("@tauri-apps/plugin-notification");
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const win = getCurrentWindow();
+  (sendNotification as SendNotificationMock).mockClear();
+  (win.requestUserAttention as SendNotificationMock).mockClear();
+  mockOscillator.start.mockClear();
+  return { sendNotification, win };
+}
+
+/** The Tauri invoke mock and the window, with their call history and the chime cleared. */
+export async function freshInvokeSpies() {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const win = getCurrentWindow();
+  (invoke as SendNotificationMock).mockClear();
+  (win.requestUserAttention as SendNotificationMock).mockClear();
+  mockOscillator.start.mockClear();
+  return { invoke: invoke as SendNotificationMock, win };
 }
 
 export function setAlertPrefs(desktop: boolean, flash: boolean, sounds: boolean): void {

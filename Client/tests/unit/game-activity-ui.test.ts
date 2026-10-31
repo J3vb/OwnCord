@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import * as logMock from "../helpers/loggerMock";
 
 const invoke = vi.hoisted(() => vi.fn());
@@ -89,15 +91,16 @@ describe("game_activity capability", () => {
 
 describe("profile card and DM profile sidebar", () => {
   let container: HTMLDivElement;
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => vi.useRealTimers(),
+  );
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(NOW);
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-  afterEach(() => {
-    container.remove();
-    vi.useRealTimers();
   });
 
   it("the popup shows Playing <game> · for N min, and nothing without a game", () => {
@@ -509,14 +512,7 @@ describe("Settings > Activity > Your games", () => {
     q(host, "game-rename").click();
     const rename = q<HTMLInputElement>(host, "game-rename-input");
     type(rename, "Half");
-    rename.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(rename);
     expect(loadGamePrefs().renames).toEqual({});
     expect(q<HTMLInputElement>(host, "game-rename-input")).toBe(rename);
     key(rename, "Escape");
@@ -526,14 +522,7 @@ describe("Settings > Activity > Your games", () => {
     all(host, "game-picker-item")[0]!.click();
     const name = q<HTMLInputElement>(host, "game-picker-name");
     type(name, "Half");
-    name.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(name);
     expect(loadGamePrefs().manual).toEqual([]);
     expect(q(host, "game-picker").hidden).toBe(false);
     host.remove();

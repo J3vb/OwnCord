@@ -12,7 +12,7 @@
 import type { Browser, Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
 import { generalChannel, signIn } from "./serverApi";
-import { installRealTransport, TUNNEL_TOKEN } from "../support/real-transport";
+import { installRealTransport, recordTraffic, traffic } from "../support/real-transport";
 import type { TestServer } from "../support/server";
 import { openSettings } from "../helpers";
 
@@ -22,36 +22,9 @@ async function shot(page: Page, name: string): Promise<void> {
   if (EVIDENCE) await page.screenshot({ path: `${EVIDENCE}/${name}.png` });
 }
 
-/** Record every HTTP request and broker invocation the page makes from now on,
- *  with the tunnel's path token removed so lines read as server paths. */
-async function recordTraffic(page: Page): Promise<void> {
-  await page.evaluate((token) => {
-    const w = window as unknown as {
-      __TAURI_INTERNALS__: { invoke: (c: string, a?: Record<string, unknown>) => Promise<unknown> };
-      __traffic: string[];
-    };
-    w.__traffic = [];
-    const inner = w.__TAURI_INTERNALS__.invoke.bind(w.__TAURI_INTERNALS__);
-    w.__TAURI_INTERNALS__.invoke = (command, args = {}) => {
-      if (command === "plugin:http|fetch") {
-        const { method, url } = args.clientConfig as { method: string; url: string };
-        const { pathname, search } = new URL(url);
-        const path = pathname.startsWith(`/${token}/`)
-          ? pathname.slice(token.length + 1)
-          : pathname;
-        w.__traffic.push(`${method} ${path}${search}`);
-      } else if (command.startsWith("external_")) {
-        w.__traffic.push(`broker ${command}`);
-      }
-      return inner(command, args);
-    };
-  }, TUNNEL_TOKEN);
-}
-
 /** Content requests (history, pins, search, attachments) and broker calls for `channelId`. */
 async function contentTraffic(page: Page, channelId: number): Promise<string[]> {
-  const all = await page.evaluate(() => (window as unknown as { __traffic: string[] }).__traffic);
-  return all.filter(
+  return (await traffic(page)).filter(
     (line) =>
       line.startsWith("broker ") ||
       line.includes(`/channels/${channelId}/messages`) ||
@@ -175,9 +148,7 @@ test.describe("NSFW consent gate (real server)", () => {
     // Focus moves from the removed gate button to the new composer.
     await expect(bob.locator("[data-testid='message-input'] textarea")).toBeFocused();
     await shot(bob, "04-accepted");
-    const afterAccept = await bob.evaluate(
-      () => (window as unknown as { __traffic: string[] }).__traffic,
-    );
+    const afterAccept = await traffic(bob);
     const put = afterAccept.findIndex(
       (l) => l.startsWith("PUT") && l.includes("nsfw-acknowledgement"),
     );

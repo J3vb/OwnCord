@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../../helpers/mountContainer";
 import "../../helpers/memberListMocks";
 import { createMemberList } from "@components/MemberList";
 import type { MemberListOptions } from "@components/MemberList";
@@ -44,20 +45,22 @@ describe("MemberList profile fields", () => {
     list.mount(container);
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      list?.destroy?.();
+      list = null;
+      resetStore();
+      setConnectionStatus("disconnected");
+    },
+  );
+
   beforeEach(() => {
     resetStore();
     // The popup's Message/Call are disabled while offline (WP 3B-2).
     setConnectionStatus("connected");
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list?.destroy?.();
-    list = null;
-    container.remove();
-    resetStore();
-    setConnectionStatus("disconnected");
   });
 
   it("renders the display name and falls back to the username", () => {

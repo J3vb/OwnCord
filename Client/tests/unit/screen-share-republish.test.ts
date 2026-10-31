@@ -5,6 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred as deferred } from "../helpers/deferred";
 import { Track } from "livekit-client";
 import type { LocalTrack, LocalVideoTrack, Room } from "livekit-client";
 import type { WsClient } from "@lib/ws";
@@ -54,17 +55,6 @@ function fakeAudio(): LocalTrack {
     mediaStreamTrack: fakeMediaStreamTrack(),
     stop: vi.fn(),
   } as unknown as LocalTrack;
-}
-
-/** A promise settled by hand. */
-function deferred(): { promise: Promise<void>; resolve: () => void; reject: (e: Error) => void } {
-  let resolve!: () => void;
-  let reject!: (e: Error) => void;
-  const promise = new Promise<void>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }
 
 function rig() {

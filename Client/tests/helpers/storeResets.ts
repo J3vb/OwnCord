@@ -1,8 +1,8 @@
-import { messagesStore } from "@stores/messages.store";
+import { messagesStore, type MessagesState } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 
 /** Empty every message, pending send and history flag, as a fresh session starts. */
-export function resetMessagesState(): void {
+export function resetMessagesState(overrides: Partial<MessagesState> = {}): void {
   messagesStore.setState(() => ({
     messagesByChannel: new Map(),
     pendingSends: new Map(),
@@ -10,6 +10,7 @@ export function resetMessagesState(): void {
     hasMore: new Map(),
     historyLoadState: new Map(),
     detachedChannels: new Set(),
+    ...overrides,
   }));
 }
 

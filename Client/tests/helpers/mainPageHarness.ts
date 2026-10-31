@@ -5,10 +5,13 @@ import { channelsStore, type Channel } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, type VoiceUser } from "../../src/stores/voice.store";
 import { dmStore, type DmChannel } from "../../src/stores/dm.store";
+import { dmRecipient, makeDm } from "./dmHarness";
+import { voiceUser } from "./voiceUsers";
 import { membersStore } from "../../src/stores/members.store";
 import type { WsClient, WsListener, ConnectionState } from "../../src/lib/ws";
 import type { ApiClient } from "../../src/lib/api";
 import type { ServerMessage } from "../../src/lib/types";
+import { makeChannel } from "./channelFactory";
 import { signInAs, resetChannelsState, resetVoiceState } from "./storeSeeds";
 import {
   capturedChatAreaRef,
@@ -84,23 +87,7 @@ export function fakeApi(host = ""): ApiClient {
 }
 
 export function textChannel(id: number, name: string, position = 0) {
-  return {
-    id,
-    name,
-    type: "text" as const,
-    category: null,
-    position,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    topic: "",
-    slowMode: 0,
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-  };
+  return makeChannel({ id, name, position });
 }
 
 export function dmChannel(id: number, name: string, position = 0) {
@@ -203,19 +190,20 @@ export function voiceChannel(id: number, name: string, position = 0): Channel {
 
 /** A 1:1 DM record with `username` (user `userId`) as the other side. */
 export function oneToOneDm(channelId: number, userId = 10, username = "bob"): DmChannel {
-  const other = { id: userId, username, avatar: "", status: "online" as const };
-  return {
+  const other = dmRecipient(userId, username);
+  return makeDm({ channelId, recipient: other, participants: [other] });
+}
+
+/** A "Group Chat" DM record between alice and bob. */
+export function groupDmRow(channelId: number): DmChannel {
+  const alice = dmRecipient(10, "alice");
+  return makeDm({
     channelId,
-    recipient: other,
-    participants: [other],
-    name: "",
-    isGroup: false,
-    lastMessageId: null,
-    lastMessage: "",
-    lastMessageAt: "",
-    unreadCount: 0,
-    mentionCount: 0,
-  };
+    recipient: alice,
+    participants: [alice, dmRecipient(11, "bob")],
+    name: "Group Chat",
+    isGroup: true,
+  });
 }
 
 /** Makes channel `id` the active 1:1 DM with bob. */
@@ -224,18 +212,7 @@ export function openOneToOneDm(id: number): void {
   dmStore.setState(() => ({ channels: [oneToOneDm(id)] }));
 }
 
-export function voiceUser(userId: number, over: Partial<VoiceUser> = {}): VoiceUser {
-  return {
-    userId,
-    username: `u${userId}`,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
-    ...over,
-  };
-}
+export { voiceUser };
 
 /** The props the page handed its most recently built sidebar area. */
 export function sidebarProps<T>(): T {
@@ -306,4 +283,21 @@ export function leaveVoice(): void {
 
 export function incomingBannerEl(): HTMLElement {
   return document.querySelector('[data-testid="incoming-call-banner"]') as HTMLElement;
+}
+
+export interface WiredMainPage {
+  container: HTMLDivElement;
+  page: ReturnType<typeof createMainPage>;
+}
+
+/** useMainPageHarness with the container and page kept on one object; tests assign `page`. */
+export function useWiredMainPage(): WiredMainPage {
+  const wired = {} as WiredMainPage;
+  useMainPageHarness({
+    wired: (c) => {
+      wired.container = c;
+    },
+    currentPage: () => wired.page,
+  });
+  return wired;
 }

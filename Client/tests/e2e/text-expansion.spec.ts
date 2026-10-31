@@ -7,6 +7,7 @@ import {
   navigateToMainPageReady,
   openSettings,
   switchSettingsTab,
+  useLeftMemberList,
 } from "./helpers";
 import { findUnnamedControls } from "./support/accessibility";
 
@@ -158,9 +159,7 @@ async function startAtLargestText(
   if (opts.memberListLeft === true) {
     // The member list defaults to the right column (3C-6c); the "MEMBERS"
     // heading checked with this option exists only in the left section.
-    await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
-    });
+    await useLeftMemberList(page);
   }
   await mockTauriFullSessionWithMessages(page);
   await page.goto("/");

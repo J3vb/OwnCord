@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import { makeDm } from "../helpers/dmHarness";
 import { createQuickSwitcher } from "@components/QuickSwitcher";
 import { channelsStore, setChannels } from "@stores/channels.store";
@@ -131,14 +132,7 @@ describe("QuickSwitcher", () => {
   it("keys an IME is composing with do not select, move or close", () => {
     switcher.mount(container);
     const input = container.querySelector(".quick-switcher__input") as HTMLInputElement;
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input);
     input.dispatchEvent(
       new KeyboardEvent("keydown", { key: "ArrowDown", keyCode: 229, bubbles: true }),
     );

@@ -157,9 +157,14 @@ function expectRuntimeCacheClears(times: number): void {
 describe("AdvancedTab — Clear All Cache", () => {
   let container: HTMLDivElement;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => vi.useRealTimers(),
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     sessionStorage.clear();
     deleteDbState.mode = "success";
@@ -174,11 +179,6 @@ describe("AdvancedTab — Clear All Cache", () => {
     mockClearEmbedCaches.mockReset();
     mockClearMediaCaches.mockReset();
     mockClearExternalImageCache.mockReset();
-  });
-
-  afterEach(() => {
-    container.remove();
-    vi.useRealTimers();
   });
 
   function getActionBtn(label: string): HTMLButtonElement {
@@ -708,16 +708,14 @@ describe("AdvancedTab — Toggles & Structure", () => {
 describe("AdvancedTab — Launch on Login (autostart)", () => {
   let container: HTMLDivElement;
 
+  useMountContainer((c) => {
+    container = c;
+  });
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     mockIsEnabled.mockReset().mockResolvedValue(false);
     mockEnable.mockReset().mockResolvedValue(undefined);
     mockDisable.mockReset().mockResolvedValue(undefined);
-  });
-
-  afterEach(() => {
-    container.remove();
   });
 
   function getAutostartToggle(): HTMLElement {

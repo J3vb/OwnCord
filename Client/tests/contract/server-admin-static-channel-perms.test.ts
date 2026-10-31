@@ -13,13 +13,8 @@
 // A text-level assertion is not a substitute: Server/admin/perm_grid_test.go
 // greps the same file, but flipping the guard in saveChannelPerms to `false`
 // reintroduces the bug while leaving every greppable identifier intact.
-import { describe, it, expect, afterEach } from "vitest";
-import { JSDOM } from "jsdom";
-import {
-  adminHtmlWithBridge,
-  loadAdminPanel as loadPanel,
-  type FetchCall,
-} from "../helpers/adminPanelFetch";
+import { describe, it, expect } from "vitest";
+import { adminHtmlWithBridge, bootAdminPanel, type FetchCall } from "../helpers/adminPanelFetch";
 
 // The page's own <script> is a classic (non-module) script, so its top-level
 // `const`/`function` declarations live in the window's shared global script
@@ -37,41 +32,24 @@ window.__test = {
 </script>`;
 const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
+interface Bridge {
+  state: any;
+  renderChannelPermsModal: () => void;
+  renderPermMatrix: () => void;
+  saveChannelPerms: () => Promise<void>;
+}
+
 // Every REST call answers with an empty body; the page's own bootstrap only
 // needs /setup/status, which the helper answers.
-function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
-  return loadPanel(ADMIN_HTML, fetchCalls, () => ({}));
+async function bootPanel() {
+  const fetchCalls: FetchCall[] = [];
+  const { dom, bridge } = await bootAdminPanel<Bridge>(ADMIN_HTML, fetchCalls, () => ({}));
+  return { fetchCalls, bridge, window: dom.window };
 }
 
 describe("Server/admin/static — channel permissions save", () => {
-  let dom: JSDOM | undefined;
-
-  afterEach(() => {
-    dom?.window?.close();
-    dom = undefined;
-  });
-
   it("keeps the quick 'Can access' toggle's write when the override matrix targets the same role", async () => {
-    const fetchCalls: FetchCall[] = [];
-    dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-
-    // Let the page's own bootstrap (checkAuth() -> GET /setup/status) settle
-    // before we start driving it, and drop that call from the log.
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    fetchCalls.length = 0;
-
-    const bridge = (
-      window as unknown as {
-        __test: {
-          state: any;
-          renderChannelPermsModal: () => void;
-          renderPermMatrix: () => void;
-          saveChannelPerms: () => Promise<void>;
-        };
-      }
-    ).__test;
-    expect(bridge).toBeTruthy();
+    const { fetchCalls, bridge, window } = await bootPanel();
 
     // Open the channel-permissions modal for #general. "Member" has no
     // existing per-channel override (allow=0, deny=0) — matches the finding's repro.
@@ -113,24 +91,7 @@ describe("Server/admin/static — channel permissions save", () => {
   });
 
   it("keeps the override matrix's write for an already-hidden role the quick toggle left unchanged", async () => {
-    const fetchCalls: FetchCall[] = [];
-    dom = loadAdminPanel(fetchCalls);
-    const { window } = dom;
-
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    fetchCalls.length = 0;
-
-    const bridge = (
-      window as unknown as {
-        __test: {
-          state: any;
-          renderChannelPermsModal: () => void;
-          renderPermMatrix: () => void;
-          saveChannelPerms: () => Promise<void>;
-        };
-      }
-    ).__test;
-    expect(bridge).toBeTruthy();
+    const { fetchCalls, bridge, window } = await bootPanel();
 
     // "Moderator" is already hidden from #staff: deny carries
     // READ_MESSAGES|CONNECT_VOICE (0x202) — exactly DENY_PRIVATE — so the

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
@@ -16,7 +18,7 @@ import { createPresenceSender } from "@lib/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
-import { resetAuthState } from "../helpers/storeSeeds";
+import { resetAuthState, seedOnlineMember } from "../helpers/storeSeeds";
 
 function setUser(custom: string | null = null): void {
   authStore.setState(() => ({
@@ -53,30 +55,28 @@ describe("SelfProfileCard from the user bar", () => {
   let comp: ReturnType<typeof createUserBar>;
   let ws: WsClient;
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      comp.destroy?.();
+      membersStore.setState((p) => ({ ...p, members: new Map() }));
+      setConnectionStatus("disconnected");
+      resetAuthState();
+      uiStore.setState((p) => ({ ...p, settingsOpen: false, settingsTab: null }));
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     setConnectionStatus("connected");
     setUser();
     // Our own member entry, as the ready/member_list payload leaves it.
-    membersStore.setState((p) => ({
-      ...p,
-      members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
-    }));
-    membersStore.flush();
+    seedOnlineMember(7, "alice");
     ws = mockWs();
     comp = createUserBar({ ws, presenceSender: createPresenceSender(ws, createPresenceLimiter()) });
     comp.mount(container);
-  });
-
-  afterEach(() => {
-    comp.destroy?.();
-    container.remove();
-    membersStore.setState((p) => ({ ...p, members: new Map() }));
-    setConnectionStatus("disconnected");
-    resetAuthState();
-    uiStore.setState((p) => ({ ...p, settingsOpen: false, settingsTab: null }));
   });
 
   it("the avatar and name are one real button that opens the card", () => {
@@ -139,14 +139,7 @@ describe("SelfProfileCard from the user bar", () => {
     trigger().click();
     const input = q<HTMLInputElement>("[data-testid='spc-custom-input']")!;
     input.value = "half";
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input);
     expect(ws.send).not.toHaveBeenCalled();
     expect(card()).not.toBeNull();
     expect(input.value).toBe("half");
@@ -464,27 +457,25 @@ describe("SelfProfileCard: timers, Clear after, emoji", () => {
     comp.mount(container);
   }
 
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => {
+      vi.useRealTimers();
+      comp.destroy?.();
+      membersStore.setState((p) => ({ ...p, members: new Map() }));
+      setConnectionStatus("disconnected");
+      resetAuthState();
+    },
+  );
+
   beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
     localStorage.clear();
     setConnectionStatus("connected");
     setUser();
-    membersStore.setState((p) => ({
-      ...p,
-      members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
-    }));
-    membersStore.flush();
+    seedOnlineMember(7, "alice");
     mountBar();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    comp.destroy?.();
-    container.remove();
-    membersStore.setState((p) => ({ ...p, members: new Map() }));
-    setConnectionStatus("disconnected");
-    resetAuthState();
   });
 
   describe("status durations", () => {

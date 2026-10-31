@@ -499,14 +499,7 @@ describe("Copy Message Link action", () => {
     });
 
     const msg = makeMessage({ id: 42, channelId: 7 });
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map([[7, [msg]]]),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState({ messagesByChannel: new Map([[7, [msg]]]) });
     const row = renderMessage(
       msg,
       false,
@@ -631,15 +624,12 @@ describe("Jump to Present pill", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList>;
 
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    list.destroy?.();
-    container.remove();
-  });
+  useMountContainer(
+    (c) => {
+      container = c;
+    },
+    () => list.destroy?.(),
+  );
 
   it("stays hidden while the window is attached to the live tail", () => {
     list = createMessageList(makeListOptions());

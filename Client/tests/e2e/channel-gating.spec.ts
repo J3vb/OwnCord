@@ -244,6 +244,16 @@ async function openMemberMenu(page: Page, userId: number) {
 // Permission gating — the server's can_send verdict
 // ---------------------------------------------------------------------------
 
+async function expectBlockSent(page: Page): Promise<void> {
+  await expect
+    .poll(async () =>
+      (await fetchCalls(page)).some(
+        (c) => c.method === "PUT" && (c.url ?? "").includes("/api/v1/blocks/2"),
+      ),
+    )
+    .toBe(true);
+}
+
 test.describe("Composer gating — permission", () => {
   test("can_send:false disables the composer with the permission reason, and a targeted can_send:true re-enables it", async ({
     page,
@@ -416,13 +426,7 @@ test.describe("Composer gating — DM blocks", () => {
     await expect(
       page.locator("[data-testid='toast']", { hasText: "Blocked otheruser" }),
     ).toBeVisible({ timeout: 5_000 });
-    await expect
-      .poll(async () =>
-        (await fetchCalls(page)).some(
-          (c) => c.method === "PUT" && (c.url ?? "").includes("/api/v1/blocks/2"),
-        ),
-      )
-      .toBe(true);
+    await expectBlockSent(page);
 
     // Open the DM: the composer is gated by the block, and the reason says who
     // the blocker is.
@@ -475,13 +479,7 @@ test.describe("Composer gating — DM blocks", () => {
     const blockItem = menu.locator("[data-testid='block-toggle']");
     await blockItem.click();
     await blockItem.click();
-    await expect
-      .poll(async () =>
-        (await fetchCalls(page)).some(
-          (c) => c.method === "PUT" && (c.url ?? "").includes("/api/v1/blocks/2"),
-        ),
-      )
-      .toBe(true);
+    await expectBlockSent(page);
 
     // Control: the 1:1 DM with that user IS gated.
     await openDmRow(page);

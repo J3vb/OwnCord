@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { pressComposingEnter } from "../helpers/keyEvents";
 import { appendPurgeSection } from "@components/purgePrompt";
 
 describe("appendPurgeSection", () => {
@@ -57,14 +58,7 @@ describe("appendPurgeSection", () => {
     q<HTMLElement>("ctx-purge-messages").click();
     const input = q<HTMLInputElement>("purge-count-input");
     input.value = "2";
-    input.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Enter",
-        isComposing: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+    pressComposingEnter(input);
     expect(onPurge).not.toHaveBeenCalled();
 
     input.value = "20";

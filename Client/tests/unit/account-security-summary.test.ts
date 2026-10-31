@@ -55,6 +55,20 @@ function sessions(count: number) {
   return Array.from({ length: count }, (_, i) => session(i + 1, i === 0));
 }
 
+/** Gives each test an empty localStorage and an AbortController, and aborts it and removes its pane afterwards. */
+function useFreshPane(bind: (ac: AbortController) => void, current: () => HTMLElement): void {
+  let ac: AbortController;
+  beforeEach(() => {
+    ac = new AbortController();
+    localStorage.clear();
+    bind(ac);
+  });
+  afterEach(() => {
+    ac.abort();
+    current().remove();
+  });
+}
+
 describe("Account tab: security summary", () => {
   let ac: AbortController;
   let pane: HTMLDivElement;
@@ -238,15 +252,12 @@ describe("Account tab: security summary", () => {
 describe("Account tab: profile strip", () => {
   let ac: AbortController;
   let pane: HTMLDivElement;
-
-  beforeEach(() => {
-    ac = new AbortController();
-    localStorage.clear();
-  });
-  afterEach(() => {
-    ac.abort();
-    pane.remove();
-  });
+  useFreshPane(
+    (a) => {
+      ac = a;
+    },
+    () => pane,
+  );
 
   it("opens avatar, display name, about and username editing from one Edit profile action", () => {
     pane = buildAccountTab(options(), ac.signal);
@@ -305,15 +316,12 @@ describe("Account tab: profile strip", () => {
 describe("Account tab: status and danger zone", () => {
   let ac: AbortController;
   let pane: HTMLDivElement;
-
-  beforeEach(() => {
-    ac = new AbortController();
-    localStorage.clear();
-  });
-  afterEach(() => {
-    ac.abort();
-    pane.remove();
-  });
+  useFreshPane(
+    (a) => {
+      ac = a;
+    },
+    () => pane,
+  );
 
   it("chooses the status from one labelled select that saves and reports the change", () => {
     const opts = options();

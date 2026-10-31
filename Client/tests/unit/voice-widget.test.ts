@@ -1,5 +1,7 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { makeDm } from "../helpers/dmHarness";
+import { voiceUser } from "../helpers/voiceUsers";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
@@ -93,31 +95,16 @@ function seedVoiceLobby(id = 1, voiceMaxVideo = 0): void {
   });
 }
 
-function voiceUser(userId: number, over: Partial<VoiceUser>): VoiceUser {
-  return {
-    userId,
-    username: `u${userId}`,
-    muted: false,
-    deafened: false,
-    speaking: false,
-    camera: false,
-    screenshare: false,
-    ...over,
-  };
-}
-
 describe("VoiceWidget", () => {
   let container: HTMLDivElement;
+
+  useMountContainer((c) => {
+    container = c;
+  });
 
   beforeEach(() => {
     resetStores();
     mockRetryMicPermission.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
   });
 
   function mountVoiceWidget(
@@ -439,15 +426,8 @@ describe("VoiceWidget", () => {
 
   it("disables share with a reason when the grant leaves it out or the video limit is used up", () => {
     seedVoiceLobby(1, 2);
-    const user = (userId: number, camera: boolean, screenshare: boolean): VoiceUser => ({
-      userId,
-      username: `u${userId}`,
-      muted: false,
-      deafened: false,
-      speaking: false,
-      camera,
-      screenshare,
-    });
+    const user = (userId: number, camera: boolean, screenshare: boolean): VoiceUser =>
+      voiceUser(userId, { camera, screenshare });
     setVoiceChannel(1, [user(1, false, false), user(2, true, false)]);
     const widget = mountVoiceWidget();
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;

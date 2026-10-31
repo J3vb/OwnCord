@@ -43,21 +43,38 @@ export const MOCK_CHANNELS = [
   { id: 2, name: "random", type: "text", position: 1, category: null },
 ];
 
+/** A channel-1 message as the history endpoint serves it; `over` sets whatever differs. */
+function mockMessage(over: {
+  id: number;
+  user: { id: number; username: string; avatar: string };
+  content: string;
+  timestamp: string;
+  [field: string]: unknown;
+}) {
+  return {
+    channel_id: 1,
+    edited_at: null,
+    attachments: [],
+    reactions: [],
+    reply_to: null,
+    pinned: false,
+    deleted: false,
+    ...over,
+  };
+}
+
+const TESTUSER = { id: 1, username: "testuser", avatar: "" };
+const OTHERUSER = { id: 2, username: "otheruser", avatar: "" };
+const MEMBER1 = { id: 3, username: "member1", avatar: "" };
+
 export const MOCK_MESSAGES = {
   messages: [
-    {
+    mockMessage({
       id: 101,
-      channel_id: 1,
-      user: { id: 1, username: "testuser", avatar: "" },
+      user: TESTUSER,
       content: "Hello world!",
       timestamp: "2026-03-15T10:00:00Z",
-      edited_at: null,
-      attachments: [],
-      reactions: [],
-      reply_to: null,
-      pinned: false,
-      deleted: false,
-    },
+    }),
   ],
   has_more: false,
 };
@@ -112,65 +129,38 @@ export const MOCK_MEMBERS_MULTI_ROLE = [
 
 export const MOCK_MESSAGES_RICH = {
   messages: [
-    {
+    mockMessage({
       id: 101,
-      channel_id: 1,
-      user: { id: 1, username: "testuser", avatar: "" },
+      user: TESTUSER,
       content: "Hello world!",
       timestamp: "2026-03-15T10:00:00Z",
-      edited_at: null,
-      attachments: [],
-      reactions: [],
-      reply_to: null,
-      pinned: false,
-      deleted: false,
-    },
-    {
+    }),
+    mockMessage({
       id: 102,
-      channel_id: 1,
-      user: { id: 2, username: "otheruser", avatar: "" },
+      user: OTHERUSER,
       content: "Hey @testuser, check this out!",
       timestamp: "2026-03-15T10:01:00Z",
-      edited_at: null,
-      attachments: [],
       reactions: [{ emoji: "\uD83D\uDC4D", count: 2, me: true }],
-      reply_to: null,
-      pinned: false,
-      deleted: false,
-    },
-    {
+    }),
+    mockMessage({
       id: 103,
-      channel_id: 1,
-      user: { id: 2, username: "otheruser", avatar: "" },
+      user: OTHERUSER,
       content: "```js\nconsole.log('code block');\n```",
       timestamp: "2026-03-15T10:01:30Z",
-      edited_at: null,
-      attachments: [],
-      reactions: [],
-      reply_to: null,
-      pinned: false,
-      deleted: false,
-    },
-    {
+    }),
+    mockMessage({
       id: 104,
-      channel_id: 1,
-      user: { id: 1, username: "testuser", avatar: "" },
+      user: TESTUSER,
       content: "Replying to your message",
       timestamp: "2026-03-15T10:02:00Z",
       edited_at: "2026-03-15T10:02:30Z",
-      attachments: [],
-      reactions: [],
       reply_to: 102,
-      pinned: false,
-      deleted: false,
-    },
-    {
+    }),
+    mockMessage({
       id: 105,
-      channel_id: 1,
-      user: { id: 3, username: "member1", avatar: "" },
+      user: MEMBER1,
       content: "Check this image",
       timestamp: "2026-03-15T10:03:00Z",
-      edited_at: null,
       attachments: [
         {
           id: "1",
@@ -180,18 +170,12 @@ export const MOCK_MESSAGES_RICH = {
           url: "/uploads/screenshot.png",
         },
       ],
-      reactions: [],
-      reply_to: null,
-      pinned: false,
-      deleted: false,
-    },
-    {
+    }),
+    mockMessage({
       id: 106,
-      channel_id: 1,
-      user: { id: 3, username: "member1", avatar: "" },
+      user: MEMBER1,
       content: "And this document",
       timestamp: "2026-03-15T10:03:30Z",
-      edited_at: null,
       attachments: [
         {
           id: "2",
@@ -201,11 +185,7 @@ export const MOCK_MESSAGES_RICH = {
           url: "/uploads/report.pdf",
         },
       ],
-      reactions: [],
-      reply_to: null,
-      pinned: false,
-      deleted: false,
-    },
+    }),
   ],
   // The whole channel: the mock serves this same page for every `before=`
   // fetch, so claiming more history would prepend duplicate rows.
@@ -224,8 +204,8 @@ export const MOCK_MESSAGES_RICH = {
  * rows sit low in the sidebar, so a real right-click can put the lower items
  * below the viewport or under another menu.
  */
-export async function dispatchContextMenu(row: Locator): Promise<void> {
-  await expect(row).toBeVisible({ timeout: 5_000 });
+export async function dispatchContextMenu(row: Locator, timeout = 5_000): Promise<void> {
+  await expect(row).toBeVisible({ timeout });
   await row.evaluate((el) =>
     el.dispatchEvent(
       new MouseEvent("contextmenu", {
@@ -240,10 +220,14 @@ export async function dispatchContextMenu(row: Locator): Promise<void> {
 }
 
 /** `dispatchContextMenu`, then the open `.context-menu`. */
-export async function openContextMenuOn(page: Page, row: Locator): Promise<Locator> {
-  await dispatchContextMenu(row);
+export async function openContextMenuOn(
+  page: Page,
+  row: Locator,
+  timeout = 5_000,
+): Promise<Locator> {
+  await dispatchContextMenu(row, timeout);
   const menu = page.locator(".context-menu").first();
-  await expect(menu).toBeVisible({ timeout: 5_000 });
+  await expect(menu).toBeVisible({ timeout });
   return menu;
 }
 
@@ -322,19 +306,13 @@ export const MOCK_VOICE_STATE = [
 
 export const MOCK_PINNED_MESSAGES = {
   messages: [
-    {
+    mockMessage({
       id: 101,
-      channel_id: 1,
-      user: { id: 1, username: "testuser", avatar: "" },
+      user: TESTUSER,
       content: "Hello world!",
       timestamp: "2026-03-15T10:00:00Z",
       pinned: true,
-      edited_at: null,
-      deleted: false,
-      reply_to: null,
-      attachments: [],
-      reactions: [],
-    },
+    }),
   ],
   has_more: false,
 };
@@ -1142,6 +1120,13 @@ export async function mockTauriFullSession(
       deferReady: options.deferReady,
     }),
   );
+}
+
+/** Stores the left-section member list layout, which is not the default. */
+export async function useLeftMemberList(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem("owncord:settings:memberListLayout", JSON.stringify("left"));
+  });
 }
 
 /** The plain full session, signed in; `ready` also waits for the WS handshake. */

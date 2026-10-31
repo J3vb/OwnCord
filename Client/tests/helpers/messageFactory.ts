@@ -75,3 +75,10 @@ export function spacedMessage(
 ): Message {
   return buildMessage(overrides, { timestamp: spacedTimestamp(overrides.id), ...defaults });
 }
+
+/** buildMessage whose timestamp is `id` minutes past 12:00 on 2024-01-15, so ids order rows in time. */
+export function buildMinuteMessage(overrides: Partial<Message> & { id: number }): Message {
+  return buildMessage(overrides, {
+    timestamp: new Date(Date.UTC(2024, 0, 15, 12, overrides.id)).toISOString(),
+  });
+}

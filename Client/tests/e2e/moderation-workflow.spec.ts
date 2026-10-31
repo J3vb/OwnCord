@@ -12,6 +12,7 @@ import {
   openModerationReport,
   undersizedTargets,
 } from "./support/a11yHarness";
+import { modRow } from "./support/moderationFixtures";
 
 // ---------------------------------------------------------------------------
 // B9-12: a report's review controls, internal notes and history against the
@@ -28,21 +29,7 @@ import {
 const OPEN = "c".repeat(32);
 const MINE = "d".repeat(32);
 
-const row = (id: string, state: string, assignee: number, reason: string) => ({
-  id,
-  reporter_name: "synthetic-reporter",
-  subject_name: "otheruser",
-  target_type: "user",
-  target_ref: "2",
-  reason,
-  state,
-  assignee_id: assignee,
-  outcome: "",
-  created_at: "2026-09-05T10:00:00Z",
-  updated_at: "2026-09-05T10:00:00Z",
-});
-
-const QUEUE = [row(MINE, "assigned", 1, "harassment"), row(OPEN, "open", 0, "spam")];
+const QUEUE = [modRow(MINE, "assigned", 1, "harassment"), modRow(OPEN, "open", 0, "spam")];
 
 const detail = (id: string, state: string, assignee: number, reason: string) => ({
   id,

@@ -9,13 +9,31 @@
 // that does nothing also does. `resolveLiveKitUrl` re-starts the tunnel on
 // every call by design, so there is no "restarts after stop" effect to pin
 // either.
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, type Mock } from "vitest";
 import type { NativeProxies } from "../../../src/platform/contracts/nativeProxies";
 
 export interface NativeControl {
   /** The native tunnel starts, listening on `port` with path token `tun`. */
   succeedWith(port: number): void;
   failWith(error: unknown): void;
+}
+
+/** Drives the `start_livekit_proxy` command on a mocked Tauri `invoke`. */
+export function livekitNativeControl(invoke: Mock): NativeControl {
+  return {
+    succeedWith(port) {
+      invoke.mockImplementation((cmd: string) =>
+        cmd === "start_livekit_proxy"
+          ? Promise.resolve({ port, token: "tun" })
+          : Promise.resolve(undefined),
+      );
+    },
+    failWith(error) {
+      invoke.mockImplementation((cmd: string) =>
+        cmd === "start_livekit_proxy" ? Promise.reject(error) : Promise.resolve(undefined),
+      );
+    },
+  };
 }
 
 export type LiveKitProxiesSeam = Pick<

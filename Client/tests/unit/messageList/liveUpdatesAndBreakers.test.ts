@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fakeTimersTest } from "../../helpers/fakeTimersTest";
 import * as mocks from "../../helpers/messageListMocks";
-import type { MessageListOptions } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
@@ -20,8 +19,7 @@ import {
   setMessages,
   setHasMore,
   setHistoryLoadState,
-  MessageListComponent,
-  useMessageListHarness,
+  useWiredMessageList,
 } from "../../helpers/messageListHarness";
 
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
@@ -31,18 +29,7 @@ vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) 
 const { fetchImageAsObjectUrlMock } = mocks;
 
 describe("MessageList", () => {
-  let container: HTMLDivElement;
-  let msgList: MessageListComponent;
-  let options: MessageListOptions;
-
-  useMessageListHarness(
-    (wired) => {
-      container = wired.container;
-      options = wired.options;
-      msgList = wired.msgList;
-    },
-    () => msgList,
-  );
+  const w = useWiredMessageList();
 
   // DP-10: revisiting a channel shows its cached rows while the tail is
   // refetched; the fetch finishing must not rebuild them.
@@ -53,25 +40,25 @@ describe("MessageList", () => {
         makeMessage({ id: 2, content: "Second", timestamp: "2024-01-15T12:01:00Z" }),
       ]);
       setHistoryLoadState(1, "loading");
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
       expect(row1).not.toBeNull();
 
       messagesStore.setState((prev) => ({ ...prev, historyLoadState: new Map() }));
       messagesStore.flush();
 
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
     });
 
     it("still swaps the loading placeholder when no rows are shown", () => {
       setHistoryLoadState(1, "loading");
-      msgList.mount(container);
-      expect(container.querySelector(".messages-loading")).not.toBeNull();
+      w.msgList.mount(w.container);
+      expect(w.container.querySelector(".messages-loading")).not.toBeNull();
 
       setHistoryLoadState(1, "error");
       messagesStore.flush();
 
-      expect(container.querySelector(".messages-loading")).toBeNull();
+      expect(w.container.querySelector(".messages-loading")).toBeNull();
     });
   });
 
@@ -89,10 +76,10 @@ describe("MessageList", () => {
         }),
       );
       setMessages(1, full);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
 
-      const row498 = container.querySelector("[data-testid='message-498']");
-      const row500 = container.querySelector("[data-testid='message-500']");
+      const row498 = w.container.querySelector("[data-testid='message-498']");
+      const row500 = w.container.querySelector("[data-testid='message-500']");
       expect(row498).not.toBeNull();
       expect(row500).not.toBeNull();
 
@@ -107,67 +94,67 @@ describe("MessageList", () => {
       });
       messagesStore.flush();
 
-      expect(container.querySelector("[data-testid='message-498']")).toBe(row498);
-      expect(container.querySelector("[data-testid='message-500']")).toBe(row500);
-      expect(container.querySelector("[data-testid='message-501']")).not.toBeNull();
+      expect(w.container.querySelector("[data-testid='message-498']")).toBe(row498);
+      expect(w.container.querySelector("[data-testid='message-500']")).toBe(row500);
+      expect(w.container.querySelector("[data-testid='message-501']")).not.toBeNull();
     });
 
     it("keeps row identity through a connection flip and still gates delete", () => {
       setConnectionStatus("connected");
       uiStore.flush();
       setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
       const deleteBtn = (): HTMLButtonElement =>
-        container.querySelector<HTMLButtonElement>("[data-testid='msg-delete-1']")!;
+        w.container.querySelector<HTMLButtonElement>("[data-testid='msg-delete-1']")!;
       expect(deleteBtn().disabled).toBe(false);
 
       setConnectionStatus("disconnected");
       uiStore.flush();
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
       expect(deleteBtn().disabled).toBe(true);
       expect(deleteBtn().getAttribute("aria-disabled")).toBe("true");
 
       setConnectionStatus("connected");
       uiStore.flush();
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
       deleteBtn().click();
-      expect(options.onDeleteClick).toHaveBeenCalledWith(1, false);
+      expect(w.options.onDeleteClick).toHaveBeenCalledWith(1, false);
     });
 
     it("disables reaction controls while timed out without rebuilding rows", () => {
       setConnectionStatus("connected");
       uiStore.flush();
       setMessages(1, [makeMessage({ id: 1, reactions: [{ emoji: "🔥", count: 2, me: false }] })]);
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
       const chip = (): HTMLElement =>
-        container.querySelector<HTMLElement>("[data-testid='message-1'] .reaction-chip")!;
+        w.container.querySelector<HTMLElement>("[data-testid='message-1'] .reaction-chip")!;
       expect(chip().getAttribute("aria-disabled")).not.toBe("true");
 
       setActiveTimeout(new Date(Date.now() + 60_000).toISOString());
       safetyStore.flush();
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
       expect(chip().getAttribute("aria-disabled")).toBe("true");
       chip().click();
-      expect(options.onReactionClick).not.toHaveBeenCalled();
+      expect(w.options.onReactionClick).not.toHaveBeenCalled();
 
       setActiveTimeout(null);
       safetyStore.flush();
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
       expect(chip().hasAttribute("aria-disabled")).toBe(false);
       chip().click();
-      expect(options.onReactionClick).toHaveBeenCalledWith(1, "🔥");
+      expect(w.options.onReactionClick).toHaveBeenCalledWith(1, "🔥");
       resetSafetyStore();
     });
 
     it("repaints author identity on a roleRevision bump without rebuilding rows", () => {
       seedMember(1, "Alice");
       setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
       const authorSpan = (): HTMLElement =>
-        container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
+        w.container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
       expect(authorSpan().dataset["roleColor"]).toBe("var(--role-member)");
       expect(authorSpan().textContent).toBe("Alice");
 
@@ -179,7 +166,7 @@ describe("MessageList", () => {
       });
       membersStore.flush();
 
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
       expect(authorSpan().dataset["roleColor"]).toBe("var(--role-admin)");
       expect(authorSpan().textContent).toBe("Alicia");
     });
@@ -187,10 +174,10 @@ describe("MessageList", () => {
     it("recolours rendered names when the Role Colors preference is toggled", () => {
       seedMember(1, "Alice", "admin");
       setMessages(1, [makeMessage({ id: 1 })]);
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
       const authorSpan = (): HTMLElement =>
-        container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
+        w.container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
       const setRoleColors = (on: boolean): void => {
         localStorage.setItem("owncord:settings:roleColors", JSON.stringify(on));
         window.dispatchEvent(
@@ -203,7 +190,7 @@ describe("MessageList", () => {
         expect(authorSpan().dataset["roleColor"]).toBe("var(--role-member)");
         setRoleColors(true);
         expect(authorSpan().dataset["roleColor"]).toBe("var(--role-admin)");
-        expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+        expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
       } finally {
         localStorage.removeItem("owncord:settings:roleColors");
         window.dispatchEvent(
@@ -225,10 +212,10 @@ describe("MessageList", () => {
           content: "hey @alice",
         }),
       ]);
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
-      const row2 = container.querySelector("[data-testid='message-2']");
-      expect(container.querySelector("[data-testid='message-2'] .mention")?.textContent).toBe(
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
+      const row2 = w.container.querySelector("[data-testid='message-2']");
+      expect(w.container.querySelector("[data-testid='message-2'] .mention")?.textContent).toBe(
         "@alice",
       );
 
@@ -239,9 +226,9 @@ describe("MessageList", () => {
       });
       membersStore.flush();
 
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
-      expect(container.querySelector("[data-testid='message-2']")).toBe(row2);
-      expect(container.querySelector("[data-testid='message-2'] .mention")).toBeNull();
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-2']")).toBe(row2);
+      expect(w.container.querySelector("[data-testid='message-2'] .mention")).toBeNull();
       expect(row2!.querySelector(".msg-text")!.textContent).toBe("hey @alice");
     });
 
@@ -255,8 +242,8 @@ describe("MessageList", () => {
           content: "check @alice and **@carol** and [@dave](https://example.com)",
         }),
       ]);
-      msgList.mount(container);
-      const row = container.querySelector("[data-testid='message-1']")!;
+      w.msgList.mount(w.container);
+      const row = w.container.querySelector("[data-testid='message-1']")!;
       expect(row.querySelectorAll(".mention").length).toBe(0);
 
       // alice, carol and dave all become resolvable at once via a join.
@@ -307,8 +294,8 @@ describe("MessageList", () => {
           content: "[@dave](/settings)",
         }),
       ]);
-      msgList.mount(container);
-      const row = container.querySelector("[data-testid='message-1']")!;
+      w.msgList.mount(w.container);
+      const row = w.container.querySelector("[data-testid='message-1']")!;
       // The relative URL is rejected, so the source renders literally and no
       // mention is highlighted at render time — nor must the resync add one.
       expect(row.querySelector(".mention")).toBeNull();
@@ -329,8 +316,8 @@ describe("MessageList", () => {
           content: "see https://[/@dave",
         }),
       ]);
-      msgList.mount(container);
-      const row = container.querySelector("[data-testid='message-1']")!;
+      w.msgList.mount(w.container);
+      const row = w.container.querySelector("[data-testid='message-1']")!;
       // An unparseable URL is left as raw text and never linkified, so its
       // @token is not highlighted at render time — nor must the resync add one.
       expect(row.querySelector("a.msg-link")).toBeNull();
@@ -361,9 +348,9 @@ describe("MessageList", () => {
         roleRevision: 0,
       }));
       setMessages(1, [makeMessage({ id: 1 })]);
-      msgList.mount(container);
+      w.msgList.mount(w.container);
       const authorEl = (): HTMLElement =>
-        container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
+        w.container.querySelector<HTMLElement>("[data-testid='message-1'] .msg-author")!;
       expect(authorEl().textContent).toBe("Ali");
       expect(authorEl().title).toBe("alice");
 
@@ -391,11 +378,11 @@ describe("MessageList", () => {
           replyTo: 1,
         }),
       ]);
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
-      const row2 = container.querySelector("[data-testid='message-2']");
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
+      const row2 = w.container.querySelector("[data-testid='message-2']");
       const rrAuthor = (): HTMLElement =>
-        container.querySelector<HTMLElement>("[data-testid='message-2'] .rr-author")!;
+        w.container.querySelector<HTMLElement>("[data-testid='message-2'] .rr-author")!;
       expect(rrAuthor().textContent).toBe("Alice");
 
       membersStore.setState((prev) => {
@@ -405,8 +392,8 @@ describe("MessageList", () => {
       });
       membersStore.flush();
 
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
-      expect(container.querySelector("[data-testid='message-2']")).toBe(row2);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-2']")).toBe(row2);
       expect(rrAuthor().textContent).toBe("Alicia");
     });
 
@@ -429,8 +416,8 @@ describe("MessageList", () => {
       }));
       fetchImageAsObjectUrlMock.mockClear();
       setMessages(1, [makeMessage({ id: 1 }), makeMessage({ id: 2 })]);
-      msgList.mount(container);
-      const row1 = container.querySelector("[data-testid='message-1']");
+      w.msgList.mount(w.container);
+      const row1 = w.container.querySelector("[data-testid='message-1']");
       // The initial row's own avatar fetch, then the change below.
       await vi.waitFor(() => {
         expect(fetchImageAsObjectUrlMock).toHaveBeenCalledWith("/api/v1/files/old");
@@ -447,7 +434,7 @@ describe("MessageList", () => {
       });
       membersStore.flush();
 
-      expect(container.querySelector("[data-testid='message-1']")).toBe(row1);
+      expect(w.container.querySelector("[data-testid='message-1']")).toBe(row1);
       const rowAvatar = row1!.querySelector<HTMLElement>(".msg-avatar")!;
       await vi.waitFor(() => {
         expect(rowAvatar.querySelector<HTMLImageElement>(".avatar-img")?.getAttribute("src")).toBe(
@@ -470,7 +457,7 @@ describe("MessageList", () => {
     it("renders the final state once the 2s burst window resets, instead of staying stuck at the pre-trip state", () => {
       const others = Array.from({ length: 25 }, (_, i) => makeMessage({ id: i + 2 }));
       setMessages(1, [makeMessage({ id: 1, content: "v0" }), ...others]);
-      msgList.mount(container); // 1st renderAll call, starts the 2s window
+      w.msgList.mount(w.container); // 1st renderAll call, starts the 2s window
 
       // Fire 25 updates back-to-back, well inside the 2s window, each editing
       // message 1 and moving it one row further down. Every update is then a
@@ -490,7 +477,7 @@ describe("MessageList", () => {
       expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
       expectConsole("error", /\[MessageList\] renderAll called >20 times in 2s/);
 
-      const rowDuringBurst = container.querySelector("[data-testid='message-1']");
+      const rowDuringBurst = w.container.querySelector("[data-testid='message-1']");
       expect(rowDuringBurst).not.toBeNull();
       // The breaker tripped partway through, so the DOM is stuck behind the
       // final store state (still showing an earlier version, not "v25").
@@ -502,7 +489,7 @@ describe("MessageList", () => {
       // Once the burst is over, the list must reflect the final state that
       // triggered the last suppressed renderAll — not stay frozen on
       // whatever rendered right before the breaker tripped.
-      const rowAfterReset = container.querySelector("[data-testid='message-1']");
+      const rowAfterReset = w.container.querySelector("[data-testid='message-1']");
       expect(rowAfterReset).not.toBeNull();
       expect(rowAfterReset!.textContent).toContain("v25");
     });
@@ -526,8 +513,8 @@ describe("MessageList", () => {
           1,
           Array.from({ length: 300 }, (_, i) => makeMessage({ id: i + 1 })),
         );
-        msgList.mount(container); // rebuild 1
-        const root = container.querySelector(".messages-container") as HTMLDivElement;
+        w.msgList.mount(w.container); // rebuild 1
+        const root = w.container.querySelector(".messages-container") as HTMLDivElement;
 
         // A fast scrollbar drag: every frame lands somewhere the window has not
         // rendered, so each one is a range-changing rebuild. 34 of them inside
@@ -542,11 +529,11 @@ describe("MessageList", () => {
         root.dispatchEvent(new Event("scroll"));
         vi.advanceTimersByTime(16);
         expectConsole("error", /\[MessageList\] renderWindow REBUILD called >30 times in 2s/);
-        expect(container.querySelector('[data-testid="message-134"]')).toBeNull();
+        expect(w.container.querySelector('[data-testid="message-134"]')).toBeNull();
 
         // Idle past the reset: the deferred replay renders where the reader stopped.
         vi.advanceTimersByTime(2100);
-        expect(container.querySelector('[data-testid="message-134"]')).not.toBeNull();
+        expect(w.container.querySelector('[data-testid="message-134"]')).not.toBeNull();
       },
     );
   });
@@ -558,16 +545,16 @@ describe("MessageList", () => {
         vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
         const msg = makeMessage({ id: 1, timestamp: new Date().toISOString() });
         setMessages(1, [msg]);
-        msgList.mount(container);
+        w.msgList.mount(w.container);
 
-        const row = container.querySelector('[data-testid="message-1"]');
-        expect(container.querySelector(".msg-time")!.textContent).toMatch(/^Today at /);
+        const row = w.container.querySelector('[data-testid="message-1"]');
+        expect(w.container.querySelector(".msg-time")!.textContent).toMatch(/^Today at /);
 
         // Cross local midnight (00:00 on the 16th) on the same channel.
         vi.advanceTimersByTime(13 * 60 * 60 * 1000);
 
-        expect(container.querySelector(".msg-time")!.textContent).toMatch(/^Yesterday at /);
-        expect(container.querySelector('[data-testid="message-1"]')).toBe(row);
+        expect(w.container.querySelector(".msg-time")!.textContent).toMatch(/^Yesterday at /);
+        expect(w.container.querySelector('[data-testid="message-1"]')).toBe(row);
       }),
     );
 
@@ -577,10 +564,10 @@ describe("MessageList", () => {
         vi.setSystemTime(new Date(2024, 0, 15, 12, 0, 0));
         setMessages(1, [makeMessage({ id: 1, timestamp: new Date().toISOString() })]);
         const pendingBeforeMount = vi.getTimerCount();
-        msgList.mount(container);
+        w.msgList.mount(w.container);
         expect(vi.getTimerCount()).toBeGreaterThan(pendingBeforeMount);
 
-        msgList.destroy?.();
+        w.msgList.destroy?.();
 
         expect(vi.getTimerCount()).toBe(pendingBeforeMount);
       }),
@@ -605,27 +592,27 @@ describe("MessageList", () => {
       () => {
         const many = Array.from({ length: 100 }, (_, i) => makeMessage({ id: i + 1 }));
         setMessages(1, many);
-        msgList.mount(container); // mount's renderAll -> renderWindow: rebuild count = 1
+        w.msgList.mount(w.container); // mount's renderAll -> renderWindow: rebuild count = 1
 
         // Every scrollToMessage call forces renderedStart = -1 and calls
         // renderWindow() directly, bypassing renderAll's own (lower) rapid-fire
         // limit. 29 more calls bring the shared renderWindow rebuild counter to
         // 30 (still under the >30 breaker), each one landing normally.
         for (let i = 0; i < 29; i++) {
-          expect(msgList.scrollToMessage(i + 1)).toBe(true);
+          expect(w.msgList.scrollToMessage(i + 1)).toBe(true);
         }
 
         // The 30th call pushes the counter to 31 and trips the breaker inside
         // renderWindow: it returns before reassigning renderedStart/renderedEnd
         // or touching the DOM, so the target (far outside the last rendered
         // window) never actually renders.
-        const result = msgList.scrollToMessage(90);
+        const result = w.msgList.scrollToMessage(90);
         expectConsole("error", /\[MessageList\] renderWindow REBUILD called >30 times in 2s/);
 
         // The rebuild did not happen — the row is not in the DOM — so this must
         // be reported as a failed jump (matching the "false if the message is
         // not in the loaded window" contract), not a false "true".
-        expect(container.querySelector('[data-testid="message-90"]')).toBeNull();
+        expect(w.container.querySelector('[data-testid="message-90"]')).toBeNull();
         expect(result).toBe(false);
       },
     );

@@ -23,6 +23,20 @@ export function addVoiceUser(
   });
 }
 
+/** A voice-store user `u<id>` with the flags off; `over` wins. */
+export function voiceUser(userId: number, over: Partial<VoiceUser> = {}): VoiceUser {
+  return {
+    userId,
+    username: `u${userId}`,
+    muted: false,
+    deafened: false,
+    speaking: false,
+    camera: false,
+    screenshare: false,
+    ...over,
+  };
+}
+
 /** A voice-store user `user<id>` with every flag off; `over` wins. */
 export function makeVoiceUser(userId: number, over: Partial<VoiceUser> = {}): VoiceUser {
   return {

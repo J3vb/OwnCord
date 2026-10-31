@@ -1,6 +1,8 @@
 import { authStore, type AuthState } from "@stores/auth.store";
 import { channelsStore, type Channel } from "@stores/channels.store";
-import { voiceStore } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
+import { membersStore } from "@stores/members.store";
+import { makeChannel } from "./channelFactory";
 
 /** Put authStore in its signed-out state. */
 export function resetAuthState(): void {
@@ -27,6 +29,20 @@ export function signInAs(
   authStore.setState(() => ({ token, user, serverName, motd, isAuthenticated: true }));
 }
 
+/** Sign in the admin with id 1, named `username`. */
+export function signInAsAdmin(username = "testuser", options: SignInOptions = {}): void {
+  signInAs({ id: 1, username, role: "admin", avatar: null, totp_enabled: false }, options);
+}
+
+/** Make `id`/`username` the only member, online, and flush the members store. */
+export function seedOnlineMember(id: number, username: string): void {
+  membersStore.setState((p) => ({
+    ...p,
+    members: new Map([[id, { id, username, status: "online" } as never]]),
+  }));
+  membersStore.flush();
+}
+
 /** Empty channelsStore: no channels, no active channel, no roles or categories. */
 export function resetChannelsState(): void {
   channelsStore.setState(() => ({
@@ -37,8 +53,8 @@ export function resetChannelsState(): void {
   }));
 }
 
-/** Put voiceStore back to idle: no channel joined, nothing muted or shared. */
-export function resetVoiceState(): void {
+/** Put voiceStore back to idle: no channel joined, nothing muted or shared; `overrides` win. */
+export function resetVoiceState(overrides: Partial<VoiceState> = {}): void {
   voiceStore.setState(() => ({
     currentChannelId: null,
     voiceUsers: new Map(),
@@ -50,6 +66,8 @@ export function resetVoiceState(): void {
     joinedAt: null,
     listenOnly: false,
     voiceStatus: "idle",
+    peerVerifications: new Map(),
+    ...overrides,
   }));
 }
 
@@ -57,20 +75,5 @@ export function resetVoiceState(): void {
 export function makeChannelRow(
   overrides: Pick<Channel, "id" | "name"> & Partial<Channel>,
 ): Channel {
-  return {
-    type: "text",
-    category: null,
-    position: 0,
-    unreadCount: 0,
-    mentionCount: 0,
-    lastMessageId: null,
-    canSend: true,
-    topic: "",
-    slowMode: 0,
-    nsfw: false,
-    isPrivate: false,
-    voiceMaxUsers: 0,
-    voiceMaxVideo: 0,
-    ...overrides,
-  };
+  return makeChannel(overrides);
 }
