@@ -73,9 +73,17 @@ pub struct CameraDevice {
 /// `gst::init` with GStreamer's plugin-load fault trap off. The trap catches
 /// a fault while a plugin loads and ends the process with `exit(-1)`, which
 /// leaves no crash line and no core dump; without it a fault reaches the
-/// crash log like any other.
+/// crash log like any other. The trap can only be set before the first
+/// init (gstreamer-rs panics otherwise), so it is set once, and only while
+/// nothing has initialised GStreamer yet.
 fn init_gst() -> Result<(), gst::glib::Error> {
-    gst::segtrap_set_enabled(false);
+    static TRAP_OFF: std::sync::Once = std::sync::Once::new();
+    TRAP_OFF.call_once(|| {
+        // SAFETY: a plain query of GStreamer's global init flag.
+        if unsafe { gst::ffi::gst_is_initialized() } == gst::glib::ffi::GFALSE {
+            gst::segtrap_set_enabled(false);
+        }
+    });
     gst::init()
 }
 
@@ -1309,6 +1317,15 @@ mod tests {
         let mode = pick_mode(&camera_modes(&slow), &options).unwrap();
         assert_eq!((mode.width, mode.fps.numer()), (1280, 10));
         assert_eq!(pick_mode(&[], &options), None);
+    }
+
+    #[test]
+    fn gstreamer_init_is_safe_to_repeat_after_any_init() {
+        if gst::init().is_err() {
+            return;
+        }
+        assert!(init_gst().is_ok());
+        assert!(init_gst().is_ok());
     }
 
     #[test]
