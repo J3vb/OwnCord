@@ -16,10 +16,9 @@ import {
   buildTauriMockScript,
   emitWsMessage,
   MOCK_CHANNELS,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   submitLogin,
   waitForWsReady,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 import {
   Q1,
@@ -72,9 +71,7 @@ async function start(
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         {
           pattern: "/api/v1/users/me/moderation",
           method: "GET",

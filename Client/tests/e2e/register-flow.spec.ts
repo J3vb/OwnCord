@@ -3,7 +3,7 @@
  * Covers: mode toggle, form validation, register success, register error.
  */
 import { test, expect } from "./fixtures";
-import { buildTauriMockScript, expectOverlayUntilReady, MOCK_LOGIN_RESPONSE } from "./helpers";
+import { buildTauriMockScript, expectOverlayUntilReady } from "./helpers";
 
 const MOCK_REGISTER_RESPONSE = {
   user: { id: 99, username: "newuser" },
@@ -64,6 +64,37 @@ async function switchToRegisterMode(page: import("@playwright/test").Page): Prom
   await expect(page.locator(".btn-text")).toHaveText("Register");
 }
 
+interface RegisterFields {
+  host?: string;
+  username?: string;
+  password?: string;
+  invite?: string;
+}
+
+/** Fills the named register fields, in form order; an omitted field is left alone. */
+async function fillRegisterForm(
+  page: import("@playwright/test").Page,
+  fields: RegisterFields,
+): Promise<void> {
+  for (const key of ["host", "username", "password", "invite"] as const) {
+    const value = fields[key];
+    if (value !== undefined) await page.locator(`#${key}`).fill(value);
+  }
+}
+
+async function submitRegister(page: import("@playwright/test").Page): Promise<void> {
+  await page.locator(".btn-primary[type='submit']").click();
+}
+
+async function expectValidationError(
+  page: import("@playwright/test").Page,
+  message: string,
+): Promise<void> {
+  const errorBanner = page.locator(".error-banner");
+  await expect(errorBanner).toHaveClass(/visible/, { timeout: 3000 });
+  await expect(errorBanner).toContainText(message);
+}
+
 test.describe("Register Flow — Mode Toggle", () => {
   test.beforeEach(async ({ page }) => {
     await mockRegisterSuccess(page);
@@ -107,56 +138,53 @@ test.describe("Register Flow — Validation", () => {
   });
 
   test("empty invite code shows validation error", async ({ page }) => {
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "newuser",
+      password: "password123",
+    });
     // Leave invite code empty
 
-    await page.locator(".btn-primary[type='submit']").click();
+    await submitRegister(page);
 
-    const errorBanner = page.locator(".error-banner");
-    await expect(errorBanner).toHaveClass(/visible/, { timeout: 3000 });
-    await expect(errorBanner).toContainText("Invite code is required");
+    await expectValidationError(page, "Invite code is required");
   });
 
   test("short password shows validation error", async ({ page }) => {
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("short");
-    await page.locator("#invite").fill("invite123");
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "newuser",
+      password: "short",
+      invite: "invite123",
+    });
 
-    await page.locator(".btn-primary[type='submit']").click();
+    await submitRegister(page);
 
-    const errorBanner = page.locator(".error-banner");
-    await expect(errorBanner).toHaveClass(/visible/, { timeout: 3000 });
-    await expect(errorBanner).toContainText("at least 8 characters");
+    await expectValidationError(page, "at least 8 characters");
   });
 
   test("empty username shows validation error", async ({ page }) => {
-    await page.locator("#host").fill("localhost:8443");
+    await fillRegisterForm(page, { host: "localhost:8443" });
     // Leave username empty
-    await page.locator("#password").fill("password123");
-    await page.locator("#invite").fill("invite123");
+    await fillRegisterForm(page, { password: "password123", invite: "invite123" });
 
-    await page.locator(".btn-primary[type='submit']").click();
+    await submitRegister(page);
 
-    const errorBanner = page.locator(".error-banner");
-    await expect(errorBanner).toHaveClass(/visible/, { timeout: 3000 });
-    await expect(errorBanner).toContainText("Username is required");
+    await expectValidationError(page, "Username is required");
   });
 
   test("empty host shows validation error", async ({ page }) => {
     // Leave host empty (clear the default)
-    await page.locator("#host").fill("");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
-    await page.locator("#invite").fill("invite123");
+    await fillRegisterForm(page, {
+      host: "",
+      username: "newuser",
+      password: "password123",
+      invite: "invite123",
+    });
 
-    await page.locator(".btn-primary[type='submit']").click();
+    await submitRegister(page);
 
-    const errorBanner = page.locator(".error-banner");
-    await expect(errorBanner).toHaveClass(/visible/, { timeout: 3000 });
-    await expect(errorBanner).toContainText("Server address is required");
+    await expectValidationError(page, "Server address is required");
   });
 });
 
@@ -166,12 +194,14 @@ test.describe("Register Flow — Submission", () => {
     await page.goto("/");
     await switchToRegisterMode(page);
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
-    await page.locator("#invite").fill("invite-abc");
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "newuser",
+      password: "password123",
+      invite: "invite-abc",
+    });
 
-    await page.locator(".btn-primary[type='submit']").click();
+    await submitRegister(page);
 
     // Should transition to the connected overlay, then to the main app once
     // `ready` arrives.
@@ -212,10 +242,12 @@ test.describe("Register Flow — Submission", () => {
     await page.goto("/");
     await switchToRegisterMode(page);
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
-    await page.locator("#invite").fill("invite-abc");
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "newuser",
+      password: "password123",
+      invite: "invite-abc",
+    });
 
     const submitBtn = page.locator(".btn-primary[type='submit']");
     await submitBtn.click();
@@ -235,12 +267,14 @@ test.describe("Register Flow — Submission", () => {
     await page.goto("/");
     await switchToRegisterMode(page);
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("existinguser");
-    await page.locator("#password").fill("password123");
-    await page.locator("#invite").fill("invite-abc");
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "existinguser",
+      password: "password123",
+      invite: "invite-abc",
+    });
 
-    await page.locator(".btn-primary[type='submit']").click();
+    await submitRegister(page);
 
     const errorBanner = page.locator(".error-banner");
     await expect(errorBanner).toHaveClass(/visible/, { timeout: 5000 });
@@ -264,10 +298,12 @@ test.describe("Register Flow — Registration modes", () => {
     await page.goto("/");
     await switchToRegisterMode(page);
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
-    await page.locator(".btn-primary[type='submit']").click();
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "newuser",
+      password: "password123",
+    });
+    await submitRegister(page);
 
     await expect(page.locator(".error-banner")).toContainText("Invite code is required");
   });
@@ -276,14 +312,16 @@ test.describe("Register Flow — Registration modes", () => {
     await mockRegisterSuccess(page, "open");
     await page.goto("/");
     await switchToRegisterMode(page);
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "newuser",
+      password: "password123",
+    });
 
     // The invite field is hidden — no code is needed.
     await expect(page.locator("#invite").locator("..")).toHaveClass(/form-group--hidden/);
 
-    await page.locator(".btn-primary[type='submit']").click();
+    await submitRegister(page);
     await expectOverlayUntilReady(page, 5000);
   });
 
@@ -294,13 +332,12 @@ test.describe("Register Flow — Registration modes", () => {
     await page.goto("/");
     await switchToRegisterMode(page);
 
-    await page.locator("#host").fill("localhost:8443");
+    await fillRegisterForm(page, { host: "localhost:8443" });
     await expect(notice(page)).toBeVisible();
     await expect(notice(page)).toContainText("admin must approve");
 
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
-    await page.locator(".btn-primary[type='submit']").click();
+    await fillRegisterForm(page, { username: "newuser", password: "password123" });
+    await submitRegister(page);
     await expectOverlayUntilReady(page, 5000);
   });
 
@@ -309,7 +346,7 @@ test.describe("Register Flow — Registration modes", () => {
     await page.goto("/");
     await switchToRegisterMode(page);
 
-    await page.locator("#host").fill("localhost:8443");
+    await fillRegisterForm(page, { host: "localhost:8443" });
     await expect(notice(page)).toBeVisible();
     await expect(notice(page)).toContainText("Registration is closed");
     await expect(page.locator(".btn-primary[type='submit']")).toBeDisabled();
@@ -322,10 +359,12 @@ test.describe("Register Flow — Registration modes", () => {
     await page.goto("/");
     await switchToRegisterMode(page);
 
-    await page.locator("#host").fill("localhost:8443");
-    await page.locator("#username").fill("newuser");
-    await page.locator("#password").fill("password123");
-    await page.locator(".btn-primary[type='submit']").click();
+    await fillRegisterForm(page, {
+      host: "localhost:8443",
+      username: "newuser",
+      password: "password123",
+    });
+    await submitRegister(page);
 
     await expect(page.locator(".error-banner")).toContainText("Invite code is required");
   });

@@ -9,14 +9,13 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   submitLogin,
   waitForWsReady,
   openHome,
   dmRows,
   emitWsMessage,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -49,9 +48,7 @@ const MOCK_DM_CHANNELS = [
 async function mockTauriSessionWithDms(page: import("@playwright/test").Page): Promise<void> {
   const script = buildTauriMockScript({
     httpRoutes: [
-      { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-      { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-      { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+      ...BASE_SESSION_ROUTES,
       { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
       { pattern: "POST /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS[0] },
       { pattern: "GET /api/v1/dms", status: 200, body: MOCK_DM_CHANNELS },

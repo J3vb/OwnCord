@@ -20,10 +20,9 @@
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   navigateToMainPageReady,
   openDmRow,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/accessibility";
 
@@ -59,11 +58,7 @@ test.describe("shell polish", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
-        httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        ],
+        httpRoutes: [...BASE_SESSION_ROUTES],
         simulateWsFlow: true,
         readyOverrides: { channels: LONG_CHANNELS, dm_channels: DM_CHANNELS },
       }),
@@ -211,11 +206,7 @@ test.describe("DM preview list", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
-        httpRoutes: [
-          { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-          { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-          { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-        ],
+        httpRoutes: [...BASE_SESSION_ROUTES],
         simulateWsFlow: true,
         readyOverrides: { dm_channels: DM_CHANNELS },
       }),

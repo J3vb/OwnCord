@@ -18,74 +18,7 @@
 import { test, expect } from "./fixtures";
 import type { Page } from "@playwright/test";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, navigateToMainPage } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// Call capture — records plugin:http|fetch invocations
-// ---------------------------------------------------------------------------
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly method?: string;
-  readonly url?: string;
-  readonly body?: string | null;
-}
-
-/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      let body: string | null = null;
-      if (Array.isArray(cfg.data)) {
-        try {
-          body = new TextDecoder().decode(new Uint8Array(cfg.data));
-        } catch {
-          body = null;
-        }
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({
-        cmd,
-        method: cfg.method,
-        url: cfg.url,
-        body,
-      });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function getCapturedCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__capturedCalls ?? []) as CapturedCall[];
-  });
-}
-
-async function fetchCalls(page: Page): Promise<CapturedCall[]> {
-  return (await getCapturedCalls(page)).filter((c) => c.cmd === "plugin:http|fetch");
-}
-
-/** Poll until a captured call matches, and return it. Avoids racing the async request. */
-async function waitForCall(
-  page: Page,
-  predicate: (call: CapturedCall) => boolean,
-  timeout = 5_000,
-): Promise<CapturedCall> {
-  let found: CapturedCall | undefined;
-  await expect(async () => {
-    found = (await fetchCalls(page)).find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
+import { captureCalls, fetchCalls, waitForFetchCall } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
 // Session
@@ -109,7 +42,7 @@ const ADMIN_ROUTES = [
 async function mockModerationSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: ADMIN_ROUTES,
       simulateWsFlow: true,
     }),
@@ -162,7 +95,7 @@ test.describe("Admin moderation — member context menu", () => {
     await dialog.locator("[data-testid='ban-duration-select']").selectOption({ label: "1 day" });
     await dialog.locator("[data-testid='ban-confirm']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
     );
@@ -183,7 +116,7 @@ test.describe("Admin moderation — member context menu", () => {
     await menu.locator(".context-menu__item", { hasText: /^Ban$/ }).click();
     await page.locator("[data-testid='ban-dialog'] [data-testid='ban-confirm']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
     );
@@ -217,7 +150,7 @@ test.describe("Admin moderation — member context menu", () => {
       .selectOption({ label: "Previous 24 hours" });
     await dialog.locator("[data-testid='ban-confirm']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes("/api/v1/moderation/members/2") && c.method === "PATCH",
     );
@@ -240,7 +173,7 @@ test.describe("Admin moderation — member context menu", () => {
     expect((await fetchCalls(page)).filter((c) => c.method === "DELETE")).toHaveLength(0);
 
     await logout.click();
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) =>
         (c.url ?? "").includes("/api/v1/moderation/members/2/sessions") && c.method === "DELETE",
@@ -265,7 +198,7 @@ test.describe("Admin moderation — member context menu", () => {
     ).toHaveLength(0);
 
     await blockItem.click();
-    const blockCall = await waitForCall(
+    const blockCall = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes("/api/v1/blocks/2") && c.method === "PUT",
     );
@@ -284,7 +217,7 @@ test.describe("Admin moderation — member context menu", () => {
     await expect(unblockItem).toHaveText("Unblock");
 
     await unblockItem.click();
-    const unblockCall = await waitForCall(
+    const unblockCall = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes("/api/v1/blocks/2") && c.method === "DELETE",
     );

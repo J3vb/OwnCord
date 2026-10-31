@@ -23,63 +23,15 @@ import {
   navigateToMainPageReady,
   emitWsMessage,
   emitWsMessageAndWait,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   MOCK_ROLES,
   MOCK_CHANNELS_WITH_CATEGORIES,
   MOCK_MEMBERS_MULTI_ROLE,
   MOCK_VOICE_STATE,
   voiceWsHandlers,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// Call capture — records ws_send invocations (same pattern as
-// social.parity.spec.ts). Passed as a `wrappers` entry, so it runs in the
-// mock's init script after `invoke` is set up and sees every outgoing call.
-// ---------------------------------------------------------------------------
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly message?: string;
-}
-
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    if (cmd === "ws_send") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, message: (args as any)?.message });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function getCapturedCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__capturedCalls ?? []) as CapturedCall[];
-  });
-}
-
-/** Poll until a captured call matches, and return it. Avoids racing the async send. */
-async function waitForCapturedCall(
-  page: Page,
-  predicate: (call: CapturedCall) => boolean,
-  timeout = 5_000,
-): Promise<CapturedCall> {
-  let found: CapturedCall | undefined;
-  await expect(async () => {
-    const calls = await getCapturedCalls(page);
-    found = calls.find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
+import { captureCalls, getCapturedCalls, waitForCapturedCall } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
 // Feature 1: custom-emoji ":shortcode" autocomplete + message-list render
@@ -95,9 +47,7 @@ async function mockSessionWithCustomEmoji(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         // Longer, more specific pattern first (buildTauriMockScript sorts by
         // pattern length, so this always outranks the shorter list route
@@ -213,11 +163,7 @@ async function mockVoiceSession(
   await page.addInitScript(
     buildTauriMockScript({
       wrappers,
-      httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
-      ],
+      httpRoutes: [...BASE_SESSION_ROUTES],
       simulateWsFlow: true,
       wsHandlers: voiceWsHandlers(),
       readyOverrides: {
@@ -242,7 +188,7 @@ async function openMenu(page: Page, uid = 2) {
 
 test.describe("@parity Voice moderation menu — the server says this user can moderate here", () => {
   test.beforeEach(async ({ page }) => {
-    await mockVoiceSession(page, true, MOCK_ROLES, [captureScript]);
+    await mockVoiceSession(page, true, MOCK_ROLES, [captureCalls]);
     await page.goto("/");
     await navigateToMainPageReady(page);
   });

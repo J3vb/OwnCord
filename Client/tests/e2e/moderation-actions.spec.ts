@@ -2,12 +2,10 @@ import type { Locator, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { buildTauriMockScript, MOCK_LOGIN_RESPONSE, submitLogin, waitForWsReady } from "./helpers";
 import {
-  Q1,
-  findUnnamedControls,
-  focusIndicator,
-  setAppearance,
-  textContrast,
   type AppearancePrefs,
+  contrastMeter,
+  findUnnamedControls,
+  setAppearance,
 } from "./support/accessibility";
 
 // ---------------------------------------------------------------------------
@@ -216,18 +214,7 @@ test.describe("moderation actions accessibility", () => {
         page,
       }, testInfo) => {
         await boot(page, { theme, highContrast, accent: null });
-        const measured: Record<string, number> = {};
-        const failures: string[] = [];
-        const measure = async (name: string, locator: Locator, min = Q1.text): Promise<void> => {
-          const { ratio } = await textContrast(locator);
-          measured[name] = Number(ratio.toFixed(2));
-          if (ratio < min) failures.push(`${name} ${ratio.toFixed(2)} < ${min}`);
-        };
-        const ring = async (name: string): Promise<void> => {
-          const f = await focusIndicator(page);
-          measured[`focus: ${name}`] = Number(f.ratio.toFixed(2));
-          if (f.problems.length > 0) failures.push(`focus ${name}: ${f.problems.join(", ")}`);
-        };
+        const { measured, failures, measure, ring } = contrastMeter(page);
 
         const { center, acts } = await openActions(page);
         await measure("actions heading", acts.locator("h4"));
@@ -360,18 +347,7 @@ test.describe("removal, kick and ban accessibility", () => {
         page,
       }, testInfo) => {
         await boot(page, { theme, highContrast, accent: null }, ABOUT_MESSAGE);
-        const measured: Record<string, number> = {};
-        const failures: string[] = [];
-        const measure = async (name: string, locator: Locator): Promise<void> => {
-          const { ratio } = await textContrast(locator);
-          measured[name] = Number(ratio.toFixed(2));
-          if (ratio < Q1.text) failures.push(`${name} ${ratio.toFixed(2)} < ${Q1.text}`);
-        };
-        const ring = async (name: string): Promise<void> => {
-          const f = await focusIndicator(page);
-          measured[`focus: ${name}`] = Number(f.ratio.toFixed(2));
-          if (f.problems.length > 0) failures.push(`focus ${name}: ${f.problems.join(", ")}`);
-        };
+        const { measured, failures, measure, ring } = contrastMeter(page);
 
         const { acts } = await openActions(page);
         const reason = acts.getByRole("textbox", { name: "Reason for a removal, log-out or ban" });

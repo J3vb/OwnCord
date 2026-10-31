@@ -19,8 +19,6 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   buildTauriMockScript,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_ROLES,
   MOCK_PINNED_MESSAGES,
   emitWsMessage,
@@ -28,7 +26,9 @@ import {
   navigateToMainPage,
   waitForWsReady,
   openDmRow,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
+import { captureCalls, fetchCalls } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -127,38 +127,6 @@ async function chatSendFrames(page: Page): Promise<SentFrame[]> {
   return (await sentFrames(page)).filter((f) => f.type === "chat_send");
 }
 
-interface CapturedCall {
-  readonly cmd: string;
-  readonly method?: string;
-  readonly url?: string;
-}
-
-/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, method: cfg.method, url: cfg.url });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function fetchCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__capturedCalls ?? []) as CapturedCall[];
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Simulated server send replies
 // ---------------------------------------------------------------------------
@@ -242,11 +210,9 @@ interface MockOpts {
 async function boot(page: Page, opts: MockOpts = {}): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         // Ready-time block refresh; the 1:1 block flow writes and clears it.
         { pattern: "/api/v1/blocks/2", method: "PUT", status: 200, body: {} },

@@ -12,9 +12,12 @@
 // it is to actually run it, not to re-implement its logic in TypeScript.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
-
-const ADMIN_HTML_SOURCE = adminPanelHtml();
+import {
+  adminHtmlWithBridge,
+  bootAdminPanel,
+  type FetchCall,
+  type PanelResponder as Responder,
+} from "../helpers/adminPanelFetch";
 
 // The page's own <script> is a classic (non-module) script, so its top-level
 // `const`/`function` declarations live in the window's shared global script
@@ -43,53 +46,7 @@ window.__test = {
   renderPlugins: renderPlugins
 };
 </script>`;
-if (!ADMIN_HTML_SOURCE.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
-
-interface FetchCall {
-  method: string;
-  path: string;
-  body: unknown;
-}
-
-type Responder = (
-  path: string,
-  method: string,
-) => { status?: number; json?: unknown; headers?: Record<string, string> };
-
-function loadAdminPanel(fetchCalls: FetchCall[], respond: Responder): JSDOM {
-  return new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = String(input).replace(/^\/admin\/api/, "");
-        let body: unknown;
-        if (typeof opts.body === "string") {
-          try {
-            body = JSON.parse(opts.body);
-          } catch {
-            body = opts.body;
-          }
-        }
-        fetchCalls.push({ method, path: p, body });
-        const r = respond(p, method);
-        const status = r.status ?? 200;
-        return {
-          ok: status >= 200 && status < 300,
-          status,
-          headers: new Headers(r.headers),
-          json: async () => r.json ?? {},
-          text: async () => JSON.stringify(r.json ?? {}),
-        } as Response;
-      }) as typeof fetch;
-    },
-  });
-}
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
 interface Bridge {
   state: any;
@@ -112,17 +69,8 @@ interface Bridge {
   renderPlugins: () => Promise<string>;
 }
 
-async function boot(
-  fetchCalls: FetchCall[],
-  respond: Responder,
-): Promise<{ dom: JSDOM; bridge: Bridge }> {
-  const dom = loadAdminPanel(fetchCalls, respond);
-  // Let the page's own bootstrap (checkAuth -> GET /setup/status) settle.
-  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
-  fetchCalls.length = 0;
-  const bridge = (dom.window as unknown as { __test: Bridge }).__test;
-  expect(bridge).toBeTruthy();
-  return { dom, bridge };
+function boot(fetchCalls: FetchCall[], respond: Responder) {
+  return bootAdminPanel<Bridge>(ADMIN_HTML, fetchCalls, respond);
 }
 
 const LOADED_SETTINGS = {

@@ -15,9 +15,11 @@
 // reintroduces the bug while leaving every greppable identifier intact.
 import { describe, it, expect, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { adminPanelHtml } from "../helpers/admin-panel";
-
-const ADMIN_HTML_SOURCE = adminPanelHtml();
+import {
+  adminHtmlWithBridge,
+  loadAdminPanel as loadPanel,
+  type FetchCall,
+} from "../helpers/adminPanelFetch";
 
 // The page's own <script> is a classic (non-module) script, so its top-level
 // `const`/`function` declarations live in the window's shared global script
@@ -33,48 +35,12 @@ window.__test = {
   saveChannelPerms: saveChannelPerms
 };
 </script>`;
-if (!ADMIN_HTML_SOURCE.includes("</body>")) {
-  throw new Error("expected Server/admin/static/index.html to contain </body>");
-}
-const ADMIN_HTML = ADMIN_HTML_SOURCE.replace("</body>", `${BRIDGE}\n</body>`);
+const ADMIN_HTML = adminHtmlWithBridge(BRIDGE);
 
-interface FetchCall {
-  method: string;
-  path: string;
-  body: unknown;
-}
-
+// Every REST call answers with an empty body; the page's own bootstrap only
+// needs /setup/status, which the helper answers.
 function loadAdminPanel(fetchCalls: FetchCall[]): JSDOM {
-  return new JSDOM(ADMIN_HTML, {
-    url: "http://localhost:8080/admin",
-    runScripts: "dangerously",
-    pretendToBeVisual: true,
-    beforeParse(window) {
-      // Stand in for the real REST API. `api()` in the page prefixes every
-      // path with /admin/api and JSON-encodes the body.
-      window.fetch = (async (input: string, opts: Record<string, unknown> = {}) => {
-        const method = String((opts.method as string) || "GET").toUpperCase();
-        const p = input.replace(/^\/admin\/api/, "");
-        let body: unknown;
-        if (typeof opts.body === "string") {
-          try {
-            body = JSON.parse(opts.body);
-          } catch {
-            body = opts.body;
-          }
-        }
-        fetchCalls.push({ method, path: p, body });
-        if (p === "/setup/status") {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ needs_setup: false }),
-          } as Response;
-        }
-        return { ok: true, status: 200, json: async () => ({}) } as Response;
-      }) as typeof fetch;
-    },
-  });
+  return loadPanel(ADMIN_HTML, fetchCalls, () => ({}));
 }
 
 describe("Server/admin/static — channel permissions save", () => {

@@ -244,6 +244,32 @@ export async function focusIndicator(page: Page): Promise<FocusIndicator> {
 }
 
 /**
+ * Records contrast ratios and focus rings for one test. `measure` and `ring`
+ * fill `measured` (attached to the report) and push a line to `failures` for
+ * each ratio below `min` or each focus ring with problems.
+ */
+export function contrastMeter(page: Page): {
+  measured: Record<string, number>;
+  failures: string[];
+  measure: (name: string, locator: Locator, min?: number) => Promise<void>;
+  ring: (name: string) => Promise<void>;
+} {
+  const measured: Record<string, number> = {};
+  const failures: string[] = [];
+  const measure = async (name: string, locator: Locator, min: number = Q1.text): Promise<void> => {
+    const { ratio } = await textContrast(locator);
+    measured[name] = Number(ratio.toFixed(2));
+    if (ratio < min) failures.push(`${name} ${ratio.toFixed(2)} < ${min}`);
+  };
+  const ring = async (name: string): Promise<void> => {
+    const f = await focusIndicator(page);
+    measured[`focus: ${name}`] = Number(f.ratio.toFixed(2));
+    if (f.problems.length > 0) failures.push(`focus ${name}: ${f.problems.join(", ")}`);
+  };
+  return { measured, failures, measure, ring };
+}
+
+/**
  * Render the shared-controls fixture over the current page: a factory-shaped
  * dialog (`.modal-overlay > .modal[role=dialog]`) holding a labelled field
  * with its error and status messages, a named settings switch, a link, and the

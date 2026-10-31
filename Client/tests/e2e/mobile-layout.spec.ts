@@ -22,14 +22,13 @@ import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support
 import {
   buildTauriMockScript,
   emitWsMessage,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
   parkLiveKitSocket,
   submitLogin,
   voiceJoinWithTokenHandlers,
   waitForWsReady,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
 import { callLog, mountCallGrid } from "./support/callGrid";
 
@@ -110,9 +109,7 @@ for (const profile of PROFILES) {
       await page.addInitScript(
         buildTauriMockScript({
           httpRoutes: [
-            { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-            { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-            { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+            ...BASE_SESSION_ROUTES,
             { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
           ],
           simulateWsFlow: true,
@@ -1165,9 +1162,7 @@ for (const profile of PROFILES) {
       await page.addInitScript(
         buildTauriMockScript({
           httpRoutes: [
-            { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-            { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-            { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+            ...BASE_SESSION_ROUTES,
             { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
             { pattern: "GET /api/v1/dms", status: 200, body: RING_DM_CHANNELS },
           ],

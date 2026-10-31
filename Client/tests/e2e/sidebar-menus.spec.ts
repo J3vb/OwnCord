@@ -19,75 +19,14 @@ import { findUnnamedControls } from "./support/accessibility";
 import {
   buildTauriMockScript,
   mockTauriFullSessionWithVoice,
-  MOCK_LOGIN_RESPONSE,
-  MOCK_MESSAGES,
   MOCK_PINNED_MESSAGES,
   navigateToMainPage,
   navigateToMainPageReady,
   waitForWsReady,
   openDmRow,
+  BASE_SESSION_ROUTES,
 } from "./helpers";
-
-// ---------------------------------------------------------------------------
-// Call capture — records plugin:http|fetch invocations
-// ---------------------------------------------------------------------------
-
-interface CapturedCall {
-  readonly cmd: string;
-  readonly method?: string;
-  readonly url?: string;
-  readonly body?: string | null;
-}
-
-/** Passed as a `wrappers` entry, so it runs after the Tauri mock sets up `invoke`. */
-function captureScript(): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const internals = (window as any).__TAURI_INTERNALS__;
-  const orig = internals.invoke;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__capturedCalls = [];
-  internals.invoke = async (cmd: string, args: unknown) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const a = args as any;
-    if (cmd === "plugin:http|fetch") {
-      const cfg = a?.clientConfig ?? {};
-      let body: string | null = null;
-      if (Array.isArray(cfg.data)) {
-        try {
-          body = new TextDecoder().decode(new Uint8Array(cfg.data));
-        } catch {
-          body = null;
-        }
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__capturedCalls.push({ cmd, method: cfg.method, url: cfg.url, body });
-    }
-    return orig(cmd, args);
-  };
-}
-
-async function fetchCalls(page: Page): Promise<CapturedCall[]> {
-  return page.evaluate(() => {
-    const calls =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ((window as any).__capturedCalls ?? []) as CapturedCall[];
-    return calls.filter((c) => c.cmd === "plugin:http|fetch");
-  });
-}
-
-/** Poll until a captured fetch matches, and return it. Avoids racing the async request. */
-async function waitForCall(
-  page: Page,
-  predicate: (call: CapturedCall) => boolean,
-  timeout = 5_000,
-): Promise<CapturedCall> {
-  let found: CapturedCall | undefined;
-  await expect(async () => {
-    found = (await fetchCalls(page)).find(predicate);
-    expect(found).toBeDefined();
-  }).toPass({ timeout });
-  return found!;
-}
+import { captureCalls, fetchCalls, waitForFetchCall } from "./support/ipcCapture";
 
 // ---------------------------------------------------------------------------
 // DM session — one 1:1 (100) and one named group (900)
@@ -143,11 +82,9 @@ const BANNED_USER = {
 async function mockDmSession(page: Page): Promise<void> {
   await page.addInitScript(
     buildTauriMockScript({
-      wrappers: [captureScript],
+      wrappers: [captureCalls],
       httpRoutes: [
-        { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
-        { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
-        { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+        ...BASE_SESSION_ROUTES,
         { pattern: "/pins", status: 200, body: MOCK_PINNED_MESSAGES },
         // Group rename: PATCH /api/v1/dms/900. Longer, method-qualified
         // patterns outrank the bare DELETE route in the mock's longest-match sort.
@@ -247,7 +184,7 @@ test.describe("DM sidebar — row context menu", () => {
     await expect(closeItem).toHaveText("Close DM");
     await closeItem.click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${DM_ONE_TO_ONE_ID}`) && c.method === "DELETE",
     );
@@ -282,7 +219,7 @@ test.describe("DM sidebar — row context menu", () => {
 
     await page.locator("[data-testid='dm-leave-confirm']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${GROUP_DM_ID}`) && c.method === "DELETE",
     );
@@ -325,7 +262,7 @@ test.describe("DM sidebar — row context menu", () => {
     await page.locator(`[data-testid='dm-close-${DM_ONE_TO_ONE_ID}']`).click();
 
     await expect(page.locator("[data-testid='dm-leave-modal']")).toHaveCount(0);
-    await waitForCall(
+    await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${DM_ONE_TO_ONE_ID}`) && c.method === "DELETE",
     );
@@ -355,7 +292,7 @@ test.describe("DM sidebar — group rename", () => {
     await input.fill("Book Club");
     await page.locator("[data-testid='prompt-confirm']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) => (c.url ?? "").includes(`/api/v1/dms/${GROUP_DM_ID}`) && c.method === "PATCH",
     );
@@ -459,7 +396,7 @@ test.describe("Banned members section", () => {
 
     await page.locator("[data-testid='unban-member']").click();
 
-    const call = await waitForCall(
+    const call = await waitForFetchCall(
       page,
       (c) =>
         (c.url ?? "").includes(`/api/v1/moderation/members/${BANNED_USER.id}`) &&
