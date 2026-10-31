@@ -6,8 +6,8 @@
  * demand, and a modal would block the app until the 30s timer expired. Accept
  * joins the DM's voice channel; Decline tells the ringer to stop.
  *
- * On a phone a ring takes the whole screen instead (IncomingCallScreen, loaded
- * on first use). Back hides that view down to this banner and the ring goes on;
+ * On a phone a ring takes the whole screen instead (incomingCallScreen in
+ * features/voice, loaded on first use). Back hides that view down to this banner and the ring goes on;
  * a redial of the same ring does not bring the view back.
  *
  * All state lives in @lib/voice/callRing — this only draws whatever it is handed.
@@ -25,7 +25,7 @@ import { membersStore } from "@stores/members.store";
 import { voiceText } from "../i18n/voice";
 import { dmCallText } from "../i18n/dmCall";
 import { createLazyScreen } from "./lazyScreen";
-import type { IncomingCallScreen, IncomingCallView } from "./IncomingCallScreen";
+import type { IncomingCallScreen, IncomingCallView } from "../features/voice/incomingCallScreen";
 
 export interface IncomingCallBannerOptions {
   /** `withVideo` is true for "Join with video": the camera turns on at join. */
@@ -34,8 +34,10 @@ export interface IncomingCallBannerOptions {
 }
 
 export interface IncomingCallBannerComponent extends MountableComponent {
-  /** Show the banner for a ring, or hide it with null. */
-  readonly setRing: (state: RingState | null) => void;
+  /** Show the banner for a ring, or hide it with null. `ringGoesOn` says a
+   *  null only moves the ring to another surface (the DM call panel), so a
+   *  full-screen view hidden with Back stays hidden when the ring comes back. */
+  readonly setRing: (state: RingState | null, ringGoesOn?: boolean) => void;
 }
 
 /** Who to draw: the member record, else the DM's participant, else the bare name. */
@@ -72,7 +74,10 @@ function view(state: RingState): IncomingCallView {
       };
 }
 
-const callScreen = createLazyScreen("incoming-call-screen", () => import("./IncomingCallScreen"));
+const callScreen = createLazyScreen(
+  "incoming-call-screen",
+  () => import("../features/voice/incomingCallScreen"),
+);
 
 /** One ring, for telling a redial of it from a new one. */
 function ringKey(state: RingState): string {
@@ -191,17 +196,22 @@ export function createIncomingCallBanner(
           onAccept: (withVideo) => options.onAccept(withVideo),
           onDecline: () => options.onDecline(),
           onHide: hideScreen,
+          renderAvatar: (subject) =>
+            createAvatarElement(subject, {
+              className: "incoming-call-screen__avatar",
+              attrs: { "data-testid": "incoming-call-screen-avatar" },
+            }),
           fallbackFocus: () => null,
         });
         root.style.display = "none";
       });
   }
 
-  function setRing(state: RingState | null): void {
+  function setRing(state: RingState | null, ringGoesOn = false): void {
     ring = state;
     ringGen += 1;
     if (state === null) {
-      hiddenFor = null;
+      if (!ringGoesOn) hiddenFor = null;
       closeScreen();
       root.style.display = "none";
       setText(title, "");

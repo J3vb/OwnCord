@@ -6,19 +6,19 @@
  * It draws what it is handed and calls back; the banner that opens it owns the
  * ring's lifetime (timeout, decline and accept all stay in lib/voice/callRing).
  * Back, and Escape, only hide this view down to the banner: the ring goes on.
- * It is loaded on first use, so the banner stays small.
+ * It is loaded on first use, so the banner stays small. The banner hands it
+ * the avatar renderer, which lives with the components.
  */
 
-import { Disposable } from "@lib/disposable";
-import { createElement, appendChildren, setText } from "@lib/dom";
-import { createIcon, type IconName } from "@lib/icons";
-import { isImeCommit } from "@lib/text/ime";
-import type { AvatarSubject } from "@lib/ui/avatar";
-import { applyDialogSemantics, focusDialog, trapFocus } from "@lib/ui/a11y";
-import { claimBack } from "@lib/ui/backHistory";
-import { createAvatarElement } from "@components/message-list/avatar";
-import { voiceText } from "../i18n/voice";
-import { dmCallText } from "../i18n/dmCall";
+import { Disposable } from "../../lib/disposable";
+import { createElement, appendChildren, setText } from "../../lib/dom";
+import { createIcon, type IconName } from "../../lib/icons";
+import { isImeCommit } from "../../lib/text/ime";
+import type { AvatarSubject } from "../../lib/ui/avatar";
+import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/ui/a11y";
+import { claimBack } from "../../lib/ui/backHistory";
+import { voiceText } from "../../i18n/voice";
+import { dmCallText } from "../../i18n/dmCall";
 
 /** What the screen shows for the ringing call. */
 export interface IncomingCallView {
@@ -34,6 +34,8 @@ export interface IncomingCallScreenOptions {
   readonly onDecline: () => void;
   /** Back or Escape: hide this view; the ring is untouched. */
   readonly onHide: () => void;
+  /** Draws the caller's large picture. */
+  readonly renderAvatar: (subject: AvatarSubject) => HTMLElement;
   /** Where focus goes when the view closes and its opener is gone. */
   readonly fallbackFocus?: () => HTMLElement | null;
 }
@@ -107,12 +109,7 @@ export function openIncomingCallScreen(options: IncomingCallScreenOptions): Inco
     // setText, never innerHTML: the names are user-controlled.
     setText(title, view.title);
     setText(subtitle, view.subtitle);
-    avatarSlot.replaceChildren(
-      createAvatarElement(view.subject, {
-        className: "incoming-call-screen__avatar",
-        attrs: { "data-testid": "incoming-call-screen-avatar" },
-      }),
-    );
+    avatarSlot.replaceChildren(options.renderAvatar(view.subject));
   }
   draw(options.view);
 

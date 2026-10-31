@@ -110,6 +110,21 @@ describe("incoming call on a phone", () => {
     expect(bannerEl().style.display).toBe("");
   });
 
+  it("a ring hidden with Back stays hidden after a trip through the DM call panel", async () => {
+    usePhone(true);
+    banner.setRing(RING);
+    await screenUp();
+    back.onBack[0]!();
+
+    // The DM call panel takes the ring, then hands it back: the ring went on.
+    banner.setRing(null, true);
+    expect(bannerEl().style.display).toBe("none");
+    banner.setRing(RING);
+    await settle();
+    expect(screenEl()).toBeNull();
+    expect(bannerEl().style.display).toBe("");
+  });
+
   it("Escape hides the view the same way", async () => {
     usePhone(true);
     banner.setRing(RING);

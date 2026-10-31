@@ -50,6 +50,7 @@ export const shards = {
     "src/lib/voice/watchRequest.ts",
     "src/features/voice/cameraFlip.ts",
     "src/features/voice/phoneFullscreen.ts",
+    "src/features/voice/incomingCallScreen.ts",
     "src/features/voice/cameraMenu.ts",
     "src/features/voice/autoPlayCameras.ts",
     "src/lib/voice/h264Profile.ts",

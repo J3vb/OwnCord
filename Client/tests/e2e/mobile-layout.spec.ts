@@ -1121,6 +1121,8 @@ for (const profile of PROFILES) {
 
     const screen = (page: Page) => page.locator("[data-testid='incoming-call-screen']");
     const banner = (page: Page) => page.locator("[data-testid='incoming-call-banner']");
+    const landscape =
+      profile.name === "Pixel 7" ? { width: 915, height: 412 } : { width: 844, height: 390 };
 
     async function boot(page: Page): Promise<void> {
       await page.addInitScript(
@@ -1174,6 +1176,30 @@ for (const profile of PROFILES) {
       expect(video?.height ?? 0).toBeGreaterThanOrEqual(44);
       expect(await findUnnamedControls(screen(page))).toEqual([]);
       await noHorizontalScroll(page);
+    });
+
+    test("on a phone turned sideways the caller and the buttons stay apart and on screen", async ({
+      page,
+    }) => {
+      await boot(page);
+      await page.setViewportSize(landscape);
+      await emitWsMessage(page, ring);
+      await expect(screen(page)).toBeVisible();
+
+      const view = page.viewportSize()!;
+      const inView = (b: { x: number; y: number; width: number; height: number }) =>
+        b.x >= 0 && b.y >= 0 && b.x + b.width <= view.width && b.y + b.height <= view.height;
+      const boxOf = async (id: string) =>
+        (await page.locator(`[data-testid='incoming-call-screen-${id}']`).boundingBox())!;
+      const avatar = await boxOf("avatar");
+      const title = await boxOf("title");
+      const accept = await boxOf("accept");
+      const decline = await boxOf("decline");
+      const video = await boxOf("accept-video");
+      for (const [name, b] of Object.entries({ avatar, title, accept, decline, video }))
+        expect(inView(b), name).toBe(true);
+      const callerRight = Math.max(avatar.x + avatar.width, title.x + title.width);
+      expect(callerRight).toBeLessThanOrEqual(Math.min(accept.x, decline.x, video.x));
     });
 
     test("Back hides it down to the banner and the ring goes on", async ({ page }) => {

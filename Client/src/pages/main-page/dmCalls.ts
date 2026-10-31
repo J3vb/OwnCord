@@ -165,7 +165,7 @@ export function createDmCalls(st: PageState, _pg: PageApi) {
       st.callPanel?.showsRingFor(ring.channelId) === true &&
       ui.activeView === null &&
       !ui.settingsOpen;
-    st.callBanner?.setRing(panelAnswers ? null : ring);
+    st.callBanner?.setRing(panelAnswers ? null : ring, panelAnswers);
   }
 
   /** Accept the ring from either surface. */
