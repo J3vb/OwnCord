@@ -5,9 +5,12 @@
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../i18n/voice";
+import { beginPhoneFullscreen } from "../../features/voice/phoneFullscreen";
 import {
   CALL_BAR_SPACE,
+  CALL_BAR_SPACE_PHONE,
   log,
   computeGridLayout,
   isShown,
@@ -31,7 +34,8 @@ export function createGridLayout(st: GridState, api: GridApi) {
     const { width: cw, height: ch } = st.root.getBoundingClientRect();
     if (cw === 0 || ch === 0) return;
 
-    const barSpace = st.callBar !== null ? CALL_BAR_SPACE : 0;
+    const barSpace =
+      st.callBar === null ? 0 : isPhoneLayout() ? CALL_BAR_SPACE_PHONE : CALL_BAR_SPACE;
     const layout = computeGridLayout(cw, ch - barSpace, tiles.length);
 
     for (const el of tiles) {
@@ -394,8 +398,25 @@ export function createGridLayout(st: GridState, api: GridApi) {
         calls?.remove();
       }
     }
+    syncPhoneFullscreen();
     api.syncStatsPolling();
     api.syncViews();
+  }
+
+  /** On a phone a full-screen tile also holds Back and asks for landscape;
+   *  both end with the full screen. */
+  function syncPhoneFullscreen(): void {
+    const watching = st.fullscreenTile !== null || st.theatreTile !== null;
+    if (!watching) {
+      st.phoneFullscreen?.end();
+      st.phoneFullscreen = null;
+      return;
+    }
+    if (st.phoneFullscreen !== null || !isPhoneLayout()) return;
+    st.phoneFullscreen = beginPhoneFullscreen(() => {
+      st.phoneFullscreen = null;
+      leaveFullscreen();
+    });
   }
 
   /** Watch the grid's sizes with its own window's observer: the pop-out's

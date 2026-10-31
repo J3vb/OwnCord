@@ -8,6 +8,9 @@
  * full-width member overlay and 44 px touch targets in the user bar. Both
  * profiles run on Chromium (the iPhone profile's default WebKit is dropped).
  *
+ * The call screen on a phone: 44 px controls with Chat and Leave, tap to focus a
+ * tile, full screen with Back, and a full-screen ring for a DM call.
+ *
  * The drawer on a phone: the server rail on its left, a search
  * button, the Back button (the Pixel 7 profile has an Android user agent and
  * the Tauri mock, which is the Android app; the iPhone profile is a phone
@@ -18,13 +21,17 @@ import { test, expect } from "./fixtures";
 import { Q1, findUnnamedControls, focusIndicator, textContrast } from "./support/accessibility";
 import {
   buildTauriMockScript,
+  emitWsMessage,
   MOCK_LOGIN_RESPONSE,
   MOCK_MESSAGES,
   mockTauriFullSessionWithVoice,
   navigateToMainPage,
+  parkLiveKitSocket,
   submitLogin,
+  voiceJoinWithTokenHandlers,
   waitForWsReady,
 } from "./helpers";
+import { callLog, mountCallGrid } from "./support/callGrid";
 
 const { defaultBrowserType: _pixelBrowser, ...pixel7 } = devices["Pixel 7"];
 const { defaultBrowserType: _iphoneBrowser, ...iphone14 } = devices["iPhone 14"];
@@ -970,6 +977,240 @@ for (const profile of PROFILES) {
       await expect(page.locator("[data-testid='voice-join-sheet']")).toHaveCount(0);
       await expect(page.locator("[data-testid='phone-call-bar']")).toBeHidden();
       await expect(page.locator("[data-testid='voice-widget']")).not.toBeVisible();
+    });
+  });
+}
+
+for (const profile of PROFILES) {
+  test.describe(`mobile call screen, ${profile.name}`, () => {
+    test.use(profile.use);
+
+    const STREAMS = [
+      { id: 3, name: "member1" },
+      { id: 4, name: "member2" },
+      { id: 1002, name: "moderator1", screenshare: true },
+    ] as const;
+    const tile = (page: Page, id: number) =>
+      page.locator(`#call-grid-host .video-cell[data-user-id='${id}']`);
+
+    async function joinAndOpenCallView(page: Page): Promise<void> {
+      await mockTauriFullSessionWithVoice(page);
+      await page.goto("/");
+      await navigateToMainPage(page);
+      await page.locator("[data-testid='sidebar-toggle']").tap();
+      await page.locator(".channel-item.voice", { hasText: "Voice Chat" }).tap();
+      await page.getByRole("button", { name: "Join Voice" }).tap();
+      await page.evaluate(() =>
+        (
+          window as unknown as { __owncord: { setVoiceStatus(s: string): void } }
+        ).__owncord.setVoiceStatus("connected"),
+      );
+      await page.locator("[data-testid='phone-call-bar'] [data-testid='pcb-open']").tap();
+      await expect(page.locator("[data-testid='video-grid']")).toBeVisible();
+    }
+
+    test("the call view has 44 px controls in one row, and Chat and Leave work", async ({
+      page,
+    }) => {
+      await joinAndOpenCallView(page);
+      const bar = page.locator("[data-testid='video-grid'] .video-grid__controls");
+      await expect(bar).toBeVisible();
+      for (const id of ["mute", "deafen", "camera", "chat", "leave"]) {
+        const box = await bar.locator(`[data-call-control='${id}']`).boundingBox();
+        expect(box?.width ?? 0, id).toBeGreaterThanOrEqual(44);
+        expect(box?.height ?? 0, id).toBeGreaterThanOrEqual(44);
+      }
+      // The camera menu is the desktop's way to pick a device: flip is the phone's.
+      await expect(bar.locator("[data-call-control='camera-device']")).toBeHidden();
+      const barBox = (await bar.boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(barBox.x).toBeGreaterThanOrEqual(0);
+      expect(barBox.x + barBox.width).toBeLessThanOrEqual(viewport.width);
+      expect(barBox.y + barBox.height).toBeLessThanOrEqual(viewport.height);
+      await noHorizontalScroll(page);
+      expect(await findUnnamedControls(bar)).toEqual([]);
+
+      // Chat goes back to the text channel with the call still up.
+      await bar.locator("[data-call-control='chat']").tap();
+      await expect(page.locator("[data-testid='video-grid']")).toBeHidden();
+      await expect(page.locator("[data-testid='phone-call-bar']")).toBeVisible();
+
+      await page.locator("[data-testid='pcb-open']").tap();
+      await expect(bar).toBeVisible();
+      await bar.locator("[data-call-control='leave']").tap();
+      await expect(page.locator("[data-testid='phone-call-bar']")).toBeHidden();
+    });
+
+    test("tapping a tile focuses it, and tapping it again unfocuses it", async ({ page }) => {
+      await mockTauriFullSessionWithVoice(page);
+      await page.goto("/");
+      await navigateToMainPage(page);
+      test.skip(!(await mountCallGrid(page, STREAMS)), "needs the dev server's modules");
+
+      await tile(page, 1002).locator(".video-cell-select").tap();
+      await expect(tile(page, 1002)).toHaveClass(/focused/);
+      await expect(tile(page, 3)).toHaveClass(/thumb/);
+
+      await tile(page, 1002).tap({ position: { x: 60, y: 60 } });
+      await expect(tile(page, 1002)).not.toHaveClass(/focused/);
+      await expect(page.locator("#call-grid-host .focus-mode")).toHaveCount(0);
+
+      // A thumb in the strip takes the focus when tapped.
+      await tile(page, 3).locator(".video-cell-select").tap();
+      await tile(page, 4).tap();
+      await expect(tile(page, 4)).toHaveClass(/focused/);
+    });
+
+    test("a focused tile's full screen button fills the screen, and Back leaves it", async ({
+      page,
+    }) => {
+      await mockTauriFullSessionWithVoice(page);
+      await page.goto("/");
+      await navigateToMainPage(page);
+      test.skip(!(await mountCallGrid(page, STREAMS)), "needs the dev server's modules");
+
+      await tile(page, 1002).locator(".video-cell-select").tap();
+      const button = tile(page, 1002).locator("[data-tile-control='fullscreen']");
+      const box = await button.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+      await button.tap();
+      await expect(button).toHaveAttribute("aria-label", "Exit full screen");
+      // Back leaves full screen and leaves the focus as it was.
+      await page.goBack();
+      await expect(button).toHaveAttribute("aria-label", "Full screen");
+      await expect(tile(page, 1002)).toHaveClass(/focused/);
+
+      // The button leaves it too.
+      await button.tap();
+      await expect(button).toHaveAttribute("aria-label", "Exit full screen");
+      await button.tap();
+      await expect(button).toHaveAttribute("aria-label", "Full screen");
+      expect(await callLog(page)).toEqual([]);
+    });
+  });
+}
+
+const RING_DM = 100;
+const RING_MEMBERS = [
+  { id: 1, username: "testuser", avatar: "", status: "online", role: "admin" },
+  {
+    id: 2,
+    username: "otheruser",
+    display_name: "Otto",
+    avatar: "",
+    status: "online",
+    role: "member",
+  },
+];
+const RING_DM_CHANNELS = [
+  {
+    channel_id: RING_DM,
+    recipient: { id: 2, username: "otheruser", avatar: "", status: "online" },
+    last_message_id: 500,
+    last_message: "Hey there!",
+    last_message_at: "2026-03-15T12:00:00Z",
+    unread_count: 0,
+  },
+];
+
+for (const profile of PROFILES) {
+  test.describe(`mobile ring screen, ${profile.name}`, () => {
+    test.use(profile.use);
+
+    const screen = (page: Page) => page.locator("[data-testid='incoming-call-screen']");
+    const banner = (page: Page) => page.locator("[data-testid='incoming-call-banner']");
+
+    async function boot(page: Page): Promise<void> {
+      await page.addInitScript(
+        buildTauriMockScript({
+          httpRoutes: [
+            { pattern: "/api/v1/health", status: 200, body: { status: "ok", version: "1.0.0" } },
+            { pattern: "/api/v1/auth/login", status: 200, body: MOCK_LOGIN_RESPONSE },
+            { pattern: "/messages", status: 200, body: MOCK_MESSAGES },
+            { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
+            { pattern: "GET /api/v1/dms", status: 200, body: RING_DM_CHANNELS },
+          ],
+          simulateWsFlow: true,
+          wsHandlers: voiceJoinWithTokenHandlers(),
+          readyOverrides: { members: RING_MEMBERS, dm_channels: RING_DM_CHANNELS },
+        }),
+      );
+      await parkLiveKitSocket(page);
+      await page.goto("/");
+      await navigateToMainPage(page);
+      await waitForWsReady(page);
+      await expect(banner(page)).toBeAttached();
+    }
+
+    const ring = {
+      type: "call_incoming",
+      payload: { channel_id: RING_DM, from_user: 2, username: "otheruser" },
+    };
+
+    test("a ring takes the whole screen with big Decline and Accept buttons", async ({ page }) => {
+      await boot(page);
+      await emitWsMessage(page, ring);
+
+      await expect(screen(page)).toBeVisible();
+      await expect(page.locator("[data-testid='incoming-call-screen-title']")).toHaveText(
+        "Otto is calling",
+      );
+      await expect(screen(page)).toContainText("Incoming call");
+      await expect(banner(page)).toBeHidden();
+      const view = page.viewportSize()!;
+      const full = (await screen(page).boundingBox())!;
+      expect(full.width).toBeGreaterThanOrEqual(view.width - 1);
+      expect(full.height).toBeGreaterThanOrEqual(view.height - 1);
+      for (const id of ["accept", "decline"]) {
+        const box = await page.locator(`[data-testid='incoming-call-screen-${id}']`).boundingBox();
+        expect(box?.width ?? 0, id).toBeGreaterThanOrEqual(64);
+        expect(box?.height ?? 0, id).toBeGreaterThanOrEqual(64);
+      }
+      const video = await page
+        .locator("[data-testid='incoming-call-screen-accept-video']")
+        .boundingBox();
+      expect(video?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(await findUnnamedControls(screen(page))).toEqual([]);
+      await noHorizontalScroll(page);
+    });
+
+    test("Back hides it down to the banner and the ring goes on", async ({ page }) => {
+      await boot(page);
+      await emitWsMessage(page, ring);
+      await expect(screen(page)).toBeVisible();
+
+      await page.goBack();
+      await expect(screen(page)).toHaveCount(0);
+      await expect(banner(page)).toBeVisible();
+      await expect(page.locator("[data-testid='incoming-call-title']")).toHaveText(
+        "Otto is calling",
+      );
+
+      // The banner still answers.
+      await page.locator("[data-testid='incoming-call-decline']").tap();
+      await expect(banner(page)).toBeHidden();
+    });
+
+    test("Decline on the full screen ends the ring", async ({ page }) => {
+      await boot(page);
+      await emitWsMessage(page, ring);
+      await expect(screen(page)).toBeVisible();
+
+      await page.locator("[data-testid='incoming-call-screen-decline']").tap();
+      await expect(screen(page)).toHaveCount(0);
+      await expect(banner(page)).toBeHidden();
+    });
+
+    test("Accept on the full screen joins the call and closes it", async ({ page }) => {
+      await boot(page);
+      await emitWsMessage(page, ring);
+      await expect(screen(page)).toBeVisible();
+
+      await page.locator("[data-testid='incoming-call-screen-accept']").tap();
+      await expect(screen(page)).toHaveCount(0);
+      await expect(banner(page)).toBeHidden();
     });
   });
 }

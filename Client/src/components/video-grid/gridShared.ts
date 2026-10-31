@@ -31,6 +31,10 @@ export const VIEW_RESIZE_MS = 150;
  *  (`.video-grid--call`'s extra bottom padding). */
 export const CALL_BAR_SPACE = 56;
 
+/** The same on a phone, where the view toggles ride above a taller control row
+ *  (`.video-grid--call` in the phone media query). */
+export const CALL_BAR_SPACE_PHONE = 104;
+
 /** The call view's saved view toggles: pref key and default. */
 export const VIEW_PREFS = {
   nonVideo: "callShowNonVideo",
