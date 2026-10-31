@@ -41,3 +41,16 @@ export function stubNavigator(devices: FakeDevice[] = []): {
     },
   };
 }
+
+/** A stream with one audio track whose `stop` is the given spy. */
+export function fakeAudioStream(stop: () => void = vi.fn()): MediaStream {
+  return {
+    getTracks: () => [{ stop, kind: "audio" }],
+    getAudioTracks: () => [{ stop, kind: "audio" }],
+  } as unknown as MediaStream;
+}
+
+/** A stream with no tracks. */
+export function emptyStream(): MediaStream {
+  return { getTracks: () => [], getAudioTracks: () => [] } as unknown as MediaStream;
+}

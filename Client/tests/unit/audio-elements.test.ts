@@ -57,7 +57,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 
 import { AudioElements, setAudioVolumeHost } from "../../src/lib/voice/audioElements";
 
-function createMockTrack(kind: string, sid: string) {
+function createMockTrack(kind: string, sid: string | undefined) {
   const audioEl = document.createElement("audio");
   // The track passed to handleTrackSubscribedAudio is a RemoteTrack directly
   // (not wrapped in a publication), so detach/attach are on the top-level object
@@ -68,6 +68,16 @@ function createMockTrack(kind: string, sid: string) {
     attach: vi.fn(() => audioEl),
   };
   return { track, audioEl };
+}
+
+function subscribeTrack(
+  elements: AudioElements,
+  track: ReturnType<typeof createMockTrack>["track"],
+  publication: { source: string; setSubscribed?: ReturnType<typeof vi.fn> },
+) {
+  const participant = { identity: "user-42", setVolume: vi.fn() };
+  elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+  return { publication, participant };
 }
 
 describe("AudioElements", () => {
@@ -99,10 +109,7 @@ describe("AudioElements", () => {
   describe("handleTrackSubscribedAudio — mic", () => {
     it("attaches mic audio element to DOM", () => {
       const { track, audioEl } = createMockTrack("audio", "track-1");
-      const publication = { source: "microphone" };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      const { participant } = subscribeTrack(elements, track, { source: "microphone" });
 
       expect(track.attach).toHaveBeenCalled();
       expect(audioEl.style.display).toBe("none");
@@ -164,10 +171,7 @@ describe("AudioElements", () => {
   describe("handleTrackSubscribedAudio — screenshare", () => {
     it("attaches screenshare audio element to DOM", () => {
       const { track, audioEl } = createMockTrack("audio", "track-ss-1");
-      const publication = { source: "screenShareAudio" };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      subscribeTrack(elements, track, { source: "screenShareAudio" });
 
       expect(track.attach).toHaveBeenCalled();
       expect(audioEl.volume).toBe(1);
@@ -177,10 +181,7 @@ describe("AudioElements", () => {
       elements.muteScreenshareAudio(42, true);
 
       const { track, audioEl } = createMockTrack("audio", "track-ss-2");
-      const publication = { source: "screenShareAudio" };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      subscribeTrack(elements, track, { source: "screenShareAudio" });
 
       expect(audioEl.muted).toBe(true);
     });
@@ -203,10 +204,9 @@ describe("AudioElements", () => {
         }),
         detach: vi.fn(() => (lastEl === null ? [] : [lastEl])),
       };
-      const publication = { source: "screenShareAudio" };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      const { publication, participant } = subscribeTrack(elements, track, {
+        source: "screenShareAudio",
+      });
       const firstEl = lastEl as unknown as HTMLAudioElement;
 
       // Re-fire subscribe for the same track before any unsubscribe arrives.
@@ -488,9 +488,7 @@ describe("AudioElements", () => {
       elements.setScreenshareAudioVolume(42, 0.25);
 
       const { track, audioEl } = createMockTrack("audio", "track-ss-early");
-      const publication = { source: "screenShareAudio" };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      subscribeTrack(elements, track, { source: "screenShareAudio" });
 
       expect(audioEl.volume).toBe(0.25);
     });
@@ -786,13 +784,7 @@ describe("AudioElements", () => {
 
   describe("handleTrackSubscribedAudio — mic with undefined sid", () => {
     it("handles track with undefined sid gracefully", () => {
-      const audioEl = document.createElement("audio");
-      const track = {
-        kind: "audio",
-        sid: undefined,
-        detach: vi.fn(() => [audioEl]),
-        attach: vi.fn(() => audioEl),
-      };
+      const { track } = createMockTrack("audio", undefined);
       const publication = { source: "microphone" };
       const participant = { identity: "user-42", setVolume: vi.fn() };
 
@@ -809,18 +801,9 @@ describe("AudioElements", () => {
         return defaultVal;
       });
 
-      const audioEl = document.createElement("audio");
+      const { track, audioEl } = createMockTrack("audio", "track-dev-1");
       audioEl.setSinkId = vi.fn().mockResolvedValue(undefined);
-      const track = {
-        kind: "audio",
-        sid: "track-dev-1",
-        detach: vi.fn(() => [audioEl]),
-        attach: vi.fn(() => audioEl),
-      };
-      const publication = { source: "microphone" };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      subscribeTrack(elements, track, { source: "microphone" });
 
       expect(audioEl.setSinkId).toHaveBeenCalledWith("device-123");
     });
@@ -831,18 +814,9 @@ describe("AudioElements", () => {
         return defaultVal;
       });
 
-      const audioEl = document.createElement("audio");
+      const { track, audioEl } = createMockTrack("audio", "track-ss-dev-1");
       audioEl.setSinkId = vi.fn().mockResolvedValue(undefined);
-      const track = {
-        kind: "audio",
-        sid: "track-ss-dev-1",
-        detach: vi.fn(() => [audioEl]),
-        attach: vi.fn(() => audioEl),
-      };
-      const publication = { source: "screenShareAudio" };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      subscribeTrack(elements, track, { source: "screenShareAudio" });
 
       expect(audioEl.setSinkId).toHaveBeenCalledWith("device-456");
     });
@@ -853,14 +827,8 @@ describe("AudioElements", () => {
         return defaultVal;
       });
 
-      const audioEl = document.createElement("audio");
+      const { track, audioEl } = createMockTrack("audio", "track-ss-err");
       audioEl.setSinkId = vi.fn().mockRejectedValue(new Error("Device not found"));
-      const track = {
-        kind: "audio",
-        sid: "track-ss-err",
-        detach: vi.fn(() => [audioEl]),
-        attach: vi.fn(() => audioEl),
-      };
       const publication = { source: "screenShareAudio" };
       const participant = { identity: "user-42", setVolume: vi.fn() };
 
@@ -875,14 +843,8 @@ describe("AudioElements", () => {
         return defaultVal;
       });
 
-      const audioEl = document.createElement("audio");
+      const { track, audioEl } = createMockTrack("audio", "track-mic-err");
       audioEl.setSinkId = vi.fn().mockRejectedValue(new Error("Device not found"));
-      const track = {
-        kind: "audio",
-        sid: "track-mic-err",
-        detach: vi.fn(() => [audioEl]),
-        attach: vi.fn(() => audioEl),
-      };
       const publication = { source: "microphone" };
       const participant = { identity: "user-42", setVolume: vi.fn() };
 
@@ -904,10 +866,10 @@ describe("AudioElements", () => {
       mockVoiceStoreState.localDeafened = true;
 
       const { track } = createMockTrack("audio", "track-deaf-1");
-      const publication = { source: "microphone", setSubscribed: vi.fn() };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      const { publication } = subscribeTrack(elements, track, {
+        source: "microphone",
+        setSubscribed: vi.fn(),
+      });
 
       // Should NOT attach any audio element
       expect(track.attach).not.toHaveBeenCalled();
@@ -921,10 +883,10 @@ describe("AudioElements", () => {
       mockVoiceStoreState.localDeafened = true;
 
       const { track, audioEl } = createMockTrack("audio", "track-deaf-ss");
-      const publication = { source: "screenShareAudio", setSubscribed: vi.fn() };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      const { publication } = subscribeTrack(elements, track, {
+        source: "screenShareAudio",
+        setSubscribed: vi.fn(),
+      });
 
       expect(track.attach).toHaveBeenCalled();
       expect(publication.setSubscribed).not.toHaveBeenCalled();
@@ -935,10 +897,10 @@ describe("AudioElements", () => {
       mockVoiceStoreState.localDeafened = false;
 
       const { track } = createMockTrack("audio", "track-ok-1");
-      const publication = { source: "microphone", setSubscribed: vi.fn() };
-      const participant = { identity: "user-42", setVolume: vi.fn() };
-
-      elements.handleTrackSubscribedAudio(track as any, publication as any, participant as any);
+      const { publication } = subscribeTrack(elements, track, {
+        source: "microphone",
+        setSubscribed: vi.fn(),
+      });
 
       expect(track.attach).toHaveBeenCalled();
       expect(publication.setSubscribed).not.toHaveBeenCalled();

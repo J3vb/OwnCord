@@ -4,7 +4,7 @@
 // is still queued behind the shared limiter must not erase the queued
 // custom_status — the retry must still carry the last customStatus the user
 // committed.
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { authStore } from "@stores/auth.store";
 import { membersStore, updatePresence } from "@stores/members.store";
 import { createPresenceSender } from "@lib/presence/presence";
@@ -16,104 +16,13 @@ import {
   saveCustomStatus,
   saveUserStatus,
 } from "@lib/presence/userStatus";
-import type { WsClient } from "@lib/ws";
-import { resetMembersState } from "../helpers/storeResets";
-import { resetAuthState, signInAs } from "../helpers/storeSeeds";
-
-function createMockWs(): WsClient {
-  return {
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    send: vi.fn(),
-    on: vi.fn().mockReturnValue(() => {}),
-    onStateChange: vi.fn().mockReturnValue(() => {}),
-    startCertListener: vi.fn().mockResolvedValue(undefined),
-    onCertFirstUse: vi.fn().mockReturnValue(() => {}),
-    onServerBusy: vi.fn().mockReturnValue(() => {}),
-    onCertMismatch: vi.fn().mockReturnValue(() => {}),
-    acceptCertFingerprint: vi.fn(),
-    getState: vi.fn(() => "connected"),
-    _getWs: vi.fn(() => null),
-  } as unknown as WsClient;
-}
-
-/** A minimal WsClient whose `on` registry can be fired by the test, so a
- *  server `error` reply can be delivered to the sender. */
-function createErrorableWs(returnIds = true): {
-  ws: WsClient;
-  sent: Array<{ type: string; payload: { status: string; custom_status?: string } }>;
-  fireError: (code: string, id?: string) => void;
-} {
-  const sent: Array<{ type: string; payload: { status: string; custom_status?: string } }> = [];
-  const listeners = new Map<string, Set<(payload: unknown, id?: string) => void>>();
-  let nextId = 0;
-  const ws = {
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    send: vi.fn((msg: { type: string; payload: { status: string; custom_status?: string } }) => {
-      sent.push(msg);
-      return returnIds ? `id-${++nextId}` : undefined;
-    }),
-    on: vi.fn((type: string, listener: (payload: unknown, id?: string) => void) => {
-      if (!listeners.has(type)) listeners.set(type, new Set());
-      listeners.get(type)!.add(listener);
-      return () => listeners.get(type)?.delete(listener);
-    }),
-    onStateChange: vi.fn().mockReturnValue(() => {}),
-    startCertListener: vi.fn().mockResolvedValue(undefined),
-    onCertFirstUse: vi.fn().mockReturnValue(() => {}),
-    onServerBusy: vi.fn().mockReturnValue(() => {}),
-    onCertMismatch: vi.fn().mockReturnValue(() => {}),
-    acceptCertFingerprint: vi.fn(),
-    getState: vi.fn(() => "connected"),
-    _getWs: vi.fn(() => null),
-  } as unknown as WsClient;
-  return {
-    ws,
-    sent,
-    fireError: (code, id) => {
-      for (const l of listeners.get("error") ?? []) l({ code, message: "rate limited" }, id);
-    },
-  };
-}
+import { createMockWs, usePresenceFixture, withSender } from "../helpers/presenceSenderHarness";
 
 describe("createPresenceSender — last requested status always reaches the server", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    signInAs(
-      { id: 1, username: "alice", avatar: null, role: "member" },
-      { serverName: "TestServer" },
-    );
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice",
-            displayName: null,
-            avatar: null,
-            role: "member",
-            status: "online",
-            customStatus: undefined,
-          } as never,
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    resetAuthState();
-    resetMembersState();
-  });
+  usePresenceFixture(undefined);
 
   it("re-arms the retry when the queued frame is answered RATE_LIMITED, so the latest status still lands", () => {
-    vi.useFakeTimers();
-    const { ws, sent, fireError } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent, fireError }) => {
       // t=0s: "dnd" consumes the shared limiter's only token.
       saveUserStatus("dnd");
       sender.send("dnd");
@@ -139,16 +48,11 @@ describe("createPresenceSender — last requested status always reaches the serv
       vi.advanceTimersByTime(11_000);
       expect(sent).toHaveLength(3);
       expect(sent[2]!.payload.status).toBe("invisible");
-    } finally {
-      sender.destroy?.();
-    }
+    });
   });
 
   it("does not re-arm for a RATE_LIMITED reply to another producer's frame", () => {
-    vi.useFakeTimers();
-    const { ws, sent, fireError } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent, fireError }) => {
       saveUserStatus("dnd");
       sender.send("dnd");
       expect(sent).toHaveLength(1);
@@ -158,43 +62,12 @@ describe("createPresenceSender — last requested status always reaches the serv
       fireError("RATE_LIMITED", "some-other-id");
       vi.advanceTimersByTime(30_000);
       expect(sent).toHaveLength(1);
-    } finally {
-      sender.destroy?.();
-    }
+    });
   });
 });
 
 describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic status", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    signInAs(
-      { id: 1, username: "alice", avatar: null, role: "member" },
-      { serverName: "TestServer" },
-    );
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice",
-            displayName: null,
-            avatar: null,
-            role: "member",
-            status: "online",
-            customStatus: "old text",
-          } as never,
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    resetAuthState();
-    resetMembersState();
-  });
+  usePresenceFixture("old text");
 
   // The server broadcasts nothing when it refuses a timed-out custom status
   // (service/channel.go's requireNotTimedOut), so the optimistic apply in
@@ -202,9 +75,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
   // nobody else has. The dispatcher's error chain calls rollbackRefused for a
   // TIMED_OUT frame; this pins the sender half.
   it("restores the previous member status/text and the saved prefs for our own frame", () => {
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender, sent }) => {
       // The status the server already knows, mirrored into the prefs.
       saveUserStatus("online");
       saveCustomStatus("old text");
@@ -228,15 +99,11 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
       expect(loadUserStatus()).toBe("online");
       expect(loadCustomStatus()).toBe("old text");
-    } finally {
-      sender.destroy?.();
-    }
+    });
   });
 
   it("ignores a TIMED_OUT refusal of another producer's frame or an unknown id", () => {
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender, sent }) => {
       saveUserStatus("online");
       saveCustomStatus("old text");
       saveCustomStatus("new text");
@@ -248,16 +115,11 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
 
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("new text");
       expect(loadCustomStatus()).toBe("new text");
-    } finally {
-      sender.destroy?.();
-    }
+    });
   });
 
   it("does not arm a retry for a refused frame (a timeout is not transient)", () => {
-    vi.useFakeTimers();
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent }) => {
       saveUserStatus("online");
       saveCustomStatus("old text");
       saveCustomStatus("new text");
@@ -265,16 +127,11 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       sender.rollbackRefused("id-1");
       vi.advanceTimersByTime(60_000);
       expect(sent).toHaveLength(1);
-    } finally {
-      sender.destroy?.();
-    }
+    });
   });
 
   it("keeps the pre-send status as the rollback target when a second edit queues behind the limiter", () => {
-    vi.useFakeTimers();
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent }) => {
       saveUserStatus("online");
       saveCustomStatus("hi");
       sender.send("online", "hi");
@@ -298,16 +155,11 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       sender.rollbackRefused("id-2");
       expect(membersStore.getState().members.get(1)?.customStatus).toBe("old text");
       expect(loadCustomStatus()).toBe("old text");
-    } finally {
-      sender.destroy?.();
-    }
+    });
   });
 
   it("drops the refused text but keeps the picked status when a plain flip queues behind it", () => {
-    vi.useFakeTimers();
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent }) => {
       saveUserStatus("online");
       saveCustomStatus("hi");
       sender.send("online", "hi");
@@ -326,43 +178,12 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       vi.advanceTimersByTime(60_000);
       expect(sent).toHaveLength(2);
       expect(sent[1]!.payload.status).toBe("dnd");
-    } finally {
-      sender.destroy?.();
-    }
+    });
   });
 });
 
 describe("createPresenceSender — custom_status survival across supersession", () => {
-  beforeEach(() => {
-    localStorage.clear();
-    signInAs(
-      { id: 1, username: "alice", avatar: null, role: "member" },
-      { serverName: "TestServer" },
-    );
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice",
-            displayName: null,
-            avatar: null,
-            role: "member",
-            status: "online",
-            customStatus: undefined,
-          } as never,
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    resetAuthState();
-    resetMembersState();
-  });
+  usePresenceFixture(undefined);
 
   it("does not drop a queued custom_status when a later plain status change supersedes it before the retry fires", () => {
     vi.useFakeTimers();
@@ -417,41 +238,10 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
   const member = (): { status?: string; customStatus?: string | null } | undefined =>
     membersStore.getState().members.get(1);
 
-  beforeEach(() => {
-    localStorage.clear();
-    signInAs(
-      { id: 1, username: "alice", avatar: null, role: "member" },
-      { serverName: "TestServer" },
-    );
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice",
-            displayName: null,
-            avatar: null,
-            role: "member",
-            status: "online",
-            customStatus: "old text",
-          } as never,
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    resetAuthState();
-    resetMembersState();
-  });
+  usePresenceFixture("old text");
 
   it("rolls back a refused status flip that carried no text", () => {
-    const { ws } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender }) => {
       saveUserStatus("online");
       saveUserStatus("dnd");
       sender.send("dnd");
@@ -459,63 +249,42 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
       sender.rollbackRefused("id-1");
       expect(member()?.status).toBe("online");
       expect(loadUserStatus()).toBe("online");
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("has nothing to roll back for a frame that repeats the saved text and status", () => {
-    const { ws } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender }) => {
       sender.send("online", "old text");
       // Another device changes the status before this frame is refused.
       updatePresence(1, "dnd");
       sender.rollbackRefused("id-1");
       expect(member()?.status).toBe("dnd");
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("has nothing to roll back for a plain flip to the status already shown", () => {
-    const { ws } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender }) => {
       sender.send("online");
       updatePresence(1, "dnd");
       sender.rollbackRefused("id-1");
       expect(member()?.status).toBe("dnd");
       expect(member()?.customStatus).toBe("old text");
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("leaves out the text and expiry fields it was not given", () => {
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender, sent }) => {
       sender.send("dnd");
       expect(Object.keys(sent[0]!.payload)).toEqual(["status"]);
-    } finally {
-      sender.destroy();
-    }
-    const second = createErrorableWs();
-    const other = createPresenceSender(second.ws, createPresenceLimiter());
-    try {
-      other.send("dnd", "busy");
-      expect(Object.keys(second.sent[0]!.payload)).toEqual(["status", "custom_status"]);
-    } finally {
-      other.destroy();
-    }
+    });
+    withSender({}, ({ sender, sent }) => {
+      sender.send("dnd", "busy");
+      expect(Object.keys(sent[0]!.payload)).toEqual(["status", "custom_status"]);
+    });
   });
 
   it("rolls back to the last accepted status when several edits queue behind the limiter", () => {
-    vi.useFakeTimers();
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent }) => {
       saveUserStatus("online");
       sender.send("online", "first");
       saveUserStatus("dnd");
@@ -532,9 +301,7 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
       sender.rollbackRefused("id-2");
       expect(member()?.status).toBe("online");
       expect(member()?.customStatus).toBe("first");
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("clears the saved text when the refused frame replaced none", () => {
@@ -542,23 +309,17 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
       ...p,
       members: new Map([[1, { ...p.members.get(1)!, customStatus: undefined }]]),
     }));
-    const { ws } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender }) => {
       saveCustomStatus("new text");
       sender.send("online", "new text");
       sender.rollbackRefused("id-1");
       expect(loadCustomStatus()).toBe("");
       expect(member()?.customStatus).toBeNull();
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("restores how the status was chosen even when the status value is unchanged", () => {
-    const { ws } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({}, ({ sender }) => {
       saveUserStatus("online", "auto");
       sender.send("online", "hello");
       // The user then picks the same status by hand.
@@ -566,16 +327,11 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
       sender.rollbackRefused("id-1");
       expect(loadUserStatus()).toBe("online");
       expect(loadUserStatusOrigin()).toBe("auto");
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("cancels a queued retry when a later change goes straight out", () => {
-    vi.useFakeTimers();
-    const { ws, sent } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent }) => {
       saveUserStatus("dnd");
       sender.send("dnd");
       vi.advanceTimersByTime(1_000);
@@ -590,49 +346,38 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
 
       vi.advanceTimersByTime(60_000);
       expect(sent).toHaveLength(2);
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("sends nothing after destroy, neither a queued retry nor one for a late rate-limit reply", () => {
-    vi.useFakeTimers();
-    const { ws, sent, fireError } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    saveUserStatus("dnd");
-    sender.send("dnd");
-    saveUserStatus("idle");
-    sender.send("idle"); // queued
-    sender.destroy();
-    vi.advanceTimersByTime(60_000);
-    expect(sent).toHaveLength(1);
+    withSender({ fakeTimers: true }, ({ sender, sent, fireError }) => {
+      saveUserStatus("dnd");
+      sender.send("dnd");
+      saveUserStatus("idle");
+      sender.send("idle"); // queued
+      sender.destroy();
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(1);
 
-    fireError("RATE_LIMITED", "id-1");
-    vi.advanceTimersByTime(60_000);
-    expect(sent).toHaveLength(1);
+      fireError("RATE_LIMITED", "id-1");
+      vi.advanceTimersByTime(60_000);
+      expect(sent).toHaveLength(1);
+    });
   });
 
   it("ignores other error codes for its own frame", () => {
-    vi.useFakeTimers();
-    const { ws, sent, fireError } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent, fireError }) => {
       saveUserStatus("dnd");
       sender.send("dnd");
       fireError("TIMED_OUT", "id-1");
       fireError("BAD_REQUEST", "id-1");
       vi.advanceTimersByTime(60_000);
       expect(sent).toHaveLength(1);
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("keeps a newer queued change when a rate-limit reply for the earlier frame arrives", () => {
-    vi.useFakeTimers();
-    const { ws, sent, fireError } = createErrorableWs();
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true }, ({ sender, sent, fireError }) => {
       saveUserStatus("online");
       sender.send("online", "first");
       saveUserStatus("dnd");
@@ -642,16 +387,11 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
       expect(sent).toHaveLength(2);
       expect(sent[1]!.payload.status).toBe("dnd");
       expect(sent[1]!.payload.custom_status).toBe("second");
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("does not match a reply without an id to a frame the transport gave no id", () => {
-    vi.useFakeTimers();
-    const { ws, sent, fireError } = createErrorableWs(false);
-    const sender = createPresenceSender(ws, createPresenceLimiter());
-    try {
+    withSender({ fakeTimers: true, returnIds: false }, ({ sender, sent, fireError }) => {
       saveUserStatus("dnd");
       sender.send("dnd");
       fireError("RATE_LIMITED", undefined);
@@ -660,20 +400,15 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
 
       sender.rollbackRefused(undefined);
       expect(member()?.status).toBe("dnd");
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 
   it("waits the full window plus a margin before retrying a rate-limited frame", () => {
-    vi.useFakeTimers();
-    const { ws, sent, fireError } = createErrorableWs();
     const limiter = {
       tryConsume: () => true,
       getRemainingMs: () => 5_000,
     } as unknown as RateLimiter;
-    const sender = createPresenceSender(ws, limiter);
-    try {
+    withSender({ fakeTimers: true, limiter }, ({ sender, sent, fireError }) => {
       saveUserStatus("dnd");
       sender.send("dnd");
       fireError("RATE_LIMITED", "id-1");
@@ -681,8 +416,6 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
       expect(sent).toHaveLength(1);
       vi.advanceTimersByTime(600);
       expect(sent).toHaveLength(2);
-    } finally {
-      sender.destroy();
-    }
+    });
   });
 });

@@ -11,8 +11,11 @@ import {
 import {
   VOLUME_SLIDERS,
   emitDeviceChange,
+  emptyStream,
+  fakeAudioStream,
   stubNavigator,
 } from "../../helpers/voiceAudioTabHarness";
+import { mountTab } from "../../helpers/voiceAudioTabMount";
 
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -39,14 +42,8 @@ describe("VoiceAudioTab camera preview", () => {
   it("does not restore a stale camera stream after the tab is aborted", async () => {
     let resolveVideo: ((stream: MediaStream) => void) | null = null;
     const stopVideoTrack = vi.fn();
-    const videoStream = {
-      getTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
-      getAudioTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
-    } as unknown as MediaStream;
-    const audioStream = {
-      getTracks: () => [],
-      getAudioTracks: () => [],
-    } as unknown as MediaStream;
+    const videoStream = fakeAudioStream(stopVideoTrack);
+    const audioStream = emptyStream();
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
@@ -82,14 +79,8 @@ describe("VoiceAudioTab camera preview", () => {
   it("does not restore a stale camera stream after the tab is cleaned up", async () => {
     let resolveVideo: ((stream: MediaStream) => void) | null = null;
     const stopVideoTrack = vi.fn();
-    const videoStream = {
-      getTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
-      getAudioTracks: () => [{ stop: stopVideoTrack, kind: "audio" }],
-    } as unknown as MediaStream;
-    const audioStream = {
-      getTracks: () => [],
-      getAudioTracks: () => [],
-    } as unknown as MediaStream;
+    const videoStream = fakeAudioStream(stopVideoTrack);
+    const audioStream = emptyStream();
 
     vi.stubGlobal("navigator", {
       mediaDevices: {
@@ -126,10 +117,7 @@ describe("VoiceAudioTab camera preview", () => {
 describe("VoiceAudioTab mic meter", () => {
   let resolveAudio: ((stream: MediaStream) => void) | null = null;
   const stopAudioTrack = vi.fn();
-  const audioStream = {
-    getTracks: () => [{ stop: stopAudioTrack, kind: "audio" }],
-    getAudioTracks: () => [{ stop: stopAudioTrack, kind: "audio" }],
-  } as unknown as MediaStream;
+  const audioStream = fakeAudioStream(stopAudioTrack);
 
   beforeEach(() => {
     localStorage.clear();
@@ -210,10 +198,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("contains input device, output device, and video device selects", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const selects = el.querySelectorAll("select");
     // Input, output, camera quality, screen share quality, screen share fps,
@@ -224,10 +209,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("contains input volume and output volume sliders", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS);
     expect(sliders.length).toBe(2); // input volume + output volume
@@ -238,10 +220,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("input volume slider calls setInputVolume on change", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     const inputSlider = sliders[0]!;
@@ -254,10 +233,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("output volume slider calls setOutputVolume on change", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     const outputSlider = sliders[1]!;
@@ -271,10 +247,7 @@ describe("VoiceAudioTab UI structure", () => {
   it("restores saved input volume from preferences", () => {
     localStorage.setItem("owncord:settings:inputVolume", "75");
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     expect(sliders[0]!.value).toBe("75");
@@ -284,10 +257,7 @@ describe("VoiceAudioTab UI structure", () => {
   it("restores saved output volume from preferences", () => {
     localStorage.setItem("owncord:settings:outputVolume", "60");
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const sliders = el.querySelectorAll(VOLUME_SLIDERS) as NodeListOf<HTMLInputElement>;
     expect(sliders[1]!.value).toBe("60");
@@ -301,10 +271,7 @@ describe("VoiceAudioTab UI structure", () => {
     ]);
     localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("mic-1"));
 
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const inputSelect = el.querySelectorAll("select")[0]!;
     await vi.waitFor(() => {
@@ -348,9 +315,7 @@ describe("VoiceAudioTab UI structure", () => {
     stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
     localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("abcdef0123456789"));
 
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const inputSelect = el.querySelectorAll("select")[0]!;
     await vi.waitFor(() => expect(inputSelect.value).toBe("abcdef0123456789"));
@@ -370,9 +335,7 @@ describe("VoiceAudioTab UI structure", () => {
     localStorage.setItem("owncord:settings:audioInputDevice", JSON.stringify("abcdef0123456789"));
     localStorage.setItem("owncord:settings:audioOutputDevice", JSON.stringify("default"));
 
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const [inputSelect, outputSelect] = el.querySelectorAll("select");
     await vi.waitFor(() => expect(inputSelect!.value).toBe("abcdef0123456789"));
@@ -394,9 +357,7 @@ describe("VoiceAudioTab UI structure", () => {
     vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValueOnce(
       Object.assign(new Error("gone"), { name: "OverconstrainedError" }),
     );
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     await vi.waitFor(() =>
       expect(navigator.mediaDevices.getUserMedia).toHaveBeenLastCalledWith({
@@ -413,10 +374,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("stops refreshing device lists once the tab is aborted", async () => {
     const nav = stubNavigator([{ kind: "audioinput", deviceId: "mic-1", label: "Mic 1" }]);
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const inputSelect = el.querySelectorAll("select")[0]!;
     await vi.waitFor(() => {
@@ -441,10 +399,7 @@ describe("VoiceAudioTab UI structure", () => {
       { kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" },
       { kind: "videoinput", deviceId: "cam-1", label: "Cam 1" },
     ]);
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     // Wait for async device enumeration
     await vi.waitFor(() => {
@@ -471,9 +426,7 @@ describe("VoiceAudioTab UI structure", () => {
       { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
       { kind: "audioinput", deviceId: "webcam-mic", label: "Webcam Mic", groupId: "g-webcam" },
     ]);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const inputSelect = el.querySelectorAll("select")[0]!;
     await vi.waitFor(() => expect(inputSelect.options[0]!.text).toBe("Default (Webcam Mic)"));
@@ -487,9 +440,7 @@ describe("VoiceAudioTab UI structure", () => {
     stubNavigator([
       { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
     ]);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const inputSelect = el.querySelectorAll("select")[0]!;
     await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
@@ -506,9 +457,7 @@ describe("VoiceAudioTab UI structure", () => {
         { kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g-usb" },
         { kind: "audioinput", deviceId: "webcam-mic", label: "Webcam Mic", groupId: "g-webcam" },
       ]);
-      const ac = new AbortController();
-      const el = createVoiceAudioTab(ac.signal).build();
-      document.body.appendChild(el);
+      const { ac, el } = mountTab();
       const inputSelect = el.querySelectorAll("select")[0]!;
       await vi.advanceTimersByTimeAsync(0);
       expect(inputSelect.options[0]!.text).toBe("Default (Webcam Mic)");
@@ -526,9 +475,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("keeps a plain Default label when no call captures the microphone", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "usb-mic", label: "USB Mic", groupId: "g" }]);
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const inputSelect = el.querySelectorAll("select")[0]!;
     await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
@@ -538,10 +485,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("input device change calls switchInputDevice and saves pref", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "mic-1", label: "Mic 1" }]);
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     await vi.waitFor(() => {
       const selects = el.querySelectorAll("select");
@@ -558,10 +502,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("output device change calls switchOutputDevice and saves pref", async () => {
     stubNavigator([{ kind: "audiooutput", deviceId: "spk-1", label: "Speaker 1" }]);
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     await vi.waitFor(() => {
       const selects = el.querySelectorAll("select");
@@ -578,10 +519,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("camera quality select saves to preferences on change", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const qualitySelect = el.querySelector(
       'select[aria-label="Camera Quality"]',
@@ -598,10 +536,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("screen share quality select defaults to medium and saves its own pref", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const qualitySelect = el.querySelector(
       'select[aria-label="Screen Share Quality"]',
@@ -617,10 +552,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("screen share fps select persists the preference as a number", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const tab = createVoiceAudioTab(ac.signal);
-    const el = tab.build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     // Screen share FPS is the 4th select (index 3)
     const fpsSelect = el.querySelector(
@@ -637,9 +569,7 @@ describe("VoiceAudioTab UI structure", () => {
 
   it("video codec select offers VP8, H.264 and Auto, defaults to Auto and saves the choice", () => {
     stubNavigator();
-    const ac = new AbortController();
-    const el = createVoiceAudioTab(ac.signal).build();
-    document.body.appendChild(el);
+    const { ac, el } = mountTab();
 
     const codecSelect = el.querySelector('select[aria-label="Video Codec"]') as HTMLSelectElement;
     expect([...codecSelect.options].map((o) => o.value)).toEqual(["vp8", "h264", "auto"]);
@@ -692,9 +622,7 @@ describe("VoiceAudioTab UI structure", () => {
   describe("device and processing cards", () => {
     function build(): { el: HTMLDivElement; ac: AbortController } {
       stubNavigator();
-      const ac = new AbortController();
-      const el = createVoiceAudioTab(ac.signal).build();
-      document.body.appendChild(el);
+      const { ac, el } = mountTab();
       return { el, ac };
     }
     const cardNamed = (el: HTMLElement, title: string): HTMLElement =>

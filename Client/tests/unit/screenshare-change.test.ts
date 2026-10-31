@@ -129,6 +129,36 @@ function picked(withAudio: boolean): FakeTrack[] {
   return fresh;
 }
 
+/** The ways something else can take a share while an async change is in flight. */
+function takenShareCases(
+  generation: number,
+): Array<[string, (rig: ReturnType<typeof setup>) => void]> {
+  return [
+    [
+      "a stop",
+      (rig) => {
+        rig.state.generation = generation;
+      },
+    ],
+    [
+      "a new set of tracks",
+      (rig) => {
+        rig.state.manualScreenTracks = [...rig.state.manualScreenTracks];
+      },
+    ],
+  ];
+}
+
+/** A share whose video track runs the quality change itself, as the native
+ *  track does: it asks the host to re-size the capture and republish. */
+function nativeRig(setQuality = vi.fn().mockResolvedValue(undefined)) {
+  const rig = setup(false);
+  rig.state.fps = 60;
+  rig.state.published = "h264";
+  Object.assign(rig.video, { quality: "medium", fps: 60, setQuality });
+  return { ...rig, setQuality };
+}
+
 beforeEach(() => {
   createLocalScreenTracks.mockReset();
   savePref.mockReset();
@@ -446,16 +476,6 @@ describe("setScreenshareQuality", () => {
 });
 
 describe("setScreenshareQuality on a share that changes its own quality (Linux native)", () => {
-  /** A share whose video track runs the quality change itself, as the native
-   *  track does: it asks the host to re-size the capture and republish. */
-  function nativeRig(setQuality = vi.fn().mockResolvedValue(undefined)) {
-    const rig = setup(false);
-    rig.state.fps = 60;
-    rig.state.published = "h264";
-    Object.assign(rig.video, { quality: "medium", fps: 60, setQuality });
-    return { ...rig, setQuality };
-  }
-
   it("asks the track with the share's frame rate and published codec, then records the quality", async () => {
     const rig = nativeRig();
 
@@ -675,32 +695,22 @@ describe("changeScreenshareSource: guards", () => {
     expect(openMst.stop).toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      "a stop",
-      (rig: ReturnType<typeof setup>) => {
-        rig.state.generation = 1;
-      },
-    ],
-    [
-      "a new set of tracks",
-      (rig: ReturnType<typeof setup>) => {
-        rig.state.manualScreenTracks = [...rig.state.manualScreenTracks];
-      },
-    ],
-  ])("drops the new capture when %s took the share while the picker was open", async (_n, act) => {
-    const rig = setup(false);
-    const picker = openPicker();
-    const changing = changeScreenshareSource(rig.state, rig.deps);
-    act(rig);
-    const fresh = track(Track.Kind.Video, "window-b");
-    picker.answer([fresh]);
-    await changing;
+  it.each(takenShareCases(1))(
+    "drops the new capture when %s took the share while the picker was open",
+    async (_n, act) => {
+      const rig = setup(false);
+      const picker = openPicker();
+      const changing = changeScreenshareSource(rig.state, rig.deps);
+      act(rig);
+      const fresh = track(Track.Kind.Video, "window-b");
+      picker.answer([fresh]);
+      await changing;
 
-    expect(rig.video.replaceTrack).not.toHaveBeenCalled();
-    expect(fresh.mediaStreamTrack.stop).toHaveBeenCalled();
-    expect(rig.state.changing).toBe(false);
-  });
+      expect(rig.video.replaceTrack).not.toHaveBeenCalled();
+      expect(fresh.mediaStreamTrack.stop).toHaveBeenCalled();
+      expect(rig.state.changing).toBe(false);
+    },
+  );
 
   it("drops the new capture when the room changed while the picker was open", async () => {
     const rig = setup(false);
@@ -905,29 +915,19 @@ describe("changeScreenshareSource on a share that swaps its own capture", () => 
     expect(changeSource).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      "a stop",
-      (rig: ReturnType<typeof setup>) => {
-        rig.state.generation = 4;
-      },
-    ],
-    [
-      "a new set of tracks",
-      (rig: ReturnType<typeof setup>) => {
-        rig.state.manualScreenTracks = [...rig.state.manualScreenTracks];
-      },
-    ],
-  ])("reports nothing when %s took the share meanwhile", async (_n, act) => {
-    let finish!: () => void;
-    const rig = inPlaceRig(() => new Promise<void>((r) => (finish = r)));
-    const changing = changeScreenshareSource(rig.state, rig.deps);
-    act(rig);
-    finish();
-    await changing;
+  it.each(takenShareCases(4))(
+    "reports nothing when %s took the share meanwhile",
+    async (_n, act) => {
+      let finish!: () => void;
+      const rig = inPlaceRig(() => new Promise<void>((r) => (finish = r)));
+      const changing = changeScreenshareSource(rig.state, rig.deps);
+      act(rig);
+      finish();
+      await changing;
 
-    expect(voiceStore.getState().localShareRev).toBe(0);
-  });
+      expect(voiceStore.getState().localShareRev).toBe(0);
+    },
+  );
 
   it("reports nothing when the room changed meanwhile", async () => {
     let finish!: () => void;
@@ -1103,14 +1103,6 @@ describe("setScreenshareQuality on the web", () => {
 });
 
 describe("setScreenshareQuality on a share that changes its own quality: guards", () => {
-  function nativeRig(setQuality = vi.fn().mockResolvedValue(undefined)) {
-    const rig = setup(false);
-    rig.state.fps = 60;
-    rig.state.published = "h264";
-    Object.assign(rig.video, { quality: "medium", fps: 60, setQuality });
-    return { ...rig, setQuality };
-  }
-
   it("logs the new quality, the frame rate and that it was done in place", async () => {
     const logs = captureLogs();
     const rig = nativeRig();
@@ -1164,30 +1156,20 @@ describe("setScreenshareQuality on a share that changes its own quality: guards"
     expect(rig.setQuality).not.toHaveBeenCalled();
   });
 
-  it.each([
-    [
-      "a stop",
-      (rig: ReturnType<typeof setup>) => {
-        rig.state.generation = 1;
-      },
-    ],
-    [
-      "a new set of tracks",
-      (rig: ReturnType<typeof setup>) => {
-        rig.state.manualScreenTracks = [...rig.state.manualScreenTracks];
-      },
-    ],
-  ])("reports nothing when %s took the share meanwhile", async (_n, act) => {
-    let finish!: () => void;
-    const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
-    const changing = setScreenshareQuality(rig.state, rig.deps, "high");
-    act(rig);
-    finish();
-    await changing;
+  it.each(takenShareCases(1))(
+    "reports nothing when %s took the share meanwhile",
+    async (_n, act) => {
+      let finish!: () => void;
+      const rig = nativeRig(vi.fn(() => new Promise<void>((r) => (finish = r))));
+      const changing = setScreenshareQuality(rig.state, rig.deps, "high");
+      act(rig);
+      finish();
+      await changing;
 
-    expect(rig.state.quality).toBe("medium");
-    expect(voiceStore.getState().localShareRev).toBe(0);
-  });
+      expect(rig.state.quality).toBe("medium");
+      expect(voiceStore.getState().localShareRev).toBe(0);
+    },
+  );
 
   it("reports nothing when the room changed meanwhile", async () => {
     let finish!: () => void;
