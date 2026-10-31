@@ -1,24 +1,21 @@
 /**
- * "Mark All as Read" lives in the unified sidebar header, beside Invite.
+ * Mark Server as Read lives in the server name menu and on Shift+Esc, not as
+ * an icon in the unified sidebar header.
  *
- * It used to sit in ChannelSidebar's own `.channel-sidebar-header`, which
- * app.css hides (`.sidebar-content-inner .channel-sidebar-header`) because the
- * unified header already shows the server name — so the control existed in the
- * DOM, and in jsdom (which ignores CSS), but never on screen.
- *
- * The real ChannelSidebar is mounted on purpose: the placement is a fact about
- * the composed DOM, and the CSS check below reads it from there.
+ * The header icon used to appear only while a server channel was unread. With
+ * a long server name that fourth icon wrapped the header's action row onto a
+ * second line, so the whole channel list jumped down as a message arrived and
+ * back up as it was read, and a click aimed at one channel landed on the next.
+ * The header must not change with read state.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
-import { makeDm } from "../helpers/dmHarness";
 import * as mocks from "../helpers/sidebarAreaMocks";
 import {
   lightSidebarAreaOpts,
   readStateChannels,
   resetSidebarStoresAsMember,
 } from "../helpers/sidebarAreaOpts";
-import { cascadedDeclaration, keyword } from "../helpers/app-css";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
@@ -29,25 +26,25 @@ vi.mock("@components/MemberList", () => mocks.memberListMock());
 vi.mock("@components/QuickSwitchOverlay", () => mocks.quickSwitchOverlayMock());
 vi.mock("../../src/pages/main-page/OverlayManagers", () => mocks.inviteManagerMock());
 
-import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main-page/SidebarArea";
-import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.store";
-import { dmStore } from "../../src/stores/dm.store";
-import { setMarkReadSender } from "@lib/readState";
+import { createSidebarArea } from "../../src/pages/main-page/SidebarArea";
+import { setChannels, setRoles, channelsStore } from "../../src/stores/channels.store";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS = readStateChannels().slice(0, 2);
+const READ_ONLY = [CHANNELS[1]!];
 
-/** Whether the header button is displayed (SidebarArea toggles `display`, as for Audit Log). */
-const shown = (el: HTMLElement): boolean => el.style.display !== "none";
-
-function opts(): SidebarAreaOptions {
-  return lightSidebarAreaOpts("example.com");
+/** The header's controls as the user meets them: what is drawn and shown. */
+function headerShape(root: HTMLElement): string[] {
+  const header = root.querySelector<HTMLElement>(".unified-sidebar-header");
+  expect(header).not.toBeNull();
+  return [...header!.querySelectorAll<HTMLElement>("button, [data-testid]")]
+    .filter((el) => el.style.display !== "none" && el.style.visibility !== "hidden")
+    .map((el) => el.getAttribute("data-testid") ?? el.className);
 }
 
-describe("SidebarArea — Mark All as Read", () => {
+describe("SidebarArea — the header does not follow read state", () => {
   let container: HTMLDivElement;
   let area: ReturnType<typeof createSidebarArea>;
-  let sent: number[];
 
   useMountContainer(
     (c) => {
@@ -55,194 +52,54 @@ describe("SidebarArea — Mark All as Read", () => {
     },
     () => {
       for (const unsub of area.unsubscribers) unsub();
-      setMarkReadSender(null);
     },
   );
 
   beforeEach(() => {
-    sent = [];
-    setMarkReadSender((id) => sent.push(id));
     resetSidebarStoresAsMember();
+    // Invite and Audit Log shown, as for a server owner: the row that wrapped.
+    setRoles([
+      {
+        id: 2,
+        name: "Member",
+        color: null,
+        permissions: Permission.MANAGE_INVITES | Permission.VIEW_AUDIT_LOG,
+      },
+    ]);
+    channelsStore.flush();
   });
 
   function mount(channels: ReadyChannel[]): void {
     setChannels(channels);
-    area = createSidebarArea(opts());
+    area = createSidebarArea(lightSidebarAreaOpts("example.com"));
     container.appendChild(area.sidebarWrapper);
   }
 
-  function button(): HTMLElement {
-    const el = area.sidebarWrapper.querySelector<HTMLElement>('[data-testid="mark-all-read"]');
-    expect(el).not.toBeNull();
-    return el!;
-  }
-
-  it("sits in the unified header's action row, not in the channel list's own header", () => {
+  it("has no Mark Server as Read control in the header", () => {
     mount(CHANNELS);
 
+    expect(area.sidebarWrapper.querySelector('[data-testid="mark-all-read"]')).toBeNull();
     expect(
       area.sidebarWrapper.querySelector(
-        '.unified-sidebar-header > .sidebar-header-actions > [data-testid="mark-all-read"]',
+        '.unified-sidebar-header [aria-label="Mark Server as Read"]',
       ),
-    ).not.toBeNull();
-    expect(button().closest(".channel-sidebar")).toBeNull();
-    expect(button().classList.contains("sidebar-header-action")).toBe(true);
+    ).toBeNull();
   });
 
-  it("is a named icon button with a tooltip and no visible text", () => {
-    mount(CHANNELS);
-
-    expect(button().tagName).toBe("BUTTON");
-    expect(button().getAttribute("type")).toBe("button");
-    expect(button().getAttribute("aria-label")).toBe("Mark Server as Read");
-    expect(button().getAttribute("title")).toBe("Mark Server as Read");
-    expect(button().textContent).toBe("");
-    expect(button().querySelector("svg")).not.toBeNull();
-  });
-
-  it("hides the button while nothing is unread", () => {
-    mount([CHANNELS[1]!]);
-
-    expect(shown(button())).toBe(false);
-  });
-
-  it("shows the button once a channel goes unread", () => {
-    mount(CHANNELS);
-
-    expect(shown(button())).toBe(true);
-  });
-
-  it("shows the button when a channel becomes unread after mount", async () => {
-    mount([CHANNELS[1]!]);
-    expect(shown(button())).toBe(false);
+  it("keeps the same header controls when a channel goes unread and is read again", async () => {
+    mount(READ_ONLY);
+    const before = headerShape(area.sidebarWrapper);
 
     setChannels(CHANNELS);
-
     await vi.waitFor(() => {
-      expect(shown(button())).toBe(true);
+      expect(channelsStore.getState().channels.get(1)?.unreadCount).toBeGreaterThan(0);
     });
-  });
+    await Promise.resolve();
+    expect(headerShape(area.sidebarWrapper)).toEqual(before);
 
-  it("does not show the button for a DM-only unread: DMs are not part of the server", async () => {
-    mount([CHANNELS[1]!]);
-    expect(shown(button())).toBe(false);
-
-    dmStore.setState(() => ({
-      channels: [
-        makeDm({
-          channelId: 50,
-          recipient: { id: 9, username: "alice", avatar: "", status: "online" },
-          unreadCount: 2,
-        }),
-      ],
-    }));
-
-    // Store notifications are batched on a microtask.
+    setChannels(READ_ONLY);
     await Promise.resolve();
     await Promise.resolve();
-    expect(shown(button())).toBe(false);
-  });
-
-  it("leaves DM unread, DM read state and the DM badge alone when clicked", async () => {
-    dmStore.setState(() => ({
-      channels: [
-        makeDm({
-          channelId: 50,
-          recipient: { id: 9, username: "alice", avatar: "", status: "online" },
-          unreadCount: 2,
-          mentionCount: 1,
-        }),
-      ],
-    }));
-    mount(CHANNELS);
-
-    button().click();
-
-    expect(sent).toEqual([1]);
-    expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
-    expect(dmStore.getState().channels[0]?.unreadCount).toBe(2);
-    expect(dmStore.getState().channels[0]?.mentionCount).toBe(1);
-    await vi.waitFor(() => {
-      expect(shown(button())).toBe(false);
-    });
-  });
-
-  it("clears every badge and hides itself when clicked", async () => {
-    mount(CHANNELS);
-
-    button().click();
-
-    expect(sent).toEqual([1]);
-    expect(channelsStore.getState().channels.get(1)?.unreadCount).toBe(0);
-    await vi.waitFor(() => {
-      expect(shown(button())).toBe(false);
-    });
-  });
-
-  it("moves focus to Invite before hiding the activated button", async () => {
-    setRoles([{ id: 2, name: "Member", color: null, permissions: Permission.MANAGE_INVITES }]);
-    channelsStore.flush();
-    mount(CHANNELS);
-    button().focus();
-    expect(document.activeElement).toBe(button());
-
-    button().click();
-
-    await vi.waitFor(() => {
-      expect(shown(button())).toBe(false);
-    });
-    const invite = area.sidebarWrapper.querySelector<HTMLElement>('[data-testid="invite-btn"]');
-    expect(document.activeElement).toBe(invite);
-  });
-
-  it("moves focus to the channel list when no other header action is shown", async () => {
-    // A plain member: Invite, Audit Log and Moderation are all hidden.
-    mount(CHANNELS);
-    const invite = area.sidebarWrapper.querySelector<HTMLElement>('[data-testid="invite-btn"]')!;
-    expect(shown(invite)).toBe(false);
-    button().focus();
-
-    button().click();
-
-    await vi.waitFor(() => {
-      expect(shown(button())).toBe(false);
-    });
-    const row = area.sidebarWrapper.querySelector<HTMLElement>('[data-channel-id][tabindex="0"]');
-    expect(row).not.toBeNull();
-    expect(document.activeElement).toBe(row);
-  });
-
-  it("stops following the stores once the sidebar area is torn down", async () => {
-    mount([CHANNELS[1]!]);
-    const btn = button();
-    for (const unsub of area.unsubscribers) unsub();
-
-    setChannels(CHANNELS);
-    await Promise.resolve();
-
-    expect(shown(btn)).toBe(false);
-  });
-
-  // jsdom applies no stylesheet, so this reads the rules instead: no rule that
-  // scopes under `.sidebar-content-inner` (or targets any element the control
-  // sits in) may `display: none` it. Rules scoped to `.sidebar-content-inner`
-  // only apply when the control is actually inside it.
-  it("is not hidden by any app.css rule that matches an element it sits in", () => {
-    mount(CHANNELS);
-    const control = button();
-    const insideContentInner = control.closest(".sidebar-content-inner") !== null;
-
-    const hiding: string[] = [];
-    for (let el: Element | null = control; el !== null; el = el.parentElement) {
-      for (const cls of el.classList) {
-        const selectors = [`.${cls}`];
-        if (insideContentInner) selectors.push(`.sidebar-content-inner .${cls}`);
-        for (const selector of selectors) {
-          if (keyword(cascadedDeclaration(selector, "display")) === "none") hiding.push(selector);
-        }
-      }
-    }
-
-    expect(hiding).toEqual([]);
+    expect(headerShape(area.sidebarWrapper)).toEqual(before);
   });
 });

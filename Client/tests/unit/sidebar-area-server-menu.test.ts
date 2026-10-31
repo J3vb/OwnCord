@@ -395,7 +395,7 @@ describe("SidebarArea - server name menu", () => {
     grant(Permission.ADMINISTRATOR);
     mount(UNREAD);
 
-    for (const id of ["mark-all-read", "invite-btn", "audit-log-btn"]) {
+    for (const id of ["invite-btn", "audit-log-btn"]) {
       expect(
         area.sidebarWrapper.querySelector(`.sidebar-header-actions [data-testid="${id}"]`),
       ).not.toBeNull();

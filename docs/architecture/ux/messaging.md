@@ -312,8 +312,10 @@ read when it opens, so the bar covers only the visit in progress.
 
 **Explicit mark-as-read (✓ implemented 2026-08):** the channel context menu gains
 **Mark as Read** (disabled when the channel is already read, absent for voice
-channels), and the sidebar's server header gains **Mark All as Read**, which
-appears only while something is unread. Both go through `lib/readState.ts`,
+channels), and the server name menu gains **Mark as Read** for the whole
+server (also Shift+Esc), shown only while a server channel is unread. It is not
+a header icon: an icon that came and went with read state wrapped a long server
+name's header row and moved the channel list under the pointer. Both go through `lib/readState.ts`,
 which sends the `mark_read` WS message and clears the local badges. `mark_read`
 rather than `channel_focus`: focus also rebinds the connection's focused channel,
 which would misroute unread bookkeeping for the channel actually on screen.

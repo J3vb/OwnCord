@@ -54,7 +54,7 @@ export function buildServerMenuItems(actions: ServerMenuActions): MenuRow[] {
       onClick: actions.onInvite,
     });
   }
-  // Server-wide, so DMs stay out of it, exactly as the header's button.
+  // Server-wide, so DMs stay out of it.
   if (unreadChannelIds({ includeDms: false }).length > 0) {
     top.push({
       label: shellText("serverMenu.markRead"),

@@ -20,6 +20,7 @@ import {
   BASE_SESSION_ROUTES,
   navigateToMainPageReady,
   dmChannel,
+  emitWsMessage,
 } from "./helpers";
 import { findUnnamedControls, focusIndicator, keyboardReachable } from "./support/accessibility";
 
@@ -208,18 +209,18 @@ test.describe("shared navigation", () => {
   });
 });
 
-test.describe("Mark Server as Read in the server header", () => {
+test.describe("Mark Server as Read in the server menu", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
       buildTauriMockScript({
         httpRoutes: [...BASE_SESSION_ROUTES, { pattern: "/api/v1/invites", status: 200, body: [] }],
         simulateWsFlow: true,
-        // "general" is the open channel; "random" is the unread one, so opening
-        // the app does not mark it read.
+        // "general" is the open channel; "random" and "third" start read.
         readyOverrides: {
           channels: [
             { id: 1, name: "general", type: "text", position: 0, category: null },
-            { id: 2, name: "random", type: "text", position: 1, category: null, unread_count: 2 },
+            { id: 2, name: "random", type: "text", position: 1, category: null },
+            { id: 3, name: "third", type: "text", position: 2, category: null },
           ],
         },
       }),
@@ -228,25 +229,45 @@ test.describe("Mark Server as Read in the server header", () => {
     await signIn(page);
   });
 
-  test("shows while a channel is unread, and clears it from the keyboard", async ({ page }) => {
+  test("a message arriving does not move the channel list, and the menu marks it read", async ({
+    page,
+  }) => {
     const header = page.locator("[data-testid='unified-sidebar'] .unified-sidebar-header");
-    const actions = header.locator(".sidebar-header-actions > button:visible");
-    const markAll = page.locator("[data-testid='mark-all-read']");
-    // A server channel shows plain unread as a bold name and a pill, not a count.
-    const badge = page.locator("[data-channel-id='2'].unread");
+    // A server name long enough that one more header icon used to wrap the
+    // icons onto a second row, which pushed every channel down by a row.
+    await page
+      .locator(".unified-sidebar-header .server-name-text")
+      .evaluate((el) => (el.textContent = "friartke Server - DE"));
+    const random = page.locator("[data-channel-id='2']");
+    const third = page.locator("[data-channel-id='3']");
+    const headerBefore = await header.boundingBox();
+    const randomBefore = await random.boundingBox();
+    const thirdBefore = await third.boundingBox();
 
-    await expect(badge).toHaveCount(1);
-    await expect(actions).toHaveCount(4);
-    await expect(actions.nth(0)).toHaveAttribute("data-testid", "mark-all-read");
-    await expect(markAll).toHaveAccessibleName("Mark Server as Read");
-    await expect(markAll).toHaveText("");
-    expect(await findUnnamedControls(header)).toEqual([]);
+    await emitWsMessage(page, {
+      type: "chat_message",
+      payload: {
+        id: 500,
+        channel_id: 2,
+        user: { id: 2, username: "otheruser", avatar: "" },
+        content: "Message on another channel",
+        timestamp: new Date().toISOString(),
+        attachments: [],
+        reply_to: null,
+      },
+    });
+    await expect(random).toHaveClass(/\bunread\b/);
 
-    expect(await keyboardReachable(page, markAll)).toBe(true);
-    await page.keyboard.press("Enter");
+    expect((await header.boundingBox())?.height).toBe(headerBefore?.height);
+    expect((await random.boundingBox())?.y).toBe(randomBefore?.y);
+    expect((await third.boundingBox())?.y).toBe(thirdBefore?.y);
 
-    await expect(badge).toHaveCount(0);
-    await expect(markAll).toBeHidden();
-    await expect(actions).toHaveCount(3);
+    expect(await page.locator("[data-testid='mark-all-read']").count()).toBe(0);
+
+    await page.locator("[data-testid='server-name']").click();
+    await page.locator("[data-testid='server-menu-mark-read']").click();
+
+    await expect(random).not.toHaveClass(/\bunread\b/);
+    expect((await random.boundingBox())?.y).toBe(randomBefore?.y);
   });
 });
