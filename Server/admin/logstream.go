@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -125,6 +126,8 @@ type RingBuffer struct {
 	subscribers map[*chan LogEntry]struct{}
 	streamsEnd  chan struct{} // closed by EndStreams
 	endOnce     sync.Once
+	// history, when set, also gets every entry, for the saved log files.
+	history atomic.Pointer[LogFile]
 }
 
 // NewRingBuffer creates a ring buffer with the given capacity (must be > 0).
@@ -146,9 +149,17 @@ func (rb *RingBuffer) EndStreams() {
 	rb.endOnce.Do(func() { close(rb.streamsEnd) })
 }
 
+// SetHistory makes every later entry also go to lf; nil stops that.
+func (rb *RingBuffer) SetHistory(lf *LogFile) {
+	rb.history.Store(lf)
+}
+
 // Write appends an entry, overwriting the oldest if full, and fans out
 // to all subscribers (non-blocking to avoid slow clients blocking logging).
 func (rb *RingBuffer) Write(entry LogEntry) {
+	if h := rb.history.Load(); h != nil {
+		h.Enqueue(entry)
+	}
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 

@@ -43,6 +43,7 @@ func adminSetupOptions(cfg *config.Config, rt Runtime, importer admin.DiscordImp
 		ImportMaxBytes: cfg.Upload.ImportMaxBytes(),
 		BeginTransfer:  beginImportTransfer,
 
+		LogHistoryDir: cfg.LogHistoryDir(),
 		System: admin.SystemSources{
 			Sampler:     rt.SystemStats,
 			DiskSpace:   func() (uint64, uint64, error) { return diskutil.Space(cfg.Server.DataDir) },
