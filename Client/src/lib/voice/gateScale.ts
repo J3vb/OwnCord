@@ -57,9 +57,8 @@ const SCALE_PREF = "voiceSensitivityScale";
 /** Move a saved sensitivity from the old amplitude-linear scale onto this
  *  one, once, so the gate keeps the level the user chose. A profile that
  *  never moved the slider has nothing saved and follows the default on
- *  this scale, manual or automatic (the owner's call: everyone starts from
- *  the same gate). Runs at startup, after automatic sensitivity's own
- *  migration. */
+ *  this scale, manual or automatic, so everyone starts from the same gate.
+ *  Runs at startup, after automatic sensitivity's own migration. */
 export function migrateVoiceSensitivityScale(): void {
   if (loadPref<string>(SCALE_PREF, "") === "db") return;
   const saved = loadPref<number>("voiceSensitivity", Number.NaN);
