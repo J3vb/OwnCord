@@ -75,12 +75,14 @@ describe("migrateVoiceSensitivityScale", () => {
     expect(get("voiceSensitivityScale")).toBe("db");
   });
 
-  it("keeps the old default's gate for a manual profile that never moved the slider", () => {
+  it("puts a manual profile that never moved the slider on the new default", () => {
     set("autoInputSensitivity", false);
     migrateVoiceSensitivityScale();
-    // The old 50 gated at -26 dBFS; on this scale that is 27, not 50 (-40 dBFS).
-    expect(get("voiceSensitivity")).toBe(legacySensitivityToDbScale(50));
-    expect(vadThresholdDb(get("voiceSensitivity") as number)).toBeCloseTo(-26, 0);
+    // Nothing saved: the slider reads its default, 50, which is -40 dBFS here
+    // (the old 50 gated at -26 dBFS). The owner wants everyone on one gate.
+    expect(get("voiceSensitivity")).toBeNull();
+    expect(get("voiceSensitivityScale")).toBe("db");
+    expect(vadThresholdDb(50)).toBeCloseTo(-40, 0);
   });
 
   it("leaves a value saved on the scale alone", () => {

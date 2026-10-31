@@ -74,6 +74,11 @@ and only when it changes something a contributor or fork holder must do
 - Picking another server in the server rail or the switch list asks "Switch to (server name)?" first, so a stray click no longer drops you out of a call. Tick "Don't ask again" to skip it; turn it back on in Settings > Advanced > Ask before switching servers.
 - Settings > My uploads: a usage bar for your upload quota, every file you uploaded across channels and DMs (newest or largest first, searchable), and Remove to free space. Files in use as your avatar, banner or a group icon are shown but kept. The channel Files tab shows how much you have used, with a link there.
 
+**Server admin panel**
+
+- New Storage page (Manage Server): one bar shows what fills the disk (uploads, database, backups, free space), and every uploaded file is listed, largest or newest first, filterable by type, channel, member and age. Tick up to 100 files and delete them; each delete goes in the audit log. It also finds leftover files no message uses and cleans them up.
+- Members page: a Storage column shows how much each member has uploaded, and the row menu's Upload limit gives one member their own limit or none, instead of the server-wide one. **This changes the database** (one new column).
+
 ### Changed
 
 **Voice**
@@ -125,6 +130,7 @@ and only when it changes something a contributor or fork holder must do
 **Desktop UI**
 
 - Turning Role Colors on or off in Settings > Accessibility now recolours the usernames already in the chat, without reopening the channel.
+- The Media panel and the Pinned messages panel stayed open when you clicked outside them — a click anywhere else now closes them.
 
 **Phones and touch screens**
 

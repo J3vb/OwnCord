@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 251 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 258 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -112,6 +112,12 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/admin/api/setup`                                                   |
 | GET     | `/admin/api/setup/status`                                            |
 | GET     | `/admin/api/stats`                                                   |
+| GET     | `/admin/api/storage/files`                                           |
+| POST    | `/admin/api/storage/files/delete`                                    |
+| GET     | `/admin/api/storage/leftovers`                                       |
+| POST    | `/admin/api/storage/leftovers`                                       |
+| GET     | `/admin/api/storage/members`                                         |
+| GET     | `/admin/api/storage/summary`                                         |
 | POST    | `/admin/api/support-bundles/download`                                |
 | POST    | `/admin/api/support-bundles/preview`                                 |
 | GET     | `/admin/api/system/slow-requests`                                    |
@@ -128,6 +134,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | DELETE  | `/admin/api/users/{id}/roles/{roleId}`                               |
 | PUT     | `/admin/api/users/{id}/roles/{roleId}`                               |
 | DELETE  | `/admin/api/users/{id}/sessions`                                     |
+| PATCH   | `/admin/api/users/{id}/upload-limit`                                 |
 | GET     | `/api/v1/admin/plugins/`                                             |
 | POST    | `/api/v1/admin/plugins/install`                                      |
 | DELETE  | `/api/v1/admin/plugins/{id}`                                         |

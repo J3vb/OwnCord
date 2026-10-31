@@ -66,4 +66,9 @@ type SetupOptions struct {
 	// System feeds the Dashboard health row. The zero value serves uptime-less
 	// answers with every CPU, memory and disk figure null.
 	System SystemSources
+
+	// UploadFiles is the upload directory the Storage page counts leftover
+	// files in and deletes from. Nil when the server has none: deletes then
+	// remove the rows and leave the bytes for the maintenance sweep.
+	UploadFiles StorageFiles
 }

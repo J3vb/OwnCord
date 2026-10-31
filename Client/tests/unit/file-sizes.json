@@ -1,12 +1,8 @@
 {
   "src/components/DmCallPanel.ts": 1350,
-  "src/components/settings/AccountTab.ts": 1850,
-  "src/components/settings/VoiceAudioTab.ts": 1700,
-  "src/features/messaging/emojiData.ts": 1950,
   "src/features/voice/native/nativeRoom.ts": 1450,
   "src/lib/voice/livekitSession.ts": 1400,
   "src/lib/voice/screenShare.ts": 1250,
   "src/lib/ws.ts": 1250,
-  "src/pages/connect-page/LoginForm.ts": 1650,
   "src/pages/main-page/SidebarArea.ts": 1550
 }
