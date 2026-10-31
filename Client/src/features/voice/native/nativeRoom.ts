@@ -327,11 +327,7 @@ export class NativeRoom {
         await desktop.nativeVoice.setPttGated(this.sessionId, this.pttGated);
         // A new session starts with no sensitivity gate and at 100 %.
         if (this.voiceThreshold > 0) {
-          await desktop.nativeVoice.setVoiceGate(
-            this.sessionId,
-            this.voiceThreshold,
-            ...this.speechRule(),
-          );
+          await desktop.nativeVoice.setVoiceGate(this.sessionId, this.voiceThreshold, false, true);
         }
         if (this.inputGainPercent !== 100)
           await desktop.nativeVoice.setInputGain(this.sessionId, this.inputGainPercent);
@@ -485,9 +481,9 @@ export class NativeRoom {
    *  and its verdicts go to `onSpeaking` — open at the start, as the web
    *  detector starts, and null when 0 runs no gate. "auto" runs the web
    *  path's noise-floor estimate over the capture's level reports, starting
-   *  at `auto.seed` and telling `auto.onThreshold` each step, and the
-   *  capture's gate also asks RNNoise's verdict, as the web detector's
-   *  speech gate does. */
+   *  at `auto.seed` and telling `auto.onThreshold` each step. The
+   *  capture's gate also asks RNNoise's verdict at either threshold, as the
+   *  web detector's speech gate does. */
   setVoiceGate(
     gate: number | "auto",
     onSpeaking: (speaking: boolean | null) => void,
@@ -501,14 +497,8 @@ export class NativeRoom {
     onSpeaking(threshold > 0 ? true : null);
     if (this.sessionId === null) return;
     desktop.nativeVoice
-      .setVoiceGate(this.sessionId, threshold, ...this.speechRule())
+      .setVoiceGate(this.sessionId, threshold, false, true)
       .catch((err) => log.warn("Voice sensitivity could not reach the native gate", err));
-  }
-  /** The trailing `retune, speech` arguments of a gate restart: the speech
-   *  rule rides along only with automatic sensitivity, so the manual
-   *  slider's calls stay as they were. */
-  private speechRule(): [] | [false, true] {
-    return this.autoFloor === null ? [] : [false, true];
   }
   /** Automatic sensitivity moved: the gate takes the new level without
    *  restarting, as the web detector's worklet does. */
@@ -517,7 +507,7 @@ export class NativeRoom {
     this.onAutoThreshold(threshold);
     if (this.sessionId === null) return;
     desktop.nativeVoice
-      .setVoiceGate(this.sessionId, threshold, true, this.autoFloor !== null)
+      .setVoiceGate(this.sessionId, threshold, true, true)
       .catch((err) => log.warn("Automatic sensitivity could not reach the native gate", err));
   }
   /** The input volume (0-200 %, the `inputVolume` pref) for the session's

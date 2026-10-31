@@ -352,13 +352,14 @@ describe("NativeRoom room surface", () => {
       await room.localParticipant.setMicrophoneEnabled(true);
       expect(host.calls).toEqual([
         ["setPttGated", [1, false]],
-        ["setVoiceGate", [1, 0.05]],
+        // The slider's gate asks RNNoise's verdict too.
+        ["setVoiceGate", [1, 0.05, false, true]],
         ["setMicrophone", [1, true]],
       ]);
       host.calls.length = 0;
 
       room.setVoiceGate(0.02, () => {});
-      expect(host.calls).toEqual([["setVoiceGate", [1, 0.02]]]);
+      expect(host.calls).toEqual([["setVoiceGate", [1, 0.02, false, true]]]);
     });
 
     it("reports the session's verdicts as the local speaking verdict", async () => {

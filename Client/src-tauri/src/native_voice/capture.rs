@@ -216,7 +216,7 @@ const GATE_HYSTERESIS_DB: f32 = 6.0;
 const GATE_LOOKAHEAD_FRAMES: usize = 5;
 /// RNNoise's probability that a frame is a voice, as vad-worklet.js reads
 /// it: at or above the first a frame counts toward opening, under the
-/// second toward closing (automatic sensitivity's speech rule).
+/// second toward closing (the gate's speech rule).
 const SPEECH_OPEN_PROBABILITY: f32 = 0.5;
 const SPEECH_CLOSE_PROBABILITY: f32 = 0.15;
 /// Frames after RNNoise starts whose probability is not trusted: its state
@@ -284,7 +284,7 @@ fn apply_gain(frame: &mut [i16], from: f32, to: f32) {
 pub struct VoiceGate {
     /// The level that counts as speech; 0 runs no gate (sensitivity 100).
     threshold: f32,
-    /// Automatic sensitivity's speech rule: a frame also needs RNNoise's
+    /// The speech rule, at either sensitivity: a frame also needs RNNoise's
     /// verdict to count toward opening, and loses it toward closing.
     speech_gate: bool,
     grace: u32,
@@ -309,8 +309,8 @@ impl VoiceGate {
     }
 
     /// Restart the detector open at `threshold`, as the web path restarts its
-    /// worklet on a slider move; `speech_gate` adds RNNoise's verdict
-    /// (automatic sensitivity). Turning it off reopens without a report.
+    /// worklet on a slider move; `speech_gate` adds RNNoise's verdict.
+    /// Turning it off reopens without a report.
     pub fn set_threshold(&mut self, threshold: f32, speech_gate: bool) {
         *self = Self {
             threshold: threshold.max(0.0),
@@ -752,7 +752,7 @@ impl Capture {
     /// Set the input-sensitivity gate's threshold (0: no gate), on the web
     /// path's scale (`vadThreshold`). `retune` moves it without restarting
     /// the detector (automatic sensitivity's steps); `speech` adds RNNoise's
-    /// verdict to the rule (automatic sensitivity) on a restart.
+    /// verdict to the rule on a restart.
     pub fn set_voice_gate(&self, threshold: f32, retune: bool, speech: bool) {
         let mut voice = lock(&self.feed.voice);
         if retune {
@@ -1257,9 +1257,9 @@ mod tests {
         assert_eq!(*lock(&reports), [false, true], "the threshold itself does");
     }
 
-    /// Automatic sensitivity's speech rule: a loud frame RNNoise does not
-    /// call a voice does not count toward opening, and an open gate closes
-    /// after the hold once the verdict goes away, loud or not.
+    /// The speech rule: a loud frame RNNoise does not call a voice does not
+    /// count toward opening, and an open gate closes after the hold once the
+    /// verdict goes away, loud or not.
     #[test]
     fn the_speech_rule_opens_only_on_rnnoises_verdict_and_closes_without_it() {
         let (gate, reports) = reporting_gate(0.02);
