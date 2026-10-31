@@ -23,7 +23,7 @@ You moderate from two places.
   list (with pending registrations and bans), Roles & permissions, Channels,
   Invites, Settings, Message retention and the Audit log. By default it only
   opens from this machine and private networks; see
-  [Reaching `/admin` on a headless server](quick-start.md#reaching-admin-on-a-headless-server-vps).
+  [Reaching `/admin` on a headless server](deployment.md#first-run).
 
 Each item in a menu or the admin panel only shows when your role has the
 permission it needs.

@@ -95,7 +95,7 @@ says exactly what the beta does and does not claim about who can read what.
 
 - **The Windows installers are not code-signed.** SmartScreen warns on first
   install and on Update Now. This is expected for an unsigned app. See
-  [Windows: "Windows protected your PC"](quick-start.md#windows-windows-protected-your-pc).
+  [Windows: "Windows protected your PC"](quick-start.md#windows-protected-your-pc).
   We have decided not to code-sign during the beta.
 - **There is no browser version yet.** The desktop app is the only supported
   client. A browser version is planned for after the beta.
@@ -223,7 +223,7 @@ The admin panel, and the first-run wizard, only accept visitors from the
 networks in `server.admin_allowed_cidrs`. By default that is this machine and
 private networks. On a VPS, use an SSH tunnel or add your address to that
 setting. See
-[Reaching `/admin` on a headless server](quick-start.md#reaching-admin-on-a-headless-server-vps).
+[Reaching `/admin` on a headless server](deployment.md#first-run).
 
 **Voice works on Windows but not on Linux.**
 Check the Linux app's version. If it is v2.0.0-beta.1 or older, see

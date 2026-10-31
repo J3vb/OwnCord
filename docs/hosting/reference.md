@@ -1197,6 +1197,132 @@ NAT and a changing public IP. It shows how to check each one yourself.
 
 The limits of each TLS mode are under [TLS Setup](tls-and-proxy.md).
 
+## Voice (LiveKit) internals
+
+### How the server runs LiveKit
+
+When `livekit_binary` is set, or auto-download provides the binary, OwnCord
+manages LiveKit like this:
+
+1. **It writes the config.** OwnCord generates `data/livekit.yaml` with:
+   - the API key and secret
+   - port 7880
+   - the UDP range `50000-60000`, or your single `voice.udp_port`
+   - an `audio:` block that tunes speaker detection, so the speaking ring
+     lights up promptly (copy it from `livekit.yaml.example` into a file you
+     manage yourself)
+2. **It starts LiveKit:** `livekit-server --config data/livekit.yaml`.
+3. **It restarts LiveKit after a crash.** Waits grow from 3 seconds to 6, 12,
+   and so on, up to 60 seconds. It gives up after 10 quick failures in a row.
+4. **It checks LiveKit's health** with an HTTP request to the address in
+   `voice.livekit_url` (by default `http://localhost:7880/`).
+5. **It stops LiveKit when OwnCord shuts down.** On Linux, LiveKit gets 5
+   seconds to stop before it is killed.
+
+**To manage `data/livekit.yaml` yourself** (custom `rtc` options, several
+network interfaces, and so on), delete the header line that contains the
+auto-generated marker. OwnCord then leaves the file alone on future starts.
+Your `keys:` entry must still match `voice.livekit_api_key` and
+`voice.livekit_api_secret`.
+
+If `livekit_binary` is empty and `auto_download_livekit` is off, OwnCord
+assumes you run LiveKit yourself, for example with Docker, systemd or by hand.
+
+### How a client joins voice
+
+How a client joins voice:
+
+```
+Client                     OwnCord Server              LiveKit Server
+  |                             |                           |
+  |-- voice_join (channel_id)-->|                           |
+  |                             |-- check READ+CONNECT_VOICE|
+  |                             |-- persist to voice_states |
+  |                             |-- GenerateToken()         |
+  |<-- voice_token ------------|                           |
+  |    { token, url,           |                           |
+  |      direct_url }          |                           |
+  |                             |                           |
+  |-- connect with JWT --------|-------------------------->|
+  |<--- media streams ----------|--------------------------|
+```
+
+**Token details:**
+
+- Room name: `"channel-{channelID}"`.
+- Identity: `"user-{userID}:{joinToken}"`. The join token makes each rejoin a
+  separate participant. Without a token it is `"user-{userID}"`.
+- Lifetime: 5 minutes. The client asks for a fresh token with
+  `voice_token_refresh` every 4 minutes. The server allows one refresh per 60
+  seconds.
+- What a user may send is set per source with `CanPublishSources`:
+  - microphone needs `SPEAK_VOICE`
+  - camera needs `USE_VIDEO`
+  - screen share needs `SHARE_SCREEN`
+- `canSubscribe` is always true.
+
+**How clients connect:**
+
+- **Proxy path (`/livekit`):** the client connects through OwnCord's HTTPS
+  server. This avoids mixed-content problems. It is the normal path.
+- **Direct URL (`ws://localhost:7880`):** sent only when `voice.livekit_url` is
+  itself a local (loopback) address
+  ([protocol.md](../protocol.md#voice_token-server---client-direct)). The client
+  uses it only when it is on the same machine and the URL is a local `ws:` or
+  `http:` address. Any other `direct_url` goes through the proxy path. That
+  includes a compose-internal name such as `ws://livekit:7880`, which only
+  works inside the container network. This rule is the same on every platform,
+  including Linux native voice
+  ([security.md](../security.md#tauri-capabilities-least-privilege)).
+  - Linux clients up to 2.0.0-beta.1 used any `direct_url` as-is for a
+    `localhost` server. See
+    [Linux app cannot join voice](troubleshooting.md#the-linux-app-cannot-join-voice).
+
+### Webhooks and clean-up
+
+**By default, LiveKit sends no webhooks.** Neither shipped LiveKit config
+(`Server/livekit.yaml.example`, or the one `Server/ws/livekit_process.go`
+writes) turns them on. The server relies on its own LiveKit API calls and on
+clients' `voice_leave` messages instead.
+
+**Cleaning up dropped users.** Sometimes a user's LiveKit connection dies
+without a `voice_leave`. To catch that, once a minute the server asks LiveKit
+who is in each room that has a voice member
+(`Server/ws/voice_reconcile.go`):
+
+- A member missing from LiveKit for two checks in a row is removed.
+- The same check lists every room LiveKit has open, and removes any
+  participant with no matching voice state, even in a room nobody is in voice
+  for.
+
+**Optional: turn webhooks on.** If you run LiveKit yourself, it can post
+webhooks to `POST /api/v1/livekit/webhook`. This needs LiveKit to reach
+OwnCord at a URL whose TLS certificate it trusts. OwnCord's default
+self-signed certificate fails LiveKit's check, so the managed LiveKit is never
+set up this way.
+
+Add this block to your `livekit.yaml`. A commented copy is in
+`Server/livekit.yaml.example`. On compose the key comes from `.env`, and a
+webhook that names another key stops LiveKit from starting.
+
+```yaml
+webhook:
+  api_key: YOUR_API_KEY # your LIVEKIT_API_KEY from .env (compose), or your voice.livekit_api_key / keys: entry when you run LiveKit yourself
+  urls:
+    - https://chat.example.com/api/v1/livekit/webhook
+```
+
+The sender's address must be in `server.livekit_webhook_allowed_cidrs`. By
+default that falls back to `server.admin_allowed_cidrs`.
+
+What the endpoint does:
+
+- It checks the webhook's signed token (JWT).
+- On `participant_joined`, it removes a participant with no matching voice
+  state as soon as it joins.
+- On `participant_left`, it cleans up the leftover voice state straight away,
+  instead of at the next check.
+
 ## Command-line reference
 
 `chatserver` has a few subcommands. Run `chatserver --help` to see them.
