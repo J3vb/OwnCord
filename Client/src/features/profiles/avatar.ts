@@ -240,9 +240,10 @@ export function createAvatarElement(
 
   const resolved = resolveServerUrl(subject.avatar);
   const swapInImage = (objectUrl: string | null): Promise<void> | undefined => {
-    // The row may have been torn down while the fetch was in flight; an
-    // element with no parent is one nobody is looking at.
-    if (objectUrl === null || !wrapper.isConnected) return undefined;
+    // Swapped in even while detached: a host may build the avatar ahead of
+    // showing it (a call tile kept for when the camera goes off), and a
+    // picture that arrived meanwhile would otherwise never show.
+    if (objectUrl === null) return undefined;
     const img = createElement("img", {
       class: "avatar-img",
       alt: options.decorative === true ? "" : resolveDisplayName(subject),
@@ -250,11 +251,8 @@ export function createAvatarElement(
       decoding: "async",
     });
     recoverEvictedImage(img, { url: resolved });
-    return setAvatarSource(
-      img,
-      objectUrl,
-      () => avatarAnimationMode(wrapper, options.animate),
-      () => wrapper.isConnected,
+    return setAvatarSource(img, objectUrl, () =>
+      avatarAnimationMode(wrapper, options.animate),
     ).then((current) => {
       if (!current) return;
       // Replacing rather than hiding keeps the letter out of the accessibility

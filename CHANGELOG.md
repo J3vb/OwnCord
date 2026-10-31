@@ -47,6 +47,10 @@ and only when it changes something a contributor or fork holder must do
 
 ## Unreleased
 
+### Fixed
+
+- In a call, turning your camera on and back off no longer leaves your tile showing the first letter of your name instead of your profile picture. This happened in DM calls and, in some cases, in voice channels.
+
 ## v2.7.0
 
 **OwnCord 2.7** (the eighth public beta) is the first release with an **Android app**: download the APK from the release page and it updates itself after that. On phones, OwnCord now works like a phone app, with a server drawer, a call bar, a full-screen call view, Push to Talk and a phone-shaped status dot. Admins get a Storage page, per-member upload limits, a health row and saved server logs, and the voice gate now works in decibels like Discord's.

@@ -98,8 +98,6 @@ describe("createAvatarElement", () => {
       { username: "ada", displayName: "Ada L.", avatar: "/api/v1/files/abc" },
       { className: "mi-avatar" },
     );
-    // Attached, because the helper skips a swap into an element nobody is
-    // looking at.
     document.body.appendChild(el);
     // The letter is what renders in the meantime.
     expect(el.textContent).toBe("A");
@@ -134,16 +132,19 @@ describe("createAvatarElement", () => {
     el.remove();
   });
 
-  it("does not swap into a detached element", async () => {
+  it("keeps the picture for an avatar attached after the bytes arrived", async () => {
     fetchImageAsObjectUrl.mockResolvedValue("data:image/png;base64,AAA");
+    // Built ahead of showing it: a call tile held while the camera is on.
     const el = createAvatarElement(
       { username: "ada", avatar: "/api/v1/files/abc" },
       { className: "mi-avatar" },
     );
-    // Never attached — the row was torn down while the fetch was in flight.
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(el.querySelector("img")).toBeNull();
+    await vi.waitFor(() => {
+      expect(el.querySelector("img")?.getAttribute("src")).toBe("data:image/png;base64,AAA");
+    });
+    document.body.appendChild(el);
+    expect(el.querySelector(".avatar-initial")).toBeNull();
+    el.remove();
   });
 });
 
