@@ -11,6 +11,7 @@ import {
   freshSendNotification,
   armDesktopPrefs,
   makePayload,
+  setAlertPrefs,
   useNotificationsHarness,
 } from "../../helpers/notificationsHarness";
 import { resetAuthState } from "../../helpers/storeSeeds";
@@ -131,9 +132,7 @@ describe("notifyIncomingMessage", () => {
     mockOscillator.start.mockClear();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", true);
-    testPrefs.set("notificationSounds", true);
+    setAlertPrefs(true, true, true);
     const payload = makePayload({ channel_id: 1 });
     notifyIncomingMessage(payload);
     await new Promise((r) => setTimeout(r, 50));
@@ -270,9 +269,7 @@ describe("notifyIncomingMessage", () => {
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
       (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
       mockOscillator.start.mockClear();
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", true);
-      testPrefs.set("notificationSounds", true);
+      setAlertPrefs(true, true, true);
       return {
         popup: sendNotification as ReturnType<typeof vi.fn>,
         flash: win.requestUserAttention as ReturnType<typeof vi.fn>,
@@ -366,9 +363,7 @@ describe("notifyIncomingMessage", () => {
     mockOscillator.start.mockClear();
 
     // All defaults are true, so just fire and confirm all three channels fired
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", true);
-    testPrefs.set("notificationSounds", true);
+    setAlertPrefs(true, true, true);
     const payload = makePayload();
     notifyIncomingMessage(payload);
 
@@ -424,9 +419,7 @@ describe("notifyIncomingMessage", () => {
   it("suppresses @everyone regardless of other toggles", async () => {
     const sendNotification = await freshSendNotification();
     testPrefs.set("suppressEveryone", true);
-    testPrefs.set("desktopNotifications", true);
-    testPrefs.set("flashTaskbar", true);
-    testPrefs.set("notificationSounds", true);
+    setAlertPrefs(true, true, true);
     const payload = makePayload({ content: "Hey @everyone look!", mentions_everyone: true });
     // Should be suppressed before any notification fires
     notifyIncomingMessage(payload);
@@ -532,10 +525,7 @@ describe("notifyIncomingMessage", () => {
     const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
     setLogLevel("debug");
 
-    testPrefs.set("notificationSounds", true);
-    testPrefs.set("desktopNotifications", false);
-    testPrefs.set("flashTaskbar", false);
-
+    setAlertPrefs(false, false, true);
     const payload = makePayload();
     // Should not throw
     notifyIncomingMessage(payload);

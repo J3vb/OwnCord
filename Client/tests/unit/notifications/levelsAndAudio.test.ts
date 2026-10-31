@@ -16,6 +16,7 @@ import {
   freshSendNotification,
   armDesktopPrefs,
   makePayload,
+  setAlertPrefs,
   notifyAs,
   seedBobDm,
   expectNoAlerts,
@@ -51,9 +52,7 @@ describe("notifyIncomingMessage", () => {
       (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
       mockOscillator.start.mockClear();
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("notificationSounds", true);
-      testPrefs.set("flashTaskbar", true);
+      setAlertPrefs(true, true, true);
       testPrefs.set("userStatus", "dnd");
 
       notifyIncomingMessage(makePayload());
@@ -107,13 +106,7 @@ describe("notifyIncomingMessage", () => {
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
 
-      notifyIncomingMessage(
-        makePayload({
-          channel_id: 55,
-          content: "hey",
-          user: { id: 2, username: "bob", avatar: null },
-        }),
-      );
+      notifyAs("bob", 55, "hey");
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();
       });
@@ -127,13 +120,7 @@ describe("notifyIncomingMessage", () => {
       muteChannel(55);
 
       try {
-        notifyIncomingMessage(
-          makePayload({
-            channel_id: 55,
-            content: "hey",
-            user: { id: 2, username: "bob", avatar: null },
-          }),
-        );
+        notifyAs("bob", 55, "hey");
         await new Promise((r) => setTimeout(r, 50));
         expect(sendNotification).not.toHaveBeenCalled();
       } finally {
@@ -149,13 +136,7 @@ describe("notifyIncomingMessage", () => {
       testPrefs.set("userStatus", "dnd");
       bobDm();
 
-      notifyIncomingMessage(
-        makePayload({
-          channel_id: 55,
-          content: "hey",
-          user: { id: 2, username: "bob", avatar: null },
-        }),
-      );
+      notifyAs("bob", 55, "hey");
       await new Promise((r) => setTimeout(r, 50));
       expect(sendNotification).not.toHaveBeenCalled();
       expect(mockOscillator.start).not.toHaveBeenCalled();
@@ -182,13 +163,7 @@ describe("notifyIncomingMessage", () => {
       testPrefs.set("notificationLevel", "mentions");
       seedBobDm();
 
-      notifyIncomingMessage(
-        makePayload({
-          channel_id: 55,
-          content: "hey",
-          user: { id: 2, username: "bob", avatar: null },
-        }),
-      );
+      notifyAs("bob", 55, "hey");
 
       await vi.waitFor(() => {
         expect(sendNotification).toHaveBeenCalled();
@@ -319,10 +294,7 @@ describe("notifyIncomingMessage", () => {
       mockOscillator.start.mockClear();
       mockOscillator.stop.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       // Verify exact frequency values (kills arithmetic mutations)
@@ -334,10 +306,7 @@ describe("notifyIncomingMessage", () => {
       mockGain.gain.setValueAtTime.mockClear();
       mockGain.gain.exponentialRampToValueAtTime.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       expect(mockGain.gain.setValueAtTime).toHaveBeenCalledWith(0.3, 0);
@@ -348,10 +317,7 @@ describe("notifyIncomingMessage", () => {
       mockOscillator.start.mockClear();
       mockOscillator.stop.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       expect(mockOscillator.start).toHaveBeenCalledWith(0);
@@ -362,10 +328,7 @@ describe("notifyIncomingMessage", () => {
       mockOscillator.connect.mockClear();
       mockGain.connect.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       expect(mockOscillator.connect).toHaveBeenCalledWith(mockGain);
@@ -376,9 +339,7 @@ describe("notifyIncomingMessage", () => {
   describe("cleanupNotificationAudio", () => {
     it("calls close() on the AudioContext when one exists", () => {
       // First, ensure an AudioContext is created by playing a sound
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
+      setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
       // Now add a close mock to the prototype
@@ -407,10 +368,7 @@ describe("notifyIncomingMessage", () => {
       const win = getCurrentWindow();
       (win.requestUserAttention as ReturnType<typeof vi.fn>).mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", true);
-      testPrefs.set("notificationSounds", false);
-
+      setAlertPrefs(false, true, false);
       notifyIncomingMessage(makePayload());
 
       await vi.waitFor(() => {

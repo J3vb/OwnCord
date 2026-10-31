@@ -101,11 +101,15 @@ export async function freshSendNotification(): Promise<SendNotificationMock> {
   return sendNotification as SendNotificationMock;
 }
 
+export function setAlertPrefs(desktop: boolean, flash: boolean, sounds: boolean): void {
+  testPrefs.set("desktopNotifications", desktop);
+  testPrefs.set("flashTaskbar", flash);
+  testPrefs.set("notificationSounds", sounds);
+}
+
 /** Desktop notifications on; taskbar flash and sounds off. */
 export function armDesktopPrefs(): void {
-  testPrefs.set("desktopNotifications", true);
-  testPrefs.set("flashTaskbar", false);
-  testPrefs.set("notificationSounds", false);
+  setAlertPrefs(true, false, false);
 }
 
 export async function armDesktopNotifications(): Promise<SendNotificationMock> {

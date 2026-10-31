@@ -12,6 +12,7 @@ import {
   freshSendNotification,
   armDesktopPrefs,
   makePayload,
+  setAlertPrefs,
   notifyAs,
   useNotificationsHarness,
 } from "../../helpers/notificationsHarness";
@@ -408,10 +409,7 @@ describe("notifyIncomingMessage", () => {
       vi.spyOn(document, "hasFocus").mockReturnValue(true);
       channelsStore.setState((prev) => ({ ...prev, activeChannelId: 2 }));
 
-      testPrefs.set("desktopNotifications", true);
-      testPrefs.set("flashTaskbar", true);
-      testPrefs.set("notificationSounds", false);
-
+      setAlertPrefs(true, true, false);
       notifyIncomingMessage(makePayload({ channel_id: 1 }));
 
       await new Promise((r) => setTimeout(r, 50));
@@ -484,10 +482,7 @@ describe("notifyIncomingMessage", () => {
     it("fires ONLY notification sound when other toggles are off", async () => {
       const sendNotification = await freshSendNotification();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", false);
-      testPrefs.set("notificationSounds", true);
-
+      setAlertPrefs(false, false, true);
       mockOscillator.start.mockClear();
 
       notifyIncomingMessage(makePayload());
@@ -504,10 +499,7 @@ describe("notifyIncomingMessage", () => {
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
       mockOscillator.start.mockClear();
 
-      testPrefs.set("desktopNotifications", false);
-      testPrefs.set("flashTaskbar", true);
-      testPrefs.set("notificationSounds", false);
-
+      setAlertPrefs(false, true, false);
       notifyIncomingMessage(makePayload());
 
       await vi.waitFor(() => {
