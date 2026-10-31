@@ -67,8 +67,8 @@ vi.mock("../../src/features/whats-new/changelogSource", () => ({
   loadChangelog: () => Promise.resolve([]),
 }));
 
-import { buildAboutTab } from "@components/settings/AboutTab";
-import { buildAdvancedTab } from "@components/settings/AdvancedTab";
+import { buildAboutTab } from "../../src/features/settings/AboutTab";
+import { buildAdvancedTab } from "../../src/features/settings/AdvancedTab";
 
 const ADVANCED_LABELS = ["Launch on Login", "Close to Tray", "Start Minimized"];
 

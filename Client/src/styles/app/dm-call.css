@@ -1,4 +1,4 @@
-/* ── DM call panel (components/DmCallPanel.ts) ─────────────────────────── */
+/* ── DM call panel (features/direct-messages/DmCallPanel.ts) ──────────────── */
 
 /* Sits between the chat header and the messages; the chat stays usable
    below it. Status text uses the qualified --text-* tokens, and the speaking

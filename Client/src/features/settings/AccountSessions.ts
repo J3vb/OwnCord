@@ -9,14 +9,9 @@ import { sessionDeviceLabel } from "@lib/net/sessionNotice";
 import { formatMessageTimestamp } from "@lib/text/formatting";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, saveUserStatus } from "@lib/presence/userStatus";
-import type { SettingsOverlayOptions } from "../SettingsOverlay";
+import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { platformText, outcomeEl } from "./helpers";
-import {
-  createStatusRow,
-  createRevealToggle,
-  setStatusIcon,
-  createDisclosure,
-} from "../../features/settings/status";
+import { createStatusRow, createRevealToggle, setStatusIcon, createDisclosure } from "./status";
 import { accountText as t } from "../../i18n/account";
 import { createLogger } from "@lib/logger";
 

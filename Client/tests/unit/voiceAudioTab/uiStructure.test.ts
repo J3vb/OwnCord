@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/voiceAudioTabMocks";
-import { createVoiceAudioTab } from "@components/settings/VoiceAudioTab";
+import { createVoiceAudioTab } from "../../../src/features/settings/VoiceAudioTab";
 import { vadThreshold } from "@lib/voice/audioPipeline";
 import { AUTO_MAX_THRESHOLD } from "@lib/voice/noiseFloor";
 import {

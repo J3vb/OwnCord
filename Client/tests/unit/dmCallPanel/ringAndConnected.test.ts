@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/dmCallPanelMocks";
-import { absentMembers, deriveCallView } from "../../../src/components/DmCallPanel";
+import { absentMembers, deriveCallView } from "../../../src/features/direct-messages/DmCallPanel";
 import {
   voiceStore,
   setPeerVerification,

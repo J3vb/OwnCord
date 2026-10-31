@@ -4,7 +4,7 @@ const setZoom = vi.hoisted(() => vi.fn<(scale: number) => Promise<boolean>>());
 vi.mock("../../src/platform/desktop", () => ({ desktop: { window: { setZoom } } }));
 
 import { expectConsole } from "../helpers/console";
-import { buildAppearanceTab } from "@components/settings/AppearanceTab";
+import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { appZoom } from "../../src/features/zoom";
 
 function build(): { tab: HTMLElement; ac: AbortController } {

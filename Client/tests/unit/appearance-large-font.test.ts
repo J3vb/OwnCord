@@ -29,7 +29,7 @@ vi.mock("@lib/ui/osMotion", () => ({
 }));
 
 import { applyStoredAppearance } from "@lib/prefs/appearance";
-import { buildAccessibilityTab } from "@components/settings/AccessibilityTab";
+import { buildAccessibilityTab } from "../../src/features/settings/AccessibilityTab";
 
 function fontSize(): string {
   return document.documentElement.style.getPropertyValue("--font-size");
@@ -156,7 +156,7 @@ describe("the Appearance slider's label shows the effective size", () => {
     localStorage.setItem("owncord:settings:fontSize", "14");
     localStorage.setItem("owncord:settings:largeFont", "true");
 
-    const { buildAppearanceTab } = await import("@components/settings/AppearanceTab");
+    const { buildAppearanceTab } = await import("../../src/features/settings/AppearanceTab");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const ac = new AbortController();

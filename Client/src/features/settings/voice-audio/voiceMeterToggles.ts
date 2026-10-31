@@ -19,7 +19,7 @@ import {
 import { createMicProcessor } from "@lib/voice/micProcessor";
 import { Track, type AudioProcessorOptions } from "livekit-client";
 import { settingsText as t } from "../../../i18n/settings";
-import { setStatusIcon } from "../../../features/settings/status";
+import { setStatusIcon } from "../status";
 import { log, nativeTestAudio } from "./voiceTabShared";
 import type { VoiceTabScope } from "./voiceTabScope";
 

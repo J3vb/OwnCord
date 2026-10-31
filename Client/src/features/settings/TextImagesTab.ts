@@ -3,12 +3,9 @@
  */
 
 import { appendChildren, createElement, setText } from "@lib/dom";
-import { resetExternalConsent } from "../../features/content-consent/external";
+import { resetExternalConsent } from "../content-consent/external";
 import { externalConsentText } from "../../i18n/externalConsent";
-import {
-  composerButtonPrefKey,
-  type ComposerButton,
-} from "../../features/messaging/composerButtons";
+import { composerButtonPrefKey, type ComposerButton } from "../messaging/composerButtons";
 import { appendToggleRows, platformText } from "./helpers";
 import { settingsText as t } from "../../i18n/settings";
 

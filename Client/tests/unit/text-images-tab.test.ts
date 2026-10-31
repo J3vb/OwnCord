@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { buildTextImagesTab } from "@components/settings/TextImagesTab";
+import { buildTextImagesTab } from "../../src/features/settings/TextImagesTab";
 
 describe("TextImagesTab", () => {
   let container: HTMLDivElement;

@@ -17,7 +17,7 @@ import { settingsText as t } from "../../i18n/settings";
 
 const log = createLogger("UpdateCheckRow");
 
-// The shared field-message classes (login.css), as components/settings/helpers
+// The shared field-message classes (login.css), as features/settings/helpers
 // `showOutcome` uses them; a lower layer cannot import that UI module.
 const OUTCOME_CLASS = {
   error: "form-error",

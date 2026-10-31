@@ -8,14 +8,11 @@ import { createLogger } from "@lib/logger";
 import { clearPendingPersistedLogs } from "@lib/logPersistence";
 import { desktop } from "../../platform/desktop";
 import type { WindowPrefName, WindowPrefsState } from "../../platform/contracts/windowPrefs";
-import {
-  clearAttachmentCaches,
-  clearExternalImageCache,
-} from "../../features/messaging/content/attachments";
-import { clearEmbedCaches } from "../../features/messaging/content/embeds";
-import { clearMediaCaches } from "../../features/messaging/content/media";
+import { clearAttachmentCaches, clearExternalImageCache } from "../messaging/content/attachments";
+import { clearEmbedCaches } from "../messaging/content/embeds";
+import { clearMediaCaches } from "../messaging/content/media";
 import { appendToggleRows, createToggle } from "./helpers";
-import { isAndroidApp } from "../../features/voice/native/platform";
+import { isAndroidApp } from "../voice/native/platform";
 import { removeStored, storedKeys } from "@lib/prefs/preferences";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
@@ -23,7 +20,7 @@ import { settingsText as t } from "../../i18n/settings";
 import {
   CONFIRM_SERVER_SWITCH_DEFAULT,
   CONFIRM_SERVER_SWITCH_PREF,
-} from "../../features/server-rail/switchConfirmPref";
+} from "../server-rail/switchConfirmPref";
 
 const log = createLogger("AdvancedTab");
 const IMAGE_CACHE_DELETE_BLOCK_TIMEOUT_MS = 1000;

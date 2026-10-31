@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, clearChildren, setText } from "@lib/dom";
 import { appendToggleRows, platformText, savePref } from "./helpers";
-import { isAndroidApp } from "../../features/voice/native/platform";
+import { isAndroidApp } from "../voice/native/platform";
 import { playNotificationSound } from "@lib/media/notificationSound";
 import {
   APP_SOUNDS_VOLUME_KEY,
@@ -12,7 +12,7 @@ import {
   loadAppSoundsGain,
   type SoundSwitch,
 } from "@lib/prefs/soundPrefs";
-import { setStatusIcon, statusIcon, type StatusKind } from "../../features/settings/status";
+import { setStatusIcon, statusIcon, type StatusKind } from "./status";
 import {
   CHANNEL_MUTE_CHANGED,
   getChannelMute,
@@ -21,7 +21,7 @@ import {
   unmuteChannel,
 } from "@lib/prefs/channelMutes";
 import { Disposable } from "@lib/disposable";
-import { clockAndDate } from "../../features/channels/muteMenu";
+import { clockAndDate } from "../channels/muteMenu";
 import {
   NOTIFICATION_LEVELS,
   getGlobalNotificationLevel,

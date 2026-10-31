@@ -16,7 +16,7 @@ vi.mock("../../src/platform/desktop", () => ({
   desktop: { notifier: mockNotifier },
 }));
 
-import { buildNotificationsTab } from "@components/settings/NotificationsTab";
+import { buildNotificationsTab } from "../../src/features/settings/NotificationsTab";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
 import {
   getGlobalNotificationLevel,

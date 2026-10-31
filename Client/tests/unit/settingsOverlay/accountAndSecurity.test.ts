@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/settingsOverlayMocks";
-import { createSettingsOverlay } from "@components/SettingsOverlay";
+import { createSettingsOverlay } from "../../../src/features/settings/SettingsOverlay";
 import { buildMyUploadsTab } from "../../../src/features/uploads/myUploadsTab";
 import { ApiClientError } from "../../../src/lib/api";
 import {

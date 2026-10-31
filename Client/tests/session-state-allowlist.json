@@ -80,19 +80,19 @@
       "reason": "WeakMap keyed by live elements"
     },
     {
-      "file": "components/settings/comboCapture.ts",
+      "file": "features/settings/comboCapture.ts",
       "binding": "activeCapture",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the settings page's AbortSignal"
     },
     {
-      "file": "components/settings/globalKeysWatch.ts",
+      "file": "features/settings/globalKeysWatch.ts",
       "binding": "hubs",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the owning AbortSignal"
     },
     {
-      "file": "components/settings/settingsSearch.ts",
+      "file": "features/settings/settingsSearch.ts",
       "binding": "searchTextCache",
       "category": "pure-cache",
       "reason": "Derived from the static settings catalog"
