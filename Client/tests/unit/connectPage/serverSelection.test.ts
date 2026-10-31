@@ -1,9 +1,19 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/connectPageMocks";
 import { createConnectPage } from "../../../src/pages/ConnectPage";
 import type { SimpleProfile } from "../../../src/pages/ConnectPage";
 import { uiStore, setTransientError } from "../../../src/stores/ui.store";
-import { makeCallbacks, testProfiles } from "../../helpers/connectPageHarness";
+import {
+  makeCallbacks,
+  useConnectPageContainer,
+  savedCredential,
+  mountPage,
+  qs,
+  submitForm,
+  waitForCall,
+  pendingLogin,
+  mountTotp,
+} from "../../helpers/connectPageHarness";
 
 vi.mock("../../../src/lib/net/credentials", () => mocks.netCredentialsMock());
 vi.mock("../../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
@@ -13,38 +23,24 @@ const { mockLoadCredential } = mocks;
 
 describe("ConnectPage", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    mockLoadCredential.mockReset();
-    mockLoadCredential.mockResolvedValue(null);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useConnectPageContainer((mounted) => {
+    container = mounted;
   });
 
   it("disables form inputs during loading state", async () => {
-    let resolveLogin: () => void;
-    const loginPromise = new Promise<void>((resolve) => {
-      resolveLogin = resolve;
-    });
-    const onLogin = vi.fn().mockReturnValue(loginPromise);
+    const { onLogin, resolveLogin } = pendingLogin();
 
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
 
     hostInput.value = "localhost:8443";
     usernameInput.value = "testuser";
     passwordInput.value = "password123";
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
     await vi.waitFor(() => {
       expect(hostInput.disabled).toBe(true);
@@ -52,14 +48,13 @@ describe("ConnectPage", () => {
       expect(passwordInput.disabled).toBe(true);
     });
 
-    resolveLogin!();
+    resolveLogin();
 
     page.destroy?.();
   });
 
   it("cleans up on destroy", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     expect(container.querySelector(".connect-page")).not.toBeNull();
 
@@ -70,28 +65,23 @@ describe("ConnectPage", () => {
   // --- selectServer / auto-login flow ---
 
   it("selectServer sets host and loads credentials asynchronously", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    mockLoadCredential.mockResolvedValue(savedCredential());
+    const page = mountPage(container);
 
     page.selectServer("localhost:8443", "initialuser");
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
     expect(hostInput.value).toBe("localhost:8443");
 
     // Wait for async credential loading
     await vi.waitFor(() => {
-      const usernameInput = container.querySelector("#username") as HTMLInputElement;
+      const usernameInput = qs<HTMLInputElement>(container, "#username");
       expect(usernameInput.value).toBe("saveduser");
     });
 
     // The field reads as filled so the "Remember password" tick keeps its
     // promise, but it holds a placeholder — the plaintext never leaves Rust.
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     expect(passwordInput.value).not.toBe("");
     expect(passwordInput.value).not.toBe("savedpass");
     expect(page.isUsingSavedPassword()).toBe(true);
@@ -101,13 +91,8 @@ describe("ConnectPage", () => {
 
   it("selectServer does not load the stored credential for a profile that opted out of remembering", async () => {
     mockLoadCredential.mockClear();
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    mockLoadCredential.mockResolvedValue(savedCredential());
+    const page = mountPage(container);
 
     page.selectServer("localhost:8443", "initialuser", false, false);
     await Promise.resolve();
@@ -120,24 +105,22 @@ describe("ConnectPage", () => {
   });
 
   it("selectServer sets credentials without password when username is provided", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.selectServer("localhost:8443", "myuser");
 
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
     expect(usernameInput.value).toBe("myuser");
 
     page.destroy?.();
   });
 
   it("selectServer without username does not set credentials", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.selectServer("localhost:8443");
 
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
     expect(usernameInput.value).toBe("");
 
     page.destroy?.();
@@ -150,19 +133,18 @@ describe("ConnectPage", () => {
       return { username: "staleuser", token: "tok", password: "stalepass" };
     });
 
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.selectServer("localhost:8443");
     // Immediately change the host to something else
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
     hostInput.value = "other-server:8443";
 
     // Wait for async to finish
     await new Promise((r) => setTimeout(r, 50));
 
     // Username should NOT be set because host changed
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
     expect(usernameInput.value).toBe("");
 
     page.destroy?.();
@@ -170,14 +152,13 @@ describe("ConnectPage", () => {
 
   it("selectServer handles credential load failure gracefully", async () => {
     mockLoadCredential.mockRejectedValue(new Error("Tauri not available"));
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // Should not throw
     page.selectServer("localhost:8443");
     await new Promise((r) => setTimeout(r, 20));
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
     expect(hostInput.value).toBe("localhost:8443");
 
     page.destroy?.();
@@ -186,12 +167,11 @@ describe("ConnectPage", () => {
   // --- showConnecting / showAutoConnecting ---
 
   it("showConnecting disables form and shows connecting text", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.showConnecting();
 
-    const submitBtn = container.querySelector(".btn-primary") as HTMLButtonElement;
+    const submitBtn = qs<HTMLButtonElement>(container, ".btn-primary");
     expect(submitBtn.disabled).toBe(true);
     const btnText = container.querySelector(".btn-text")!;
     expect(btnText.textContent).toContain("Connecting");
@@ -204,8 +184,7 @@ describe("ConnectPage", () => {
 
   it("showAutoConnecting shows overlay with server name and calls cancel callback", () => {
     const onAutoLoginCancel = vi.fn();
-    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onAutoLoginCancel });
 
     page.showAutoConnecting("My Server");
 
@@ -216,7 +195,7 @@ describe("ConnectPage", () => {
     expect(serverName.textContent).toBe("My Server");
 
     // Click cancel
-    const cancelBtn = container.querySelector(".auto-connect-cancel") as HTMLElement;
+    const cancelBtn = qs<HTMLElement>(container, ".auto-connect-cancel");
     cancelBtn.click();
 
     expect(onAutoLoginCancel).toHaveBeenCalledTimes(1);
@@ -229,8 +208,7 @@ describe("ConnectPage", () => {
 
   it("showServerWait shows the waiting line with a keyboard-reachable Cancel", () => {
     const onAutoLoginCancel = vi.fn();
-    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onAutoLoginCancel });
 
     page.showServerWait("Home Server", "localhost:8443");
 
@@ -239,7 +217,7 @@ describe("ConnectPage", () => {
     expect(wait.getAttribute("role")).toBe("status");
     expect(wait.textContent).toContain("Waiting for Home Server…");
     // The form stays usable beneath it: the wait is not a blocking overlay.
-    expect((container.querySelector("#host") as HTMLInputElement).disabled).toBe(false);
+    expect(qs<HTMLInputElement>(container, "#host").disabled).toBe(false);
 
     const cancel = wait.querySelector<HTMLButtonElement>("button")!;
     expect(cancel.textContent).toBe("Cancel");
@@ -258,11 +236,10 @@ describe("ConnectPage", () => {
 
   it("typing into the form cancels the server wait", () => {
     const onAutoLoginCancel = vi.fn();
-    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onAutoLoginCancel });
     page.showServerWait("Home Server", "localhost:8443");
 
-    const username = container.querySelector("#username") as HTMLInputElement;
+    const username = qs<HTMLInputElement>(container, "#username");
     username.value = "a";
     username.dispatchEvent(new Event("input", { bubbles: true }));
     username.value = "al";
@@ -299,8 +276,7 @@ describe("ConnectPage", () => {
 
   it("toggling a checkbox leaves the server wait running", () => {
     const onAutoLoginCancel = vi.fn();
-    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onAutoLoginCancel });
     page.showServerWait("Home Server", "localhost:8443");
 
     for (const id of ["#auto-connect", "#remember-password"]) {
@@ -315,8 +291,7 @@ describe("ConnectPage", () => {
 
   it("hideServerWait hides the waiting line without cancelling", () => {
     const onAutoLoginCancel = vi.fn();
-    const page = createConnectPage(makeCallbacks({ onAutoLoginCancel }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onAutoLoginCancel });
     page.showServerWait("Home Server", "localhost:8443");
 
     page.hideServerWait();
@@ -330,8 +305,7 @@ describe("ConnectPage", () => {
   // --- refreshProfiles ---
 
   it("refreshProfiles re-renders the server profile list", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     expect(container.querySelectorAll(".server-item").length).toBe(1);
 
@@ -348,8 +322,7 @@ describe("ConnectPage", () => {
   // --- updateHealthStatus ---
 
   it("updateHealthStatus updates health elements for a known host", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.updateHealthStatus("localhost:8443", {
       status: "online",
@@ -371,13 +344,12 @@ describe("ConnectPage", () => {
   // --- getRememberPassword / getPassword ---
 
   it("getRememberPassword returns checkbox state", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // Default: Remember password starts unticked.
     expect(page.getRememberPassword()).toBe(false);
 
-    const checkbox = container.querySelector("#remember-password") as HTMLInputElement;
+    const checkbox = qs<HTMLInputElement>(container, "#remember-password");
     checkbox.checked = true;
     expect(page.getRememberPassword()).toBe(true);
 
@@ -387,13 +359,12 @@ describe("ConnectPage", () => {
   // --- getAutoConnect ---
 
   it("getAutoConnect returns checkbox state", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // Default: Auto connect (stay signed in) starts ticked.
     expect(page.getAutoConnect()).toBe(true);
 
-    const checkbox = container.querySelector("#auto-connect") as HTMLInputElement;
+    const checkbox = qs<HTMLInputElement>(container, "#auto-connect");
     checkbox.checked = false;
     expect(page.getAutoConnect()).toBe(false);
     checkbox.checked = true;
@@ -403,11 +374,10 @@ describe("ConnectPage", () => {
   });
 
   it("ticking auto-connect no longer forces or disables remember password", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const autoConnectCheckbox = container.querySelector("#auto-connect") as HTMLInputElement;
-    const rememberCheckbox = container.querySelector("#remember-password") as HTMLInputElement;
+    const autoConnectCheckbox = qs<HTMLInputElement>(container, "#auto-connect");
+    const rememberCheckbox = qs<HTMLInputElement>(container, "#remember-password");
 
     autoConnectCheckbox.checked = false;
     autoConnectCheckbox.dispatchEvent(new Event("change"));
@@ -422,11 +392,10 @@ describe("ConnectPage", () => {
   });
 
   it("unticking auto-connect leaves remember password as the user set it", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const autoConnectCheckbox = container.querySelector("#auto-connect") as HTMLInputElement;
-    const rememberCheckbox = container.querySelector("#remember-password") as HTMLInputElement;
+    const autoConnectCheckbox = qs<HTMLInputElement>(container, "#auto-connect");
+    const rememberCheckbox = qs<HTMLInputElement>(container, "#remember-password");
 
     rememberCheckbox.checked = true;
     autoConnectCheckbox.checked = false;
@@ -450,8 +419,8 @@ describe("ConnectPage", () => {
       },
     ];
     const boxes = () => ({
-      auto: (container.querySelector("#auto-connect") as HTMLInputElement).checked,
-      remember: (container.querySelector("#remember-password") as HTMLInputElement).checked,
+      auto: qs<HTMLInputElement>(container, "#auto-connect").checked,
+      remember: qs<HTMLInputElement>(container, "#remember-password").checked,
     });
 
     it.each([
@@ -464,7 +433,7 @@ describe("ConnectPage", () => {
       page.mount(container);
       // Start from the opposite state so a no-op would be caught.
       page.selectServer("other:1", undefined, !auto, !remember);
-      (container.querySelector(".server-item") as HTMLElement).click();
+      qs<HTMLElement>(container, ".server-item").click();
       expect(boxes()).toEqual({ auto, remember });
       page.destroy?.();
     });
@@ -485,12 +454,12 @@ describe("ConnectPage", () => {
       const page = createConnectPage(makeCallbacks(), savedProfile(false, false));
       page.mount(container);
       expect(boxes()).toEqual({ auto: true, remember: false });
-      const host = container.querySelector("#host") as HTMLInputElement;
+      const host = qs<HTMLInputElement>(container, "#host");
       host.value = "saved.example:8443";
       host.dispatchEvent(new Event("input"));
       expect(boxes()).toEqual({ auto: false, remember: false });
       // The user's later edit is not overridden by further typing in the host.
-      (container.querySelector("#auto-connect") as HTMLInputElement).checked = true;
+      qs<HTMLInputElement>(container, "#auto-connect").checked = true;
       host.dispatchEvent(new Event("input"));
       expect(boxes()).toEqual({ auto: true, remember: false });
       page.destroy?.();
@@ -499,7 +468,7 @@ describe("ConnectPage", () => {
     it("a host typed before profiles load takes the saved flags when they arrive", () => {
       const page = createConnectPage(makeCallbacks(), []);
       page.mount(container);
-      const host = container.querySelector("#host") as HTMLInputElement;
+      const host = qs<HTMLInputElement>(container, "#host");
       host.value = "saved.example:8443";
       host.dispatchEvent(new Event("input"));
       expect(boxes()).toEqual({ auto: true, remember: false });
@@ -509,8 +478,7 @@ describe("ConnectPage", () => {
     });
 
     it("a host with no profile gets the defaults", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
       page.selectServer("other:1", undefined, false, true);
       page.selectServer("brand-new:1");
       expect(boxes()).toEqual({ auto: true, remember: false });
@@ -519,10 +487,9 @@ describe("ConnectPage", () => {
   });
 
   it("getPassword returns password input value", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     passwordInput.value = "mypassword";
     expect(page.getPassword()).toBe("mypassword");
 
@@ -533,11 +500,10 @@ describe("ConnectPage", () => {
 
   describe("incompatible state", () => {
     it("shows the notice for a selected client-older server, naming the client", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       page.updateCompatibility("localhost:8443", "client-older", 2);
-      (container.querySelector(".server-item") as HTMLElement).click();
+      qs<HTMLElement>(container, ".server-item").click();
 
       const notice = container.querySelector(".incompatible-notice")!;
       expect(notice.classList.contains("visible")).toBe(true);
@@ -548,8 +514,7 @@ describe("ConnectPage", () => {
     });
 
     it("mounts the notice inside the form panel, directly above the form", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       // A direct child of the flex-row .connect-page would claim its own column.
       const notice = container.querySelector(".incompatible-notice")!;
@@ -560,11 +525,10 @@ describe("ConnectPage", () => {
     });
 
     it("keeps the notice hidden for a compatible server", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       page.updateCompatibility("localhost:8443", "compatible", 1);
-      (container.querySelector(".server-item") as HTMLElement).click();
+      qs<HTMLElement>(container, ".server-item").click();
 
       expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
         false,
@@ -574,8 +538,7 @@ describe("ConnectPage", () => {
     });
 
     it("badges a background-probe server without showing the notice", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       // The 15 s background probe only reaches updateCompatibility — it must
       // never raise the notice for a profile the user has not selected.
@@ -592,11 +555,10 @@ describe("ConnectPage", () => {
     });
 
     it("gives server-older its own wording and no client-update exit", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       page.updateCompatibility("localhost:8443", "server-older", 0);
-      (container.querySelector(".server-item") as HTMLElement).click();
+      qs<HTMLElement>(container, ".server-item").click();
 
       const notice = container.querySelector(".incompatible-notice")!;
       expect(notice.classList.contains("visible")).toBe(true);
@@ -609,11 +571,10 @@ describe("ConnectPage", () => {
 
     it("the update exit asks the host to mount the updater", () => {
       const onUpdateClient = vi.fn();
-      const page = createConnectPage(makeCallbacks({ onUpdateClient }), testProfiles);
-      page.mount(container);
+      const page = mountPage(container, { onUpdateClient });
 
       page.showIncompatible("localhost:8443", 2, 1);
-      (container.querySelector(".incompatible-notice-update") as HTMLElement).click();
+      qs<HTMLElement>(container, ".incompatible-notice-update").click();
 
       expect(onUpdateClient).toHaveBeenCalledWith("localhost:8443");
 
@@ -621,8 +582,7 @@ describe("ConnectPage", () => {
     });
 
     it("Choose another server clears the protocol-refusal error", async () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       setTransientError("Server protocol is newer than this client");
       await vi.waitFor(() =>
@@ -631,15 +591,14 @@ describe("ConnectPage", () => {
       page.showIncompatible("localhost:8443", 2, 1);
       expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
 
-      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      qs<HTMLElement>(container, ".incompatible-notice-leave").click();
       expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(false);
 
       page.destroy?.();
     });
 
     it("Choose another server keeps an unrelated error", async () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       setTransientError("Server protocol is newer than this client");
       await vi.waitFor(() =>
@@ -649,7 +608,7 @@ describe("ConnectPage", () => {
       // A later, unrelated failure replaces the refusal banner.
       page.showError("Invalid username or password");
 
-      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      qs<HTMLElement>(container, ".incompatible-notice-leave").click();
       const banner = container.querySelector(".error-banner")!;
       expect(banner.classList.contains("visible")).toBe(true);
       expect(banner.textContent).toContain("Invalid username or password");
@@ -658,30 +617,28 @@ describe("ConnectPage", () => {
     });
 
     it("the leave exit dismisses the notice and leaves the server rows usable", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       page.showIncompatible("localhost:8443", 2, 1);
       expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
         true,
       );
 
-      (container.querySelector(".incompatible-notice-leave") as HTMLElement).click();
+      qs<HTMLElement>(container, ".incompatible-notice-leave").click();
       expect(container.querySelector(".incompatible-notice")!.classList.contains("visible")).toBe(
         false,
       );
 
       // The list is untouched: clicking the row still fills the form.
-      (container.querySelector(".server-item") as HTMLElement).click();
-      const hostInput = container.querySelector("#host") as HTMLInputElement;
+      qs<HTMLElement>(container, ".server-item").click();
+      const hostInput = qs<HTMLInputElement>(container, "#host");
       expect(hostInput.value).toBe("localhost:8443");
 
       page.destroy?.();
     });
 
     it("renders the notice for a WS-refusal host via showIncompatible", () => {
-      const page = createConnectPage(makeCallbacks(), testProfiles);
-      page.mount(container);
+      const page = mountPage(container);
 
       page.showIncompatible("server-a.example:8443", 2, 1);
 
@@ -698,8 +655,7 @@ describe("ConnectPage", () => {
   it("shows pending transient error on mount and clears it", () => {
     setTransientError("Already connected from another client");
 
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     const errorBanner = container.querySelector(".error-banner")!;
     expect(errorBanner.classList.contains("visible")).toBe(true);
@@ -715,8 +671,7 @@ describe("ConnectPage", () => {
   // warning can set transientError AFTER this page is already mounted — a
   // one-time getState() read at mount would silently drop it.
   it("shows a transient error set after mount, not just one already pending at mount time", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // No error yet at mount time.
     expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(false);
@@ -738,8 +693,7 @@ describe("ConnectPage", () => {
   // only happens after a later logout, where it would misleadingly read as a
   // fresh login failure.
   it("clears a transient error on destroy so it cannot resurface as a bogus login error later", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // Set while mounted but not yet observed (no flush before destroy) —
     // mirrors a background failure landing just as the page is torn down.
@@ -753,20 +707,13 @@ describe("ConnectPage", () => {
 
   it("TOTP submit calls onTotpSubmit with 6-digit code", async () => {
     const onTotpSubmit = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onTotpSubmit }), testProfiles);
-    page.mount(container);
-
-    page.showTotp();
-
-    const totpInput = container.querySelector(".totp-overlay input") as HTMLInputElement;
+    const { page, totpInput } = mountTotp(container, { onTotpSubmit });
     totpInput.value = "123456";
 
-    const verifyBtn = container.querySelector(".totp-overlay .btn-primary") as HTMLButtonElement;
+    const verifyBtn = qs<HTMLButtonElement>(container, ".totp-overlay .btn-primary");
     verifyBtn.click();
 
-    await vi.waitFor(() => {
-      expect(onTotpSubmit).toHaveBeenCalledWith("123456");
-    });
+    await waitForCall(onTotpSubmit, "123456");
 
     page.destroy?.();
   });

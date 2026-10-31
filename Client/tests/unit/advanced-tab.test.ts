@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const {
   mockReadDir,
@@ -139,9 +140,28 @@ import {
   settleNotificationLevelDefault,
 } from "@lib/prefs/notificationLevel";
 
+function mountTab(container: HTMLElement): HTMLElement {
+  const section = buildAdvancedTab(new AbortController().signal);
+  container.appendChild(section);
+  return section;
+}
+
+function mountButton(container: HTMLElement, label: string, index = 0): HTMLButtonElement {
+  mountTab(container);
+  return Array.from(container.querySelectorAll<HTMLButtonElement>("button.ac-btn")).filter(
+    (b) => b.textContent === label,
+  )[index] as HTMLButtonElement;
+}
+
+function expectRuntimeCacheClears(times: number): void {
+  expect(mockClearAttachmentCaches).toHaveBeenCalledTimes(times);
+  expect(mockClearEmbedCaches).toHaveBeenCalledTimes(times);
+  expect(mockClearMediaCaches).toHaveBeenCalledTimes(times);
+  expect(mockClearExternalImageCache).toHaveBeenCalledTimes(times);
+}
+
 describe("AdvancedTab — Clear All Cache", () => {
   let container: HTMLDivElement;
-  const ac = new AbortController();
 
   beforeEach(() => {
     container = document.createElement("div");
@@ -167,22 +187,8 @@ describe("AdvancedTab — Clear All Cache", () => {
     vi.useRealTimers();
   });
 
-  function getClearAllBtn(): HTMLButtonElement {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const buttons = container.querySelectorAll("button.ac-btn");
-    const btn = Array.from(buttons).find(
-      (b) => b.textContent === "Clear & Restart",
-    ) as HTMLButtonElement;
-    expect(btn).toBeDefined();
-    return btn;
-  }
-
   function getActionBtn(label: string): HTMLButtonElement {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const buttons = container.querySelectorAll("button.ac-btn");
-    const btn = Array.from(buttons).find((b) => b.textContent === label) as HTMLButtonElement;
+    const btn = mountButton(container, label);
     expect(btn).toBeDefined();
     return btn;
   }
@@ -201,7 +207,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     localStorage.setItem("owncord:settings:fontSize", "16");
     sessionStorage.setItem("some-session-key", "value");
 
-    const btn = getClearAllBtn();
+    const btn = getActionBtn("Clear & Restart");
 
     // First click — confirmation
     btn.click();
@@ -223,7 +229,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     localStorage.setItem("owncord:credential:localhost", JSON.stringify({ user: "test" }));
     localStorage.setItem("owncord:settings:compactMode", "false");
 
-    const btn = getClearAllBtn();
+    const btn = getActionBtn("Clear & Restart");
 
     btn.click();
     btn.click();
@@ -241,7 +247,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     );
     localStorage.setItem("owncord:settings:accentColor", '"#00c8ff"');
 
-    const btn = getClearAllBtn();
+    const btn = getActionBtn("Clear & Restart");
 
     btn.click();
     btn.click();
@@ -259,7 +265,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     setServerNotificationLevel("nothing");
     localStorage.setItem("owncord:theme:active", "neon-glow");
 
-    const btn = getClearAllBtn();
+    const btn = getActionBtn("Clear & Restart");
     btn.click();
     btn.click();
     await flush();
@@ -271,7 +277,7 @@ describe("AdvancedTab — Clear All Cache", () => {
   });
 
   it("renders two-step confirmation for Clear All", () => {
-    const btn = getClearAllBtn();
+    const btn = getActionBtn("Clear & Restart");
     expect(btn.textContent).toBe("Clear & Restart");
 
     btn.click();
@@ -285,10 +291,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     btn.click();
     await flush();
 
-    expect(mockClearAttachmentCaches).toHaveBeenCalledTimes(1);
-    expect(mockClearEmbedCaches).toHaveBeenCalledTimes(1);
-    expect(mockClearMediaCaches).toHaveBeenCalledTimes(1);
-    expect(mockClearExternalImageCache).toHaveBeenCalledTimes(1);
+    expectRuntimeCacheClears(1);
     expect(btn.textContent).toBe("Cleared!");
   });
 
@@ -301,10 +304,7 @@ describe("AdvancedTab — Clear All Cache", () => {
     await vi.waitFor(() => {
       expect(btn.textContent).toBe("Cleared!");
     });
-    expect(mockClearAttachmentCaches).toHaveBeenCalledTimes(1);
-    expect(mockClearEmbedCaches).toHaveBeenCalledTimes(1);
-    expect(mockClearMediaCaches).toHaveBeenCalledTimes(1);
-    expect(mockClearExternalImageCache).toHaveBeenCalledTimes(1);
+    expectRuntimeCacheClears(1);
   });
 
   it("shows Failed when image cache deletion remains blocked", async () => {
@@ -316,21 +316,13 @@ describe("AdvancedTab — Clear All Cache", () => {
     await vi.advanceTimersByTimeAsync(1000);
 
     expect(btn.textContent).toBe("Failed");
-    expect(mockClearAttachmentCaches).not.toHaveBeenCalled();
-    expect(mockClearEmbedCaches).not.toHaveBeenCalled();
-    expect(mockClearMediaCaches).not.toHaveBeenCalled();
-    expect(mockClearExternalImageCache).not.toHaveBeenCalled();
+    expectRuntimeCacheClears(0);
     vi.useRealTimers();
   });
 
   it("treats a missing log directory as an already-cleared success", async () => {
     mockReadDir.mockRejectedValueOnce(new Error("No such file or directory"));
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 1);
     expect(btn).toBeDefined();
 
     btn.click();
@@ -343,12 +335,7 @@ describe("AdvancedTab — Clear All Cache", () => {
   it("shows Failed when removing existing log files errors", async () => {
     mockReadDir.mockResolvedValueOnce([{ name: "app.jsonl", isDirectory: false }]);
     mockRemove.mockRejectedValueOnce(new Error("Permission denied"));
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 1);
     expect(btn).toBeDefined();
 
     btn.click();
@@ -359,12 +346,7 @@ describe("AdvancedTab — Clear All Cache", () => {
   });
 
   it("clears buffered persisted logs before deleting log files", async () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 1);
 
     btn.click();
 
@@ -378,20 +360,13 @@ describe("AdvancedTab — Clear All Cache", () => {
 describe("AdvancedTab — Toggles & Structure", () => {
   let container: HTMLDivElement;
   const ac = new AbortController();
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((mounted) => {
+    container = mounted;
     localStorage.clear();
   });
 
-  afterEach(() => {
-    container.remove();
-  });
-
   it("renders Developer Mode toggle defaulting to off", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const rows = container.querySelectorAll(".setting-row");
     const devRow = rows[0]!;
@@ -404,8 +379,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 
   it("does not offer a Hardware Acceleration toggle that nothing honours", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const labels = Array.from(container.querySelectorAll(".setting-label")).map(
       (l) => l.textContent,
@@ -414,8 +388,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 
   it("toggles Developer Mode on and persists to localStorage", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const rows = container.querySelectorAll(".setting-row");
     const toggle = rows[0]!.querySelector(".toggle") as HTMLElement;
@@ -433,8 +406,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
   it("restores Developer Mode toggle state from localStorage", () => {
     localStorage.setItem("owncord:settings:developerMode", "true");
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const rows = container.querySelectorAll(".setting-row");
     const toggle = rows[0]!.querySelector(".toggle")!;
@@ -442,8 +414,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 
   it("toggles via keyboard Enter/Space on Developer Mode", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const rows = container.querySelectorAll(".setting-row");
     const toggle = rows[0]!.querySelector(".toggle") as HTMLElement;
@@ -456,8 +427,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 
   it("asks before switching servers by default, and turning it off is stored", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const row = Array.from(container.querySelectorAll(".setting-row")).find(
       (r) => r.querySelector(".setting-label")?.textContent === "Ask before switching servers",
@@ -471,8 +441,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
   it("shows the switch question as off after Don't ask again", () => {
     localStorage.setItem("owncord:settings:confirmServerSwitch", "false");
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const row = Array.from(container.querySelectorAll(".setting-row")).find(
       (r) => r.querySelector(".setting-label")?.textContent === "Ask before switching servers",
@@ -484,8 +453,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 
   it("renders DevTools button in Debug section", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const devtoolsBtn = Array.from(container.querySelectorAll("button.ac-btn")).find(
       (b) => b.textContent === "Open DevTools",
@@ -495,12 +463,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
   it("DevTools button invokes open_devtools command", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-
-    const devtoolsBtn = Array.from(container.querySelectorAll("button.ac-btn")).find(
-      (b) => b.textContent === "Open DevTools",
-    ) as HTMLButtonElement;
+    const devtoolsBtn = mountButton(container, "Open DevTools");
 
     devtoolsBtn.click();
 
@@ -513,12 +476,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
     const { invoke } = await import("@tauri-apps/api/core");
     (invoke as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("DevTools not supported"));
 
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-
-    const devtoolsBtn = Array.from(container.querySelectorAll("button.ac-btn")).find(
-      (b) => b.textContent === "Open DevTools",
-    ) as HTMLButtonElement;
+    const devtoolsBtn = mountButton(container, "Open DevTools");
 
     // Should not throw
     devtoolsBtn.click();
@@ -556,8 +514,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 
   it("makes the cache actions secondary and marks clear-and-restart destructive", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const byText = (text: string): HTMLButtonElement =>
       Array.from(container.querySelectorAll<HTMLButtonElement>("button.ac-btn")).find(
@@ -578,16 +535,14 @@ describe("AdvancedTab — Toggles & Structure", () => {
   });
 
   it("renders separators between sections", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const separators = container.querySelectorAll(".settings-separator");
     expect(separators.length).toBeGreaterThanOrEqual(2);
   });
 
   it("renders all three cache clear rows", () => {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
 
     const labels = Array.from(container.querySelectorAll(".setting-label")).map(
       (l) => l.textContent,
@@ -600,12 +555,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   it("shows image cache clear success then resets button text after timeout", async () => {
     vi.useFakeTimers();
     deleteDbState.mode = "success";
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearBtns[0] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 0);
 
     btn.click();
     // Flush microtasks for indexedDB mock
@@ -624,12 +574,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   it("shows image cache clear failure then resets button text after timeout", async () => {
     vi.useFakeTimers();
     deleteDbState.mode = "error";
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearBtns[0] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 0);
 
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
@@ -643,12 +588,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
   it("shows log clear success then resets button text after timeout", async () => {
     vi.useFakeTimers();
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearBtns[1] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 1);
 
     btn.click();
     await vi.advanceTimersByTimeAsync(0);
@@ -662,12 +602,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
   it("confirmation dialog resets after 3s timeout without second click", async () => {
     vi.useFakeTimers();
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const buttons = container.querySelectorAll("button.ac-btn");
-    const btn = Array.from(buttons).find(
-      (b) => b.textContent === "Clear & Restart",
-    ) as HTMLButtonElement;
+    const btn = mountButton(container, "Clear & Restart");
 
     btn.click();
     expect(btn.textContent).toBe("Are you sure? Click again");
@@ -681,12 +616,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
   it("Clear All shows Failed when relaunch fails", async () => {
     mockRelaunch.mockRejectedValue(new Error("Relaunch not supported"));
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const buttons = container.querySelectorAll("button.ac-btn");
-    const btn = Array.from(buttons).find(
-      (b) => b.textContent === "Clear & Restart",
-    ) as HTMLButtonElement;
+    const btn = mountButton(container, "Clear & Restart");
 
     btn.click();
     btn.click();
@@ -704,12 +634,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
       { name: "subdir", isDirectory: true },
       { name: "readme.txt", isDirectory: false },
     ]);
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 1);
 
     btn.click();
 
@@ -720,62 +645,14 @@ describe("AdvancedTab — Toggles & Structure", () => {
     expect(mockRemove).toHaveBeenCalledTimes(2);
   });
 
-  it("treats ENOENT as missing-path (no throw)", async () => {
-    mockReadDir.mockRejectedValueOnce(new Error("ENOENT: no such file"));
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
-
-    btn.click();
-
-    await vi.waitFor(() => {
-      expect(btn.textContent).toBe("Cleared!");
-    });
-  });
-
-  it("treats 'cannot find the path' as missing-path (no throw)", async () => {
-    mockReadDir.mockRejectedValueOnce(new Error("cannot find the path"));
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
-
-    btn.click();
-
-    await vi.waitFor(() => {
-      expect(btn.textContent).toBe("Cleared!");
-    });
-  });
-
-  it("treats 'os error 2' as missing-path (no throw)", async () => {
-    mockReadDir.mockRejectedValueOnce(new Error("os error 2"));
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
-
-    btn.click();
-
-    await vi.waitFor(() => {
-      expect(btn.textContent).toBe("Cleared!");
-    });
-  });
-
-  it("treats non-Error throw as missing-path when message matches pattern", async () => {
-    mockReadDir.mockRejectedValueOnce("not found");
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearButtons = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearButtons[1] as HTMLButtonElement;
+  it.each([
+    ["treats ENOENT as missing-path (no throw)", new Error("ENOENT: no such file")],
+    ["treats 'cannot find the path' as missing-path (no throw)", new Error("cannot find the path")],
+    ["treats 'os error 2' as missing-path (no throw)", new Error("os error 2")],
+    ["treats non-Error throw as missing-path when message matches pattern", "not found"],
+  ])("%s", async (_title, rejection) => {
+    mockReadDir.mockRejectedValueOnce(rejection);
+    const btn = mountButton(container, "Clear", 1);
 
     btn.click();
 
@@ -787,12 +664,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   it("handles double onblocked without error", async () => {
     vi.useFakeTimers();
     deleteDbState.mode = "blocked-double";
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearBtns[0] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 0);
 
     btn.click();
     await vi.advanceTimersByTimeAsync(1000);
@@ -805,12 +677,7 @@ describe("AdvancedTab — Toggles & Structure", () => {
   it("handles success followed by blocked (settled guard)", async () => {
     vi.useFakeTimers();
     deleteDbState.mode = "success-then-blocked";
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
-    const clearBtns = Array.from(container.querySelectorAll("button.ac-btn")).filter(
-      (b) => b.textContent === "Clear",
-    );
-    const btn = clearBtns[0] as HTMLButtonElement;
+    const btn = mountButton(container, "Clear", 0);
 
     btn.click();
     // Flush microtask for the initial promise resolution (onsuccess fires)
@@ -846,7 +713,6 @@ describe("AdvancedTab — Toggles & Structure", () => {
 
 describe("AdvancedTab — Launch on Login (autostart)", () => {
   let container: HTMLDivElement;
-  const ac = new AbortController();
 
   beforeEach(() => {
     container = document.createElement("div");
@@ -861,8 +727,7 @@ describe("AdvancedTab — Launch on Login (autostart)", () => {
   });
 
   function getAutostartToggle(): HTMLElement {
-    const section = buildAdvancedTab(ac.signal);
-    container.appendChild(section);
+    mountTab(container);
     const rows = Array.from(container.querySelectorAll(".setting-row"));
     const row = rows.find(
       (r) => r.querySelector(".setting-label")?.textContent === "Launch on Login",

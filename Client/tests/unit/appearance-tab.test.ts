@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { refreshTimeFormat } from "@lib/text/timeFormat";
 
@@ -505,15 +506,9 @@ describe("AppearanceTab — Accessibility", () => {
 describe("AppearanceTab - member list position (3C-6b)", () => {
   let container: HTMLDivElement;
   const ac = new AbortController();
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((mounted) => {
+    container = mounted;
     localStorage.clear();
-  });
-
-  afterEach(() => {
-    container.remove();
   });
 
   it("member layout radiogroup saves memberListLayout", () => {

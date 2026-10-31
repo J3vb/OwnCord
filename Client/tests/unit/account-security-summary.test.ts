@@ -18,6 +18,7 @@ vi.mock("@stores/ui.store", () => ({
 
 import { buildAccountTab } from "../../src/features/settings/AccountTab";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
+import { makeOverlayOptions } from "../helpers/settingsOverlayOptions";
 
 function session(id: number, current: boolean) {
   return {
@@ -30,29 +31,10 @@ function session(id: number, current: boolean) {
 }
 
 function options(overrides: Record<string, unknown> = {}) {
-  return {
-    onClose: vi.fn(),
-    onChangePassword: vi.fn().mockResolvedValue(undefined),
-    onUpdateProfile: vi.fn().mockResolvedValue(undefined),
-    onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
-    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-    onLogout: vi.fn(),
-    onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-    onStatusChange: vi.fn(),
-    onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
-    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-    onDisableTotp: vi.fn().mockResolvedValue(undefined),
-    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
+  return makeOverlayOptions({
     onListSessions: vi.fn().mockResolvedValue([session(1, true), session(2, false)]),
-    onRevokeSession: vi.fn().mockResolvedValue(undefined),
-    onRevokeAllSessions: vi
-      .fn()
-      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     ...overrides,
-  } as unknown as Parameters<typeof buildAccountTab>[0];
+  }) as unknown as Parameters<typeof buildAccountTab>[0];
 }
 
 /** Only what is on screen: a form not yet opened is hidden or display:none. */

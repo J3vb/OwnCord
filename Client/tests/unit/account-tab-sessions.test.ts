@@ -8,6 +8,7 @@ import { setSessionReplaced } from "@stores/ui.store";
 import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
 import type { SessionInfo } from "@lib/api";
 import { signInAs } from "../helpers/storeSeeds";
+import { makeOverlayOptions } from "../helpers/settingsOverlayOptions";
 
 // B7-14: the Account tab lists every signed-in device, signs one out by id,
 // and signs out everywhere behind a confirmation that says this device is
@@ -33,29 +34,15 @@ const OTHER: SessionInfo = {
 };
 
 function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverlayOptions {
-  return {
-    onClose: vi.fn(),
-    onChangePassword: vi.fn().mockResolvedValue(undefined),
-    onUpdateProfile: vi.fn().mockResolvedValue(undefined),
+  return makeOverlayOptions({
     onUploadAvatar: vi.fn().mockResolvedValue(""),
-    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-    onLogout: vi.fn(),
-    onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-    onStatusChange: vi.fn(),
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "", backup_codes: [] }),
-    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-    onDisableTotp: vi.fn().mockResolvedValue(undefined),
-    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
     onListSessions: vi.fn().mockResolvedValue([OTHER, CURRENT]),
-    onRevokeSession: vi.fn().mockResolvedValue(undefined),
     onRevokeAllSessions: vi
       .fn()
       .mockResolvedValue({ sessions_revoked: 2, current_session_revoked: true }),
     ...overrides,
-  };
+  });
 }
 
 describe("Account tab — devices", () => {

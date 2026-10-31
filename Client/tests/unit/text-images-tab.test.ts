@@ -1,18 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
+import { useMountContainer } from "../helpers/mountContainer";
 import { buildTextImagesTab } from "../../src/features/settings/TextImagesTab";
 
 describe("TextImagesTab", () => {
   let container: HTMLDivElement;
   const ac = new AbortController();
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
+  useMountContainer((mounted) => {
+    container = mounted;
     localStorage.clear();
-  });
-
-  afterEach(() => {
-    container.remove();
   });
 
   it("renders 5 media toggles and 5 chat bar toggles (no dead showSpoilers)", () => {
