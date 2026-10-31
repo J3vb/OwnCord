@@ -48,9 +48,9 @@ export {
   renderMentions,
   renderMentionSegment,
   renderMessageContent,
-} from "./contentParser";
+} from "../../features/messaging/content/contentParser";
 
-export { setServerHost } from "./attachments";
+export { setServerHost } from "../../features/messaging/content/attachments";
 import { isVoiceAttachment } from "../../features/voice-messages/player";
 
 // -- Imports for composite functions ------------------------------------------
@@ -63,21 +63,24 @@ import {
 } from "@lib/text/formatting";
 import { formatFullDateTime } from "../../features/messaging/discordTimestamp";
 import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
-import { createAvatarElement, pickAvatarColor } from "./avatar";
+import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 import { importedAuthorKey } from "../../features/messaging/importedAuthor";
 import { createImportedAvatar, createImportedName, createImportedTag } from "./importedAuthor";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import { renderMentions, renderMessageContent } from "./contentParser";
+import {
+  renderMentions,
+  renderMessageContent,
+} from "../../features/messaging/content/contentParser";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { highlightsCurrentUser } from "@lib/text/mentions";
 import { readableRoleColor } from "@lib/prefs/themes";
-import { isLoneImageEmbed, renderUrlEmbeds } from "./media";
+import { isLoneImageEmbed, renderUrlEmbeds } from "../../features/messaging/content/media";
 import {
   isGalleryImage,
   renderAttachment,
   resolveServerUrl,
   type LightboxGallery,
-} from "./attachments";
+} from "../../features/messaging/content/attachments";
 import { atReactionLimit, renderReactions, wireReactionControl } from "./reactions";
 import { WsErrorCode } from "@lib/protocolTypes";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";

@@ -19,15 +19,15 @@ import { createIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
-import { isRenderableAvatar, setAvatarSource } from "./message-list/avatar";
+import { isRenderableAvatar, setAvatarSource } from "../features/profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "./message-list/attachments";
+} from "../features/messaging/content/attachments";
 import { blocksStore } from "@stores/blocks.store";
 import { paintBanner } from "../features/profiles/banner";
-import { bannerImages } from "./bannerImages";
+import { bannerImages } from "../features/profiles/bannerImages";
 import { shellText, statusLabel } from "../i18n/shell";
 import { requestsText } from "../i18n/requests";
 import { playingForLine } from "../features/members/gameActivityLine";

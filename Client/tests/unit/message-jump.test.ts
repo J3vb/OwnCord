@@ -26,7 +26,7 @@ import { createMessageController } from "../../src/pages/main-page/MessageContro
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { renderMessage } from "../../src/components/message-list/renderers";
-import { renderMentionSegment } from "../../src/components/message-list/contentParser";
+import { renderMentionSegment } from "../../src/features/messaging/content/contentParser";
 import { jumpToMessage, setMessageJumpHandler } from "@lib/nav/messageNavigation";
 import {
   deleteMessage,

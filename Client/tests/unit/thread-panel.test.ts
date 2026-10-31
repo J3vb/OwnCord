@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const noteSeen = vi.hoisted(() => vi.fn());
-vi.mock("@components/message-list/attachments", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
   fetchImageAsObjectUrl: vi.fn(async () => "blob:sticker"),
 }));
 // The pending-message queue is not activated in a unit test; a sticker send needs its dedup id.

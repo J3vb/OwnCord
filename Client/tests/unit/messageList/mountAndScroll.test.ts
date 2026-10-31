@@ -18,7 +18,7 @@ import {
   useMessageListHarness,
 } from "../../helpers/messageListHarness";
 
-vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
 

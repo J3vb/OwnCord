@@ -5,7 +5,7 @@
  */
 
 import { getRecentEmoji } from "../emojiRecent";
-import { buildCustomEmojiNode } from "./customEmoji";
+import { buildCustomEmojiNode } from "../../features/messaging/content/customEmoji";
 
 /** How many quick-reaction emoji the message menu and the hover bar each show. */
 export const QUICK_REACTIONS = 3;

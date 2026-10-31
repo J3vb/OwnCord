@@ -27,9 +27,9 @@ vi.mock("@lib/voice/livekitSession", () =>
     getUserLocalMute: (userId: number) => localMuted.has(userId),
   }),
 );
-vi.mock("../../src/components/message-list/attachments", async (importOriginal) => {
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
   const actual =
-    await importOriginal<typeof import("../../src/components/message-list/attachments")>();
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return {
     ...actual,
     fetchImageAsObjectUrl: vi.fn((url: string) =>
@@ -46,7 +46,7 @@ import { membersStore, type Member } from "../../src/stores/members.store";
 import { voiceStore, type PeerVerification, type VoiceUser } from "../../src/stores/voice.store";
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
 import { markVoiceDropTarget } from "../../src/features/voice/dragMove";
-import { createAvatarElement, pickAvatarColor } from "../../src/components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../../src/features/profiles/avatar";
 import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
 import {
   drawVoiceChannelChrome,

@@ -32,7 +32,7 @@ import {
   isAudioMime,
   resolveServerUrl,
   thumbnailUrl,
-} from "./message-list/attachments";
+} from "../features/messaging/content/attachments";
 
 /** Quiet period after the last keystroke before a name search runs. */
 export const MEDIA_SEARCH_DEBOUNCE_MS = 300;

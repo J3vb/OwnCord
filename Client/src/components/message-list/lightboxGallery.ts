@@ -13,7 +13,7 @@ import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
 import { showToast } from "@lib/ui/toast";
 import { mediaControlsText } from "../../i18n/mediaControls";
-import type { LightboxGallery, LightboxHandle } from "./attachments";
+import type { LightboxGallery, LightboxHandle } from "../../features/messaging/content/attachments";
 
 const log = createLogger("lightbox-gallery");
 

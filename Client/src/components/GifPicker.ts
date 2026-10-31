@@ -16,7 +16,7 @@ import {
   fetchExternalImage,
   recoverEvictedImage,
   renderFailureStatus,
-} from "@components/message-list/attachments";
+} from "../features/messaging/content/attachments";
 import {
   admitDerived,
   externalAllowed,

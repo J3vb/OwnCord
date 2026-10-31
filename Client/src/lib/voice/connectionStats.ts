@@ -422,7 +422,7 @@ export function createConnectionStatsPoller(getRoom: () => Room | null): Connect
 /**
  * Format a byte count as `B` / `<kiloUnit>` / `MB`, switching units at
  * `base` and `base * base`. Shared by `formatBytes` here (base-1000, "kB")
- * and `formatFileSize` in components/message-list/attachments.ts
+ * and `formatFileSize` in features/messaging/content/attachments.ts
  * (base-1024, "KB") — those two disagreed on both the base and the unit
  * case before this was unified, so keep each call site's own `base`/
  * `kiloUnit`/`decimals` rather than picking one for both.

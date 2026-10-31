@@ -12,13 +12,13 @@ import {
   previewExternal,
   recoverEvictedImage,
 } from "./attachments";
-import { admitDerived } from "../../features/content-consent/external";
-import { contentText as t } from "../../i18n/content";
+import { admitDerived } from "../../content-consent/external";
+import { contentText as t } from "../../../i18n/content";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type {
   ExternalContentFailure,
   ExternalImageHandle,
-} from "../../platform/contracts/externalContent";
+} from "../../../platform/contracts/externalContent";
 
 const log = createLogger("embeds");
 

@@ -4,12 +4,12 @@ import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import { errorText, ApiClientError } from "@lib/api";
 import { authStore } from "@stores/auth.store";
 import { avatarInitial } from "@lib/ui/avatar";
-import { setAvatarSource, isRenderableAvatar } from "@components/message-list/avatar";
+import { setAvatarSource, isRenderableAvatar } from "../../features/profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "@components/message-list/attachments";
+} from "../../features/messaging/content/attachments";
 import { type CropResult, cropImage } from "@lib/ui/imageCrop";
 import { isAnimatedImage } from "@lib/ui/animatedStill";
 import { isBannerColor } from "../../features/profiles/banner";

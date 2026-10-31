@@ -8,7 +8,7 @@ const cachedImageBytes = vi.hoisted(() =>
 // The real module reaches for the Tauri HTTP plugin and IndexedDB; only the
 // fetch entry point matters here, so it is stubbed and the URL helpers are
 // kept honest by reimplementing exactly what they do.
-vi.mock("@components/message-list/attachments", () => ({
+vi.mock("../../src/features/messaging/content/attachments", () => ({
   fetchImageAsObjectUrl,
   cachedImageBytes,
   recoverEvictedImage: () => {},
@@ -18,7 +18,7 @@ vi.mock("@components/message-list/attachments", () => ({
 
 const { avatarInitial, resolveDisplayName } = await import("@lib/ui/avatar");
 const { createAvatarElement, isRenderableAvatar } =
-  await import("../../src/components/message-list/avatar");
+  await import("../../src/features/profiles/avatar");
 const { clearAnimatedStills } = await import("@lib/ui/animatedStill");
 
 describe("resolveDisplayName", () => {
@@ -168,9 +168,9 @@ describe("createAvatarElement with deferUntilVisible", () => {
 
   // The observer and the limiter are module state, so each test gets a fresh
   // copy of the module.
-  async function load(): Promise<typeof import("../../src/components/message-list/avatar")> {
+  async function load(): Promise<typeof import("../../src/features/profiles/avatar")> {
     vi.resetModules();
-    return import("../../src/components/message-list/avatar");
+    return import("../../src/features/profiles/avatar");
   }
 
   function mount(create: typeof createAvatarElement, n: number, attach = true): HTMLDivElement {

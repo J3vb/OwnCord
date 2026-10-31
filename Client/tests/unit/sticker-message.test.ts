@@ -3,8 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const fetchImage = vi.hoisted(() => vi.fn<(url: string) => Promise<string | null>>());
 const showStill = vi.hoisted(() => vi.fn());
 
-vi.mock("@components/message-list/attachments", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@components/message-list/attachments")>();
+vi.mock("../../src/features/messaging/content/attachments", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../../src/features/messaging/content/attachments")>();
   return { ...actual, fetchImageAsObjectUrl: fetchImage };
 });
 vi.mock("../../src/features/messaging/emojiStill", async (importOriginal) => {

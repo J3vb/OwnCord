@@ -7,7 +7,7 @@ import { formatByteSize } from "@lib/voice/connectionStats";
 import { authStore } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { Attachment } from "@lib/types";
-import { setExternalConsentScope } from "../../features/content-consent/external";
+import { setExternalConsentScope } from "../../content-consent/external";
 
 export const log = createLogger("attachments");
 

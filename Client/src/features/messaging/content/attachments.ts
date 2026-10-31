@@ -8,11 +8,11 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { observeMedia } from "@lib/prefs/mediaVisibility";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
-import { isVoiceAttachment, renderVoicePlayer } from "../../features/voice-messages/player";
+import { isVoiceAttachment, renderVoicePlayer } from "../../voice-messages/player";
 import type { Attachment } from "@lib/types";
-import { messagingText } from "../../i18n/messaging";
-import { isSpoilerFilename } from "../../features/messaging/spoilerAttachment";
-import { messageStatusText } from "../../i18n/messageStatus";
+import { messagingText } from "../../../i18n/messaging";
+import { isSpoilerFilename } from "../spoilerAttachment";
+import { messageStatusText } from "../../../i18n/messageStatus";
 import {
   fitImageBox,
   ATTACHMENT_BOX_MAX_H,
@@ -23,11 +23,7 @@ import {
   blobImageSize,
 } from "./imageSizes";
 import { highlightCode, resolveLanguage } from "./syntaxHighlight";
-import {
-  type TextPreviewDeps,
-  isTextPreviewable,
-  renderTextPreview,
-} from "../../features/messaging/textPreview";
+import { type TextPreviewDeps, isTextPreviewable, renderTextPreview } from "../textPreview";
 import {
   fetchImageAsObjectUrl,
   fetchMediaAsObjectUrl,

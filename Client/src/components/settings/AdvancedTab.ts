@@ -11,9 +11,9 @@ import type { WindowPrefName, WindowPrefsState } from "../../platform/contracts/
 import {
   clearAttachmentCaches,
   clearExternalImageCache,
-} from "@components/message-list/attachments";
-import { clearEmbedCaches } from "@components/message-list/embeds";
-import { clearMediaCaches } from "@components/message-list/media";
+} from "../../features/messaging/content/attachments";
+import { clearEmbedCaches } from "../../features/messaging/content/embeds";
+import { clearMediaCaches } from "../../features/messaging/content/media";
 import { appendToggleRows, createToggle } from "./helpers";
 import { isAndroidApp } from "../../features/voice/native/platform";
 import { removeStored, storedKeys } from "@lib/prefs/preferences";

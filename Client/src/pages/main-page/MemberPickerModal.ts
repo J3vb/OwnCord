@@ -19,7 +19,7 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { membersStore } from "@stores/members.store";
 import type { Member } from "@stores/members.store";
-import { createAvatarElement, pickAvatarColor } from "../../components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../../features/profiles/avatar";
 import { statusLabel } from "../../i18n/shell";
 import { authStore } from "@stores/auth.store";
 import { MAX_GROUP_DM_PARTICIPANTS } from "@lib/constants";

@@ -5,12 +5,12 @@ import {
   renderInlineImage,
   closeActiveLightbox,
   clearMediaCaches,
-} from "../../../src/components/message-list/media";
+} from "../../../src/features/messaging/content/media";
 import {
   clearExternalImageCache,
   fetchExternalImage,
-} from "../../../src/components/message-list/attachments";
-import { blobImageSize } from "../../../src/components/message-list/imageSizes";
+} from "../../../src/features/messaging/content/attachments";
+import { blobImageSize } from "../../../src/features/messaging/content/imageSizes";
 import {
   imageResponse,
   createObjectURLMock,
@@ -29,10 +29,10 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/prefs/mediaVisibility", () => mocks.prefsMediaVisibilityMock());
 vi.mock("@lib/icons", () => mocks.iconsMock());
 vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock(importOriginal));
-vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
-vi.mock("../../../src/components/message-list/embeds", () => mocks.listEmbedsMock());
+vi.mock("../../../src/features/messaging/content/embeds", () => mocks.listEmbedsMock());
 
 const { imageMock, observeMediaMock, loadPrefMock } = mocks;
 

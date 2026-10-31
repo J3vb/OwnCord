@@ -18,7 +18,7 @@ import {
   clearAttachmentCaches,
   renderAttachment,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 import { createApiClient } from "../../src/lib/api";
 import { encodeWaveform } from "../../src/features/voice-messages/waveform";
 import { messagesStore, type Message } from "../../src/stores/messages.store";

@@ -39,7 +39,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ save: vi.fn() }));
 vi.mock("@tauri-apps/plugin-fs", () => ({ writeFile: vi.fn() }));
 vi.mock("@lib/icons", () => ({ createIcon: () => document.createElement("span") }));
 vi.mock("@lib/prefs/mediaVisibility", () => ({ observeMedia: vi.fn() }));
-vi.mock("../../src/components/message-list/media", () => ({ openImageLightbox: vi.fn() }));
+vi.mock("../../src/features/messaging/content/media", () => ({ openImageLightbox: vi.fn() }));
 
 // No-op IndexedDB so fetchImageAsObjectUrl falls through to the network path.
 vi.stubGlobal("indexedDB", {
@@ -58,7 +58,7 @@ import {
   fetchImageAsObjectUrl,
   isTrustedServerUrl,
   setServerHost,
-} from "../../src/components/message-list/attachments";
+} from "../../src/features/messaging/content/attachments";
 
 // jsdom implements no object URLs; server images are handed out as blob: URLs.
 URL.createObjectURL = vi.fn(() => "blob:test-image");

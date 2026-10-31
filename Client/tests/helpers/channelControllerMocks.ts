@@ -333,7 +333,7 @@ export async function dmStoreMock() {
 
 export async function listAttachmentsMock(importOriginal: <T>() => Promise<T>) {
   return {
-    ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
+    ...(await importOriginal<typeof import("../../src/features/messaging/content/attachments")>()),
     fetchImageAsObjectUrl,
   };
 }

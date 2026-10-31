@@ -13,7 +13,7 @@ import { readableRoleColor } from "../../lib/prefs/themes";
 import type { UserStatus } from "../../lib/types";
 import { statusLabel } from "../../i18n/shell";
 import { createIcon, type IconName } from "../../lib/icons";
-import type { createAvatarElement } from "../../components/message-list/avatar";
+import type { createAvatarElement } from "../profiles/avatar";
 
 /** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
 export type CreateAvatar = typeof createAvatarElement;

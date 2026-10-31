@@ -9,11 +9,11 @@ import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createZoomPan, PAN_MIN_SCALE, bindTouchZoom } from "@lib/ui/zoomPan";
 import { showToast } from "@lib/ui/toast";
-import { desktop } from "../../platform/desktop";
-import type { ExternalImageSource } from "../../platform/contracts/externalContent";
-import { mediaControlsText } from "../../i18n/mediaControls";
-import { messageStatusText } from "../../i18n/messageStatus";
-import type { ImageMenuTarget } from "./imageMenu";
+import { desktop } from "../../../platform/desktop";
+import type { ExternalImageSource } from "../../../platform/contracts/externalContent";
+import { mediaControlsText } from "../../../i18n/mediaControls";
+import { messageStatusText } from "../../../i18n/messageStatus";
+import type { ImageMenuTarget } from "../../../components/message-list/imageMenu";
 import {
   fetchExternalImage,
   fetchImageAsObjectUrl,
@@ -104,12 +104,12 @@ export async function downloadFile(url: string, filename: string): Promise<void>
 
 // -- Image menu ---------------------------------------------------------------
 
-type ImageMenuModule = typeof import("./imageMenu");
+type ImageMenuModule = typeof import("../../../components/message-list/imageMenu");
 /** Set once the lazy menu module has loaded, so teardown can close its menu. */
 let imageMenuModule: ImageMenuModule | null = null;
 
 function loadImageMenu(): Promise<ImageMenuModule> {
-  return import("./imageMenu").then((m) => {
+  return import("../../../components/message-list/imageMenu").then((m) => {
     imageMenuModule = m;
     return m;
   });
@@ -428,7 +428,7 @@ export function openImageLightbox(
       shownImageUrl,
       close,
     };
-    import("./lightboxGallery").then(
+    import("../../../components/message-list/lightboxGallery").then(
       (m) => {
         if (!disposable.signal.aborted) m.attachLightboxGallery(gallery, handle);
       },

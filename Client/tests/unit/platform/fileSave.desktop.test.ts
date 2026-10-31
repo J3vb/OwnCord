@@ -1,6 +1,6 @@
 // Desktop binding for the FileSaver suite: `platform/desktop`'s save dialog
 // and file write. B7-4 ran the same suite file against the in-place seam in
-// `message-list/attachments.ts` first (proving it could fail and pinning
+// `features/messaging/content/attachments.ts` first (proving it could fail and pinning
 // today's behaviour), then re-bound it here. The legacy binding is deleted
 // with this commit: its export is now internal.
 //

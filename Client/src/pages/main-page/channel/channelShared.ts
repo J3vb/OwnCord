@@ -9,7 +9,7 @@ import { markdownToPlainText } from "@lib/text/markdown";
 import { authStore } from "@stores/auth.store";
 import type { MessageUser } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
-import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../../../features/profiles/avatar";
 import { buildGroupAvatarStack } from "@components/DmSidebar";
 import { membersStore } from "@stores/members.store";
 import { messagingText } from "../../../i18n/messaging";

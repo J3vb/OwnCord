@@ -233,7 +233,7 @@ Link previews, avatars and external inline images make the desktop client
 fetch URLs that other users chose. Before B7-16 those fetches were made from
 the renderer through the Tauri HTTP plugin and the webview's own image loading,
 with destination policy applied in TypeScript per call site rather than in
-one place (`Client/src/components/message-list/embeds.ts`, `attachments.ts`,
+one place (`Client/src/features/messaging/content/embeds.ts`, `attachments.ts`,
 `media.ts`; `docs/security.md` §"Tauri Capabilities") — which is the C-09
 finding as publicly recorded: the policy is **not centralised at the native
 boundary**, and not every automatic fetch path applies the same checks. The
@@ -329,7 +329,7 @@ the viewer has chosen, once per server profile, "Load automatically on this
 server" or "Ask each time" (a per-item click), after being told the linked
 sites can see their IP address
 (`Client/src/features/content-consent/external.ts`). The check sits in front
-of every broker call in `Client/src/components/message-list/attachments.ts`,
+of every broker call in `Client/src/features/messaging/content/attachments.ts`,
 so a render path that forgets to ask still fetches nothing. Turning off a
 Text & Images toggle, or its "Reset external content consent" action, revokes
 every server's choice, drops fetched bytes and late answers, and re-conceals

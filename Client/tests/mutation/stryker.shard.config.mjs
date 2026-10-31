@@ -182,7 +182,7 @@ export const shards = {
     "src/features/messaging/wsHandlers.ts",
   ],
   "lib-rest-1": [
-    "src/components/message-list/avatar.ts",
+    "src/features/profiles/avatar.ts",
     "src/lib/prefs/channelMutes.ts",
     "src/lib/prefs/channelMuteExpiry.ts",
     "src/lib/media/gifProvider.ts",

@@ -1,16 +1,16 @@
 /**
  * The attachment-cache helpers a profile banner needs, handed to
- * `paintBanner` by the popup, the DM panel and the Account card. They sit here
- * because `features/profiles/banner.ts` may not import `components/`.
+ * `paintBanner` by the popup, the DM panel and the Account card. Kept apart
+ * from `banner.ts` so that module does not load the attachment cache.
  */
 
-import type { BannerImages } from "../features/profiles/banner";
+import type { BannerImages } from "./banner";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "./message-list/attachments";
-import { avatarStill } from "./message-list/avatar";
+} from "../messaging/content/attachments";
+import { avatarStill } from "./avatar";
 
 /** A banner's still is drawn no larger than its widest surface at 2x. */
 const BANNER_STILL_SIDE = 1200;

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { estimateItemHeight, type VirtualItem } from "@components/MessageList";
-import { clearImageSizes, setImageBox } from "../../src/components/message-list/imageSizes";
+import { clearImageSizes, setImageBox } from "../../src/features/messaging/content/imageSizes";
 import type { Message } from "@stores/messages.store";
 import "../helpers/resizeObserverStub";
 

@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
-import { bindImageMenu, closeActiveLightbox } from "@components/message-list/attachments";
+import {
+  bindImageMenu,
+  closeActiveLightbox,
+} from "../../src/features/messaging/content/attachments";
 import { messagesStore, type Message } from "@stores/messages.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../src/features/safety/store";

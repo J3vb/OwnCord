@@ -32,25 +32,25 @@
       "reason": "AbortSignals of mounted sidebars; removed when the sidebar's signal aborts"
     },
     {
-      "file": "components/message-list/avatar.ts",
+      "file": "features/profiles/avatar.ts",
       "binding": "fetchQueue",
       "category": "transient",
       "reason": "Queue of avatar fetches, drained as they run; holds no server data after it empties"
     },
     {
-      "file": "components/message-list/avatar.ts",
+      "file": "features/profiles/avatar.ts",
       "binding": "visibilityCallbacks",
       "category": "dom-owned",
       "reason": "Keyed by live avatar element; removed when the element leaves the page"
     },
     {
-      "file": "components/message-list/contentParser.ts",
+      "file": "features/messaging/content/contentParser.ts",
       "binding": "rolesById",
       "category": "pure-cache",
       "reason": "WeakMap keyed by the channels store's roles array snapshot; a new roster is a new key and an old one is collected with it, so nothing outlives the session that built it"
     },
     {
-      "file": "components/message-list/contentParser.ts",
+      "file": "features/messaging/content/contentParser.ts",
       "binding": "parseCache",
       "category": "pure-cache",
       "reason": "Key is message id + editedAt + content, and the cache is cleared on MessageList destroy (clearContentParseCache)"

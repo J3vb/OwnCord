@@ -41,7 +41,7 @@ import { followedThreadsStore, type FollowedThreadsView } from "@stores/followed
 import { attachCategoryDragHandlers, attachDragHandlers } from "./channel-sidebar/dragReorder";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../features/voice/dragMove";
 import { openIdentityMismatchModal } from "../features/voice/peerVerification";
-import { createAvatarElement, pickAvatarColor } from "@components/message-list/avatar";
+import { createAvatarElement, pickAvatarColor } from "../features/profiles/avatar";
 import { membersStore, type Member, type MembersState } from "@stores/members.store";
 import { currentUserRoleHasPermission } from "@lib/permissions";
 import { Permission, type ChannelType } from "@lib/types";

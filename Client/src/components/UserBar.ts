@@ -29,17 +29,17 @@ import {
   avatarAnimationMode,
   isRenderableAvatar,
   setAvatarSource,
-} from "@components/message-list/avatar";
+} from "../features/profiles/avatar";
 import {
   fetchImageAsObjectUrl,
   recoverEvictedImage,
   resolveServerUrl,
-} from "@components/message-list/attachments";
+} from "../features/messaging/content/attachments";
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence/presence";
 import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
-import { micControlState } from "./voiceStatusText";
+import { micControlState } from "../features/voice/voiceStatusText";
 import { portalText } from "../i18n/portal";
 import { createTalkSlot } from "../features/voice/talkSlot";
 

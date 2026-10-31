@@ -10,12 +10,12 @@ import { createMockWsClient } from "../../helpers/mock-ws";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import type { ApiClient } from "../../../src/lib/api";
-import { renderYouTubeEmbed } from "../../../src/components/message-list/media";
-import { renderGenericLinkPreview } from "../../../src/components/message-list/embeds";
+import { renderYouTubeEmbed } from "../../../src/features/messaging/content/media";
+import { renderGenericLinkPreview } from "../../../src/features/messaging/content/embeds";
 import {
   externalPartition,
   fetchExternalImage,
-} from "../../../src/components/message-list/attachments";
+} from "../../../src/features/messaging/content/attachments";
 import { desktop } from "../../../src/platform/desktop";
 import { saveUserStatus } from "../../../src/lib/presence/userStatus";
 import { markAllRead } from "../../../src/lib/readState";
@@ -37,7 +37,7 @@ vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messages
 vi.mock("@components/UpdateNotifier", () => mocks.updateNotifierMock());
 vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
-vi.mock("../../../src/components/message-list/attachments", (importOriginal) =>
+vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
 );
 vi.mock("../../../src/pages/main-page/ChannelController", () => mocks.pageChannelControllerMock());
