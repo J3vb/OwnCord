@@ -270,6 +270,7 @@ fn report_previous_runs(dir: &Path, own_pid: u32) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
+    let mut ended = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         if let Some(pid) = run_file_tmp_pid(&path) {
@@ -286,10 +287,23 @@ fn report_previous_runs(dir: &Path, own_pid: u32) {
         }
         let contents = std::fs::read_to_string(&path).unwrap_or_default();
         log::warn!("{}", previous_run_report(pid, &contents));
+        ended.push(crate::system_crash_report::EndedRun {
+            pid,
+            last_seen: modified_secs(&path),
+        });
         if let Err(e) = std::fs::remove_file(&path) {
             log::warn!("[exit] stale run file not removed: {e}");
         }
     }
+    crate::system_crash_report::report(ended);
+}
+
+/// A file's modification time as a Unix second: a run file's is its last
+/// heartbeat.
+fn modified_secs(path: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    let secs = modified.duration_since(UNIX_EPOCH).ok()?.as_secs();
+    i64::try_from(secs).ok()
 }
 
 /// Whether a run file's process is another OwnCord that is still running.
