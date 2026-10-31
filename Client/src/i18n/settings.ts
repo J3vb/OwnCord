@@ -533,6 +533,8 @@ export const settingsText = defineCatalog("settings", {
   "voiceAudio.inputMode": "Input Mode",
   "voiceAudio.inputMode.vad": "Voice Activity",
   "voiceAudio.inputMode.ptt": "Push to Talk",
+  "voiceAudio.inputMode.ptt.android":
+    "In a call, hold the Hold to talk button to speak. Let go and your mic goes quiet again.",
   "voiceAudio.card.microphone": "Microphone",
   "voiceAudio.card.speakers": "Speakers",
   "voiceAudio.card.camera": "Camera & screen share",

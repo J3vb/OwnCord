@@ -41,6 +41,7 @@ import { shellText } from "../i18n/shell";
 import { voiceText } from "../i18n/voice";
 import { micControlState } from "./voiceStatusText";
 import { portalText } from "../i18n/portal";
+import { createTalkSlot } from "../features/voice/talkSlot";
 
 export interface UserBarOptions {
   readonly onDisconnect?: () => void;
@@ -407,6 +408,11 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         renderVoiceControls(muteBtn, deafenBtn),
       );
       appendChildren(buttons, muteBtn, deafenBtn);
+      // Push to Talk in the Android app: a hold-to-talk button before Mute, so
+      // a call that leaves no call bar on screen (a tablet) can still talk.
+      const talkSlot = createTalkSlot("user");
+      disposable.addCleanup(() => talkSlot.clear());
+      talkSlot.attach(buttons, muteBtn);
     }
 
     const settingsBtn = createElement("button", {

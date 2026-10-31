@@ -27,8 +27,19 @@ export function effectiveVoiceSensitivity(pttLive: boolean): number {
   return pttGates(pttLive) ? 100 : loadPref<number>("voiceSensitivity", 50);
 }
 
-function pttGates(pttLive: boolean): boolean {
-  return inputMode() === "ptt" && loadPref<number>("pttVk", 0) !== 0 && pttLive;
+/** The on-screen talk button is the Push to Talk trigger (the Android app,
+ *  which has no key to bind). Set once at startup by the talk button. */
+let talkButton = false;
+
+export function setTalkButton(on: boolean): void {
+  talkButton = on;
+}
+
+/** Whether Push to Talk gates the mic: the mode is Push to Talk, something can
+ *  be pressed (a bound key, or the talk button), and a press can actually be
+ *  observed (`pttLive`). The voice session closes the gate at join on this. */
+export function pttGates(pttLive: boolean): boolean {
+  return inputMode() === "ptt" && (talkButton || loadPref<number>("pttVk", 0) !== 0) && pttLive;
 }
 
 /** Whether the gate finds its own threshold above the room's noise floor.

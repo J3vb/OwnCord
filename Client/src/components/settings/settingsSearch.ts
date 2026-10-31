@@ -114,7 +114,9 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("accessibility.saturation.desc"),
   ],
   "Voice & Video": () => [
-    ...desktopOnly(s("voiceAudio.card.inputMode"), s("voiceAudio.inputMode.ptt")),
+    s("voiceAudio.card.inputMode"),
+    s("voiceAudio.inputMode.ptt"),
+    ...(isAndroidApp() ? [s("voiceAudio.inputMode.ptt.android")] : []),
     s("voiceAudio.card.microphone"),
     s("voiceAudio.card.speakers"),
     platformText(s("voiceAudio.card.camera"), s("voiceAudio.card.camera.android")),

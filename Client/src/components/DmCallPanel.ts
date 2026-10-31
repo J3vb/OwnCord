@@ -47,6 +47,7 @@ import { voiceText as t } from "../i18n/voice";
 import { dmCallText as d } from "../i18n/dmCall";
 import { shareBlockReason } from "../features/voice/shareGate";
 import { canPublishScreen } from "../features/voice/native/platform";
+import { createTalkSlot } from "../features/voice/talkSlot";
 
 // ---------------------------------------------------------------------------
 // View model
@@ -478,6 +479,10 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     return btn;
   }
 
+  // Push to Talk in the Android app: a hold-to-talk button first in the controls.
+  const talkSlot = createTalkSlot("bar");
+  disposable.addCleanup(() => talkSlot.clear());
+
   function callControls(compact: boolean): HTMLElement {
     const bar = createElement("div", {
       class: "dcp-controls",
@@ -515,6 +520,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
       ),
     };
     appendChildren(bar, controls.mute!, controls.deafen!, controls.camera!);
+    talkSlot.attach(bar);
     if (canPublishScreen()) {
       bar.appendChild(controls.share!);
     }

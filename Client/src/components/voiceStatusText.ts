@@ -6,6 +6,7 @@
 
 import { isSelfMuted, type VoiceState, type VoiceStatus } from "@stores/voice.store";
 import { voiceText as t } from "../i18n/voice";
+import { isAndroidApp } from "../features/voice/native/platform";
 
 /** Header status text per voice-session lifecycle state
  *  (docs/architecture/ux/voice-and-e2ee.md §2). */
@@ -62,7 +63,7 @@ export function micControlState(voice: VoiceState): MicControlState {
       : listenOnly
         ? t("widget.control.listenOnly")
         : pttGated
-          ? t("widget.control.pttGated")
+          ? t(isAndroidApp() ? "widget.control.pttGated.android" : "widget.control.pttGated")
           : t(userMuted ? "widget.control.unmute" : "widget.control.mute");
   return {
     userMuted,

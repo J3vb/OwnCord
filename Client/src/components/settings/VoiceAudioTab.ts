@@ -229,12 +229,10 @@ function buildVoiceAudioTabInner(
   // and in the capture-only monitor the meter runs outside a call. The
   // webview's microphone is not the engine's, so the meter opens none there.
   const nativeAudio = isLinuxDesktop();
-  // The Android app has no key service for Push to Talk, no output device
-  // choice and no screen sharing, so those controls are left out.
+  // The Android app has no output device choice and no screen sharing, so
+  // those controls are left out; its Push to Talk is the talk button in a
+  // call, not a bound key.
   const android = isAndroidApp();
-  // The mode the gate runs in. The saved choice is kept as it is, but a phone
-  // always gates on the sensitivity, as a call there does.
-  const currentMode = (): InputMode => (android ? "vad" : inputMode());
 
   // Five cards: when you transmit, what you speak into, what you hear, what
   // you show, and how your voice is processed.
@@ -439,10 +437,14 @@ function buildVoiceAudioTabInner(
     "data-testid": "input-mode",
   });
   const pttBox = createElement("div", { class: "input-mode-ptt", "data-testid": "ptt-controls" });
-  if (!android) pttBox.append(...buildPttControls(signal));
+  if (android) {
+    pttBox.appendChild(
+      createElement("div", { class: "setting-desc" }, t("voiceAudio.inputMode.ptt.android")),
+    );
+  } else pttBox.append(...buildPttControls(signal));
   const modeButtons = new Map<InputMode, HTMLButtonElement>();
   const paintMode = (): void => {
-    const mode = currentMode();
+    const mode = inputMode();
     for (const [value, button] of modeButtons) {
       button.classList.toggle("active", value === mode);
       button.setAttribute("aria-checked", String(value === mode));
@@ -459,6 +461,12 @@ function buildVoiceAudioTabInner(
     applyInputMode();
     syncMeterGate();
     resetNativeTestGate();
+    if (android) {
+      void import("../../features/voice/talkButton")
+        .then((m) => m.syncTalkSource())
+        .catch((err: unknown) => log.warn("Talk button failed to follow the input mode", err));
+      return;
+    }
     const vk = loadPref<number>("pttVk", 0);
     if (mode === "vad") void desktop.pushToTalk.stop();
     else if (vk !== 0)
@@ -493,8 +501,7 @@ function buildVoiceAudioTabInner(
   paintMode();
   setRovingTabindex(modeGroup, "[role='radio']");
   enableRovingNavigation(modeGroup, "[role='radio']", signal);
-  if (android) inputModeCard.remove();
-  else appendChildren(inputModeCard, modeGroup, pttBox);
+  appendChildren(inputModeCard, modeGroup, pttBox);
 
   function updateThresholdIndicator(sensitivity: number): void {
     // Invert: sensitivity 100 (no gating) → handle at LEFT (0%),
@@ -554,13 +561,13 @@ function buildVoiceAudioTabInner(
   /** The test's gate threshold, as the web meter gates its test playback:
    *  none in Push to Talk, the tab's sensitivity in Voice Activity. */
   function nativeTestThreshold(): number {
-    if (currentMode() !== "vad") return 0;
+    if (inputMode() !== "vad") return 0;
     if (autoSensitivity) return nativeTestFloor?.threshold ?? 0;
     return vadThreshold(currentSensitivity);
   }
 
   function makeNativeTestFloor(): void {
-    nativeTestFloor = currentMode() === "vad" && autoSensitivity ? new NoiseFloorTracker() : null;
+    nativeTestFloor = inputMode() === "vad" && autoSensitivity ? new NoiseFloorTracker() : null;
   }
 
   function updateNativeTest(update: NativeMicTestUpdate): void {
@@ -717,7 +724,7 @@ function buildVoiceAudioTabInner(
    *  Activity, open in Push to Talk (there the key decides, not the level). */
   function syncMeterGate(): void {
     if (meterProcessor === null) return;
-    const vad = currentMode() === "vad";
+    const vad = inputMode() === "vad";
     meterProcessor.setLookahead(vad ? GATE_LOOKAHEAD_S : 0);
     meterProcessor.setGate("vad", vad && meterGated);
   }
@@ -768,7 +775,7 @@ function buildVoiceAudioTabInner(
     currentSensitivity = val;
     updateThresholdIndicator(val);
     meterThresholdSetter?.(vadThreshold(val));
-    if (currentMode() === "vad" && !autoSensitivity) {
+    if (inputMode() === "vad" && !autoSensitivity) {
       updateNativeTest({ kind: "voiceGate", threshold: vadThreshold(val), retune: true });
     }
   }

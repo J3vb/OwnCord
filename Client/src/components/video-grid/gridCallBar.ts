@@ -11,11 +11,17 @@ import { voiceText } from "../../i18n/voice";
 import type { StreamSample } from "../../features/voice/remoteTracks";
 import { canPublishScreen, isAndroidApp } from "../../features/voice/native/platform";
 import { openPopoutWindow } from "../../features/voice/popout";
+import { createTalkSlot } from "../../features/voice/talkSlot";
 import { STATS_POLL_MS, VIEW_PREFS, type ViewToggle, log, callButton, sizeOf } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 import type { VideoGridCallbacks } from "../VideoGrid";
 
 export function createGridCallBar(st: GridState, api: GridApi) {
+  /** The call view's hold-to-talk button (Android app only), above the round
+   *  controls; it lives as long as the bar. */
+  const talkSlot = createTalkSlot("call");
+  st.gridListeners.addCleanup(() => talkSlot.clear());
+
   /** `inCallView` is the call view's own bar (not a full-screen tile's): on a
    *  phone it also holds Chat, the way back to the text channel. */
   function buildCallControls(
@@ -112,6 +118,8 @@ export function createGridCallBar(st: GridState, api: GridApi) {
         " video-fs-btn--leave",
       ),
     );
+    if (inCallView)
+      talkSlot.attach(bar, bar.firstChild, () => bar.classList.add("video-fs-calls--talk"));
     drawCallState(bar);
     return bar;
   }
@@ -376,6 +384,7 @@ export function createGridCallBar(st: GridState, api: GridApi) {
       st.callBar.classList.add("video-grid__controls");
     }
     if (!on && st.callBar !== null) {
+      talkSlot.clear();
       st.callBar.remove();
       st.callBar = null;
     }
