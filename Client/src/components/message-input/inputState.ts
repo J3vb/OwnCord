@@ -1,4 +1,5 @@
 /** The mutable state one message input instance keeps, shared by its modules. */
+import type { NativeFile } from "../../platform/contracts/nativeFiles";
 import type { Disposable } from "@lib/disposable";
 import type {
   MentionAutocompleteComponent,
@@ -166,6 +167,8 @@ export interface InputApi {
   toggleSpoiler(att: InputState["pendingAttachments"][number], btn: HTMLButtonElement): void;
   appendSpoilerButton(item: HTMLDivElement, file: File | undefined): void;
   handlePasteFile(file: File, draftText?: string): Promise<void>;
+  handleNativeFiles(files: readonly NativeFile[]): Promise<void>;
+  pasteNativeFiles(e: ClipboardEvent): boolean;
   startUpload(
     upload: NonNullable<MessageInputOptions["onUploadFile"]>,
     file: File,

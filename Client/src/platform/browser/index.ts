@@ -27,6 +27,7 @@ import type {
   ExternalContentBroker,
   GameDetector,
   MediaDetector,
+  NativeFiles,
   GlobalShortcuts,
   HttpClient,
   IdentityStore,
@@ -254,6 +255,12 @@ const mediaDetector: MediaDetector = {
   detect: async () => ({ state: "none" }),
 };
 
+const nativeFiles: NativeFiles = {
+  available: false,
+  onDrag: inertUnsubscribe,
+  clipboardFiles: async () => [],
+};
+
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
 };
@@ -300,6 +307,7 @@ export const browser: Platform = {
   devTools,
   fileSaver,
   gameDetector,
+  nativeFiles,
   mediaDetector,
   logFiles,
   nativeVoice,
