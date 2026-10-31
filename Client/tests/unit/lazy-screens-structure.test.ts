@@ -27,6 +27,12 @@ const LAZY = [
 const EAGER_SITES = [
   "pages/main-page/OverlayManagers.ts",
   "pages/main-page/SidebarArea.ts",
+  "pages/main-page/sidebar-area/sidebarChannels.ts",
+  "pages/main-page/sidebar-area/sidebarContent.ts",
+  "pages/main-page/sidebar-area/sidebarDms.ts",
+  "pages/main-page/sidebar-area/sidebarHeader.ts",
+  "pages/main-page/sidebar-area/sidebarShared.ts",
+  "pages/main-page/sidebar-area/sidebarVoiceSwitch.ts",
   "pages/main-page/ReactionController.ts",
   "components/MessageInput.ts",
   "components/message-input/inputAttachments.ts",
@@ -47,6 +53,9 @@ const EAGER_SITES = [
   "pages/main-page/pagePresence.ts",
   "pages/main-page/pageShared.ts",
   "components/DmCallPanel.ts",
+  "components/DmCallViewModel.ts",
+  "components/dm-call/dmCallRender.ts",
+  "components/dm-call/dmCallVerify.ts",
   "components/ChannelSidebar.ts",
   "pages/main-page/ChatArea.ts",
 ] as const;

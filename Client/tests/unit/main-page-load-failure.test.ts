@@ -1,8 +1,8 @@
 /**
  * A rejected `import("@pages/MainPage")` must not leave a blank window
  * (roadmap 4.12): the router (src/app/router.ts) shows the render fallback with its Reload and Sign
- * out buttons instead. The mount-throws case is in main.test.ts, which stubs a
- * MainPage that loads. The mocks below mirror main.test.ts's.
+ * out buttons instead. The mount-throws case is in the main/ tests, which stub a
+ * MainPage that loads. The mocks below mirror the main/ tests'.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 

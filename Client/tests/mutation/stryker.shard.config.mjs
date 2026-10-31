@@ -145,6 +145,7 @@ export const shards = {
   ],
   "transport-auth-2": [
     "src/lib/ws.ts",
+    "src/lib/wsConfig.ts",
     "src/lib/net/rateLimiter.ts",
     "src/lib/pendingMessages.ts",
     "src/features/connection/dispatchContext.ts",
