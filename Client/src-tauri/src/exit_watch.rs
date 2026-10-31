@@ -289,7 +289,7 @@ fn report_previous_runs(dir: &Path, own_pid: u32) {
         log::warn!("{}", previous_run_report(pid, &contents));
         ended.push(crate::system_crash_report::EndedRun {
             pid,
-            last_seen: modified_secs(&path).unwrap_or_else(now),
+            last_seen: modified_secs(&path),
         });
         if let Err(e) = std::fs::remove_file(&path) {
             log::warn!("[exit] stale run file not removed: {e}");
