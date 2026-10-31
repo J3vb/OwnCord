@@ -1,23 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as voiceSession from "../helpers/voiceSessionMock";
+import * as mocks from "../helpers/settingsOverlayMocks";
+import { makeOverlayOptions } from "../helpers/settingsOverlayOptions";
 import { createSettingsOverlay } from "../../src/features/settings/SettingsOverlay";
 import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
 import { updateUser } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
 
-// Mock logger
-vi.mock("@lib/logger", () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-  getLogBuffer: () => [],
-  clearLogBuffer: vi.fn(),
-  addLogListener: () => () => {},
-  setLogLevel: vi.fn(),
-}));
+vi.mock("@lib/logger", () => mocks.loggerMock());
 
 // Mock stores
 const mockSetTheme = vi.fn();
@@ -30,12 +19,7 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/voice/livekitSession", () =>
-  voiceSession.withOverrides({
-    switchInputDevice: vi.fn().mockResolvedValue(undefined),
-    switchOutputDevice: vi.fn().mockResolvedValue(undefined),
-  }),
-);
+vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 // Start with totp_enabled = false for enrollment tests
 let mockTotpEnabled = false;
@@ -55,32 +39,13 @@ vi.mock("@stores/auth.store", () => ({
 }));
 
 function makeOptions(overrides: Partial<SettingsOverlayOptions> = {}): SettingsOverlayOptions {
-  return {
-    onClose: vi.fn(),
-    onChangePassword: vi.fn().mockResolvedValue(undefined),
-    onUpdateProfile: vi.fn().mockResolvedValue(undefined),
-    onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
-    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-    onLogout: vi.fn(),
-    onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-    onStatusChange: vi.fn(),
+  return makeOverlayOptions({
     onEnableTotp: vi.fn().mockResolvedValue({
       qr_uri: "otpauth://totp/OwnCord:testuser?secret=TESTSECRET",
       backup_codes: ["code1", "code2", "code3"],
     }),
-    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-    onDisableTotp: vi.fn().mockResolvedValue(undefined),
-    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
-    onListSessions: vi.fn().mockResolvedValue([]),
-    onRevokeSession: vi.fn().mockResolvedValue(undefined),
-    onRevokeAllSessions: vi
-      .fn()
-      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     ...overrides,
-  };
+  });
 }
 
 describe("TOTP Settings", () => {
@@ -98,29 +63,71 @@ describe("TOTP Settings", () => {
     container.remove();
   });
 
+  const q = <T extends Element>(sel: string): T | null => container.querySelector<T>(sel);
+  const byTestId = <T extends Element>(id: string): T => q<T>(`[data-testid='${id}']`)!;
+
+  function acButton(label: string, scope: ParentNode = container): HTMLElement {
+    return Array.from(scope.querySelectorAll(".ac-btn")).find(
+      (b) => b.textContent === label,
+    ) as HTMLElement;
+  }
+
+  function submitEnrolPassword(password: string): HTMLElement {
+    byTestId<HTMLElement>("totp-enable-btn").click();
+    byTestId<HTMLInputElement>("totp-password-input").value = password;
+    const submit = acButton("Submit");
+    submit.click();
+    return submit;
+  }
+
+  async function reachCodeStep(password: string): Promise<void> {
+    submitEnrolPassword(password);
+    await vi.waitFor(() => {
+      expect(q("[data-testid='totp-qr-uri']")).not.toBeNull();
+    });
+  }
+
+  function submitCode(code: string): void {
+    byTestId<HTMLInputElement>("totp-code-input").value = code;
+    byTestId<HTMLElement>("totp-confirm-btn").click();
+  }
+
+  function submitDisablePassword(password: string): HTMLElement {
+    byTestId<HTMLElement>("totp-disable-btn").click();
+    byTestId<HTMLInputElement>("totp-password-input").value = password;
+    const confirm = acButton("Confirm Disable");
+    confirm.click();
+    return confirm;
+  }
+
+  function openOverlay(overrides: Partial<SettingsOverlayOptions> = {}, totpEnabled = false) {
+    mockTotpEnabled = totpEnabled;
+    const options = makeOptions(overrides);
+    const overlay = createSettingsOverlay(options);
+    overlay.mount(container);
+    overlay.open();
+    return { options, overlay };
+  }
+
   // -----------------------------------------------------------------------
   // OC-0354: the store's totp_enabled is a stale default until the profile
   // has been read, so the section asks the server when it opens.
   // -----------------------------------------------------------------------
   describe("2FA state refresh on open", () => {
     it("asks the server once and switches to the disable view when 2FA is really on", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions({
+      const { options, overlay } = openOverlay({
         onRefreshTotpStatus: vi.fn(async () => {
           updateUser({ totp_enabled: true });
         }),
       });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
 
       // Rendered from the stale store first...
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      const enableBtn = byTestId<HTMLElement>("totp-enable-btn");
       expect(enableBtn).not.toBeNull();
 
       // ...then rebuilt from the server's answer.
       await vi.waitFor(() => {
-        const badge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
+        const badge = byTestId<HTMLElement>("totp-status-badge");
         expect(badge.textContent).toBe("Enabled");
       });
       expect(container.querySelector("[data-testid='totp-disable-btn']")).not.toBeNull();
@@ -135,18 +142,12 @@ describe("TOTP Settings", () => {
       const overlay = createSettingsOverlay(confirmed);
       overlay.mount(container);
       overlay.open();
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "typed already";
+      byTestId<HTMLElement>("totp-enable-btn").click();
+      byTestId<HTMLInputElement>("totp-password-input").value = "typed already";
       await Promise.resolve();
       await Promise.resolve();
       // The form the user opened survives a refresh that changes nothing.
-      expect(
-        (container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement).value,
-      ).toBe("typed already");
+      expect(byTestId<HTMLInputElement>("totp-password-input").value).toBe("typed already");
       overlay.destroy?.();
 
       const failing = makeOptions({
@@ -157,7 +158,7 @@ describe("TOTP Settings", () => {
       overlay2.open();
       await Promise.resolve();
       await Promise.resolve();
-      const badge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
+      const badge = byTestId<HTMLElement>("totp-status-badge");
       expect(badge.textContent).toBe("Disabled");
       overlay2.destroy?.();
     });
@@ -168,13 +169,9 @@ describe("TOTP Settings", () => {
   // -----------------------------------------------------------------------
   describe("TOTP enrollment (totp_enabled is false)", () => {
     it("renders 'Enable 2FA' button when totp_enabled is falsy", () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      const enableBtn = byTestId<HTMLElement>("totp-enable-btn");
       expect(enableBtn).not.toBeNull();
       expect(enableBtn.textContent).toBe("Enable 2FA");
 
@@ -182,18 +179,12 @@ describe("TOTP Settings", () => {
     });
 
     it("shows password form when 'Enable 2FA' is clicked", () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      const enableBtn = byTestId<HTMLElement>("totp-enable-btn");
       enableBtn.click();
 
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
+      const pwInput = byTestId<HTMLInputElement>("totp-password-input");
       expect(pwInput).not.toBeNull();
       // The enable button should be hidden
       expect(enableBtn.style.display).toBe("none");
@@ -204,22 +195,14 @@ describe("TOTP Settings", () => {
     });
 
     it("shows 'Password is required' error when submitting empty password", () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { options, overlay } = openOverlay();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
+      byTestId<HTMLElement>("totp-enable-btn").click();
 
       // Leave password empty and click Submit
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
+      acButton("Submit").click();
 
-      const errorEl = container.querySelector("[data-testid='totp-error']") as HTMLElement;
+      const errorEl = byTestId<HTMLElement>("totp-error");
       expect(errorEl.textContent).toBe("Password is required.");
       expect(options.onEnableTotp).not.toHaveBeenCalled();
 
@@ -227,24 +210,9 @@ describe("TOTP Settings", () => {
     });
 
     it("calls onEnableTotp with password on submit", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { options, overlay } = openOverlay();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
+      submitEnrolPassword("mypassword123");
 
       await vi.waitFor(() => {
         expect(options.onEnableTotp).toHaveBeenCalledWith("mypassword123");
@@ -254,27 +222,12 @@ describe("TOTP Settings", () => {
     });
 
     it("shows QR URI display after successful enable call", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
+      submitEnrolPassword("mypassword123");
 
       await vi.waitFor(() => {
-        const qrUri = container.querySelector("[data-testid='totp-qr-uri']") as HTMLElement;
+        const qrUri = byTestId<HTMLElement>("totp-qr-uri");
         expect(qrUri).not.toBeNull();
         expect(qrUri.textContent).toBe("otpauth://totp/OwnCord:testuser?secret=TESTSECRET");
       });
@@ -283,24 +236,9 @@ describe("TOTP Settings", () => {
     });
 
     it("shows backup codes if returned", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
+      submitEnrolPassword("mypassword123");
 
       await vi.waitFor(() => {
         const qrUri = container.querySelector("[data-testid='totp-qr-uri']");
@@ -325,20 +263,9 @@ describe("TOTP Settings", () => {
         configurable: true,
       });
 
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay();
 
-      (container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement).click();
-      (container.querySelector("[data-testid='totp-password-input']") as HTMLInputElement).value =
-        "mypassword123";
-      (
-        Array.from(container.querySelectorAll(".ac-btn")).find(
-          (b) => b.textContent === "Submit",
-        ) as HTMLElement
-      ).click();
+      submitEnrolPassword("mypassword123");
 
       await vi.waitFor(() => {
         expect(container.querySelector("[data-testid='totp-copy-backup-codes']")).not.toBeNull();
@@ -346,9 +273,7 @@ describe("TOTP Settings", () => {
 
       expect(container.textContent).toContain("you won't see them again");
 
-      const copyBtn = container.querySelector(
-        "[data-testid='totp-copy-backup-codes']",
-      ) as HTMLElement;
+      const copyBtn = byTestId<HTMLElement>("totp-copy-backup-codes");
       copyBtn.click();
 
       expect(writeText).toHaveBeenCalledWith("code1\ncode2\ncode3");
@@ -360,34 +285,17 @@ describe("TOTP Settings", () => {
     });
 
     it("shows code confirmation input after enable success", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
+      submitEnrolPassword("mypassword123");
 
       await vi.waitFor(() => {
-        const codeInput = container.querySelector(
-          "[data-testid='totp-code-input']",
-        ) as HTMLInputElement;
+        const codeInput = byTestId<HTMLInputElement>("totp-code-input");
         expect(codeInput).not.toBeNull();
         expect(codeInput.placeholder).toBe("6-digit code");
       });
 
-      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
+      const confirmBtn = byTestId<HTMLElement>("totp-confirm-btn");
       expect(confirmBtn).not.toBeNull();
       expect(confirmBtn.textContent).toBe("Verify & Activate");
 
@@ -395,40 +303,13 @@ describe("TOTP Settings", () => {
     });
 
     it("calls onConfirmTotp with password and code on 'Verify & Activate' click", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { options, overlay } = openOverlay();
 
       // Step 1: Click Enable 2FA
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-
-      // Step 2: Enter password and submit
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
-
-      // Wait for QR URI to appear
-      await vi.waitFor(() => {
-        expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
-      });
+      await reachCodeStep("mypassword123");
 
       // Step 3: Enter code and confirm
-      const codeInput = container.querySelector(
-        "[data-testid='totp-code-input']",
-      ) as HTMLInputElement;
-      codeInput.value = "123456";
-
-      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
-      confirmBtn.click();
+      submitCode("123456");
 
       await vi.waitFor(() => {
         expect(options.onConfirmTotp).toHaveBeenCalledWith("mypassword123", "123456");
@@ -438,29 +319,14 @@ describe("TOTP Settings", () => {
     });
 
     it("shows error on failed enable (bad password)", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions({
+      const { overlay } = openOverlay({
         onEnableTotp: vi.fn().mockRejectedValue(new Error("Invalid password")),
       });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
 
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "wrongpassword";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
+      const submitBtn = submitEnrolPassword("wrongpassword");
 
       await vi.waitFor(() => {
-        const errorEl = container.querySelector("[data-testid='totp-error']") as HTMLElement;
+        const errorEl = byTestId<HTMLElement>("totp-error");
         expect(errorEl.textContent).toBe("Invalid password");
       });
 
@@ -471,165 +337,72 @@ describe("TOTP Settings", () => {
       overlay.destroy?.();
     });
 
-    it("shows error on failed confirm (bad code)", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions({
-        onConfirmTotp: vi.fn().mockRejectedValue(new Error("Invalid code")),
-      });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+    async function expectConfirmFailure(
+      onConfirmTotp: SettingsOverlayOptions["onConfirmTotp"],
+      message: string,
+    ): Promise<void> {
+      const { overlay } = openOverlay({ onConfirmTotp });
 
       // Navigate through enable flow
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
+      await reachCodeStep("mypassword123");
 
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
-
-      await vi.waitFor(() => {
-        expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
-      });
-
-      const codeInput = container.querySelector(
-        "[data-testid='totp-code-input']",
-      ) as HTMLInputElement;
-      codeInput.value = "000000";
-
-      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
-      confirmBtn.click();
+      submitCode("000000");
 
       await vi.waitFor(() => {
         // The error element in the confirm area also has data-testid="totp-error"
         const errorEls = container.querySelectorAll("[data-testid='totp-error']");
-        const confirmError = Array.from(errorEls).find((el) => el.textContent === "Invalid code");
+        const confirmError = Array.from(errorEls).find((el) => el.textContent === message);
         expect(confirmError).not.toBeUndefined();
       });
 
       // Confirm button should be re-enabled
-      const confirmBtnAfter = container.querySelector(
-        "[data-testid='totp-confirm-btn']",
-      ) as HTMLButtonElement;
+      const confirmBtnAfter = byTestId<HTMLButtonElement>("totp-confirm-btn");
       expect(confirmBtnAfter.disabled).toBe(false);
       expect(confirmBtnAfter.textContent).toBe("Verify & Activate");
 
       overlay.destroy?.();
+    }
+
+    it("shows error on failed confirm (bad code)", async () => {
+      await expectConfirmFailure(
+        vi.fn().mockRejectedValue(new Error("Invalid code")),
+        "Invalid code",
+      );
     });
 
     it("reports an internal confirm failure as a failure, not a wrong code", async () => {
-      mockTotpEnabled = false;
-      const options = makeOptions({
-        onConfirmTotp: vi
+      await expectConfirmFailure(
+        vi
           .fn()
           .mockRejectedValue(
             new ApiClientError(500, "INTERNAL_ERROR", "failed to enable two-factor authentication"),
           ),
-      });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
-
-      // Navigate through enable flow
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
-
-      await vi.waitFor(() => {
-        expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
-      });
-
-      const codeInput = container.querySelector(
-        "[data-testid='totp-code-input']",
-      ) as HTMLInputElement;
-      codeInput.value = "000000";
-
-      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
-      confirmBtn.click();
-
-      await vi.waitFor(() => {
-        // The error element in the confirm area also has data-testid="totp-error"
-        const errorEls = container.querySelectorAll("[data-testid='totp-error']");
-        const confirmError = Array.from(errorEls).find(
-          (el) => el.textContent === "Could not turn on two-factor authentication. Try again.",
-        );
-        expect(confirmError).not.toBeUndefined();
-      });
-
-      // Confirm button should be re-enabled
-      const confirmBtnAfter = container.querySelector(
-        "[data-testid='totp-confirm-btn']",
-      ) as HTMLButtonElement;
-      expect(confirmBtnAfter.disabled).toBe(false);
-      expect(confirmBtnAfter.textContent).toBe("Verify & Activate");
-
-      overlay.destroy?.();
+        "Could not turn on two-factor authentication. Try again.",
+      );
     });
 
     it("updates UI to disabled state after successful confirm", async () => {
-      mockTotpEnabled = false;
       // Simulate MainPage's onConfirmTotp: it calls updateUser after API success
-      const options = makeOptions({
+      const { overlay } = openOverlay({
         onConfirmTotp: vi.fn().mockImplementation(async () => {
           updateUser({ totp_enabled: true });
         }),
       });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
 
       // Navigate through enable flow
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
+      await reachCodeStep("mypassword123");
 
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
-
-      await vi.waitFor(() => {
-        expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
-      });
-
-      const codeInput = container.querySelector(
-        "[data-testid='totp-code-input']",
-      ) as HTMLInputElement;
-      codeInput.value = "123456";
-
-      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
-      confirmBtn.click();
+      submitCode("123456");
 
       // After successful confirmation, onEnrolled() is called which re-renders.
       // Since updateUser sets mockTotpEnabled = true, the re-render should show the disable view.
       await vi.waitFor(() => {
-        const statusBadge = container.querySelector(
-          "[data-testid='totp-status-badge']",
-        ) as HTMLElement;
+        const statusBadge = byTestId<HTMLElement>("totp-status-badge");
         expect(statusBadge.textContent).toBe("Enabled");
       });
 
       // The disable button should now be visible
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
+      const disableBtn = byTestId<HTMLElement>("totp-disable-btn");
       expect(disableBtn).not.toBeNull();
       expect(disableBtn.textContent).toBe("Disable 2FA");
 
@@ -642,17 +415,13 @@ describe("TOTP Settings", () => {
   // -----------------------------------------------------------------------
   describe("TOTP disable (totp_enabled is true)", () => {
     it("renders 'Disable 2FA' button and 'Enabled' badge when totp_enabled is true", () => {
-      mockTotpEnabled = true;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay({}, true);
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
+      const disableBtn = byTestId<HTMLElement>("totp-disable-btn");
       expect(disableBtn).not.toBeNull();
       expect(disableBtn.textContent).toBe("Disable 2FA");
 
-      const badge = container.querySelector("[data-testid='totp-status-badge']") as HTMLElement;
+      const badge = byTestId<HTMLElement>("totp-status-badge");
       expect(badge).not.toBeNull();
       expect(badge.textContent).toBe("Enabled");
 
@@ -660,46 +429,25 @@ describe("TOTP Settings", () => {
     });
 
     it("shows password confirmation when 'Disable 2FA' is clicked", () => {
-      mockTotpEnabled = true;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay({}, true);
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
+      const disableBtn = byTestId<HTMLElement>("totp-disable-btn");
       disableBtn.click();
 
       // Disable button should be hidden
       expect(disableBtn.style.display).toBe("none");
 
       // Password input should appear
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
+      const pwInput = byTestId<HTMLInputElement>("totp-password-input");
       expect(pwInput).not.toBeNull();
 
       overlay.destroy?.();
     });
 
     it("calls onDisableTotp with password on confirm", async () => {
-      mockTotpEnabled = true;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { options, overlay } = openOverlay({}, true);
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
-      disableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Confirm Disable",
-      ) as HTMLElement;
-      confirmBtn.click();
+      submitDisablePassword("mypassword123");
 
       await vi.waitFor(() => {
         expect(options.onDisableTotp).toHaveBeenCalledWith("mypassword123");
@@ -709,29 +457,17 @@ describe("TOTP Settings", () => {
     });
 
     it("shows error on failed disable (bad password)", async () => {
-      mockTotpEnabled = true;
-      const options = makeOptions({
-        onDisableTotp: vi.fn().mockRejectedValue(new Error("Wrong password")),
-      });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay(
+        {
+          onDisableTotp: vi.fn().mockRejectedValue(new Error("Wrong password")),
+        },
+        true,
+      );
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
-      disableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "wrongpassword";
-
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Confirm Disable",
-      ) as HTMLElement;
-      confirmBtn.click();
+      const confirmBtn = submitDisablePassword("wrongpassword");
 
       await vi.waitFor(() => {
-        const errorEl = container.querySelector("[data-testid='totp-error']") as HTMLElement;
+        const errorEl = byTestId<HTMLElement>("totp-error");
         expect(errorEl.textContent).toBe("Wrong password");
       });
 
@@ -743,37 +479,25 @@ describe("TOTP Settings", () => {
     });
 
     it("shows 'required' error when server returns 403 for require_2fa policy", async () => {
-      mockTotpEnabled = true;
-      const options = makeOptions({
-        onDisableTotp: vi
-          .fn()
-          .mockRejectedValue(
-            new ApiClientError(
-              403,
-              "FORBIDDEN",
-              "two-factor authentication is required for this server",
+      const { overlay } = openOverlay(
+        {
+          onDisableTotp: vi
+            .fn()
+            .mockRejectedValue(
+              new ApiClientError(
+                403,
+                "FORBIDDEN",
+                "two-factor authentication is required for this server",
+              ),
             ),
-          ),
-      });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+        },
+        true,
+      );
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
-      disableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Confirm Disable",
-      ) as HTMLElement;
-      confirmBtn.click();
+      submitDisablePassword("mypassword123");
 
       await vi.waitFor(() => {
-        const errorEl = container.querySelector("[data-testid='totp-error']") as HTMLElement;
+        const errorEl = byTestId<HTMLElement>("totp-error");
         expect(errorEl.textContent).toBe("2FA is required by this server and cannot be disabled");
       });
 
@@ -781,24 +505,18 @@ describe("TOTP Settings", () => {
     });
 
     it("hides confirm area when cancel is clicked", () => {
-      mockTotpEnabled = true;
-      const options = makeOptions();
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay({}, true);
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
+      const disableBtn = byTestId<HTMLElement>("totp-disable-btn");
       disableBtn.click();
 
       // Confirm area should be visible
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
+      const pwInput = byTestId<HTMLInputElement>("totp-password-input");
       expect(pwInput).not.toBeNull();
 
       // Find the Cancel button that is a sibling of the "Confirm Disable" button
       // inside the TOTP section
-      const totpSection = container.querySelector("[data-testid='totp-section']") as HTMLElement;
+      const totpSection = byTestId<HTMLElement>("totp-section");
       const cancelBtn = Array.from(totpSection.querySelectorAll(".ac-btn")).find(
         (b) => b.textContent === "Cancel",
       ) as HTMLElement;
@@ -813,41 +531,27 @@ describe("TOTP Settings", () => {
     });
 
     it("updates UI to enrollment state after successful disable", async () => {
-      mockTotpEnabled = true;
       // Simulate MainPage's onDisableTotp: it calls updateUser after API success
-      const options = makeOptions({
-        onDisableTotp: vi.fn().mockImplementation(async () => {
-          updateUser({ totp_enabled: false });
-        }),
-      });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { overlay } = openOverlay(
+        {
+          onDisableTotp: vi.fn().mockImplementation(async () => {
+            updateUser({ totp_enabled: false });
+          }),
+        },
+        true,
+      );
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
-      disableBtn.click();
-
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Confirm Disable",
-      ) as HTMLElement;
-      confirmBtn.click();
+      submitDisablePassword("mypassword123");
 
       // After successful disable, onDisabled() is called which re-renders.
       // Since updateUser sets mockTotpEnabled = false, re-render should show enrollment view.
       await vi.waitFor(() => {
-        const statusBadge = container.querySelector(
-          "[data-testid='totp-status-badge']",
-        ) as HTMLElement;
+        const statusBadge = byTestId<HTMLElement>("totp-status-badge");
         expect(statusBadge.textContent).toBe("Disabled");
       });
 
       // The enable button should now be visible
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
+      const enableBtn = byTestId<HTMLElement>("totp-enable-btn");
       expect(enableBtn).not.toBeNull();
       expect(enableBtn.textContent).toBe("Enable 2FA");
 
@@ -860,42 +564,21 @@ describe("TOTP Settings", () => {
   // -----------------------------------------------------------------------
   describe("TOTP store mutation ownership", () => {
     it("AccountTab does NOT call updateUser on confirm — only the callback owner does", async () => {
-      mockTotpEnabled = false;
       // The onConfirmTotp callback simulates MainPage: it calls updateUser itself
-      const options = makeOptions({
+      const { options, overlay } = openOverlay({
         onConfirmTotp: vi.fn().mockImplementation(async () => {
           // MainPage calls updateUser here — this is the single owner
           updateUser({ totp_enabled: true });
         }),
       });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
 
       // Navigate through enable flow
-      const enableBtn = container.querySelector("[data-testid='totp-enable-btn']") as HTMLElement;
-      enableBtn.click();
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
-      const submitBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Submit",
-      ) as HTMLElement;
-      submitBtn.click();
+      await reachCodeStep("mypassword123");
 
-      await vi.waitFor(() => {
-        expect(container.querySelector("[data-testid='totp-qr-uri']")).not.toBeNull();
-      });
-
-      const codeInput = container.querySelector(
-        "[data-testid='totp-code-input']",
-      ) as HTMLInputElement;
-      codeInput.value = "123456";
+      byTestId<HTMLInputElement>("totp-code-input").value = "123456";
       (updateUser as ReturnType<typeof vi.fn>).mockClear();
 
-      const confirmBtn = container.querySelector("[data-testid='totp-confirm-btn']") as HTMLElement;
-      confirmBtn.click();
+      byTestId<HTMLElement>("totp-confirm-btn").click();
 
       await vi.waitFor(() => {
         expect(options.onConfirmTotp).toHaveBeenCalled();
@@ -908,28 +591,20 @@ describe("TOTP Settings", () => {
     });
 
     it("AccountTab does NOT call updateUser on disable — only the callback owner does", async () => {
-      mockTotpEnabled = true;
-      const options = makeOptions({
-        onDisableTotp: vi.fn().mockImplementation(async () => {
-          updateUser({ totp_enabled: false });
-        }),
-      });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { options, overlay } = openOverlay(
+        {
+          onDisableTotp: vi.fn().mockImplementation(async () => {
+            updateUser({ totp_enabled: false });
+          }),
+        },
+        true,
+      );
 
-      const disableBtn = container.querySelector("[data-testid='totp-disable-btn']") as HTMLElement;
-      disableBtn.click();
-      const pwInput = container.querySelector(
-        "[data-testid='totp-password-input']",
-      ) as HTMLInputElement;
-      pwInput.value = "mypassword123";
+      byTestId<HTMLElement>("totp-disable-btn").click();
+      byTestId<HTMLInputElement>("totp-password-input").value = "mypassword123";
       (updateUser as ReturnType<typeof vi.fn>).mockClear();
 
-      const confirmBtn = Array.from(container.querySelectorAll(".ac-btn")).find(
-        (b) => b.textContent === "Confirm Disable",
-      ) as HTMLElement;
-      confirmBtn.click();
+      acButton("Confirm Disable").click();
 
       await vi.waitFor(() => {
         expect(options.onDisableTotp).toHaveBeenCalled();
@@ -944,9 +619,6 @@ describe("TOTP Settings", () => {
   // -------------------------------------------------------------------------
   // B7-15b: emergency code regeneration and the recovery kit
   // -------------------------------------------------------------------------
-
-  const q = <T extends Element>(sel: string): T | null => container.querySelector<T>(sel);
-  const byTestId = <T extends Element>(id: string): T => q<T>(`[data-testid='${id}']`)!;
 
   async function confirmWithPassword(prefix: string, password: string): Promise<void> {
     byTestId<HTMLButtonElement>(`${prefix}-btn`).click();
@@ -967,11 +639,10 @@ describe("TOTP Settings", () => {
     });
 
     it("requires the password, then shows the new set once and clears the password", async () => {
-      mockTotpEnabled = true;
-      const options = makeOptions({ onRegenerateRecoveryCodes: vi.fn().mockResolvedValue(CODES) });
-      const overlay = createSettingsOverlay(options);
-      overlay.mount(container);
-      overlay.open();
+      const { options, overlay } = openOverlay(
+        { onRegenerateRecoveryCodes: vi.fn().mockResolvedValue(CODES) },
+        true,
+      );
 
       await confirmWithPassword("totp-regenerate", "");
       expect(byTestId("totp-regenerate-error").textContent).toBe("Password is required.");

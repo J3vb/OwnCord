@@ -6,6 +6,7 @@ import {
   clickEl,
   getTab,
   defaultOptions,
+  openOverlay,
   useSettingsOverlayHarness,
 } from "../../helpers/settingsOverlayHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
@@ -127,9 +128,7 @@ describe("SettingsOverlay", () => {
 
     it("opens on the list, and a tapped tab opens its section", () => {
       stubPhone(true);
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
 
       getTab(container, 1).click();
@@ -146,9 +145,7 @@ describe("SettingsOverlay", () => {
           (query: string) => ({ matches: query.includes("pointer: coarse") }) as MediaQueryList,
         ),
       );
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       getTab(container, 1).click();
       expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
       expect(document.activeElement).toBe(container.querySelector("[data-testid='settings-back']"));
@@ -157,9 +154,7 @@ describe("SettingsOverlay", () => {
 
     it("Back returns to the list with focus on the section it left, without closing", () => {
       stubPhone(true);
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       const appearance = getTab(container, 1);
       appearance.click();
 
@@ -173,9 +168,7 @@ describe("SettingsOverlay", () => {
 
     it("Escape leaves the open section first, then closes Settings", () => {
       stubPhone(true);
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       getTab(container, 1).click();
 
       escape();
@@ -189,9 +182,7 @@ describe("SettingsOverlay", () => {
 
     it("Enter in search opens the picked section with focus on Back, and nothing on no match", () => {
       stubPhone(true);
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       const box = container.querySelector<HTMLInputElement>("[data-testid='settings-search']")!;
       const enter = (): boolean =>
         box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -213,9 +204,7 @@ describe("SettingsOverlay", () => {
 
     it("reopening starts on the list again", () => {
       stubPhone(true);
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       getTab(container, 1).click();
       overlay.close();
       overlay.open();
@@ -227,9 +216,7 @@ describe("SettingsOverlay", () => {
     it("a tab another surface asks for opens straight on its section", () => {
       stubPhone(true);
       mockUiState.settingsTab = "Notifications";
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       expect(panelOf(container).classList.contains("settings-panel--section")).toBe(true);
       expect(container.querySelector(".settings-content h1")?.textContent).toBe("Notifications");
 
@@ -238,7 +225,7 @@ describe("SettingsOverlay", () => {
 
     it("a tapped My uploads opens its section, as every other tab does", () => {
       stubPhone(true);
-      const overlay = createSettingsOverlay({
+      const overlay = openOverlay(container, {
         ...defaultOptions,
         myUploadsTab: () => {
           const pane = document.createElement("div");
@@ -246,8 +233,6 @@ describe("SettingsOverlay", () => {
           return pane;
         },
       });
-      overlay.mount(container);
-      overlay.open();
       expect(panelOf(container).classList.contains("settings-panel--section")).toBe(false);
 
       container.querySelector<HTMLElement>("#settings-tab-my-uploads")!.click();
@@ -261,9 +246,7 @@ describe("SettingsOverlay", () => {
 
     it("on a wide window Escape still closes Settings with a section picked", () => {
       stubPhone(false);
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       getTab(container, 1).click();
 
       escape();
@@ -319,9 +302,7 @@ describe("SettingsOverlay", () => {
     it("is ignored when another surface asks for it on Android", () => {
       hostAndroidApp();
       mockUiState.settingsTab = "Keybinds";
-      const overlay = createSettingsOverlay(defaultOptions);
-      overlay.mount(container);
-      overlay.open();
+      const overlay = openOverlay(container);
       expect(container.querySelector(".settings-nav-item.active")?.textContent).not.toBe(
         "Keybinds",
       );
@@ -399,9 +380,7 @@ describe("SettingsOverlay", () => {
   });
 
   it("closes on Escape key", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(defaultOptions.onClose).toHaveBeenCalled();
@@ -410,9 +389,7 @@ describe("SettingsOverlay", () => {
   });
 
   it("stays open when a drag-select ends on the backdrop, and a backdrop click still closes", () => {
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
     defaultOptions.onClose.mockClear();
     const root = container.querySelector<HTMLElement>(".settings-overlay")!;
     root
@@ -695,9 +672,7 @@ describe("SettingsOverlay", () => {
     document.body.appendChild(opener);
     opener.focus();
 
-    const overlay = createSettingsOverlay(defaultOptions);
-    overlay.mount(container);
-    overlay.open();
+    const overlay = openOverlay(container);
 
     const panel = container.querySelector(".settings-panel") as HTMLElement;
     expect(panel.contains(document.activeElement)).toBe(true);

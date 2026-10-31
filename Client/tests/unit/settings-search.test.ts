@@ -76,29 +76,9 @@ import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
 import type { SearchableTab } from "../../src/features/settings/settingsSearch";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../helpers/androidHost";
+import { baseOptions } from "../helpers/settingsOverlayOptions";
 
-const options = {
-  onClose: vi.fn(),
-  onChangePassword: vi.fn().mockResolvedValue(undefined),
-  onUpdateProfile: vi.fn().mockResolvedValue(undefined),
-  onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/test"),
-  onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-  onLogout: vi.fn(),
-  onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-  onStatusChange: vi.fn(),
-  onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "otpauth://test", backup_codes: [] }),
-  onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-  onDisableTotp: vi.fn().mockResolvedValue(undefined),
-  onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-  onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-  onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-  onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
-  onListSessions: vi.fn().mockResolvedValue([]),
-  onRevokeSession: vi.fn().mockResolvedValue(undefined),
-  onRevokeAllSessions: vi
-    .fn()
-    .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
-};
+const options = baseOptions();
 
 const uploadsApi = {
   getUserStorage: vi.fn().mockResolvedValue({ used_bytes: 1, quota_bytes: 0 }),

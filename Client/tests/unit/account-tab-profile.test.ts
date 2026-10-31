@@ -17,6 +17,7 @@ import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/server
 import { ApiClientError } from "@lib/api";
 import * as imageCrop from "@lib/ui/imageCrop";
 import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
+import { makeOverlayOptions } from "../helpers/settingsOverlayOptions";
 
 /**
  * The Account tab's new job: edit the display name and about text, and upload
@@ -36,29 +37,11 @@ function setUser(patch: Record<string, unknown>): void {
 }
 
 function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverlayOptions {
-  return {
-    onClose: vi.fn(),
-    onChangePassword: vi.fn().mockResolvedValue(undefined),
-    onUpdateProfile: vi.fn().mockResolvedValue(undefined),
+  return makeOverlayOptions({
     onUploadAvatar: vi.fn().mockResolvedValue("/api/v1/files/abc"),
-    onRemoveAvatar: vi.fn().mockResolvedValue(undefined),
-    onLogout: vi.fn(),
-    onDeleteAccount: vi.fn().mockResolvedValue(undefined),
-    onStatusChange: vi.fn(),
     onEnableTotp: vi.fn().mockResolvedValue({ qr_uri: "", backup_codes: [] }),
-    onConfirmTotp: vi.fn().mockResolvedValue(undefined),
-    onDisableTotp: vi.fn().mockResolvedValue(undefined),
-    onRefreshTotpStatus: vi.fn().mockResolvedValue(undefined),
-    onRegenerateRecoveryCodes: vi.fn().mockResolvedValue([]),
-    onEnrolRecoveryKit: vi.fn().mockResolvedValue({ created_at: "" }),
-    onGetRecoveryKitStatus: vi.fn().mockResolvedValue({ enrolled: false, used_at: null }),
-    onListSessions: vi.fn().mockResolvedValue([]),
-    onRevokeSession: vi.fn().mockResolvedValue(undefined),
-    onRevokeAllSessions: vi
-      .fn()
-      .mockResolvedValue({ sessions_revoked: 0, current_session_revoked: false }),
     ...overrides,
-  };
+  });
 }
 
 describe("validateAvatarFile", () => {

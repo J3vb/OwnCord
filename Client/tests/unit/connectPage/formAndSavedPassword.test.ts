@@ -1,9 +1,26 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/connectPageMocks";
 import { ApiClientError, TLS_CERT_CODE } from "../../../src/lib/api";
 import { createConnectPage } from "../../../src/pages/ConnectPage";
 import type { ConnectPageCallbacks } from "../../../src/pages/ConnectPage";
-import { makeCallbacks, testProfiles, dropFocusToBody } from "../../helpers/connectPageHarness";
+import {
+  dropFocusToBody,
+  useConnectPageContainer,
+  savedCredential,
+  mountPage,
+  qs,
+  submitForm,
+  setField,
+  fillLogin,
+  switchMode,
+  mountWithSavedPassword,
+  fire,
+  typeInto,
+  waitForCall,
+  waitForCalls,
+  expectBannerVisible,
+  signIn,
+} from "../../helpers/connectPageHarness";
 
 vi.mock("../../../src/lib/net/credentials", () => mocks.netCredentialsMock());
 vi.mock("../../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
@@ -13,21 +30,12 @@ const { mockLoadCredential } = mocks;
 
 describe("ConnectPage", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    mockLoadCredential.mockReset();
-    mockLoadCredential.mockResolvedValue(null);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useConnectPageContainer((mounted) => {
+    container = mounted;
   });
 
   it("renders the connect page with form elements", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     expect(container.querySelector(".connect-page")).not.toBeNull();
     expect(container.querySelector(".connect-form")).not.toBeNull();
@@ -39,8 +47,7 @@ describe("ConnectPage", () => {
   });
 
   it("renders server profiles in the server panel", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     const serverItems = container.querySelectorAll(".server-item");
     expect(serverItems.length).toBe(1);
@@ -52,13 +59,12 @@ describe("ConnectPage", () => {
   });
 
   it("fills host input when a server profile is clicked", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    const serverItem = qs<HTMLElement>(container, ".server-item");
     serverItem.click();
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
     expect(hostInput.value).toBe("localhost:8443");
 
     page.destroy?.();
@@ -70,15 +76,12 @@ describe("ConnectPage", () => {
     // to become an unhandled rejection.
     mockLoadCredential.mockRejectedValue(new Error("keychain locked"));
 
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    const serverItem = qs<HTMLElement>(container, ".server-item");
     serverItem.click();
 
-    await vi.waitFor(() => {
-      expect(mockLoadCredential).toHaveBeenCalledWith("localhost:8443");
-    });
+    await waitForCall(mockLoadCredential, "localhost:8443");
     // Give the rejected promise's catch handler a turn to run before the
     // test ends, or an unhandled-rejection would surface after this test.
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -87,15 +90,13 @@ describe("ConnectPage", () => {
   });
 
   it("shows error when submitting empty form", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // Clear any default host value
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
     hostInput.value = "";
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
     // Wait for async handler
     await vi.waitFor(() => {
@@ -107,19 +108,17 @@ describe("ConnectPage", () => {
   });
 
   it("shows validation error for short password", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
 
     hostInput.value = "localhost:8443";
     usernameInput.value = "testuser";
     passwordInput.value = "short";
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
     await vi.waitFor(() => {
       const errorBanner = container.querySelector(".error-banner");
@@ -137,17 +136,15 @@ describe("ConnectPage", () => {
   });
 
   it("announces a field error as an alert when that field already has focus", async () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
-    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
-    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    qs<HTMLInputElement>(container, "#host").value = "localhost:8443";
+    qs<HTMLInputElement>(container, "#username").value = "testuser";
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     passwordInput.value = "short";
     passwordInput.focus();
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
     const errorBanner = container.querySelector(".error-banner")!;
     await vi.waitFor(() => {
@@ -162,17 +159,15 @@ describe("ConnectPage", () => {
 
   it("returns focus to the password field after the server rejects a login", async () => {
     const onLogin = vi.fn().mockRejectedValue(new Error("Invalid credentials"));
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    (container.querySelector("#host") as HTMLInputElement).value = "localhost:8443";
-    (container.querySelector("#username") as HTMLInputElement).value = "testuser";
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    qs<HTMLInputElement>(container, "#host").value = "localhost:8443";
+    qs<HTMLInputElement>(container, "#username").value = "testuser";
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     passwordInput.value = "long-enough-password";
     passwordInput.focus();
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
     expect(passwordInput.disabled).toBe(true);
     dropFocusToBody();
 
@@ -191,19 +186,17 @@ describe("ConnectPage", () => {
       new ApiClientError(502, TLS_CERT_CODE, "certificate not confirmed");
 
     function submitLogin(host: string): void {
-      (container.querySelector("#host") as HTMLInputElement).value = host;
-      (container.querySelector("#username") as HTMLInputElement).value = "testuser";
-      (container.querySelector("#password") as HTMLInputElement).value = "long-enough-password";
-      const form = container.querySelector(".connect-form") as HTMLFormElement;
-      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      qs<HTMLInputElement>(container, "#host").value = host;
+      qs<HTMLInputElement>(container, "#username").value = "testuser";
+      qs<HTMLInputElement>(container, "#password").value = "long-enough-password";
+      submitForm(container);
     }
 
     async function refusedThen(
       onLogin: ConnectPageCallbacks["onLogin"],
       host: string,
     ): Promise<ReturnType<typeof createConnectPage>> {
-      const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-      page.mount(container);
+      const page = mountPage(container, { onLogin });
       submitLogin(host);
       await vi.waitFor(() => {
         expect(container.querySelector(".error-banner")!.textContent).not.toBe("");
@@ -220,7 +213,7 @@ describe("ConnectPage", () => {
       const page = await refusedThen(onLogin, "Chat.Example:8443");
 
       page.resubmitAfterCertAccept("chat.example:8443");
-      await vi.waitFor(() => expect(onLogin).toHaveBeenCalledTimes(2));
+      await waitForCalls(onLogin, 2);
       // The typed capitals are not kept: host names are case-insensitive.
       expect(onLogin).toHaveBeenLastCalledWith(
         "chat.example:8443",
@@ -242,7 +235,7 @@ describe("ConnectPage", () => {
       await Promise.resolve();
       expect(onLogin).toHaveBeenCalledTimes(1);
 
-      (container.querySelector("#host") as HTMLInputElement).value = "other.example:8443";
+      qs<HTMLInputElement>(container, "#host").value = "other.example:8443";
       page.resubmitAfterCertAccept("chat.example:8443");
       await Promise.resolve();
       expect(onLogin).toHaveBeenCalledTimes(1);
@@ -253,7 +246,7 @@ describe("ConnectPage", () => {
       const onLogin = vi.fn<ConnectPageCallbacks["onLogin"]>().mockRejectedValue(certRefusal());
       const page = await refusedThen(onLogin, "chat.example:8443");
 
-      const passwordInput = container.querySelector("#password") as HTMLInputElement;
+      const passwordInput = qs<HTMLInputElement>(container, "#password");
       passwordInput.value = "half-typed";
       passwordInput.dispatchEvent(new Event("input", { bubbles: true }));
       page.resubmitAfterCertAccept("chat.example:8443");
@@ -271,15 +264,11 @@ describe("ConnectPage", () => {
           }),
       );
       const onLogin = vi.fn<ConnectPageCallbacks["onLogin"]>().mockResolvedValue(undefined);
-      const page = createConnectPage(
-        makeCallbacks({ onLogin, onRegister, getRegistrationMode: () => "open" }),
-        testProfiles,
-      );
-      page.mount(container);
-      const toggle = container.querySelector(".form-switch button") as HTMLElement;
+      const page = mountPage(container, { onLogin, onRegister, getRegistrationMode: () => "open" });
+      const toggle = qs<HTMLElement>(container, ".form-switch button");
       toggle.click();
       submitLogin("chat.example:8443");
-      await vi.waitFor(() => expect(onRegister).toHaveBeenCalledTimes(1));
+      await waitForCalls(onRegister, 1);
 
       toggle.click();
       refuse(certRefusal());
@@ -318,68 +307,30 @@ describe("ConnectPage", () => {
   // ordinary (almost certainly wrong) typed password.
 
   it("submits a remembered password through the backend, not as form text", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onLogin = vi.fn().mockResolvedValue(undefined);
-    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
+    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
+    submitForm(container);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(onLoginWithSavedPassword).toHaveBeenCalledWith("localhost:8443", "saveduser");
-    });
+    await waitForCall(onLoginWithSavedPassword, "localhost:8443", "saveduser");
     expect(onLogin).not.toHaveBeenCalled();
 
     page.destroy?.();
   });
 
   it("falls back to a normal login once the user edits the remembered password", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onLogin = vi.fn().mockResolvedValue(undefined);
-    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
-
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
+    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
 
     // An edit drops the placeholder outright — the field must never mix
     // placeholder text with typed characters.
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
+    fire(passwordInput, "beforeinput");
     expect(passwordInput.value).toBe("");
     expect(page.isUsingSavedPassword()).toBe(false);
 
     passwordInput.value = "typed-password";
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledWith("localhost:8443", "saveduser", "typed-password");
-    });
+    await waitForCall(onLogin, "localhost:8443", "saveduser", "typed-password");
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -388,20 +339,9 @@ describe("ConnectPage", () => {
   it("does not drop the placeholder on caret movement alone", async () => {
     // ArrowLeft moves the caret without editing the field, so the placeholder
     // must survive it — unlike an actual edit.
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const { page } = await mountWithSavedPassword(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
-
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     const value = passwordInput.value;
     passwordInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
 
@@ -414,35 +354,16 @@ describe("ConnectPage", () => {
   it("falls back to a normal login once a beforeinput edit clears the placeholder", async () => {
     // Covers edits that never fire keydown/paste — drag-and-drop and
     // autofill both mutate the value via beforeinput.
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onLogin = vi.fn().mockResolvedValue(undefined);
-    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
+    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
-
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
+    fire(passwordInput, "beforeinput");
     expect(page.isUsingSavedPassword()).toBe(false);
 
     passwordInput.value = "dropped-in-password";
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledWith("localhost:8443", "saveduser", "dropped-in-password");
-    });
+    await waitForCall(onLogin, "localhost:8443", "saveduser", "dropped-in-password");
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -452,39 +373,15 @@ describe("ConnectPage", () => {
     // A password manager (and some webview autofill implementations) sets
     // the value and fires only `input`, never `beforeinput`. The `input`
     // listener is the backstop that must still clear the placeholder.
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onLogin = vi.fn().mockResolvedValue(undefined);
-    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
+    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
-
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.value = "manager-filled-password";
-    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
+    typeInto(passwordInput, "manager-filled-password");
     expect(page.isUsingSavedPassword()).toBe(false);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledWith(
-        "localhost:8443",
-        "saveduser",
-        "manager-filled-password",
-      );
-    });
+    await waitForCall(onLogin, "localhost:8443", "saveduser", "manager-filled-password");
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -500,40 +397,16 @@ describe("ConnectPage", () => {
     // the owner out. Submitting it simply reaches onLogin like any other
     // typed password; if it's not the real password, auth fails normally.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onLogin = vi.fn().mockResolvedValue(undefined);
-    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
+    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
-
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
-    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
-    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
+    fire(passwordInput, "beforeinput");
+    typeInto(passwordInput, SAVED_PASSWORD_PLACEHOLDER);
     expect(page.isUsingSavedPassword()).toBe(false);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledWith(
-        "localhost:8443",
-        "saveduser",
-        SAVED_PASSWORD_PLACEHOLDER,
-      );
-    });
+    await waitForCall(onLogin, "localhost:8443", "saveduser", SAVED_PASSWORD_PLACEHOLDER);
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -544,38 +417,20 @@ describe("ConnectPage", () => {
     // unconditional: this is the path that would otherwise create an account
     // whose password is a fixed, publicly known constant.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const { page, onRegister } = await mountWithSavedPassword(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
-
-    const toggle = container.querySelector(".form-switch button") as HTMLElement;
-    toggle.click();
+    switchMode(container);
     expect(page.isUsingSavedPassword()).toBe(false);
 
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
-    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
+    typeInto(passwordInput, SAVED_PASSWORD_PLACEHOLDER);
 
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
-    inviteInput.value = "invite-code";
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
+    setField(container, "#invite", "invite-code");
+    const usernameInput = qs<HTMLInputElement>(container, "#username");
     usernameInput.value = "newuser";
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
-    });
+    await expectBannerVisible(container);
     expect(onRegister).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -585,30 +440,11 @@ describe("ConnectPage", () => {
     // The new placeholder check must not fire on the ordinary saved-password
     // path, where the field legitimately holds the placeholder text while
     // `usingSavedPassword` is true.
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onLogin = vi.fn().mockResolvedValue(undefined);
-    const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
+    const { page, onLogin, onLoginWithSavedPassword } = await mountWithSavedPassword(container);
 
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
+    submitForm(container);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(onLoginWithSavedPassword).toHaveBeenCalledWith("localhost:8443", "saveduser");
-    });
+    await waitForCall(onLoginWithSavedPassword, "localhost:8443", "saveduser");
     expect(onLogin).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -620,27 +456,11 @@ describe("ConnectPage", () => {
     // whether or not a saved password was ever shown on this form.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     const onLogin = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", SAVED_PASSWORD_PLACEHOLDER);
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledWith(
-        "localhost:8443",
-        "testuser",
-        SAVED_PASSWORD_PLACEHOLDER,
-      );
-    });
+    await waitForCall(onLogin, "localhost:8443", "testuser", SAVED_PASSWORD_PLACEHOLDER);
 
     page.destroy?.();
   });
@@ -651,28 +471,16 @@ describe("ConnectPage", () => {
     // missed, because nothing had ever armed it.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
-    const toggle = container.querySelector(".form-switch button") as HTMLElement;
-    toggle.click();
+    switchMode(container);
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
+    fillLogin(container, "localhost:8443", "newuser", SAVED_PASSWORD_PLACEHOLDER);
+    setField(container, "#invite", "invite-code");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "newuser";
-    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
-    inviteInput.value = "invite-code";
+    submitForm(container);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
-    });
+    await expectBannerVisible(container);
     expect(onRegister).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -689,8 +497,7 @@ describe("ConnectPage", () => {
       .mockResolvedValueOnce({ username: "otheruser", token: "tok", hasPassword: false });
 
     const onLogin = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
     page.selectServer("server-a:8443", "saveduser");
     await vi.waitFor(() => {
@@ -699,42 +506,26 @@ describe("ConnectPage", () => {
 
     page.selectServer("server-b:8443", "otheruser");
     await vi.waitFor(() => {
-      const usernameInput = container.querySelector("#username") as HTMLInputElement;
+      const usernameInput = qs<HTMLInputElement>(container, "#username");
       expect(usernameInput.value).toBe("otheruser");
     });
     expect(page.isUsingSavedPassword()).toBe(false);
 
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
-    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
+    typeInto(passwordInput, SAVED_PASSWORD_PLACEHOLDER);
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledWith(
-        "server-b:8443",
-        "otheruser",
-        SAVED_PASSWORD_PLACEHOLDER,
-      );
-    });
+    await waitForCall(onLogin, "server-b:8443", "otheruser", SAVED_PASSWORD_PLACEHOLDER);
 
     page.destroy?.();
   });
 
   it("drops the saved password when switching to a server with no saved username", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
+    mockLoadCredential.mockResolvedValue(savedCredential());
     const onLogin = vi.fn().mockResolvedValue(undefined);
     const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(
-      makeCallbacks({ onLogin, onLoginWithSavedPassword }),
-      testProfiles,
-    );
-    page.mount(container);
+    const page = mountPage(container, { onLogin, onLoginWithSavedPassword });
 
     page.selectServer("server-a:8443", "saveduser");
     await vi.waitFor(() => {
@@ -744,11 +535,10 @@ describe("ConnectPage", () => {
     // An Add Server profile has no username, so no credential load resets the form.
     page.selectServer("server-b:8443");
     expect(page.isUsingSavedPassword()).toBe(false);
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     expect(passwordInput.value).toBe("");
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
     await Promise.resolve();
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 
@@ -756,28 +546,22 @@ describe("ConnectPage", () => {
   });
 
   it("drops the saved password when the user types a different host", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
+    mockLoadCredential.mockResolvedValue(savedCredential());
     const onLoginWithSavedPassword = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onLoginWithSavedPassword }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLoginWithSavedPassword });
 
     page.selectServer("server-a:8443", "saveduser");
     await vi.waitFor(() => {
       expect(page.isUsingSavedPassword()).toBe(true);
     });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
+    const hostInput = qs<HTMLInputElement>(container, "#host");
     hostInput.value = "server-c:8443";
     hostInput.dispatchEvent(new Event("input", { bubbles: true }));
     expect(page.isUsingSavedPassword()).toBe(false);
-    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+    expect(qs<HTMLInputElement>(container, "#password").value).toBe("");
 
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    submitForm(container);
     await Promise.resolve();
     expect(onLoginWithSavedPassword).not.toHaveBeenCalled();
 
@@ -785,13 +569,8 @@ describe("ConnectPage", () => {
   });
 
   it("keeps the saved password when the same server is selected again", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    mockLoadCredential.mockResolvedValue(savedCredential());
+    const page = mountPage(container);
 
     page.selectServer("server-a:8443", "saveduser");
     await vi.waitFor(() => {
@@ -810,45 +589,34 @@ describe("ConnectPage", () => {
     // else branch, since it runs for Register too. The stateless check does
     // not care about any of that history.
     const SAVED_PASSWORD_PLACEHOLDER = "•".repeat(12);
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
+    mockLoadCredential.mockResolvedValue(savedCredential());
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
-    const serverItem = container.querySelector(".server-item") as HTMLElement;
+    const serverItem = qs<HTMLElement>(container, ".server-item");
     serverItem.click();
     await vi.waitFor(() => {
       expect(page.isUsingSavedPassword()).toBe(true);
     });
 
-    const toggle = container.querySelector(".form-switch button") as HTMLElement;
-    toggle.click();
+    switchMode(container);
     expect(page.isUsingSavedPassword()).toBe(false);
 
     // Reselect the same host while already in Register mode.
     serverItem.click();
     await vi.waitFor(() => {
-      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+      expect(qs<HTMLInputElement>(container, "#username").value).toBe("saveduser");
     });
     expect(page.isUsingSavedPassword()).toBe(false);
 
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
-    passwordInput.dispatchEvent(new Event("beforeinput", { bubbles: true, cancelable: true }));
-    passwordInput.value = SAVED_PASSWORD_PLACEHOLDER;
-    passwordInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
+    fire(passwordInput, "beforeinput");
+    typeInto(passwordInput, SAVED_PASSWORD_PLACEHOLDER);
 
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
-    inviteInput.value = "invite-code";
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    setField(container, "#invite", "invite-code");
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
-    });
+    await expectBannerVisible(container);
     expect(onRegister).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -858,37 +626,20 @@ describe("ConnectPage", () => {
     // Regression: the placeholder is a fixed, publicly known constant. If it
     // survived a switch to Register it would be submitted as the NEW account's
     // password, because only the login branch consults `usingSavedPassword`.
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
-
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
+    const { page, onRegister } = await mountWithSavedPassword(container);
 
     // Switch to Register without touching the password field.
-    const toggle = container.querySelector(".form-switch button") as HTMLElement;
-    toggle.click();
+    switchMode(container);
 
     expect(page.isUsingSavedPassword()).toBe(false);
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    const passwordInput = qs<HTMLInputElement>(container, "#password");
     expect(passwordInput.value).toBe("");
 
     // Submitting now must be rejected for a missing password, not sent.
-    const inviteInput = container.querySelector("#invite") as HTMLInputElement;
-    inviteInput.value = "invite-code";
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    setField(container, "#invite", "invite-code");
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
-    });
+    await expectBannerVisible(container);
     expect(onRegister).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -899,33 +650,25 @@ describe("ConnectPage", () => {
     // in Register mode when the credential load lands. Clicking a server row
     // does not force the form back to login, so setCredentials must refuse to
     // arm the placeholder itself.
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
+    mockLoadCredential.mockResolvedValue(savedCredential());
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
     // Switch to Register FIRST, then pick the saved server.
-    (container.querySelector(".form-switch button") as HTMLElement).click();
-    (container.querySelector(".server-item") as HTMLElement).click();
+    switchMode(container);
+    qs<HTMLElement>(container, ".server-item").click();
 
     await vi.waitFor(() => {
-      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+      expect(qs<HTMLInputElement>(container, "#username").value).toBe("saveduser");
     });
 
     expect(page.isUsingSavedPassword()).toBe(false);
-    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+    expect(qs<HTMLInputElement>(container, "#password").value).toBe("");
 
-    (container.querySelector("#invite") as HTMLInputElement).value = "invite-code";
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    setField(container, "#invite", "invite-code");
+    submitForm(container);
 
-    await vi.waitFor(() => {
-      expect(container.querySelector(".error-banner")!.classList.contains("visible")).toBe(true);
-    });
+    await expectBannerVisible(container);
     expect(onRegister).not.toHaveBeenCalled();
 
     page.destroy?.();
@@ -943,37 +686,25 @@ describe("ConnectPage", () => {
         }),
     );
     const onRegister = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onRegister }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onRegister });
 
     // Click the server (load starts), switch to Register, THEN let it land.
-    (container.querySelector(".server-item") as HTMLElement).click();
-    (container.querySelector(".form-switch button") as HTMLElement).click();
+    qs<HTMLElement>(container, ".server-item").click();
+    switchMode(container);
     resolveCredential({ username: "saveduser", token: "tok", hasPassword: true });
 
     await vi.waitFor(() => {
-      expect((container.querySelector("#username") as HTMLInputElement).value).toBe("saveduser");
+      expect(qs<HTMLInputElement>(container, "#username").value).toBe("saveduser");
     });
 
     expect(page.isUsingSavedPassword()).toBe(false);
-    expect((container.querySelector("#password") as HTMLInputElement).value).toBe("");
+    expect(qs<HTMLInputElement>(container, "#password").value).toBe("");
 
     page.destroy?.();
   });
 
   it("does not report a saved password as form text", async () => {
-    mockLoadCredential.mockResolvedValue({
-      username: "saveduser",
-      token: "tok",
-      hasPassword: true,
-    });
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
-
-    (container.querySelector(".server-item") as HTMLElement).click();
-    await vi.waitFor(() => {
-      expect(page.isUsingSavedPassword()).toBe(true);
-    });
+    const { page } = await mountWithSavedPassword(container);
 
     // "" means "nothing new to save", which makes save_credential preserve
     // the stored password instead of clearing it.
@@ -984,38 +715,24 @@ describe("ConnectPage", () => {
 
   it("calls onLogin with form values on valid submit", async () => {
     const onLogin = vi.fn().mockResolvedValue(undefined);
-    const page = createConnectPage(makeCallbacks({ onLogin }), testProfiles);
-    page.mount(container);
+    const page = mountPage(container, { onLogin });
 
-    const hostInput = container.querySelector("#host") as HTMLInputElement;
-    const usernameInput = container.querySelector("#username") as HTMLInputElement;
-    const passwordInput = container.querySelector("#password") as HTMLInputElement;
+    signIn(container, "localhost:8443", "testuser", "password123");
 
-    hostInput.value = "localhost:8443";
-    usernameInput.value = "testuser";
-    passwordInput.value = "password123";
-
-    const form = container.querySelector(".connect-form") as HTMLFormElement;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-
-    await vi.waitFor(() => {
-      expect(onLogin).toHaveBeenCalledWith("localhost:8443", "testuser", "password123");
-    });
+    await waitForCall(onLogin, "localhost:8443", "testuser", "password123");
 
     page.destroy?.();
   });
 
   it("toggles between login and register mode", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     // Initially in login mode — invite group hidden
     const inviteGroup = container.querySelector("#invite")!.closest(".form-group") as HTMLElement;
     expect(inviteGroup.classList.contains("form-group--hidden")).toBe(true);
 
     // Click toggle link
-    const toggleLink = container.querySelector(".form-switch button") as HTMLElement;
-    toggleLink.click();
+    switchMode(container);
 
     // Now in register mode — invite group visible
     expect(inviteGroup.classList.contains("form-group--hidden")).toBe(false);
@@ -1028,8 +745,7 @@ describe("ConnectPage", () => {
   });
 
   it("shows TOTP overlay when showTotp is called", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     const totpOverlay = container.querySelector(".totp-overlay")!;
     expect(totpOverlay.classList.contains("totp-overlay--hidden")).toBe(true);
@@ -1041,8 +757,7 @@ describe("ConnectPage", () => {
   });
 
   it("shows error message via showError", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.showError("Connection refused");
 
@@ -1058,8 +773,7 @@ describe("ConnectPage", () => {
   });
 
   it("resets to idle state via resetToIdle", () => {
-    const page = createConnectPage(makeCallbacks(), testProfiles);
-    page.mount(container);
+    const page = mountPage(container);
 
     page.showError("Some error");
     page.resetToIdle();
@@ -1067,7 +781,7 @@ describe("ConnectPage", () => {
     const errorBanner = container.querySelector(".error-banner");
     expect(errorBanner!.classList.contains("visible")).toBe(false);
 
-    const submitBtn = container.querySelector(".btn-primary") as HTMLButtonElement;
+    const submitBtn = qs<HTMLButtonElement>(container, ".btn-primary");
     expect(submitBtn.disabled).toBe(false);
 
     page.destroy?.();

@@ -80,8 +80,16 @@ function makeMockEntry(level: "debug" | "info" | "warn" | "error", msg: string) 
   };
 }
 
-function buildLogsPane(signal: AbortSignal): HTMLDivElement {
-  return createLogsTab(() => "Logs" as TabName, signal).build();
+function buildLogsPane(signal: AbortSignal, tab: TabName = "Logs"): HTMLDivElement {
+  return createLogsTab(() => tab, signal).build();
+}
+
+function buttonLabeled(el: HTMLElement, label: string): HTMLButtonElement {
+  return Array.from(el.querySelectorAll("button")).find((b) => b.textContent === label)!;
+}
+
+function stubClipboard(writeText: unknown): void {
+  Object.assign(navigator, { clipboard: { writeText } });
 }
 function shareCard(el: HTMLElement): HTMLElement {
   return el.querySelector<HTMLElement>("[data-testid='share-testing']")!;
@@ -115,15 +123,13 @@ describe("LogsTab", () => {
   });
 
   it("build() returns a div with settings-pane class", () => {
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     expect(el.tagName).toBe("DIV");
     expect(el.className).toBe("settings-pane active");
   });
 
   it("keeps the voice engine state in its own closed disclosure", () => {
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const voice = disclosure(el, "Voice engine state");
     expect(voice.open).toBe(false);
     expect(voice.querySelector(".diag-state")).not.toBeNull();
@@ -134,8 +140,7 @@ describe("LogsTab", () => {
       makeMockEntry("info", "hello"),
       makeMockEntry("warn", "warning"),
     ]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const entries = el.querySelectorAll(".log-entry");
     expect(entries.length).toBe(2);
   });
@@ -144,8 +149,7 @@ describe("LogsTab", () => {
     mockGetLogBuffer.mockReturnValue([
       { ...makeMockEntry("info", "with data"), data: { key: "value" } },
     ]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const pre = el.querySelector("pre");
     expect(pre).not.toBeNull();
   });
@@ -154,8 +158,7 @@ describe("LogsTab", () => {
     mockGetLogBuffer.mockReturnValue([
       { ...makeMockEntry("info", "str data"), data: "some string" },
     ]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     // Find the <pre> inside a log-entry row (not the diagnostics result <pre>).
     const pre = el.querySelector(".log-entry pre");
     expect(pre).not.toBeNull();
@@ -163,16 +166,14 @@ describe("LogsTab", () => {
   });
 
   it("renders filter dropdown and level selector", () => {
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     // The Screen share testing card has its own select.
     const selects = el.querySelectorAll("select:not([data-testid='share-motion-policy'])");
     expect(selects.length).toBe(2);
   });
 
   it("renders Clear Logs and Refresh buttons", () => {
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const buttons = el.querySelectorAll("button");
     const texts = Array.from(buttons).map((b) => b.textContent);
     expect(texts).toContain("Clear Logs");
@@ -185,8 +186,7 @@ describe("LogsTab", () => {
       makeMockEntry("info", "two"),
       makeMockEntry("info", "three"),
     ]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     expect(el.textContent).toContain("3 entries");
   });
 
@@ -210,8 +210,7 @@ describe("LogsTab", () => {
       makeMockEntry("info", "info msg"),
       makeMockEntry("warn", "warn msg"),
     ]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const filterSelect = el.querySelectorAll("select")[0]!;
 
     // Change to "warn" filter
@@ -223,8 +222,7 @@ describe("LogsTab", () => {
   });
 
   it("clear button calls clearLogBuffer", () => {
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const clearBtn = Array.from(el.querySelectorAll("button")).find(
       (b) => b.textContent === "Clear Logs",
     );
@@ -233,8 +231,7 @@ describe("LogsTab", () => {
   });
 
   it("level selector calls setLogLevel", () => {
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const levelSelect = el.querySelectorAll("select")[1]!;
     levelSelect.value = "error";
     levelSelect.dispatchEvent(new Event("change"));
@@ -243,15 +240,10 @@ describe("LogsTab", () => {
 
   it("Copy All shows 'Failed to copy' on clipboard rejection", async () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "test")]);
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
-    });
+    stubClipboard(vi.fn().mockRejectedValue(new Error("denied")));
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
-    const copyBtn = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Copy All",
-    )!;
+    const el = buildLogsPane(controller.signal);
+    const copyBtn = buttonLabeled(el, "Copy All");
     copyBtn.click();
 
     await vi.waitFor(() => {
@@ -261,15 +253,10 @@ describe("LogsTab", () => {
 
   it("Copy Diagnostics shows 'Failed to copy' on clipboard rejection", async () => {
     mockGetLogBuffer.mockReturnValue([]);
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
-    });
+    stubClipboard(vi.fn().mockRejectedValue(new Error("denied")));
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
-    const diagCopy = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Copy Diagnostics",
-    )!;
+    const el = buildLogsPane(controller.signal);
+    const diagCopy = buttonLabeled(el, "Copy Diagnostics");
     diagCopy.click();
 
     await vi.waitFor(() => {
@@ -295,8 +282,7 @@ describe("LogsTab", () => {
     mockGetLogBuffer.mockReturnValue([]);
     localStorage.clear();
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const filterSelect = el.querySelectorAll("select")[0]!;
 
     filterSelect.value = "error";
@@ -311,8 +297,7 @@ describe("LogsTab", () => {
     localStorage.clear();
     localStorage.setItem("logs_filter_level", "warn");
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const filterSelect = el.querySelectorAll("select")[0]!;
 
     expect(filterSelect.value).toBe("warn");
@@ -324,8 +309,7 @@ describe("LogsTab", () => {
     localStorage.clear();
     mockGetLogLevel.mockReturnValue("info");
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const levelSelect = el.querySelectorAll("select")[1]!;
 
     // Reflects getLogLevel() rather than the first option (DEBUG); no save/apply.
@@ -338,8 +322,7 @@ describe("LogsTab", () => {
     localStorage.clear();
     localStorage.setItem("logs_min_level", "error");
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     const levelSelect = el.querySelectorAll("select")[1]!;
 
     expect(levelSelect.value).toBe("error");
@@ -349,15 +332,10 @@ describe("LogsTab", () => {
 
   it("Copy All shows 'Copied!' on successful clipboard write", async () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "test")]);
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
-    });
+    stubClipboard(vi.fn().mockResolvedValue(undefined));
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
-    const copyBtn = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Copy All",
-    )!;
+    const el = buildLogsPane(controller.signal);
+    const copyBtn = buttonLabeled(el, "Copy All");
     copyBtn.click();
 
     await vi.waitFor(() => {
@@ -367,15 +345,10 @@ describe("LogsTab", () => {
 
   it("Copy Diagnostics shows 'Copied!' on successful clipboard write", async () => {
     mockGetLogBuffer.mockReturnValue([]);
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
-    });
+    stubClipboard(vi.fn().mockResolvedValue(undefined));
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
-    const diagCopy = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Copy Diagnostics",
-    )!;
+    const el = buildLogsPane(controller.signal);
+    const diagCopy = buttonLabeled(el, "Copy Diagnostics");
     diagCopy.click();
 
     await vi.waitFor(() => {
@@ -385,8 +358,7 @@ describe("LogsTab", () => {
 
   it("Refresh button re-renders log entries", () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "initial")]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
 
     expect(el.querySelectorAll(".log-entry").length).toBe(1);
 
@@ -396,9 +368,7 @@ describe("LogsTab", () => {
       makeMockEntry("warn", "new entry"),
     ]);
 
-    const refreshBtn = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Refresh",
-    )!;
+    const refreshBtn = buttonLabeled(el, "Refresh");
     refreshBtn.click();
 
     expect(el.querySelectorAll(".log-entry").length).toBe(2);
@@ -415,8 +385,7 @@ describe("LogsTab", () => {
       };
     }) as any);
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     expect(el.querySelectorAll(".log-entry").length).toBe(0);
 
     // Simulate a new log entry arriving
@@ -437,8 +406,7 @@ describe("LogsTab", () => {
       };
     }) as any);
 
-    const handle = createLogsTab(() => "Account" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal, "Account");
 
     mockGetLogBuffer.mockReturnValue([makeMockEntry("error", "live entry")]);
     logCallback?.();
@@ -449,18 +417,13 @@ describe("LogsTab", () => {
 
   it("Copy All includes data field in copied text", async () => {
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, {
-      clipboard: { writeText: writeTextMock },
-    });
+    stubClipboard(writeTextMock);
     mockGetLogBuffer.mockReturnValue([
       { ...makeMockEntry("info", "with data"), data: { key: "value" } },
     ]);
 
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
-    const copyBtn = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Copy All",
-    )!;
+    const el = buildLogsPane(controller.signal);
+    const copyBtn = buttonLabeled(el, "Copy All");
     copyBtn.click();
 
     await vi.waitFor(() => {
@@ -474,8 +437,7 @@ describe("LogsTab", () => {
 
   it("clear button updates the entry count, not just the list", () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "one"), makeMockEntry("info", "two")]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     expect(el.textContent).toContain("2 entries");
 
     // Simulate clearLogBuffer() actually emptying the buffer.
@@ -483,9 +445,7 @@ describe("LogsTab", () => {
       mockGetLogBuffer.mockReturnValue([]);
     });
 
-    const clearBtn = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Clear Logs",
-    )!;
+    const clearBtn = buttonLabeled(el, "Clear Logs");
     clearBtn.click();
 
     expect(el.querySelectorAll(".log-entry").length).toBe(0);
@@ -495,8 +455,7 @@ describe("LogsTab", () => {
 
   it("Refresh button updates the entry count to match the refreshed list", () => {
     mockGetLogBuffer.mockReturnValue([makeMockEntry("info", "initial")]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
     expect(el.textContent).toContain("1 entry ·");
 
     mockGetLogBuffer.mockReturnValue([
@@ -504,9 +463,7 @@ describe("LogsTab", () => {
       makeMockEntry("warn", "new entry"),
     ]);
 
-    const refreshBtn = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Refresh",
-    )!;
+    const refreshBtn = buttonLabeled(el, "Refresh");
     refreshBtn.click();
 
     expect(el.textContent).toContain("2 entries");
@@ -515,12 +472,9 @@ describe("LogsTab", () => {
 
   it("Refresh Diagnostics button re-renders diagnostics panel", () => {
     mockGetLogBuffer.mockReturnValue([]);
-    const handle = createLogsTab(() => "Logs" as TabName, controller.signal);
-    const el = handle.build();
+    const el = buildLogsPane(controller.signal);
 
-    const diagRefresh = Array.from(el.querySelectorAll("button")).find(
-      (b) => b.textContent === "Refresh Diagnostics",
-    )!;
+    const diagRefresh = buttonLabeled(el, "Refresh Diagnostics");
     vi.mocked(getSessionDebugInfo).mockReturnValue({ hasRoom: true } as never);
     diagRefresh.click();
 
