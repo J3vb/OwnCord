@@ -1,9 +1,22 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createSearchOverlay } from "../../../src/components/SearchOverlay";
 import { setDmChannels } from "../../../src/stores/dm.store";
-import { membersStore, setMembers } from "../../../src/stores/members.store";
-import { resetBlocksStore, setBlockedByMe } from "../../../src/stores/blocks.store";
-import { makeDmChannel, makeResult, makeOptions } from "../../helpers/searchOverlayHarness";
+import { setMembers } from "../../../src/stores/members.store";
+import { seedMemberEntries } from "../../helpers/composerAutocomplete";
+import { setBlockedByMe } from "../../../src/stores/blocks.store";
+import {
+  makeResult,
+  makeOptions,
+  mountOverlay,
+  searchInput,
+  typeQuery,
+  pressKey,
+  expectActiveRow,
+  useSearchOverlayEnv,
+  makeDmChannel,
+  searchFor,
+  searchResolving,
+} from "../../helpers/searchOverlayHarness";
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -11,27 +24,11 @@ import { makeDmChannel, makeResult, makeOptions } from "../../helpers/searchOver
 
 describe("createSearchOverlay", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    setDmChannels([]);
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    container.remove();
-    setDmChannels([]);
-    resetBlocksStore();
-    localStorage.removeItem("owncord:settings:timeFormat");
-    window.dispatchEvent(new CustomEvent("owncord:pref-change", { detail: { key: "timeFormat" } }));
-  });
+  useSearchOverlayEnv((c) => (container = c));
 
   it("mounts with overlay and input", () => {
     const opts = makeOptions();
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
     expect(container.querySelector(".search-overlay")).not.toBeNull();
     expect(container.querySelector(".search-overlay-input")).not.toBeNull();
@@ -43,10 +40,9 @@ describe("createSearchOverlay", () => {
   it("calls onSearch after debounce", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
     const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    const input = searchInput(container);
     input.value = "test query";
     input.dispatchEvent(new Event("input"));
 
@@ -68,15 +64,7 @@ describe("createSearchOverlay", () => {
 
   it("does not call onSearch for empty query", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "   ";
-    input.dispatchEvent(new Event("input"));
-
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "   ");
 
     expect(onSearch).not.toHaveBeenCalled();
 
@@ -85,15 +73,7 @@ describe("createSearchOverlay", () => {
 
   it("does not call onSearch for single character", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "a";
-    input.dispatchEvent(new Event("input"));
-
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "a");
 
     expect(onSearch).not.toHaveBeenCalled();
     const status = container.querySelector(".search-overlay-status");
@@ -107,16 +87,7 @@ describe("createSearchOverlay", () => {
       makeResult({ message_id: 1, content: "first result" }),
       makeResult({ message_id: 2, content: "second result", channel_name: "random" }),
     ];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "result";
-    input.dispatchEvent(new Event("input"));
-
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchResolving(container, results, "result");
 
     const items = container.querySelectorAll(".search-result-item");
     expect(items).toHaveLength(2);
@@ -143,10 +114,8 @@ describe("createSearchOverlay", () => {
     );
     overlay.mount(container);
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "result";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const input = searchInput(container);
+    await typeQuery(input, "result");
 
     const item = container.querySelector(".search-result-item")!;
     expect(item.querySelector(".search-result-author")!.textContent).toBe(name);
@@ -166,14 +135,7 @@ describe("createSearchOverlay", () => {
     const bareResult = makeResult({ message_id: 1, timestamp: "2026-01-15 12:00:00" });
     const zResult = makeResult({ message_id: 2, timestamp: "2026-01-15T12:00:00Z" });
 
-    const onSearch = vi.fn().mockResolvedValue({ results: [bareResult, zResult] });
-    const overlay = createSearchOverlay(makeOptions({ onSearch }));
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchResolving(container, [bareResult, zResult], "hello");
 
     const times = container.querySelectorAll(".search-result-time");
     expect(times[0]!.textContent).toBe(times[1]!.textContent);
@@ -188,13 +150,7 @@ describe("createSearchOverlay", () => {
     const onSearch = vi
       .fn()
       .mockResolvedValue({ results: [makeResult({ timestamp: at.toISOString() })] });
-    const overlay = createSearchOverlay(makeOptions({ onSearch }));
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "hello");
 
     const time = container.querySelector(".search-result-time")!.textContent!;
     expect(time).toContain("18:34");
@@ -219,15 +175,7 @@ describe("createSearchOverlay", () => {
     ]);
 
     const results = [makeResult({ channel_id: 42, channel_name: "" })];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "dm search";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchResolving(container, results, "dm search");
 
     const channelLabel = container.querySelector(".search-result-channel")!;
     expect(channelLabel.textContent).toBe("@bob");
@@ -237,32 +185,10 @@ describe("createSearchOverlay", () => {
   });
 
   it("shows the author's display name when the member list has one", async () => {
-    membersStore.setState(() => ({
-      members: new Map([
-        [
-          1,
-          {
-            id: 1,
-            username: "alice_w",
-            displayName: "Alice",
-            avatar: null,
-            role: "member" as const,
-            status: "online" as const,
-          },
-        ],
-      ]),
-      typingUsers: new Map(),
-    }));
+    seedMemberEntries([{ username: "alice_w", displayName: "Alice" }]);
 
     const results = [makeResult({ user: { id: 1, username: "alice_w", avatar: null } })];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const overlay = createSearchOverlay(makeOptions({ onSearch }));
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchResolving(container, results, "hello");
 
     expect(container.querySelector(".search-result-author")!.textContent).toBe("Alice");
     expect(container.querySelector(".search-result-handle")!.textContent).toBe("@alice_w");
@@ -273,14 +199,7 @@ describe("createSearchOverlay", () => {
   it("falls back to the username when no display name is set", async () => {
     setMembers([]);
     const results = [makeResult()];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const overlay = createSearchOverlay(makeOptions({ onSearch }));
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchResolving(container, results, "hello");
 
     expect(container.querySelector(".search-result-author")!.textContent).toBe("alice");
     expect(container.querySelector(".search-result-handle")).toBeNull();
@@ -289,16 +208,7 @@ describe("createSearchOverlay", () => {
   });
 
   it("shows 'No results found' for empty results", async () => {
-    const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "no match";
-    input.dispatchEvent(new Event("input"));
-
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchResolving(container, [], "no match");
 
     const status = container.querySelector(".search-overlay-status");
     expect(status!.textContent).toBe("No results found");
@@ -308,15 +218,7 @@ describe("createSearchOverlay", () => {
 
   it("shows 'Search failed' on error", async () => {
     const onSearch = vi.fn().mockRejectedValue(new Error("network error"));
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "fail";
-    input.dispatchEvent(new Event("input"));
-
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay } = await searchFor(container, { onSearch }, "fail");
 
     const status = container.querySelector(".search-overlay-status");
     expect(status!.textContent).toBe("Search failed");
@@ -326,11 +228,10 @@ describe("createSearchOverlay", () => {
 
   it("calls onClose on Escape", () => {
     const opts = makeOptions();
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    const input = searchInput(container);
+    pressKey(input, "Escape");
 
     expect(opts.onClose).toHaveBeenCalledOnce();
 
@@ -341,14 +242,7 @@ describe("createSearchOverlay", () => {
     const result = makeResult({ message_id: 7 });
     const onSearch = vi.fn().mockResolvedValue({ results: [result] });
     const onSelectResult = vi.fn();
-    const opts = makeOptions({ onSearch, onSelectResult });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "click";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { opts, overlay } = await searchFor(container, { onSearch, onSelectResult }, "click");
 
     (container.querySelector("[data-testid='search-result-0']") as HTMLElement).click();
     // Picking a hit keeps the panel open and the row is a non-focusable div, so
@@ -364,8 +258,7 @@ describe("createSearchOverlay", () => {
 
   it("closes on Escape from the scope radiogroup, not just the input", () => {
     const opts = makeOptions({ currentChannelId: 99 });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
     const channelChip = container.querySelector(
       "[data-testid='search-scope-channel']",
@@ -380,23 +273,20 @@ describe("createSearchOverlay", () => {
   it("wires the input as a combobox over the results listbox", async () => {
     const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
     const onSearch = vi.fn().mockResolvedValue({ results });
-    const overlay = createSearchOverlay(makeOptions({ onSearch }));
-    overlay.mount(container);
+    const overlay = mountOverlay(container, makeOptions({ onSearch }));
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
+    const input = searchInput(container);
     const listbox = container.querySelector(".search-overlay-results") as HTMLElement;
     expect(input.getAttribute("role")).toBe("combobox");
     expect(input.getAttribute("aria-controls")).toBe(listbox.id);
     expect(listbox.getAttribute("role")).toBe("listbox");
 
-    input.value = "test";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    await typeQuery(input, "test");
 
     // The active option is named while the input keeps DOM focus, so a screen
     // reader tracks the roving highlight the arrow keys move.
     expect(input.getAttribute("aria-activedescendant")).toBe("search-result-option-0");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    pressKey(input, "ArrowDown");
     expect(input.getAttribute("aria-activedescendant")).toBe("search-result-option-1");
 
     const active = container.querySelector("[data-testid='search-result-1']") as HTMLElement;
@@ -408,16 +298,13 @@ describe("createSearchOverlay", () => {
 
   it("announces its status through a polite live region", async () => {
     const onSearch = vi.fn().mockResolvedValue({ results: [] });
-    const overlay = createSearchOverlay(makeOptions({ onSearch }));
-    overlay.mount(container);
+    const overlay = mountOverlay(container, makeOptions({ onSearch }));
 
     const status = container.querySelector(".search-overlay-status") as HTMLElement;
     expect(status.getAttribute("role")).toBe("status");
 
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "no match";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const input = searchInput(container);
+    await typeQuery(input, "no match");
 
     expect(status.textContent).toBe("No results found");
 
@@ -426,8 +313,7 @@ describe("createSearchOverlay", () => {
 
   it("calls onClose on backdrop click", () => {
     const opts = makeOptions();
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
     const overlayEl = container.querySelector(".search-overlay") as HTMLElement;
     overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -439,8 +325,7 @@ describe("createSearchOverlay", () => {
 
   it("stays open when a drag-select ends on the backdrop", () => {
     const opts = makeOptions();
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
     const overlayEl = container.querySelector(".search-overlay") as HTMLElement;
     overlayEl.firstElementChild!.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     overlayEl.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -450,8 +335,7 @@ describe("createSearchOverlay", () => {
 
   it("does not close when clicking inside the box", () => {
     const opts = makeOptions();
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
     const box = container.querySelector(".search-overlay-box") as HTMLElement;
     box.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -464,31 +348,15 @@ describe("createSearchOverlay", () => {
   describe("keyboard navigation", () => {
     it("ArrowDown moves active index", async () => {
       const results = [makeResult({ message_id: 1 }), makeResult({ message_id: 2 })];
-      const onSearch = vi.fn().mockResolvedValue({ results });
-      const opts = makeOptions({ onSearch });
-      const overlay = createSearchOverlay(opts);
-      overlay.mount(container);
-
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-      input.value = "test";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(300);
+      const { overlay, input } = await searchResolving(container, results, "test");
 
       // First item should be active
-      expect(
-        container
-          .querySelector("[data-testid='search-result-0']")!
-          .classList.contains("search-result-item--active"),
-      ).toBe(true);
+      expectActiveRow(container, 0);
 
       // Arrow down
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      pressKey(input, "ArrowDown");
 
-      expect(
-        container
-          .querySelector("[data-testid='search-result-1']")!
-          .classList.contains("search-result-item--active"),
-      ).toBe(true);
+      expectActiveRow(container, 1);
 
       overlay.destroy?.();
     });
@@ -497,14 +365,11 @@ describe("createSearchOverlay", () => {
       const result = makeResult({ message_id: 5 });
       const onSearch = vi.fn().mockResolvedValue({ results: [result] });
       const onSelectResult = vi.fn();
-      const opts = makeOptions({ onSearch, onSelectResult });
-      const overlay = createSearchOverlay(opts);
-      overlay.mount(container);
-
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-      input.value = "test";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(300);
+      const { opts, overlay, input } = await searchFor(
+        container,
+        { onSearch, onSelectResult },
+        "test",
+      );
 
       input.dispatchEvent(
         new KeyboardEvent("keydown", {
@@ -520,7 +385,7 @@ describe("createSearchOverlay", () => {
       expect(onSelectResult).not.toHaveBeenCalled();
       expect(opts.onClose).not.toHaveBeenCalled();
 
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      pressKey(input, "Enter");
       expect(onSelectResult).toHaveBeenCalledWith(result);
 
       overlay.destroy?.();
@@ -530,16 +395,13 @@ describe("createSearchOverlay", () => {
       const result = makeResult({ message_id: 5 });
       const onSearch = vi.fn().mockResolvedValue({ results: [result] });
       const onSelectResult = vi.fn();
-      const opts = makeOptions({ onSearch, onSelectResult });
-      const overlay = createSearchOverlay(opts);
-      overlay.mount(container);
+      const { opts, overlay, input } = await searchFor(
+        container,
+        { onSearch, onSelectResult },
+        "test",
+      );
 
-      const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-      input.value = "test";
-      input.dispatchEvent(new Event("input"));
-      await vi.advanceTimersByTimeAsync(300);
-
-      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      pressKey(input, "Enter");
 
       expect(onSelectResult).toHaveBeenCalledWith(result);
       // Picking a hit must not close the panel: the reader can walk through
@@ -554,14 +416,7 @@ describe("createSearchOverlay", () => {
     const result = makeResult({ message_id: 7 });
     const onSearch = vi.fn().mockResolvedValue({ results: [result] });
     const onSelectResult = vi.fn();
-    const opts = makeOptions({ onSearch, onSelectResult });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "click";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { opts, overlay } = await searchFor(container, { onSearch, onSelectResult }, "click");
 
     const item = container.querySelector("[data-testid='search-result-0']") as HTMLElement;
     item.click();
@@ -577,13 +432,7 @@ describe("createSearchOverlay", () => {
     const result = makeResult({ message_id: 9, content: "secret hello" });
     const onSearch = vi.fn().mockResolvedValue({ results: [result] });
     const onSelectResult = vi.fn();
-    const overlay = createSearchOverlay(makeOptions({ onSearch, onSelectResult }));
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "hello";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay, input } = await searchFor(container, { onSearch, onSelectResult }, "hello");
 
     const item = container.querySelector("[data-testid='search-result-0']") as HTMLElement;
     const body = item.querySelector(".search-result-content") as HTMLElement;
@@ -593,7 +442,7 @@ describe("createSearchOverlay", () => {
     expect(item.textContent).not.toContain("secret");
     expect(item.querySelector(".search-result-author")!.textContent).toBe("alice");
 
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    pressKey(input, "Enter");
     expect(onSelectResult).toHaveBeenCalledWith(result);
 
     overlay.destroy?.();
@@ -611,15 +460,7 @@ describe("createSearchOverlay", () => {
       makeResult({ message_id: 2 }),
       makeResult({ message_id: 3 }),
     ];
-    const onSearch = vi.fn().mockResolvedValue({ results });
-    const opts = makeOptions({ onSearch });
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
-
-    const input = container.querySelector(".search-overlay-input") as HTMLInputElement;
-    input.value = "test";
-    input.dispatchEvent(new Event("input"));
-    await vi.advanceTimersByTimeAsync(300);
+    const { overlay, input } = await searchResolving(container, results, "test");
 
     expect(container.querySelectorAll(".search-result-item")).toHaveLength(3);
 
@@ -643,7 +484,7 @@ describe("createSearchOverlay", () => {
 
     try {
       for (let i = 0; i < 5; i++) {
-        input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+        pressKey(input, "ArrowDown");
       }
     } finally {
       Element.prototype.addEventListener = originalAddEventListener;
@@ -656,8 +497,7 @@ describe("createSearchOverlay", () => {
 
   it("destroy removes overlay from DOM", () => {
     const opts = makeOptions();
-    const overlay = createSearchOverlay(opts);
-    overlay.mount(container);
+    const overlay = mountOverlay(container, opts);
 
     expect(container.querySelector(".search-overlay")).not.toBeNull();
 

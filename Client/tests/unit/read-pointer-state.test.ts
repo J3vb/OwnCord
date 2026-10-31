@@ -41,12 +41,11 @@ import {
   setChannels,
 } from "@stores/channels.store";
 import { dmStore, setDmChannels, setDmReadPointer } from "@stores/dm.store";
-import { messagesStore } from "@stores/messages.store";
-import type { Message } from "@stores/messages.store";
 import type { ReadyChannel } from "@lib/types";
 import type { DmChannel } from "@stores/dm.store";
 import { resetMessagesState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
+import { pointerMessage, seedLoadedMessages } from "../helpers/readPointerFixtures";
 
 function channel(id: number, unread: number, pointer: number | undefined): ReadyChannel {
   return {
@@ -59,34 +58,6 @@ function channel(id: number, unread: number, pointer: number | undefined): Ready
     mention_count: 0,
     ...(pointer !== undefined ? { last_read_message_id: pointer } : {}),
   };
-}
-
-function msg(id: number): Message {
-  return {
-    id,
-    channelId: 1,
-    user: { id: 2, username: "alice", avatar: null },
-    content: `m${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: "2024-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
-}
-
-/** Seed a channel's loaded messages directly (setMessages takes server payloads). */
-function setMessages(channelId: number, messages: readonly Message[], _hasMore: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(channelId, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
 }
 
 const pointer = (id: number): number | undefined =>
@@ -150,7 +121,7 @@ describe("capability off: today's behaviour", () => {
 
   it("Mark Unread does nothing and sends nothing", () => {
     setChannels([channel(1, 0, 5)]);
-    setMessages(1, [msg(6), msg(7)], false);
+    seedLoadedMessages(1, [pointerMessage(6), pointerMessage(7)]);
     expect(markMessageUnread(1, 7)).toBeNull();
     expect(unreads).toEqual([]);
   });
@@ -285,7 +256,12 @@ describe("Mark Unread", () => {
   beforeEach(() => {
     setChannels([channel(1, 0, 10)]);
     setActiveChannel(1);
-    setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
+    seedLoadedMessages(1, [
+      pointerMessage(8),
+      pointerMessage(9),
+      pointerMessage(10),
+      pointerMessage(11),
+    ]);
   });
 
   it("sends mark_unread and moves the pointer to the previous loaded message", () => {
@@ -357,7 +333,7 @@ describe("Mark Unread", () => {
 
   it("keeps two requests apart: the first one's refusal rolls back only its own", () => {
     setChannels([channel(1, 0, 10), channel(2, 0, 20)]);
-    setMessages(2, [msg(18), msg(19), msg(20)], false);
+    seedLoadedMessages(2, [pointerMessage(18), pointerMessage(19), pointerMessage(20)]);
     markMessageUnread(1, 10);
     markMessageUnread(2, 20);
     expect(pointer(1)).toBe(9);
@@ -581,8 +557,13 @@ describe("Mark Unread hold and acknowledgements", () => {
   beforeEach(() => {
     setChannels([channel(1, 0, 10), channel(2, 0, 20)]);
     setActiveChannel(1);
-    setMessages(1, [msg(8), msg(9), msg(10), msg(11)], false);
-    setMessages(2, [msg(18), msg(19), msg(20)], false);
+    seedLoadedMessages(1, [
+      pointerMessage(8),
+      pointerMessage(9),
+      pointerMessage(10),
+      pointerMessage(11),
+    ]);
+    seedLoadedMessages(2, [pointerMessage(18), pointerMessage(19), pointerMessage(20)]);
   });
 
   it("is no longer held once a live arrival released it", () => {

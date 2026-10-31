@@ -14,20 +14,16 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
 import { createMessageList } from "@components/MessageList";
 import { messagesStore, markStickersDeleted } from "@stores/messages.store";
 import type { Message } from "@stores/messages.store";
-import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import {
+  makeListOptions,
+  resetStoresAndChannels,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
-
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-  setChannels([]);
-  setActiveChannel(null);
-}
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
   return buildMessage(overrides, {
@@ -37,20 +33,12 @@ function makeMessage(overrides: Partial<Message> & { id: number }): Message {
   });
 }
 
-function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
-}
-
 describe("MessageList — a removed sticker leaves loaded rows", () => {
   let container: HTMLDivElement;
   let list: ReturnType<typeof createMessageList> | null = null;
 
   beforeEach(() => {
-    resetStores();
+    resetStoresAndChannels();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -72,20 +60,8 @@ describe("MessageList — a removed sticker leaves loaded rows", () => {
         },
         timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
       });
-    setMessages([mk(1, 1), mk(2, 2)]);
-    list = createMessageList({
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    });
+    setMessages(CHANNEL_ID, [mk(1, 1), mk(2, 2)]);
+    list = createMessageList(makeListOptions({ channelId: CHANNEL_ID }));
     list.mount(container);
     const row = (id: number): HTMLElement =>
       container.querySelector<HTMLElement>(`[data-testid='message-${id}']`)!;
@@ -103,7 +79,7 @@ describe("MessageList — a removed sticker leaves loaded rows", () => {
 
   it("leaves other channels' lists and non-sticker messages untouched", () => {
     const plain = makeMessage({ id: 1 });
-    setMessages([plain]);
+    setMessages(CHANNEL_ID, [plain]);
     const before = messagesStore.getState().messagesByChannel;
     markStickersDeleted(new Set());
     messagesStore.flush();

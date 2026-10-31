@@ -23,8 +23,11 @@ import {
   makeMessage,
   makeOpts,
   useRenderersHarness,
+  mountMessage,
+  seedPlainMember,
+  mountAsOtherViewer,
+  setRoleColorsPref,
 } from "../../helpers/renderersHarness";
-import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
@@ -45,9 +48,7 @@ describe("renderers", () => {
     it("calls onReplyClick when reply button is clicked", () => {
       const opts = makeOpts();
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], opts, ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg, opts);
 
       const replyBtn = container.querySelector("[data-testid='msg-reply-1']") as HTMLElement;
       replyBtn.click();
@@ -59,9 +60,7 @@ describe("renderers", () => {
     it("calls onReactionClick when react button is clicked", () => {
       const opts = makeOpts();
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], opts, ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg, opts);
 
       const reactBtn = container.querySelector("[data-testid='msg-react-1']") as HTMLElement;
       reactBtn.click();
@@ -74,9 +73,7 @@ describe("renderers", () => {
       seedMessageManager();
       const opts = makeOpts();
       const msg = makeMessage({ pinned: false });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], opts, ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg, opts);
 
       const pinBtn = container.querySelector("[data-testid='msg-pin-1']") as HTMLElement;
       pinBtn.click();
@@ -88,9 +85,7 @@ describe("renderers", () => {
     it("calls onEditClick when edit button is clicked", () => {
       const opts = makeOpts();
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], opts, ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg, opts);
 
       const editBtn = container.querySelector("[data-testid='msg-edit-1']") as HTMLElement;
       editBtn.click();
@@ -102,9 +97,7 @@ describe("renderers", () => {
     it("calls onDeleteClick with shiftKey=false when delete button is clicked", () => {
       const opts = makeOpts();
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], opts, ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg, opts);
 
       const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
       deleteBtn.click();
@@ -116,9 +109,7 @@ describe("renderers", () => {
     it("passes the shift state through to onDeleteClick", () => {
       const opts = makeOpts();
       const msg = makeMessage();
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], opts, ac.signal);
-      container.appendChild(el);
+      const { ac } = mountMessage(container, msg, opts);
 
       const deleteBtn = container.querySelector("[data-testid='msg-delete-1']") as HTMLElement;
       deleteBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
@@ -131,8 +122,7 @@ describe("renderers", () => {
       setConnectionStatus("reconnecting");
       const opts = makeOpts();
       const msg = makeMessage();
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+      const { ac } = mountMessage(container, msg, opts);
 
       const deleteBtn = container.querySelector(
         "[data-testid='msg-delete-1']",
@@ -147,11 +137,7 @@ describe("renderers", () => {
     });
 
     it("does not render edit/delete buttons for other users' messages", () => {
-      const opts = makeOpts({ currentUserId: 999 });
-      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
-      const ac = new AbortController();
-      const el = renderMessage(msg, false, [msg], opts, ac.signal);
-      container.appendChild(el);
+      const { ac } = mountAsOtherViewer(container);
 
       expect(container.querySelector("[data-testid='msg-edit-1']")).toBeNull();
       expect(container.querySelector("[data-testid='msg-delete-1']")).toBeNull();
@@ -166,13 +152,9 @@ describe("renderers", () => {
 
     it("offers delete on others' messages to a role with MANAGE_MESSAGES", () => {
       // MANAGE_MESSAGES = 0x10000 (see lib/types Permission).
-      setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
-      signInAs({ id: 999, username: "Mod", avatar: null, role: "moderator" }, { serverName: null });
+      seedMessageManager();
 
-      const opts = makeOpts({ currentUserId: 999 });
-      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+      const { ac } = mountAsOtherViewer(container);
 
       expect(container.querySelector("[data-testid='msg-delete-1']")).not.toBeNull();
       // Editing someone else's message is still not a thing.
@@ -182,13 +164,9 @@ describe("renderers", () => {
     });
 
     it("withholds delete from a role without MANAGE_MESSAGES", () => {
-      setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
-      signInAs({ id: 999, username: "Nobody", avatar: null, role: "member" }, { serverName: null });
+      seedPlainMember();
 
-      const opts = makeOpts({ currentUserId: 999 });
-      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+      const { ac } = mountAsOtherViewer(container);
 
       expect(container.querySelector("[data-testid='msg-delete-1']")).toBeNull();
 
@@ -198,13 +176,9 @@ describe("renderers", () => {
     it("withholds Pin from a member without MANAGE_MESSAGES (F1)", () => {
       // The server gates SetMessagePinned on MANAGE_MESSAGES, so offering
       // Pin to a plain member is a broken affordance on every message.
-      setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
-      signInAs({ id: 999, username: "Nobody", avatar: null, role: "member" }, { serverName: null });
+      seedPlainMember();
 
-      const opts = makeOpts({ currentUserId: 999 });
-      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+      const { ac } = mountAsOtherViewer(container);
 
       expect(container.querySelector("[data-testid='msg-pin-1']")).toBeNull();
       // React/Reply stay available to everyone.
@@ -215,13 +189,9 @@ describe("renderers", () => {
     });
 
     it("offers Pin to a role with MANAGE_MESSAGES", () => {
-      setRoles([{ id: 2, name: "moderator", color: null, permissions: 0x10000 }]);
-      signInAs({ id: 999, username: "Mod", avatar: null, role: "moderator" }, { serverName: null });
+      seedMessageManager();
 
-      const opts = makeOpts({ currentUserId: 999 });
-      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+      const { ac } = mountAsOtherViewer(container);
 
       expect(container.querySelector("[data-testid='msg-pin-1']")).not.toBeNull();
 
@@ -231,13 +201,9 @@ describe("renderers", () => {
     it("offers Pin to a DM participant without MANAGE_MESSAGES (F1)", () => {
       // The server lets any DM participant pin (SetMessagePinned's DM branch),
       // so the gate must not hide it there.
-      setRoles([{ id: 3, name: "member", color: null, permissions: 0 }]);
-      signInAs({ id: 999, username: "Nobody", avatar: null, role: "member" }, { serverName: null });
+      seedPlainMember();
 
-      const opts = makeOpts({ currentUserId: 999, channelType: "dm" });
-      const msg = makeMessage({ user: { id: 10, username: "Alice", avatar: null } });
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], opts, ac.signal));
+      const { ac } = mountAsOtherViewer(container, { channelType: "dm" });
 
       expect(container.querySelector("[data-testid='msg-pin-1']")).not.toBeNull();
 
@@ -270,8 +236,7 @@ describe("renderers", () => {
   describe("compact header time", () => {
     it("renders the short clock time before the author, titled with the full date", () => {
       const msg = makeMessage();
-      const ac = new AbortController();
-      container.appendChild(renderMessage(msg, false, [msg], makeOpts(), ac.signal));
+      const { ac } = mountMessage(container, msg);
 
       const compact = container.querySelector<HTMLElement>(".msg-header .msg-compact-time");
       expect(compact).not.toBeNull();
@@ -403,12 +368,7 @@ describe("renderers", () => {
   describe("roleColorVar", () => {
     afterEach(() => {
       // Restore roleColors to default (true)
-      localStorage.setItem("owncord:settings:roleColors", "true");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "roleColors" },
-        }),
-      );
+      setRoleColorsPref("true");
     });
 
     it("returns owner color for 'owner' role", () => {
@@ -432,12 +392,7 @@ describe("renderers", () => {
     });
 
     it("returns member color for all roles when roleColors is disabled", () => {
-      localStorage.setItem("owncord:settings:roleColors", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "roleColors" },
-        }),
-      );
+      setRoleColorsPref("false");
 
       expect(roleColorVar("owner")).toBe("var(--role-member)");
       expect(roleColorVar("admin")).toBe("var(--role-member)");
@@ -446,20 +401,10 @@ describe("renderers", () => {
     });
 
     it("re-enables role colors when pref changes back to true", () => {
-      localStorage.setItem("owncord:settings:roleColors", "false");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "roleColors" },
-        }),
-      );
+      setRoleColorsPref("false");
       expect(roleColorVar("owner")).toBe("var(--role-member)");
 
-      localStorage.setItem("owncord:settings:roleColors", "true");
-      window.dispatchEvent(
-        new CustomEvent("owncord:pref-change", {
-          detail: { key: "roleColors" },
-        }),
-      );
+      setRoleColorsPref("true");
       expect(roleColorVar("owner")).toBe("var(--role-owner)");
     });
   });

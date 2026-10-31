@@ -11,7 +11,7 @@
  *    already in place for bracket matching.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 
 import { parseInline, parseBlocks } from "../../src/lib/text/markdown";
@@ -19,41 +19,9 @@ import {
   renderInlineContent,
   renderMessageContent,
 } from "../../src/features/messaging/content/contentParser";
-import { membersStore } from "../../src/stores/members.store";
-import { setChannels } from "../../src/stores/channels.store";
-import type { ReadyChannel } from "../../src/lib/types";
-import { signInAs, resetChannelsState } from "../helpers/storeSeeds";
+import { useContentContainer } from "../helpers/contentRenderHarness";
 
-const CHANNELS: ReadyChannel[] = [
-  { id: 1, name: "general", type: "text", category: null, position: 0 },
-];
-
-function seedStores(): void {
-  membersStore.setState(() => ({
-    members: new Map([
-      [10, { id: 10, username: "alice", avatar: null, role: "member", status: "online" as const }],
-    ]),
-    typingUsers: new Map(),
-  }));
-  signInAs(
-    { id: 12, username: "me", avatar: null, role: "member" },
-    { token: "t", serverName: null },
-  );
-  resetChannelsState();
-  setChannels(CHANNELS);
-}
-
-let container: HTMLDivElement;
-
-beforeEach(() => {
-  seedStores();
-  container = document.createElement("div");
-  document.body.appendChild(container);
-});
-
-afterEach(() => {
-  container.remove();
-});
+useContentContainer();
 
 /** Small alphabet of markdown-significant characters, weighted heavily toward
  *  the tokens the grammar actually branches on — random unicode alone rarely
@@ -214,54 +182,18 @@ describe("bounded time on pathological input", () => {
   // The suite's 2 s test timeout would end a run before the budget is measured.
   const TIMEOUT_MS = BUDGET_MS + 5000;
 
-  it(
-    "a long run of unmatched '[' stays within budget",
-    () => {
-      const input = "[".repeat(5000);
-      const start = Date.now();
-      expect(() => renderMessageContent(input)).not.toThrow();
-      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-    },
-    TIMEOUT_MS,
-  );
-
-  it(
-    "a long run of unmatched '*' stays within budget",
-    () => {
-      const input = "*".repeat(5000);
-      const start = Date.now();
-      expect(() => renderMessageContent(input)).not.toThrow();
-      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-    },
-    TIMEOUT_MS,
-  );
-
-  it(
-    "a long run of unmatched '(' stays within budget",
-    () => {
-      const input = "[x](".repeat(5000);
-      const start = Date.now();
-      expect(() => renderMessageContent(input)).not.toThrow();
-      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-    },
-    TIMEOUT_MS,
-  );
-
-  it(
-    "deeply nested emphasis stays within budget (MAX_DEPTH guards recursion)",
-    () => {
-      const input = "*".repeat(2000) + "x" + "*".repeat(2000);
-      const start = Date.now();
-      expect(() => renderMessageContent(input)).not.toThrow();
-      expect(Date.now() - start).toBeLessThan(BUDGET_MS);
-    },
-    TIMEOUT_MS,
-  );
-
-  it(
-    "a long mix of brackets and parens stays within budget",
-    () => {
-      const input = "[".repeat(2500) + "(".repeat(2500);
+  it.each([
+    ["a long run of unmatched '[' stays within budget", "[".repeat(5000)],
+    ["a long run of unmatched '*' stays within budget", "*".repeat(5000)],
+    ["a long run of unmatched '(' stays within budget", "[x](".repeat(5000)],
+    [
+      "deeply nested emphasis stays within budget (MAX_DEPTH guards recursion)",
+      "*".repeat(2000) + "x" + "*".repeat(2000),
+    ],
+    ["a long mix of brackets and parens stays within budget", "[".repeat(2500) + "(".repeat(2500)],
+  ])(
+    "%s",
+    (_name, input) => {
       const start = Date.now();
       expect(() => renderMessageContent(input)).not.toThrow();
       expect(Date.now() - start).toBeLessThan(BUDGET_MS);

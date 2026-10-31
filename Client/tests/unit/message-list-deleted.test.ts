@@ -12,19 +12,17 @@ import { messagesStore, deleteMessage, bulkDeleteMessages } from "@stores/messag
 import type { Message } from "@stores/messages.store";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { buildMessage } from "../helpers/messageFactory";
-import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import {
+  makeListOptions,
+  resetStoresAndChannels,
+  setHasMore,
+  setMessages,
+} from "../helpers/messageListHarness";
 import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 const ME = { id: 1, username: "Alice", avatar: null };
 const BOB = { id: 2, username: "Bob", avatar: null };
-
-function resetStores(): void {
-  resetMessagesState();
-  resetMembersState();
-  setChannels([]);
-  setActiveChannel(null);
-}
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
   return buildMessage(overrides, {
@@ -39,22 +37,6 @@ function spaced(id: number): Message {
   return makeMessage({
     id,
     timestamp: new Date(Date.UTC(2024, 0, 15, 0, id * 10)).toISOString(),
-  });
-}
-
-function setMessages(messages: readonly Message[]): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.messagesByChannel);
-    next.set(CHANNEL_ID, [...messages]);
-    return { ...prev, messagesByChannel: next };
-  });
-}
-
-function setHasMore(value: boolean): void {
-  messagesStore.setState((prev) => {
-    const next = new Map(prev.hasMore);
-    next.set(CHANNEL_ID, value);
-    return { ...prev, hasMore: next };
   });
 }
 
@@ -77,23 +59,10 @@ describe("MessageList — deleted messages leave the list", () => {
   };
 
   beforeEach(() => {
-    resetStores();
+    resetStoresAndChannels();
     container = document.createElement("div");
     document.body.appendChild(container);
-    options = {
-      channelId: CHANNEL_ID,
-      channelName: "general",
-      currentUserId: 1,
-      onScrollTop: vi.fn(),
-      onReplyClick: vi.fn(),
-      onEditClick: vi.fn(),
-      onEditSave: vi.fn(() => true),
-      onEmptyEdit: vi.fn(),
-      onEditEnd: vi.fn(),
-      onDeleteClick: vi.fn(),
-      onReactionClick: vi.fn(),
-      onPinClick: vi.fn(),
-    };
+    options = makeListOptions({ channelId: CHANNEL_ID, onEditEnd: vi.fn() });
   });
 
   afterEach(() => {
@@ -103,7 +72,7 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("a message deleted while the list is open loses its row, and the store keeps the tombstone", () => {
-    setMessages([1, 2, 3].map(spaced));
+    setMessages(CHANNEL_ID, [1, 2, 3].map(spaced));
     mount();
     expect(row(2)).not.toBeNull();
 
@@ -118,7 +87,10 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("history holding a tombstone renders one row fewer", () => {
-    setMessages([1, 2, 3, 4].map((id) => ({ ...spaced(id), deleted: id === 3 })));
+    setMessages(
+      CHANNEL_ID,
+      [1, 2, 3, 4].map((id) => ({ ...spaced(id), deleted: id === 3 })),
+    );
     mount();
 
     const ids = [...container.querySelectorAll("[data-testid^='message-']")].map(
@@ -128,7 +100,7 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("the row after a deleted one shows its author when the row above is someone else's", () => {
-    setMessages([
+    setMessages(CHANNEL_ID, [
       makeMessage({ id: 1 }),
       makeMessage({ id: 2, user: BOB }),
       makeMessage({ id: 3, user: BOB }),
@@ -148,7 +120,10 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("the row after a deleted one stays grouped, and untouched, when the earlier row still matches", () => {
-    setMessages([1, 2, 3].map((id) => makeMessage({ id })));
+    setMessages(
+      CHANNEL_ID,
+      [1, 2, 3].map((id) => makeMessage({ id })),
+    );
     mount();
     const [row1, row3] = [row(1), row(3)];
     expect(row3!.classList.contains("grouped")).toBe(true);
@@ -162,7 +137,7 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("deleting the last message of a day takes its day divider with it", () => {
-    setMessages([
+    setMessages(CHANNEL_ID, [
       makeMessage({ id: 1 }),
       makeMessage({ id: 2 }),
       makeMessage({ id: 3, timestamp: "2024-01-16T12:00:00Z" }),
@@ -178,7 +153,7 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("a bulk delete of three rows removes all three in one patch and keeps the other rows", () => {
-    setMessages([1, 2, 3, 4, 5, 6].map(spaced));
+    setMessages(CHANNEL_ID, [1, 2, 3, 4, 5, 6].map(spaced));
     mount();
     const [row1, row5, row6] = [row(1), row(5), row(6)];
 
@@ -239,7 +214,10 @@ describe("MessageList — deleted messages leave the list", () => {
     }
 
     it("removing a row above the view keeps the top visible row where it was", () => {
-      setMessages(Array.from({ length: 60 }, (_, i) => spaced(i + 1)));
+      setMessages(
+        CHANNEL_ID,
+        Array.from({ length: 60 }, (_, i) => spaced(i + 1)),
+      );
       mount();
       const root = container.querySelector<HTMLElement>(".messages-container")!;
       // Read from the middle: row 30 is the first row under the top edge.
@@ -278,7 +256,7 @@ describe("MessageList — deleted messages leave the list", () => {
       container.querySelector<HTMLElement>("[data-testid='new-messages-divider']");
 
     it("moves to the next message when the message it sat above is deleted", () => {
-      setMessages([1, 2, 3, 4, 5].map(spaced));
+      setMessages(CHANNEL_ID, [1, 2, 3, 4, 5].map(spaced));
       openWithUnread(3);
       mount();
       expect(divider()?.nextElementSibling).toBe(row(3));
@@ -291,7 +269,7 @@ describe("MessageList — deleted messages leave the list", () => {
     });
 
     it("is dropped when the message it sat above was the last one", () => {
-      setMessages([1, 2, 3].map(spaced));
+      setMessages(CHANNEL_ID, [1, 2, 3].map(spaced));
       openWithUnread(1);
       mount();
       expect(divider()?.nextElementSibling).toBe(row(3));
@@ -304,8 +282,11 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("with every loaded row deleted and older history on the server, it loads more instead of welcoming", () => {
-    setMessages([1, 2].map((id) => ({ ...spaced(id), deleted: true })));
-    setHasMore(true);
+    setMessages(
+      CHANNEL_ID,
+      [1, 2].map((id) => ({ ...spaced(id), deleted: true })),
+    );
+    setHasMore(CHANNEL_ID, true);
 
     mount();
 
@@ -315,8 +296,11 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("with every loaded row deleted and nothing older, it shows the welcome state", () => {
-    setMessages([1, 2].map((id) => ({ ...spaced(id), deleted: true })));
-    setHasMore(false);
+    setMessages(
+      CHANNEL_ID,
+      [1, 2].map((id) => ({ ...spaced(id), deleted: true })),
+    );
+    setHasMore(CHANNEL_ID, false);
 
     mount();
 
@@ -325,7 +309,7 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("focus on a deleted row's control moves to the next row", () => {
-    setMessages([1, 2, 3].map(spaced));
+    setMessages(CHANNEL_ID, [1, 2, 3].map(spaced));
     mount();
     const reply = container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-2']")!;
     reply.focus();
@@ -339,7 +323,7 @@ describe("MessageList — deleted messages leave the list", () => {
   });
 
   it("focus on the last row's control moves up when that row is deleted", () => {
-    setMessages([1, 2, 3].map(spaced));
+    setMessages(CHANNEL_ID, [1, 2, 3].map(spaced));
     mount();
     container.querySelector<HTMLButtonElement>("[data-testid='msg-reply-3']")!.focus();
 
@@ -360,7 +344,7 @@ describe("MessageList — deleted messages leave the list", () => {
     it("read 'Original message was deleted': plain text, no avatar, not a jump link", () => {
       const onJump = vi.fn();
       options = { ...options, onJumpToMessage: onJump };
-      setMessages([
+      setMessages(CHANNEL_ID, [
         { ...spaced(1), deleted: true },
         { ...spaced(2), replyTo: 1, referencedMessage: parentRef(true) },
       ]);
@@ -377,7 +361,10 @@ describe("MessageList — deleted messages leave the list", () => {
     });
 
     it("re-render live when their parent is deleted", () => {
-      setMessages([spaced(1), { ...spaced(2), replyTo: 1, referencedMessage: parentRef(false) }]);
+      setMessages(CHANNEL_ID, [
+        spaced(1),
+        { ...spaced(2), replyTo: 1, referencedMessage: parentRef(false) },
+      ]);
       mount();
       const before = row(2)!.querySelector(".msg-reply-ref")!;
       expect(before.querySelector(".rr-text")?.textContent).toBe("Message 1");
@@ -393,7 +380,7 @@ describe("MessageList — deleted messages leave the list", () => {
     it("re-render live even when the reply carries no server snippet", () => {
       // Nothing redacts this reply's snippet, so only the list's own check of
       // its parent leaving the window can redraw it.
-      setMessages([spaced(1), { ...spaced(2), replyTo: 1 }]);
+      setMessages(CHANNEL_ID, [spaced(1), { ...spaced(2), replyTo: 1 }]);
       mount();
       const reply = row(2)!;
       expect(reply.querySelector(".msg-reply-ref .rr-text")?.textContent).toBe("Message 1");
@@ -416,7 +403,7 @@ describe("MessageList — deleted messages leave the list", () => {
     }
 
     it("chat_deleted for the edited message closes the editor and focuses the composer", async () => {
-      setMessages([1, 2, 3].map(spaced));
+      setMessages(CHANNEL_ID, [1, 2, 3].map(spaced));
       mount();
       const textarea = await openEditor(2);
       textarea.focus();
@@ -432,7 +419,7 @@ describe("MessageList — deleted messages leave the list", () => {
     });
 
     it("chat_deleted for the message above regroups the edited row and keeps its editor and text", async () => {
-      setMessages([
+      setMessages(CHANNEL_ID, [
         makeMessage({ id: 1, user: BOB }),
         makeMessage({ id: 2 }),
         makeMessage({ id: 3 }),

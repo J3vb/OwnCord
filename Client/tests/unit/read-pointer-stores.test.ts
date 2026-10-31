@@ -16,10 +16,10 @@ import {
   setDmChannels,
   setDmReadPointer,
 } from "@stores/dm.store";
-import type { DmChannel } from "@stores/dm.store";
 import { applyReadyDms } from "../../src/features/direct-messages/wsHandlers";
 import type { DmChannelPayload, ReadyChannel } from "@lib/types";
 import { resetChannelsState } from "../helpers/storeSeeds";
+import { makeDmRow } from "../helpers/readPointerFixtures";
 
 const ch = (id: number, pointer?: number): ReadyChannel => ({
   id,
@@ -30,21 +30,6 @@ const ch = (id: number, pointer?: number): ReadyChannel => ({
   unread_count: 3,
   mention_count: 1,
   ...(pointer !== undefined ? { last_read_message_id: pointer } : {}),
-});
-
-const dm = (over: Partial<DmChannel> = {}): DmChannel => ({
-  channelId: 50,
-  recipient: { id: 7, username: "bob", avatar: "", status: "online" },
-  participants: [],
-  name: "",
-  isGroup: false,
-  lastMessageId: 30,
-  lastReadMessageId: 10,
-  lastMessage: "",
-  lastMessageAt: "",
-  unreadCount: 2,
-  mentionCount: 1,
-  ...over,
 });
 
 beforeEach(() => {
@@ -120,19 +105,19 @@ describe("DM store", () => {
   });
 
   it("keeps its pointer across a dm_channel_open that carries none", () => {
-    setDmChannels([dm()]);
-    addDmChannel(dm({ lastReadMessageId: undefined }));
+    setDmChannels([makeDmRow()]);
+    addDmChannel(makeDmRow({ lastReadMessageId: undefined }));
     expect(dmStore.getState().channels[0]?.lastReadMessageId).toBe(10);
   });
 
   it("copies the pointer into the channels-store mirror row", () => {
-    addDmToChannelsStore(dm());
+    addDmToChannelsStore(makeDmRow());
     expect(channelsStore.getState().channels.get(50)?.lastReadMessageId).toBe(10);
   });
 
   it("a ready restates the mirror row's pointer too", () => {
-    setDmChannels([dm()]);
-    addDmToChannelsStore(dm());
+    setDmChannels([makeDmRow()]);
+    addDmToChannelsStore(makeDmRow());
     applyReadyDms({
       channels: [],
       members: [],
@@ -156,7 +141,7 @@ describe("DM store", () => {
   });
 
   it("sets the pointer and counts outright", () => {
-    setDmChannels([dm()]);
+    setDmChannels([makeDmRow()]);
     setDmReadPointer(50, 4, { unread: 0, mention: 0 });
     expect(dmStore.getState().channels[0]).toMatchObject({
       lastReadMessageId: 4,

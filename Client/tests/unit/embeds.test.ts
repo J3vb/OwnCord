@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as mocks from "../helpers/attachmentsMocks";
 import type {
   ExternalContentFailure,
   ExternalContentResult,
@@ -16,20 +17,15 @@ const { previewMock, imageMock, mockObserveMedia } = vi.hoisted(() => ({
   mockObserveMedia: vi.fn(),
 }));
 
-// B9-8: this suite exercises content the viewer has already consented to;
-// the consent gate itself is proven in src/features/content-consent/external.test.ts.
-vi.mock("../../src/features/content-consent/external", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/content-consent/external")>()),
-  externalAllowed: () => true,
-}));
+vi.mock("../../src/features/content-consent/external", (importOriginal) =>
+  mocks.consentExternalMock(importOriginal),
+);
 
-vi.mock("../../src/platform/desktop/externalContent", () => ({
-  externalContent: { preview: previewMock, image: imageMock },
-}));
+vi.mock("../../src/platform/desktop/externalContent", () =>
+  mocks.externalContentMock(previewMock, imageMock),
+);
 
-vi.mock("@lib/prefs/mediaVisibility", () => ({
-  observeMedia: mockObserveMedia,
-}));
+vi.mock("@lib/prefs/mediaVisibility", () => mocks.mediaVisibilityMock(mockObserveMedia));
 
 import {
   clearEmbedCaches,
@@ -79,6 +75,31 @@ function resetBroker(): void {
   URL.revokeObjectURL = vi.fn();
 }
 
+function mountCard(url: string): HTMLElement {
+  const card = renderGenericLinkPreview(url);
+  document.body.appendChild(card);
+  return card;
+}
+
+function embedStateIs(card: HTMLElement, state: string): Promise<void> {
+  return vi.waitFor(() => {
+    expect(card.dataset.embedState).toBe(state);
+  });
+}
+
+function arrangeImagePreview(): void {
+  previewMock.mockResolvedValue({
+    ok: true,
+    value: {
+      title: "Pic",
+      description: null,
+      siteName: null,
+      image: "h1" as ExternalImageHandle,
+    },
+  });
+  imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+}
+
 describe("renderGenericLinkPreview", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -93,8 +114,7 @@ describe("renderGenericLinkPreview", () => {
   it("does not reuse OG metadata that resolves after the cache was cleared", async () => {
     const settle = deferredPreview();
 
-    const first = renderGenericLinkPreview("https://news.example.com/post");
-    document.body.appendChild(first);
+    mountCard("https://news.example.com/post");
 
     await Promise.resolve();
     clearEmbedCaches();
@@ -103,8 +123,7 @@ describe("renderGenericLinkPreview", () => {
     await Promise.resolve();
 
     previewMock.mockResolvedValueOnce(previewOk("Fresh"));
-    const second = renderGenericLinkPreview("https://news.example.com/post");
-    document.body.appendChild(second);
+    mountCard("https://news.example.com/post");
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledTimes(2);
@@ -114,8 +133,7 @@ describe("renderGenericLinkPreview", () => {
   it("does not reuse an EMPTY_OG result that resolves after the cache was cleared", async () => {
     const settle = deferredPreview();
 
-    const first = renderGenericLinkPreview("https://news.example.com/empty");
-    document.body.appendChild(first);
+    mountCard("https://news.example.com/empty");
 
     await Promise.resolve();
     clearEmbedCaches();
@@ -124,8 +142,7 @@ describe("renderGenericLinkPreview", () => {
     await Promise.resolve();
 
     previewMock.mockResolvedValueOnce(previewOk("Recovered"));
-    const second = renderGenericLinkPreview("https://news.example.com/empty");
-    document.body.appendChild(second);
+    mountCard("https://news.example.com/empty");
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledTimes(2);
@@ -136,14 +153,12 @@ describe("renderGenericLinkPreview", () => {
     const settleFirst = deferredPreview();
     const settleSecond = deferredPreview();
 
-    const first = renderGenericLinkPreview("https://news.example.com/race");
-    document.body.appendChild(first);
+    mountCard("https://news.example.com/race");
     await Promise.resolve();
 
     clearEmbedCaches();
 
-    const second = renderGenericLinkPreview("https://news.example.com/race");
-    document.body.appendChild(second);
+    const second = mountCard("https://news.example.com/race");
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledTimes(2);
     });
@@ -152,8 +167,7 @@ describe("renderGenericLinkPreview", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const third = renderGenericLinkPreview("https://news.example.com/race");
-    document.body.appendChild(third);
+    mountCard("https://news.example.com/race");
     expect(previewMock).toHaveBeenCalledTimes(2);
 
     settleSecond(previewOk("New"));
@@ -165,8 +179,7 @@ describe("renderGenericLinkPreview", () => {
   it("asks the broker for the preview and renders its title", async () => {
     previewMock.mockResolvedValue(previewOk("F-Droid"));
 
-    const card = renderGenericLinkPreview("https://fdroid.org/packages");
-    document.body.appendChild(card);
+    const card = mountCard("https://fdroid.org/packages");
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledWith(externalPartition(), "https://fdroid.org/packages");
@@ -180,8 +193,7 @@ describe("renderGenericLinkPreview", () => {
   it("takes no layout space and shows no host or title while the preview is pending", () => {
     deferredPreview();
 
-    const card = renderGenericLinkPreview("https://pending.example.com/page");
-    document.body.appendChild(card);
+    const card = mountCard("https://pending.example.com/page");
 
     // The row must not grow for a card that has nothing to show yet (DP-44):
     // zero height and no visible content until the metadata settles.
@@ -193,29 +205,16 @@ describe("renderGenericLinkPreview", () => {
   it("adds no card when the resolved preview has no title, description or image", async () => {
     previewMock.mockResolvedValue(previewOk(null));
 
-    const card = renderGenericLinkPreview("https://empty.example.com/page");
-    document.body.appendChild(card);
+    const card = mountCard("https://empty.example.com/page");
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("empty");
-    });
+    await embedStateIs(card, "empty");
     expect(card.hidden).toBe(true);
   });
 
   it("grows the row once for a preview with an image, when the image has loaded", async () => {
-    previewMock.mockResolvedValue({
-      ok: true,
-      value: {
-        title: "Pic",
-        description: null,
-        siteName: null,
-        image: "h1" as ExternalImageHandle,
-      },
-    });
-    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+    arrangeImagePreview();
 
-    const card = renderGenericLinkPreview("https://pic.example.com/page");
-    document.body.appendChild(card);
+    const card = mountCard("https://pic.example.com/page");
 
     const img = await vi.waitFor(() => {
       const el = card.querySelector<HTMLImageElement>(".msg-embed-link-img");
@@ -233,19 +232,9 @@ describe("renderGenericLinkPreview", () => {
   });
 
   it("does not collapse a cached image preview on a rebuild when its image is already loaded", async () => {
-    previewMock.mockResolvedValue({
-      ok: true,
-      value: {
-        title: "Pic",
-        description: null,
-        siteName: null,
-        image: "h1" as ExternalImageHandle,
-      },
-    });
-    imageMock.mockResolvedValue({ ok: true, value: new Blob(["x"], { type: "image/jpeg" }) });
+    arrangeImagePreview();
     const url = "https://cached-pic.example.com/page";
-    const first = renderGenericLinkPreview(url);
-    document.body.appendChild(first);
+    const first = mountCard(url);
     const firstImg = await vi.waitFor(() => {
       const el = first.querySelector<HTMLImageElement>(".msg-embed-link-img");
       if (el === null) throw new Error("no image yet");
@@ -259,8 +248,7 @@ describe("renderGenericLinkPreview", () => {
     const complete = vi.spyOn(HTMLImageElement.prototype, "complete", "get").mockReturnValue(true);
     const width = vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(640);
     try {
-      const rebuilt = renderGenericLinkPreview(url);
-      document.body.appendChild(rebuilt);
+      const rebuilt = mountCard(url);
       await vi.waitFor(() => {
         expect(rebuilt.classList.contains("msg-embed-link-pending")).toBe(false);
       });
@@ -291,8 +279,7 @@ describe("renderGenericLinkPreview", () => {
           }),
       );
 
-      const card = renderGenericLinkPreview("https://slow.example.com/page");
-      document.body.appendChild(card);
+      const card = mountCard("https://slow.example.com/page");
       await vi.waitFor(() => {
         expect(imageMock).toHaveBeenCalled();
       });
@@ -316,12 +303,9 @@ describe("renderGenericLinkPreview", () => {
       value: { title: "  ", description: "", siteName: "", image: null },
     });
 
-    const card = renderGenericLinkPreview("https://blank.example.com/page");
-    document.body.appendChild(card);
+    const card = mountCard("https://blank.example.com/page");
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("empty");
-    });
+    await embedStateIs(card, "empty");
     expect(card.hidden).toBe(true);
   });
 
@@ -331,12 +315,9 @@ describe("renderGenericLinkPreview", () => {
       value: { title: "", description: "Some text", siteName: " ", image: null },
     });
 
-    const card = renderGenericLinkPreview("https://untitled.example.com/page");
-    document.body.appendChild(card);
+    const card = mountCard("https://untitled.example.com/page");
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("loaded");
-    });
+    await embedStateIs(card, "loaded");
     expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("untitled.example.com");
     expect(card.querySelector(".msg-embed-host")?.textContent).toBe("untitled.example.com");
   });
@@ -344,15 +325,12 @@ describe("renderGenericLinkPreview", () => {
   it("keeps a pending card's link out of the tab order until it has content", async () => {
     const settle = deferredPreview();
 
-    const card = renderGenericLinkPreview("https://tab.example.com/page");
-    document.body.appendChild(card);
+    const card = mountCard("https://tab.example.com/page");
     const title = card.querySelector<HTMLAnchorElement>(".msg-embed-link-title")!;
     expect(title.tabIndex).toBe(-1);
 
     settle(previewOk("Ready"));
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("loaded");
-    });
+    await embedStateIs(card, "loaded");
     expect(title.hasAttribute("tabindex")).toBe(false);
   });
 
@@ -382,9 +360,7 @@ describe("renderGenericLinkPreview", () => {
     const card = renderGenericLinkPreview("https://retry-empty.example.com/x");
     row.appendChild(card);
     document.body.appendChild(row);
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("failed");
-    });
+    await embedStateIs(card, "failed");
     const retry = card.querySelector<HTMLButtonElement>(".msg-embed-retry")!;
     retry.focus();
 
@@ -399,12 +375,9 @@ describe("renderGenericLinkPreview", () => {
   it("names the host exactly once on a refusal", async () => {
     previewMock.mockResolvedValue(refused("blocked-destination"));
 
-    const card = renderGenericLinkPreview("https://blocked.example.com/x");
-    document.body.appendChild(card);
+    const card = mountCard("https://blocked.example.com/x");
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("failed");
-    });
+    await embedStateIs(card, "failed");
 
     const host = "blocked.example.com";
     const visibleHosts = Array.from(card.querySelectorAll<HTMLElement>("*")).filter(
@@ -434,8 +407,7 @@ describe("renderGenericLinkPreview", () => {
   ])("leaves %s to the broker and caches its blocked-destination refusal", async (url, host) => {
     previewMock.mockResolvedValue(refused("blocked-destination"));
 
-    const card = renderGenericLinkPreview(url);
-    document.body.appendChild(card);
+    const card = mountCard(url);
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledWith(externalPartition(), url);
@@ -446,8 +418,7 @@ describe("renderGenericLinkPreview", () => {
     expect(card.querySelector("img")).toBeNull();
     expect(imageMock).not.toHaveBeenCalled();
 
-    const again = renderGenericLinkPreview(url);
-    document.body.appendChild(again);
+    const again = mountCard(url);
     expect(again.querySelector(".msg-embed-link-title")?.textContent).toBe(host);
     expect(previewMock).toHaveBeenCalledTimes(1);
   });
@@ -456,8 +427,7 @@ describe("renderGenericLinkPreview", () => {
     setServerHost("LOCALHOST:8080");
     previewMock.mockResolvedValue(refused("blocked-destination"));
 
-    const card = renderGenericLinkPreview("https://localhost:8080/docs");
-    document.body.appendChild(card);
+    const card = mountCard("https://localhost:8080/docs");
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledWith(externalPartition(), "https://localhost:8080/docs");
@@ -470,8 +440,7 @@ describe("renderGenericLinkPreview", () => {
   it("leaves malformed URLs to the broker and shows the raw text on refusal", async () => {
     previewMock.mockResolvedValue(refused("blocked-destination"));
 
-    const card = renderGenericLinkPreview("not-a-valid-url");
-    document.body.appendChild(card);
+    const card = mountCard("not-a-valid-url");
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledWith(externalPartition(), "not-a-valid-url");
@@ -484,8 +453,7 @@ describe("renderGenericLinkPreview", () => {
   it("falls back to the hostname on a wrong-type refusal and caches it", async () => {
     previewMock.mockResolvedValue(refused("wrong-type"));
 
-    const card = renderGenericLinkPreview("https://api.example.com/data.json");
-    document.body.appendChild(card);
+    const card = mountCard("https://api.example.com/data.json");
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalled();
@@ -494,8 +462,7 @@ describe("renderGenericLinkPreview", () => {
       expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("api.example.com");
     });
 
-    const again = renderGenericLinkPreview("https://api.example.com/data.json");
-    document.body.appendChild(again);
+    const again = mountCard("https://api.example.com/data.json");
     expect(again.querySelector(".msg-embed-link-title")?.textContent).toBe("api.example.com");
     expect(previewMock).toHaveBeenCalledTimes(1);
   });
@@ -503,8 +470,7 @@ describe("renderGenericLinkPreview", () => {
   it("falls back to the hostname when the broker is unavailable and caches it", async () => {
     previewMock.mockResolvedValue(refused("unavailable"));
 
-    const card = renderGenericLinkPreview("https://error.example.com/page");
-    document.body.appendChild(card);
+    const card = mountCard("https://error.example.com/page");
 
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalled();
@@ -513,8 +479,7 @@ describe("renderGenericLinkPreview", () => {
     await Promise.resolve();
     expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("error.example.com");
 
-    const again = renderGenericLinkPreview("https://error.example.com/page");
-    document.body.appendChild(again);
+    const again = mountCard("https://error.example.com/page");
     expect(again.querySelector(".msg-embed-link-title")?.textContent).toBe("error.example.com");
     expect(previewMock).toHaveBeenCalledTimes(1);
   });
@@ -522,12 +487,9 @@ describe("renderGenericLinkPreview", () => {
   it("marks a refusal as a typed failed state with no retry for a policy refusal", async () => {
     previewMock.mockResolvedValue(refused("blocked-destination"));
 
-    const card = renderGenericLinkPreview("https://blocked.example.com/x");
-    document.body.appendChild(card);
+    const card = mountCard("https://blocked.example.com/x");
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("failed");
-    });
+    await embedStateIs(card, "failed");
     expect(card.dataset.embedFailure).toBe("blocked-destination");
     expect(card.querySelector(".msg-embed-status")?.textContent).toBe("Preview unavailable");
     // A policy refusal is not retryable; the retry stays hidden.
@@ -539,12 +501,9 @@ describe("renderGenericLinkPreview", () => {
   it("offers a bounded retry for a transient 'unavailable' answer and re-asks on click", async () => {
     previewMock.mockResolvedValueOnce(refused("unavailable"));
 
-    const card = renderGenericLinkPreview("https://flaky.example.com/x");
-    document.body.appendChild(card);
+    const card = mountCard("https://flaky.example.com/x");
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("failed");
-    });
+    await embedStateIs(card, "failed");
     const retry = card.querySelector(".msg-embed-retry") as HTMLButtonElement;
     expect(retry.hidden).toBe(false);
     expect(retry.getAttribute("aria-label")).toBe("Retry preview");
@@ -552,9 +511,7 @@ describe("renderGenericLinkPreview", () => {
     previewMock.mockResolvedValueOnce(previewOk("Recovered"));
     retry.click();
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("loaded");
-    });
+    await embedStateIs(card, "loaded");
     expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("Recovered");
     expect(retry.hidden).toBe(true);
   });
@@ -562,11 +519,8 @@ describe("renderGenericLinkPreview", () => {
   it("keeps keyboard focus on the retry while it re-asks and after a repeat failure", async () => {
     previewMock.mockResolvedValue(refused("unavailable"));
 
-    const card = renderGenericLinkPreview("https://focus.example.com/x");
-    document.body.appendChild(card);
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("failed");
-    });
+    const card = mountCard("https://focus.example.com/x");
+    await embedStateIs(card, "failed");
     const retry = card.querySelector<HTMLButtonElement>(".msg-embed-retry")!;
     retry.focus();
 
@@ -581,21 +535,16 @@ describe("renderGenericLinkPreview", () => {
 
     previewMock.mockResolvedValue(previewOk("Back"));
     retry.click();
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("loaded");
-    });
+    await embedStateIs(card, "loaded");
     expect(document.activeElement).toBe(card.querySelector(".msg-embed-link-title"));
   });
 
   it("does not retry automatically after a refusal", async () => {
     previewMock.mockResolvedValue(refused("unavailable"));
 
-    const card = renderGenericLinkPreview("https://still-down.example.com/x");
-    document.body.appendChild(card);
+    const card = mountCard("https://still-down.example.com/x");
 
-    await vi.waitFor(() => {
-      expect(card.dataset.embedState).toBe("failed");
-    });
+    await embedStateIs(card, "failed");
     await new Promise((resolve) => setTimeout(resolve, 20));
     // Only the single render-time ask, no retry loop.
     expect(previewMock).toHaveBeenCalledTimes(1);
@@ -604,15 +553,13 @@ describe("renderGenericLinkPreview", () => {
   it("renders from cache on second call (no second preview)", async () => {
     previewMock.mockResolvedValueOnce(previewOk("Cached Title"));
 
-    const card1 = renderGenericLinkPreview("https://cached.example.com/page");
-    document.body.appendChild(card1);
+    const card1 = mountCard("https://cached.example.com/page");
 
     await vi.waitFor(() => {
       expect(card1.querySelector(".msg-embed-link-title")?.textContent).toBe("Cached Title");
     });
 
-    const card2 = renderGenericLinkPreview("https://cached.example.com/page");
-    document.body.appendChild(card2);
+    const card2 = mountCard("https://cached.example.com/page");
     expect(card2.querySelector(".msg-embed-link-title")?.textContent).toBe("Cached Title");
     expect(previewMock).toHaveBeenCalledTimes(1);
   });
@@ -917,8 +864,7 @@ describe("renderGenericLinkPreview — cache stale during a refusal", () => {
   it("discards a wrong-type refusal when cache was cleared mid-flight", async () => {
     const settle = deferredPreview();
 
-    const card = renderGenericLinkPreview("https://stale-nonhtml.example.com/data");
-    document.body.appendChild(card);
+    mountCard("https://stale-nonhtml.example.com/data");
     await Promise.resolve();
 
     clearEmbedCaches();
@@ -928,8 +874,7 @@ describe("renderGenericLinkPreview — cache stale during a refusal", () => {
     await Promise.resolve();
 
     previewMock.mockResolvedValueOnce(previewOk("Fresh"));
-    const card2 = renderGenericLinkPreview("https://stale-nonhtml.example.com/data");
-    document.body.appendChild(card2);
+    mountCard("https://stale-nonhtml.example.com/data");
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledTimes(2);
     });
@@ -938,8 +883,7 @@ describe("renderGenericLinkPreview — cache stale during a refusal", () => {
   it("discards an unavailable refusal when cache was cleared mid-flight", async () => {
     const settle = deferredPreview();
 
-    const card = renderGenericLinkPreview("https://stale-error.example.com/fail");
-    document.body.appendChild(card);
+    mountCard("https://stale-error.example.com/fail");
     await Promise.resolve();
 
     clearEmbedCaches();
@@ -949,8 +893,7 @@ describe("renderGenericLinkPreview — cache stale during a refusal", () => {
     await Promise.resolve();
 
     previewMock.mockResolvedValueOnce(previewOk("Recovered"));
-    const card2 = renderGenericLinkPreview("https://stale-error.example.com/fail");
-    document.body.appendChild(card2);
+    mountCard("https://stale-error.example.com/fail");
     await vi.waitFor(() => {
       expect(previewMock).toHaveBeenCalledTimes(2);
     });
