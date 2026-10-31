@@ -34,6 +34,7 @@ import { voiceStore } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { setConnectionStatus } from "@stores/ui.store";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -48,12 +49,7 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "idle",
   }));
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
+  resetChannelsState();
   resetMembersState();
   // Voice controls freeze while the socket is down; an active call is live.
   setConnectionStatus("connected");

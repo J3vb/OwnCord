@@ -7,7 +7,7 @@ import { clearAuth } from "@stores/auth.store";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
 import { setMarkReadSender } from "@lib/readState";
 import type { ReadyChannel } from "@lib/types";
-import { channelsStore, setChannels, setActiveChannel } from "@stores/channels.store";
+import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { loadUserStatus, loadUserStatusOrigin } from "@lib/presence/userStatus";
 import { createMainPage } from "@pages/MainPage";
@@ -21,6 +21,7 @@ import {
   loginAndReachAuthOk,
   useMainHarness,
 } from "../../helpers/mainHarness";
+import { resetChannelsState } from "../../helpers/storeSeeds";
 
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
@@ -74,12 +75,7 @@ describe("main.ts beforeunload", () => {
   afterEach(() => {
     hasFocus.mockRestore();
     setMarkReadSender(null);
-    channelsStore.setState(() => ({
-      channels: new Map(),
-      activeChannelId: null,
-      roles: [],
-      categories: [],
-    }));
+    resetChannelsState();
   });
 
   it("marks the active channel read, so messages read live do not return as unread", () => {

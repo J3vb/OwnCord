@@ -13,18 +13,14 @@ import { membersStore } from "../../src/stores/members.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 // ---------------------------------------------------------------------------
 // Store reset
 // ---------------------------------------------------------------------------
 
 function resetStores(): void {
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
+  resetChannelsState();
   dmStore.setState(() => ({ channels: [] }));
   resetMembersState();
   uiStore.setState(() => ({

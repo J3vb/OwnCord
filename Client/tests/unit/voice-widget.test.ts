@@ -61,6 +61,7 @@ import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
 import { loadPref, savePref } from "../../src/lib/prefs/preferences";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -75,12 +76,7 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "idle",
   }));
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
+  resetChannelsState();
   resetMembersState();
   // Voice controls freeze when the socket is down; keep it live by default so
   // the interaction tests below operate on enabled controls.

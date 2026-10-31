@@ -22,6 +22,7 @@ import type { DmChannel } from "../../src/stores/dm.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { Channel } from "../../src/stores/channels.store";
 import type { DmChannelPayload } from "../../src/lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function makeMirrorChannel(overrides: Partial<Channel> = {}): Channel {
   return {
@@ -184,12 +185,7 @@ describe("dmStore", () => {
 
   describe("closeDmLocally", () => {
     beforeEach(() => {
-      channelsStore.setState(() => ({
-        channels: new Map(),
-        activeChannelId: null,
-        roles: [],
-        categories: [],
-      }));
+      resetChannelsState();
     });
 
     it("removes the channel and does not run the fallback when it was not active", () => {
@@ -572,13 +568,7 @@ const person = (id: number, extra: Partial<DmChannel["recipient"]> = {}) => ({
   ...extra,
 });
 
-const resetChannels = () =>
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+const resetChannels = () => resetChannelsState();
 
 describe("dmStore presence carry-over", () => {
   beforeEach(() => {

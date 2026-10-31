@@ -35,6 +35,7 @@ import {
   testChannels,
   setAdminUser,
 } from "../../helpers/channelSidebarHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -982,13 +983,7 @@ describe("ChannelSidebar", () => {
   it("non-admin does not get draggable class on channel items", () => {
     const onReorderChannel = vi.fn();
     sidebar.destroy?.();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Member", avatar: null, role: "member" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Member", avatar: null, role: "member" });
     sidebar = createChannelSidebar({
       onVoiceJoin,
       onOpenCall,
@@ -1102,13 +1097,7 @@ describe("ChannelSidebar text rows and groups on models", () => {
       async () => {},
     );
     setRoles([{ id: 3, name: "Moderator", color: null, permissions: 0 }]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
     sidebar = createChannelSidebar({ onVoiceJoin: vi.fn(), onOpenCall: vi.fn(), onPurgeChannel });
     setChannels(testChannels);
     addVoiceUser(VOICE_CH, 10, "alice");
@@ -1151,13 +1140,7 @@ describe("ChannelSidebar text rows and groups on models", () => {
   }
 
   function useModerator(): void {
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 3, username: "Mod", avatar: null, role: "moderator" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 3, username: "Mod", avatar: null, role: "moderator" });
   }
 
   it("a MANAGE_INVITES-only role edit grants and revokes Invite People on text and voice rows", () => {

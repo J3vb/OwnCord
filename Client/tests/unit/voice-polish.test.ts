@@ -42,9 +42,9 @@ vi.mock("@lib/voice/connectionStats", () => ({
 import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createVideoGrid, type TileConfig } from "../../src/components/VideoGrid";
 import { voiceStore } from "../../src/stores/voice.store";
-import { channelsStore } from "../../src/stores/channels.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import { resetMembersState } from "../helpers/storeResets";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -59,12 +59,7 @@ function resetStores(): void {
     listenOnly: false,
     voiceStatus: "idle",
   }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   resetMembersState();
   setConnectionStatus("connected");
 }

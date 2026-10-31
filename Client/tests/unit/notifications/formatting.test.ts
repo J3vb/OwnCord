@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
 import { notifyIncomingMessage } from "../../../src/lib/notifications";
-import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import type { DmChannel } from "../../../src/stores/dm.store";
@@ -9,6 +8,7 @@ import { membersStore } from "../../../src/stores/members.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { setLogLevel } from "../../../src/lib/logger";
 import { makePayload, useNotificationsHarness } from "../../helpers/notificationsHarness";
+import { resetAuthState } from "../../helpers/storeSeeds";
 
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
@@ -466,13 +466,7 @@ describe("notifyIncomingMessage", () => {
       const { sendNotification } = await import("@tauri-apps/plugin-notification");
       (sendNotification as ReturnType<typeof vi.fn>).mockClear();
 
-      authStore.setState(() => ({
-        token: null,
-        user: null,
-        serverName: null,
-        motd: null,
-        isAuthenticated: false,
-      }));
+      resetAuthState();
 
       testPrefs.set("desktopNotifications", true);
       testPrefs.set("flashTaskbar", false);

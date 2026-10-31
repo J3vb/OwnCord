@@ -13,6 +13,7 @@ import {
   setLocalDeafened,
   setPttGated,
 } from "@stores/voice.store";
+import { resetAuthState } from "../helpers/storeSeeds";
 
 vi.mock("@stores/ui.store", () => ({
   openSettings: vi.fn(),
@@ -47,13 +48,7 @@ describe("UserBar", () => {
     comp?.destroy?.();
     container.remove();
     // Reset auth store
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
   });
 
   it("mounts with user-bar class", () => {
@@ -214,13 +209,7 @@ describe("UserBar", () => {
     expect(container.querySelector(".ub-status")?.textContent).toBe("Online");
 
     // Simulate logout
-    authStore.setState(() => ({
-      token: null,
-      user: null,
-      serverName: null,
-      motd: null,
-      isAuthenticated: false,
-    }));
+    resetAuthState();
     authStore.flush();
 
     expect(container.querySelector(".ub-status")?.textContent).toBe("Offline");

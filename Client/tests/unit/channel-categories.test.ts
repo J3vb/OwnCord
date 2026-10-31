@@ -42,6 +42,7 @@ import {
 import { ApiClientError } from "@lib/api";
 import type { ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
+import { signInAs } from "../helpers/storeSeeds";
 
 type Row = Partial<ReadyChannel> & Pick<ReadyChannel, "id" | "name" | "type" | "position">;
 
@@ -204,13 +205,7 @@ describe("grouping and order (D7)", () => {
       ["cat:2", "Real name"],
       ["cat:3", "Other"],
     ]);
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 2, username: "Me", avatar: null, role: "member" },
-      serverName: "S",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 2, username: "Me", avatar: null, role: "member" }, { serverName: "S" });
     expect(visibleCategories()).toEqual([]);
     expect(getKnownCategories(visibleCategories()).map((k) => k.name)).toEqual([
       "Real name",

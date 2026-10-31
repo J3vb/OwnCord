@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vite
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { createChannelSidebar } from "../../../src/components/ChannelSidebar";
 import { channelsStore, setChannels } from "../../../src/stores/channels.store";
-import { authStore } from "../../../src/stores/auth.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import {
   resetSafetyStore,
@@ -25,6 +24,7 @@ import {
   voiceModCallbacks,
   setAdminUser,
 } from "../../helpers/channelSidebarHarness";
+import { signInAs } from "../../helpers/storeSeeds";
 
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -1198,13 +1198,7 @@ describe("ChannelSidebar voice rows on models", () => {
 
   it("draggable follows connection status", () => {
     sidebar.destroy?.();
-    authStore.setState(() => ({
-      token: "tok",
-      user: { id: 99, username: "Me", avatar: null, role: "admin" },
-      serverName: "Test Server",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs({ id: 99, username: "Me", avatar: null, role: "admin" });
     sidebar = createChannelSidebar({
       onVoiceJoin,
       onOpenCall,

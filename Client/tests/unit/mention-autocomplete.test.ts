@@ -25,6 +25,7 @@ import {
 } from "../../src/lib/net/serverCapabilities";
 import type { MessageResponse } from "../../src/lib/types";
 import { Permission } from "../../src/lib/types";
+import { resetChannelsState } from "../helpers/storeSeeds";
 
 const NAMES = ["alice", "Alan", "Bob", "carol"];
 
@@ -55,12 +56,7 @@ function signInAs(role: string, permissions: number): void {
     motd: null,
     isAuthenticated: true,
   }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetChannelsState();
   setRoles([{ id: 1, name: role, color: null, permissions }]);
   channelsStore.flush();
 }

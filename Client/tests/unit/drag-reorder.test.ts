@@ -20,6 +20,7 @@ import { channelsStore, setRoles } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { UserWithRole } from "@lib/types";
 import { Permission } from "@lib/types";
+import { resetAuthState, resetChannelsState } from "../helpers/storeSeeds";
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -178,19 +179,8 @@ function drag(rig: Rig, fromId: number, toIdx: number, half: "top" | "bottom"): 
 }
 
 beforeEach(() => {
-  authStore.setState(() => ({
-    token: null,
-    user: null,
-    serverName: null,
-    motd: null,
-    isAuthenticated: false,
-  }));
-  channelsStore.setState(() => ({
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-    categories: [],
-  }));
+  resetAuthState();
+  resetChannelsState();
   document.body.className = "";
   document.body.innerHTML = "";
 });

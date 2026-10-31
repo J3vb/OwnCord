@@ -1,12 +1,12 @@
 import { vi, beforeEach } from "vitest";
 import { resetNotificationCoalescing } from "../../src/lib/notifications";
-import { authStore } from "../../src/stores/auth.store";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
 import { messagesStore } from "../../src/stores/messages.store";
 import type { ChatMessagePayload } from "../../src/lib/types";
 import { testPrefs } from "./notificationsMocks";
+import { signInAs } from "./storeSeeds";
 
 export function makePayload(overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayload {
   return {
@@ -35,13 +35,10 @@ export function useNotificationsHarness(): void {
     testPrefs.set("notificationLevel", "all");
 
     // Set up auth store with a different user
-    authStore.setState(() => ({
-      token: "test",
-      user: { id: 1, username: "Me", avatar: null, role: "member" },
-      serverName: null,
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 1, username: "Me", avatar: null, role: "member" },
+      { token: "test", serverName: null },
+    );
 
     // Set up channels store
     channelsStore.setState(() => ({

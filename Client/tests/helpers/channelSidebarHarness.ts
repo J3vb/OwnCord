@@ -1,19 +1,14 @@
 import { vi } from "vitest";
-import { channelsStore } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore, updateVoiceState } from "../../src/stores/voice.store";
 import type { PeerVerification } from "../../src/stores/voice.store";
 import { type ReadyChannel } from "../../src/lib/types";
 import { resetMembersState } from "./storeResets";
+import { signInAs, resetChannelsState } from "./storeSeeds";
 
 export function resetStores(): void {
-  channelsStore.setState(() => ({
-    categories: [],
-    channels: new Map(),
-    activeChannelId: null,
-    roles: [],
-  }));
+  resetChannelsState();
   authStore.setState(() => ({
     token: null,
     user: null,
@@ -134,11 +129,5 @@ export function voiceModCallbacks() {
 
 /** Set auth user so admin-gated features (context menus, drag, create channel) activate. */
 export function setAdminUser(): void {
-  authStore.setState(() => ({
-    token: "tok",
-    user: { id: 1, username: "Admin", avatar: null, role: "admin" },
-    serverName: "Test Server",
-    motd: null,
-    isAuthenticated: true,
-  }));
+  signInAs({ id: 1, username: "Admin", avatar: null, role: "admin" });
 }

@@ -2,7 +2,6 @@
 // sent only with a non-empty custom status, carried by a limiter retry, and
 // mirrored onto your own member entry as `customStatusExpiresAt`.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { authStore } from "@stores/auth.store";
 import {
   membersStore,
   updatePresence,
@@ -18,6 +17,7 @@ import {
   saveUserStatus,
 } from "@lib/presence/userStatus";
 import type { WsClient } from "@lib/ws";
+import { signInAs } from "../helpers/storeSeeds";
 
 type Frame = { type: string; payload: Record<string, unknown> };
 
@@ -41,13 +41,10 @@ describe("presence_update custom_status_expires_in", () => {
     localStorage.clear();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-17T10:00:00Z"));
-    authStore.setState(() => ({
-      token: "t",
-      user: { id: 7, username: "alice", avatar: null, role: "member" },
-      serverName: "S",
-      motd: null,
-      isAuthenticated: true,
-    }));
+    signInAs(
+      { id: 7, username: "alice", avatar: null, role: "member" },
+      { token: "t", serverName: "S" },
+    );
     membersStore.setState((p) => ({
       ...p,
       members: new Map([[7, { id: 7, username: "alice", status: "online" } as never]]),
