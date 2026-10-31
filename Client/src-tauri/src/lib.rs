@@ -1,4 +1,6 @@
 mod active_session;
+#[cfg(target_os = "android")]
+mod call_service;
 mod commands;
 // Test-only: gates over tauri.conf.json and the source text itself.
 #[cfg(test)]
@@ -208,7 +210,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init());
 
     #[cfg(target_os = "android")]
-    let builder = builder.plugin(update_commands::android::init());
+    let builder = builder
+        .plugin(update_commands::android::init())
+        .plugin(call_service::init());
 
     // Desktop-only convenience plugins. window-state auto-saves/restores window
     // geometry (off-screen correction lives in the frontend); autostart backs
@@ -286,6 +290,8 @@ pub fn run() {
             update_commands::download_and_install_update,
             #[cfg(target_os = "android")]
             update_commands::android::download_and_install_update,
+            #[cfg(target_os = "android")]
+            call_service::set_call_service,
             ptt::ptt_start,
             ptt::ptt_stop,
             ptt::ptt_set_key,

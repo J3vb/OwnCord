@@ -101,20 +101,20 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 26    |
-| Distinct `invoke` command names called from `Client/src/`  | 97    |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 100   |
+| Distinct `invoke` command names called from `Client/src/`  | 98    |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 101   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
-| Files under `Client/src/platform/`                         | 56    |
+| Files under `Client/src/platform/`                         | 58    |
 
-The handler count covers the 100 distinct registrations
+The handler count covers the 101 distinct registrations
 (`Client/src-tauri/src/lib.rs`); `open_devtools` sits behind
 `#[cfg(feature = "devtools")]`, and the forty-three `native_voice_*` commands
 and the two Linux file commands (`clipboard_files`, `read_staged_file`, for
 files dragged in or copied from the file manager) behind
 `#[cfg(target_os = "linux")]`, so a default build (no `devtools`) registers 99 on Linux
-and 54 elsewhere. The one environment-detection helper is
+and 54 elsewhere, plus the Android-only `set_call_service`. The one environment-detection helper is
 `features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
@@ -217,6 +217,7 @@ save_credential
 save_identity_key
 save_pending_messages
 save_settings
+set_call_service
 set_unread_badge
 set_window_pref
 show_next_launch
@@ -259,7 +260,11 @@ web build reads nothing and hides the setting. The three Windows per-app share a
 half: they exist on every target and answer "unavailable" off Windows) have their
 caller since WP 6.7b: `src/platform/desktop/appAudio.ts`, behind the `AppAudio`
 contract, a twenty-seventh importer. They still belong in the registration
-inventory.
+inventory. `set_call_service` (Android only, `src-tauri/src/call_service.rs`)
+starts, updates and stops the foreground service that keeps a call's mic and
+camera running while the app is in the background; its caller is
+`src/platform/desktop/callService.ts`, behind the `CallService` contract, and
+the web build does nothing.
 
 There is no `window.__TAURI__` access, and the only environment branching is
 the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is

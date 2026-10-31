@@ -922,6 +922,8 @@ export function buildTauriMockScript(opts: {
         if (cmd === "list_running_programs") return [];
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
+        // The Android call service; calls stay in __invokeLog.
+        if (cmd === "set_call_service") return null;
         if (cmd === "ptt_polling_supported") return false;
         // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
         if (cmd === "app_audio_available") return false;

@@ -55,6 +55,7 @@ export const shards = {
     "src/features/voice/cameraFlip.ts",
     "src/features/voice/phoneFullscreen.ts",
     "src/features/voice/incomingCallScreen.ts",
+    "src/features/voice/backgroundCall.ts",
     "src/features/voice/talkButton.ts",
     "src/features/voice/talkSlot.ts",
     "src/features/voice/cameraMenu.ts",
