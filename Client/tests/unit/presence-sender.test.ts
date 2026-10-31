@@ -17,6 +17,7 @@ import {
   saveUserStatus,
 } from "@lib/presence/userStatus";
 import type { WsClient } from "@lib/ws";
+import { resetMembersState } from "../helpers/storeResets";
 
 function createMockWs(): WsClient {
   return {
@@ -113,7 +114,7 @@ describe("createPresenceSender — last requested status always reaches the serv
       motd: null,
       isAuthenticated: false,
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
   });
 
   it("re-arms the retry when the queued frame is answered RATE_LIMITED, so the latest status still lands", () => {
@@ -209,7 +210,7 @@ describe("createPresenceSender — a TIMED_OUT refusal rolls back the optimistic
       motd: null,
       isAuthenticated: false,
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
   });
 
   // The server broadcasts nothing when it refuses a timed-out custom status
@@ -386,7 +387,7 @@ describe("createPresenceSender — custom_status survival across supersession", 
       motd: null,
       isAuthenticated: false,
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
   });
 
   it("does not drop a queued custom_status when a later plain status change supersedes it before the retry fires", () => {
@@ -479,7 +480,7 @@ describe("createPresenceSender — rollback, retry and teardown details", () => 
       motd: null,
       isAuthenticated: false,
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
   });
 
   it("rolls back a refused status flip that carried no text", () => {

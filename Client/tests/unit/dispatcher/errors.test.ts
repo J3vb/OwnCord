@@ -3,11 +3,7 @@ import * as dispatcherMocks from "../../helpers/dispatcherMocks";
 import { setActivityRefusalHandler } from "../../../src/lib/presence/gameActivityBridge";
 import { expectConsole } from "../../helpers/console";
 import { authStore } from "../../../src/stores/auth.store";
-import {
-  messagesStore,
-  addOptimisticMessage,
-  getChannelMessages,
-} from "../../../src/stores/messages.store";
+import { addOptimisticMessage, getChannelMessages } from "../../../src/stores/messages.store";
 import { membersStore } from "../../../src/stores/members.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { blocksStore } from "../../../src/stores/blocks.store";
@@ -17,6 +13,7 @@ import { createPresenceSender, setActivePresenceSender } from "../../../src/lib/
 import { createPresenceLimiter } from "../../../src/lib/net/rateLimiter";
 import { loadCustomStatus, saveCustomStatus } from "../../../src/lib/presence/userStatus";
 import { useDispatcherHarness, type DispatcherMock } from "../../helpers/dispatcherHarness";
+import { resetMessagesState } from "../../helpers/storeResets";
 
 vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
@@ -331,14 +328,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires an error carrying a pending send id to mark that row failed (not a toast)", () => {
-    messagesStore.setState(() => ({
-      messagesByChannel: new Map(),
-      pendingSends: new Map(),
-      loadedChannels: new Set(),
-      hasMore: new Map(),
-      historyLoadState: new Map(),
-      detachedChannels: new Set(),
-    }));
+    resetMessagesState();
     uiStore.setState((prev) => ({ ...prev, transientError: null }));
 
     addOptimisticMessage({

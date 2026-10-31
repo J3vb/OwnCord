@@ -12,6 +12,7 @@ import type { DmConversation } from "@components/DmSidebar";
 import { createIncomingCallBanner } from "@components/IncomingCallBanner";
 import { dmDisplayName, dmStore } from "@stores/dm.store";
 import type { DmChannel, DmUser } from "@stores/dm.store";
+import { useMountContainer } from "../helpers/mountContainer";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -476,14 +477,8 @@ describe("DmSidebar — muted rows", () => {
 
 describe("IncomingCallBanner", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("stays hidden until a ring arrives", () => {

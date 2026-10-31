@@ -223,6 +223,7 @@ var deadlineBound = []string{
 	"GET /admin/api/discord-imports/latest",
 	"GET /admin/api/discord-imports/{id}",
 	"GET /admin/api/config/settings",
+	"GET /admin/api/logs/history",
 	"GET /admin/api/logs/level",
 	"GET /admin/api/me",
 	"GET /admin/api/registrations",

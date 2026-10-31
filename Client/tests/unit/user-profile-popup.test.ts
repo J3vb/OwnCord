@@ -6,6 +6,7 @@ import {
   type UserProfileData,
 } from "@components/UserProfilePopup";
 import { createNoteBinding } from "../../src/features/profiles/userNotes";
+import { useMountContainer } from "../helpers/mountContainer";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
   return {
@@ -23,14 +24,8 @@ function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
 
 describe("UserProfilePopup", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("paints a banner colour on the strip and leaves the gradient without one", () => {
@@ -401,14 +396,8 @@ describe("UserProfilePopup positioning", () => {
 
 describe("UserProfilePopup profile fields", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("shows the display name as the heading and the username as an @handle", () => {

@@ -12,6 +12,7 @@ import { dmStore, addDmChannel, addDmToChannelsStore } from "../../src/stores/dm
 import { membersStore } from "../../src/stores/members.store";
 import { uiStore } from "../../src/stores/ui.store";
 import type { DmChannel } from "../../src/stores/dm.store";
+import { resetMembersState } from "../helpers/storeResets";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -25,10 +26,7 @@ function resetStores(): void {
     roles: [],
   }));
   dmStore.setState(() => ({ channels: [] }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   uiStore.setState(() => ({
     sidebarCollapsed: false,
     memberListVisible: true,

@@ -28,6 +28,7 @@ export const shards = {
     "src/features/voice/native/platform.ts",
     "src/lib/hostPlatform.ts",
     "src/features/voice/native/nativeRoom.ts",
+    "src/features/voice/native/nativeLocalVideo.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/native/videoCodecs.ts",
     "src/features/voice/callChatResize.ts",
@@ -35,6 +36,8 @@ export const shards = {
   ],
   "livekit-2": [
     "src/lib/voice/livekitSession.ts",
+    "src/features/voice/voiceSession.ts",
+    "src/features/voice/localVoiceRestore.ts",
     "src/features/voice/remoteTracks.ts",
     "src/features/voice/native/nativeCameraTrack.ts",
     "src/features/voice/native/screenAudioTrack.ts",
@@ -44,6 +47,7 @@ export const shards = {
   "livekit-3": [
     "src/lib/voice/livekitUrlResolver.ts",
     "src/lib/voice/screenShare.ts",
+    "src/lib/voice/videoPresets.ts",
     "src/lib/voice/appAudioTrack.ts",
     "src/features/voice/joinRequest.ts",
     "src/features/voice/passwordPrompt.ts",

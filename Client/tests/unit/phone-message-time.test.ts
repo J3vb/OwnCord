@@ -1,16 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// jsdom does not provide ResizeObserver; stub it so MessageList can mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
 import { createMessageList } from "@components/MessageList";
 import { messagesStore, type Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import {
   makeMessage,
   makeOpts,
@@ -18,6 +9,8 @@ import {
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
+import { resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 function seed(messages: Message[]): void {
   messagesStore.setState(() => ({
@@ -58,7 +51,7 @@ describe("message header time on a phone", () => {
     localStorage.clear();
     signInAs("member");
     setChannel();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     container = document.createElement("div");
     document.body.appendChild(container);
   });

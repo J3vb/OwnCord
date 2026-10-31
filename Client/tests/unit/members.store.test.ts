@@ -15,6 +15,7 @@ import {
   getTypingUsers,
 } from "../../src/stores/members.store";
 import type { ReadyMember, MemberJoinPayload } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 const MEMBER_ALICE: ReadyMember = {
   id: 1,
@@ -41,10 +42,7 @@ const MEMBER_CAROL: ReadyMember = {
 };
 
 function resetStore(): void {
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
 }
 
 describe("members store", () => {

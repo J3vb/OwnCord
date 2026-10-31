@@ -15,6 +15,7 @@ import { createWsClient, type ConnectionState } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
 import { handleConnectionError } from "../../src/features/connection/wsHandlers";
 import { setSessionReplaced, uiStore } from "../../src/stores/ui.store";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
 
 const AUTH_OK = JSON.stringify({
   type: "auth_ok",
@@ -36,19 +37,8 @@ function pingSends(): unknown[][] {
 
 describe("wake probe (U7d)", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   async function connectAndAuth(): Promise<void> {

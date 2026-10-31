@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // vi.mock is hoisted per file; the factories resolve to the shared handles
 // exported from ./helpers/ws-mocks (see that module's doc comment).
@@ -10,9 +10,10 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 
-import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, type ConnectionState } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
 
 const AUTH_OK = JSON.stringify({
   type: "auth_ok",
@@ -31,19 +32,8 @@ const AUTH_OK = JSON.stringify({
 // the whole 90 s+ window, not only after 180 s.
 describe("wake reconnect signal (U4 follow-up)", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   async function connectAndAuth(): Promise<void> {

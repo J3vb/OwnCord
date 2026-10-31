@@ -32,8 +32,8 @@ import { replaceEmojiShortcodes } from "../../src/features/messaging/shortcodes"
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
 import type { ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: "Text", position: 0 },
@@ -57,7 +57,7 @@ beforeEach(() => {
     categories: [],
   }));
   setChannels(CHANNELS);
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
   clearCustomEmoji();
   setCustomEmoji([]);
   emojiStore.flush();

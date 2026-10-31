@@ -83,20 +83,8 @@
       "stores/voice.store.ts": 1
     },
     "lib/voice/livekitSession.ts": {
-      "features/direct-messages/keptCallDms.ts": 1,
-      "features/voice/joinOrchestration.ts": 1,
-      "features/voice/joinRequest.ts": 1,
-      "features/voice/mediaControl.ts": 1,
-      "features/voice/mediaLostNotice.ts": 1,
-      "features/voice/native/counters.ts": 1,
-      "features/voice/native/platform.ts": 1,
-      "features/voice/native/screenPicker.ts": 1,
-      "features/voice/remoteTracks.ts": 1,
-      "features/voice/roomLifecycle.ts": 1,
       "features/voice/sessionState.ts": 1,
-      "stores/auth.store.ts": 1,
-      "stores/channels.store.ts": 1,
-      "stores/dm.store.ts": 1,
+      "features/voice/voiceSession.ts": 2,
       "stores/voice.store.ts": 2
     },
     "lib/net/logout.ts": {

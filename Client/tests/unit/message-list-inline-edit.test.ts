@@ -6,19 +6,10 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import { createMessageInput } from "@components/MessageInput";
 import { messagesStore, type Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { clearCustomEmoji, emojiStore, setCustomEmoji } from "../../src/stores/emoji.store";
 import {
@@ -30,6 +21,8 @@ import {
   setChannel,
   signInAs,
 } from "../helpers/message-actions-fixtures";
+import { resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 function seed(messages: readonly Message[]): void {
   messagesStore.setState(() => ({
@@ -109,7 +102,7 @@ describe("inline message editor", () => {
     resetGateStores();
     signInAs("member");
     setChannel();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     container = document.createElement("div");
     document.body.appendChild(container);
     options = makeOpts({
