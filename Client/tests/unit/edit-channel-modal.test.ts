@@ -11,6 +11,9 @@ import { channelsStore, setChannels, updateChannel } from "@stores/channels.stor
 import {
   checkBackdropClickCloses,
   checkClickCloses,
+  checkCloseButtonLabelled,
+  checkFocusMovesInAndRestores,
+  checkModalSemantics,
   checkDragSelectKeepsOpen,
   checkEscapeCancels,
   checkEscapeIgnoredAfterDestroy,
@@ -54,6 +57,18 @@ describe("EditChannelModal", () => {
     return { modal, options };
   }
 
+  function submitName(value: string): HTMLButtonElement {
+    const input = container.querySelector(
+      "[data-testid='edit-channel-name-input']",
+    ) as HTMLInputElement;
+    input.value = value;
+    const saveBtn = container.querySelector(
+      "[data-testid='edit-channel-submit']",
+    ) as HTMLButtonElement;
+    saveBtn.click();
+    return saveBtn;
+  }
+
   const openDialog: MakeDialog = ({ action, onClose }) =>
     makeModal({ onSave: action, onClose }).modal;
 
@@ -82,15 +97,7 @@ describe("EditChannelModal", () => {
   it("shows error when saving with empty name", () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    submitName("");
 
     const error = container.querySelector("[data-testid='edit-channel-error']");
     expect(error?.textContent).toContain("required");
@@ -101,15 +108,7 @@ describe("EditChannelModal", () => {
   it("calls onSave with updated name", async () => {
     const onSave = vi.fn(async () => {});
     const { modal } = makeModal({ onSave });
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "renamed-channel";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    submitName("renamed-channel");
 
     await vi.waitFor(() => {
       expect(onSave).toHaveBeenCalledWith({ name: "renamed-channel" });
@@ -223,15 +222,7 @@ describe("EditChannelModal", () => {
     const onSave = vi.fn().mockRejectedValue(new Error("Server error"));
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "new-name";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    const saveBtn = submitName("new-name");
 
     await vi.waitFor(() => {
       const error = container.querySelector("[data-testid='edit-channel-error']");
@@ -249,15 +240,7 @@ describe("EditChannelModal", () => {
     const onSave = vi.fn().mockRejectedValue("unknown");
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "new-name";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    submitName("new-name");
 
     await vi.waitFor(() => {
       const error = container.querySelector("[data-testid='edit-channel-error']");
@@ -277,15 +260,7 @@ describe("EditChannelModal", () => {
     );
     const { modal } = makeModal({ onSave });
 
-    const input = container.querySelector(
-      "[data-testid='edit-channel-name-input']",
-    ) as HTMLInputElement;
-    input.value = "renamed";
-
-    const saveBtn = container.querySelector(
-      "[data-testid='edit-channel-submit']",
-    ) as HTMLButtonElement;
-    saveBtn.click();
+    const saveBtn = submitName("renamed");
 
     expect(saveBtn.hasAttribute("disabled")).toBe(true);
     expect(saveBtn.textContent).toBe("Saving...");
@@ -758,15 +733,8 @@ describe("EditChannelModal", () => {
   // ─── Dialog accessibility contract (DC-13) ─────────────────────────────────
 
   describe("dialog accessibility", () => {
-    it("stamps dialog semantics named by the header title", () => {
-      const { modal } = makeModal();
-      const dialog = container.querySelector(".modal") as HTMLElement;
-      expect(dialog.getAttribute("role")).toBe("dialog");
-      expect(dialog.getAttribute("aria-modal")).toBe("true");
-      expect(dialog.getAttribute("aria-labelledby")).toBe("edit-channel-title");
-      expect(container.querySelector("#edit-channel-title")?.textContent).toBe("Edit Channel");
-      modal.destroy?.();
-    });
+    it("stamps dialog semantics named by the header title", () =>
+      checkModalSemantics(openDialog, container, "edit-channel-title", "Edit Channel"));
 
     it("names each form control by its visible label", () => {
       const { modal } = makeModal({ channelType: "voice" });
@@ -784,12 +752,7 @@ describe("EditChannelModal", () => {
       modal.destroy?.();
     });
 
-    it("labels the icon-only close button", () => {
-      const { modal } = makeModal();
-      const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
-      expect(closeBtn.getAttribute("aria-label")).toBe("Close");
-      modal.destroy?.();
-    });
+    it("labels the icon-only close button", () => checkCloseButtonLabelled(openDialog, container));
 
     it("Escape calls onClose without saving", () => checkEscapeCancels(openDialog));
 
@@ -798,20 +761,12 @@ describe("EditChannelModal", () => {
 
     it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(openDialog));
 
-    it("focuses the name input on open and restores focus on destroy", () => {
-      const trigger = document.createElement("button");
-      container.appendChild(trigger);
-      trigger.focus();
-
-      const { modal } = makeModal();
-      const input = container.querySelector(
+    it("focuses the name input on open and restores focus on destroy", () =>
+      checkFocusMovesInAndRestores(
+        openDialog,
+        container,
         "[data-testid='edit-channel-name-input']",
-      ) as HTMLInputElement;
-      expect(document.activeElement).toBe(input);
-
-      modal.destroy?.();
-      expect(document.activeElement).toBe(trigger);
-    });
+      ));
   });
 
   // ─── Pure helpers ──────────────────────────────────────────────────────────

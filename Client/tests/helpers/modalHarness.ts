@@ -90,6 +90,45 @@ export function checkDragSelectKeepsOpen(
   modal.destroy?.();
 }
 
+export function checkModalSemantics(
+  make: MakeDialog,
+  container: ParentNode,
+  titleId: string,
+  title: string,
+): void {
+  const modal = make(spies());
+  const dialog = container.querySelector(".modal") as HTMLElement;
+  expect(dialog.getAttribute("role")).toBe("dialog");
+  expect(dialog.getAttribute("aria-modal")).toBe("true");
+  expect(dialog.getAttribute("aria-labelledby")).toBe(titleId);
+  expect(container.querySelector(`#${titleId}`)?.textContent).toBe(title);
+  modal.destroy?.();
+}
+
+export function checkCloseButtonLabelled(make: MakeDialog, container: ParentNode): void {
+  const modal = make(spies());
+  const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
+  expect(closeBtn.getAttribute("aria-label")).toBe("Close");
+  modal.destroy?.();
+}
+
+export function checkFocusMovesInAndRestores(
+  make: MakeDialog,
+  container: HTMLElement,
+  focusedSelector: string,
+): void {
+  const trigger = document.createElement("button");
+  container.appendChild(trigger);
+  trigger.focus();
+
+  const modal = make(spies());
+  const focused = container.querySelector(focusedSelector) as HTMLElement;
+  expect(document.activeElement).toBe(focused);
+
+  modal.destroy?.();
+  expect(document.activeElement).toBe(trigger);
+}
+
 export function checkOverlayRemovedOnDestroy(
   make: MakeDialog,
   container: ParentNode,

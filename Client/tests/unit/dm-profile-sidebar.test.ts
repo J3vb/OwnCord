@@ -1,18 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { avatarAttachmentsMock } from "../helpers/avatarAttachmentsMock";
+
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn());
 
 // Only the network fetch is stubbed -- isSafeUrl/resolveServerUrl are
 // reimplemented (not mocked away) so the raw-src-vs-authenticated-fetch
 // distinction this suite exercises stays honest. Mirrors tests/unit/avatar.test.ts.
-vi.mock("../../src/features/messaging/content/attachments", () => ({
-  fetchImageAsObjectUrl,
-  // No cached bytes: every avatar here is a still picture (WP 8.7).
-  cachedImageBytes: () => null,
-  recoverEvictedImage: () => {},
-  isSafeUrl: (url: string) => url.startsWith("https://") || url.startsWith("http://"),
-  resolveServerUrl: (url: string) => (url.startsWith("http") ? url : `https://server.test${url}`),
-}));
+vi.mock("../../src/features/messaging/content/attachments", () =>
+  avatarAttachmentsMock(fetchImageAsObjectUrl),
+);
 
 import { createDmProfileSidebar } from "../../src/components/DmProfileSidebar";
 import type { DmProfileData, DmProfileSidebarOptions } from "../../src/components/DmProfileSidebar";

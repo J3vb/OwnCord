@@ -4,6 +4,9 @@ import type { DeleteChannelModalOptions } from "@components/DeleteChannelModal";
 import {
   checkBackdropClickCloses,
   checkClickCloses,
+  checkCloseButtonLabelled,
+  checkFocusMovesInAndRestores,
+  checkModalSemantics,
   checkDragSelectKeepsOpen,
   checkEscapeCancels,
   checkEscapeIgnoredAfterDestroy,
@@ -37,6 +40,17 @@ describe("DeleteChannelModal", () => {
     return { modal, options };
   }
 
+  function clickConfirm(): HTMLButtonElement {
+    const deleteBtn = container.querySelector(
+      "[data-testid='delete-channel-confirm']",
+    ) as HTMLButtonElement;
+    deleteBtn.click();
+    return deleteBtn;
+  }
+
+  const errorText = (): string | null | undefined =>
+    container.querySelector("[data-testid='delete-channel-error']")?.textContent;
+
   const openDialog: MakeDialog = ({ action, onClose }) =>
     makeModal({ onConfirm: action, onClose }).modal;
 
@@ -63,10 +77,7 @@ describe("DeleteChannelModal", () => {
   it("calls onConfirm when delete button is clicked", async () => {
     const onConfirm = vi.fn(async () => {});
     const { modal } = makeModal({ onConfirm });
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    clickConfirm();
 
     await vi.waitFor(() => {
       expect(onConfirm).toHaveBeenCalled();
@@ -87,15 +98,9 @@ describe("DeleteChannelModal", () => {
     const onConfirm = vi.fn().mockRejectedValue(new Error("Permission denied"));
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    const deleteBtn = clickConfirm();
 
-    await vi.waitFor(() => {
-      const error = container.querySelector("[data-testid='delete-channel-error']");
-      expect(error?.textContent).toBe("Permission denied");
-    });
+    await vi.waitFor(() => expect(errorText()).toBe("Permission denied"));
 
     expect(deleteBtn.hasAttribute("disabled")).toBe(false);
     expect(deleteBtn.textContent).toBe("Delete Channel");
@@ -107,15 +112,9 @@ describe("DeleteChannelModal", () => {
     const onConfirm = vi.fn().mockRejectedValue(42);
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    clickConfirm();
 
-    await vi.waitFor(() => {
-      const error = container.querySelector("[data-testid='delete-channel-error']");
-      expect(error?.textContent).toBe("Failed to delete channel");
-    });
+    await vi.waitFor(() => expect(errorText()).toBe("Failed to delete channel"));
 
     modal.destroy?.();
   });
@@ -126,10 +125,7 @@ describe("DeleteChannelModal", () => {
     const onConfirm = vi.fn(async () => {});
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    const deleteBtn = clickConfirm();
 
     await vi.waitFor(() => {
       expect(deleteBtn.hasAttribute("disabled")).toBe(false);
@@ -153,10 +149,7 @@ describe("DeleteChannelModal", () => {
     );
     const { modal } = makeModal({ onConfirm });
 
-    const deleteBtn = container.querySelector(
-      "[data-testid='delete-channel-confirm']",
-    ) as HTMLButtonElement;
-    deleteBtn.click();
+    const deleteBtn = clickConfirm();
 
     expect(deleteBtn.hasAttribute("disabled")).toBe(true);
     expect(deleteBtn.textContent).toBe("Deleting...");
@@ -173,22 +166,10 @@ describe("DeleteChannelModal", () => {
 
   // ── dialog accessibility contract (DC-13) ──────────────────────────────────
 
-  it("stamps dialog semantics named by the header title", () => {
-    const { modal } = makeModal();
-    const dialog = container.querySelector(".modal") as HTMLElement;
-    expect(dialog.getAttribute("role")).toBe("dialog");
-    expect(dialog.getAttribute("aria-modal")).toBe("true");
-    expect(dialog.getAttribute("aria-labelledby")).toBe("delete-channel-title");
-    expect(container.querySelector("#delete-channel-title")?.textContent).toBe("Delete Channel");
-    modal.destroy?.();
-  });
+  it("stamps dialog semantics named by the header title", () =>
+    checkModalSemantics(openDialog, container, "delete-channel-title", "Delete Channel"));
 
-  it("labels the icon-only close button", () => {
-    const { modal } = makeModal();
-    const closeBtn = container.querySelector(".modal-close") as HTMLButtonElement;
-    expect(closeBtn.getAttribute("aria-label")).toBe("Close");
-    modal.destroy?.();
-  });
+  it("labels the icon-only close button", () => checkCloseButtonLabelled(openDialog, container));
 
   it("Escape cancels without confirming the delete", () => checkEscapeCancels(openDialog));
 
@@ -197,18 +178,6 @@ describe("DeleteChannelModal", () => {
 
   it("ignores Escape after destroy", () => checkEscapeIgnoredAfterDestroy(openDialog));
 
-  it("moves focus into the dialog on open and restores it on destroy", () => {
-    const trigger = document.createElement("button");
-    container.appendChild(trigger);
-    trigger.focus();
-
-    const { modal } = makeModal();
-    // Focus starts on Cancel (the shared confirm preset) — safely away from the
-    // destructive confirm.
-    const cancelBtn = container.querySelector(".btn-modal-cancel") as HTMLButtonElement;
-    expect(document.activeElement).toBe(cancelBtn);
-
-    modal.destroy?.();
-    expect(document.activeElement).toBe(trigger);
-  });
+  it("moves focus into the dialog on open and restores it on destroy", () =>
+    checkFocusMovesInAndRestores(openDialog, container, ".btn-modal-cancel"));
 });
