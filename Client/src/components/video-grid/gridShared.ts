@@ -355,8 +355,8 @@ export function isFullscreenKey(e: KeyboardEvent): boolean {
   return (e.key === "f" || e.key === "F") && !e.ctrlKey && !e.metaKey && !e.altKey && !typing;
 }
 
-/** Your own camera tile, which shows mirrored like a mirror does. Never a
- *  screen share: that must read the way viewers see it. */
+/** Your own camera tile, which mirrors when "Mirror my camera preview" is on.
+ *  Never a screen share: that must read the way viewers see it. */
 export function isSelfCamera(config: TileConfig | undefined): boolean {
   return config?.isSelf === true && !config.isScreenshare;
 }

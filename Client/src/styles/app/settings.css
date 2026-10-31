@@ -547,7 +547,10 @@ details.disclose > summary {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* Mirrored, like your own tile in a call. */
+}
+/* Follows "Mirror my camera preview", like your own tile in a call. */
+.mirror-self-camera .camera-preview video,
+.mirror-self-camera .camera-preview .video-surface {
   transform: scaleX(-1);
 }
 .camera-preview-label {
