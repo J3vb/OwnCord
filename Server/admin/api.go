@@ -348,6 +348,7 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		// The Dashboard health row: CPU, memory, disk and uptime, the same
 		// server health detail as the attention panel.
 		gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/stats", handleGetSystemStats(setupOpts.System, hub))
+		gates.route(r, gateViewDiagnostics, http.MethodGet, "/system/slow-requests", handleGetSlowRequests(setupOpts.System))
 		mountUserRoutes(r, gates, svc, hub, mod)
 		// The approval-mode registration queue: deciding who joins
 		// is server management, not moderation of existing members.

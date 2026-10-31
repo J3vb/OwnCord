@@ -19,7 +19,7 @@ const MANAGE_CHANNELS = 0x20000;
 
 interface Bridge {
   state: { me: unknown; section: string; token: string };
-  health: { seq: number; timer: unknown; data: unknown };
+  health: { seq: number; timer: unknown; data: unknown; slow: unknown };
   renderDashboard: () => Promise<string>;
   startHealthPoll: () => Promise<void>;
   pollHealth: (seq: number, token: string) => Promise<void>;
@@ -325,5 +325,126 @@ describe("Server/admin/static — Dashboard health row", () => {
     const host = render(dom, await bridge.renderDashboard());
     expect(bridge.health.data).toBeNull();
     expect(text(host, "healthCpu", "health-value")).toBe("–");
+  });
+
+  describe("slow requests card", () => {
+    const SLOW = {
+      window_seconds: 3600,
+      routes: [
+        {
+          method: "POST",
+          route: "/api/v1/channels/{id}/messages",
+          count: 1204,
+          p50_ms: 2500,
+          p95_ms: 5000,
+          max_ms: 12_400,
+        },
+        {
+          method: "GET",
+          route: "/admin/api/<b>x</b>",
+          count: 3,
+          p50_ms: 500,
+          p95_ms: 1000,
+          max_ms: 730,
+        },
+        { method: "GET", route: "/api/v1/health", count: 9, p50_ms: 0.3, p95_ms: 0.3, max_ms: 0.3 },
+      ],
+    };
+    const rows = (host: Element) =>
+      [...host.querySelectorAll("#slowRequests tbody tr")].map((tr) =>
+        [...tr.querySelectorAll("td")].map((td) => td.textContent),
+      );
+
+    it("lists routes with calls, typical and worst time under the health row", async () => {
+      const paths: string[] = [];
+      const booted = await boot(paths, (p) =>
+        p === "/system/slow-requests" ? SLOW : p.startsWith("/system/stats") ? STATS : {},
+      );
+      dom = booted.dom;
+      booted.bridge.state.me = { permissions: ADMINISTRATOR };
+      const host = render(dom, await booted.bridge.renderDashboard());
+      expect(paths).toContain("/system/slow-requests");
+      expect(host.querySelector("#healthRow + section #slowRequests")).toBeTruthy();
+      expect(rows(host)).toEqual([
+        ["POST /api/v1/channels/{id}/messages", (1204).toLocaleString(), "2.5 s", "12 s"],
+        ["GET /admin/api/<b>x</b>", "3", "500 ms", "730 ms"],
+        ["GET /api/v1/health", "9", "<1 ms", "<1 ms"],
+      ]);
+      // A route is text, never markup.
+      expect(host.querySelector("#slowRequests b")).toBeNull();
+      expect(
+        host
+          .querySelector("#slowRequests tbody tr:first-child td:nth-child(3)")
+          ?.classList.contains("slow-crit"),
+      ).toBe(true);
+      expect(
+        host
+          .querySelector("#slowRequests tbody tr:nth-child(2) td:nth-child(3)")
+          ?.classList.contains("slow-warn"),
+      ).toBe(true);
+    });
+
+    it("says so when nothing was recorded yet", async () => {
+      const booted = await boot([], (p) =>
+        p === "/system/slow-requests"
+          ? { window_seconds: 3600, routes: [] }
+          : p.startsWith("/system/stats")
+            ? STATS
+            : {},
+      );
+      dom = booted.dom;
+      booted.bridge.state.me = { permissions: ADMINISTRATOR };
+      const host = render(dom, await booted.bridge.renderDashboard());
+      expect(host.querySelector("#slowRequests")?.textContent).toBe(
+        "No requests in the last hour yet.",
+      );
+    });
+
+    // The card never stops the poll: a failed read keeps its last list and
+    // the health row keeps updating.
+    it("keeps the last list and the poll when its read fails", async () => {
+      let failSlow = false;
+      let cpu = 7.4;
+      const booted = await boot([], (p) => {
+        if (p === "/system/slow-requests") {
+          if (failSlow) throw new Error("down");
+          return SLOW;
+        }
+        return p.startsWith("/system/stats")
+          ? { ...STATS, current: { ...STATS.current, machine_cpu: cpu } }
+          : {};
+      });
+      dom = booted.dom;
+      const { bridge } = booted;
+      bridge.state.me = { permissions: ADMINISTRATOR };
+      render(dom, await bridge.renderDashboard());
+
+      failSlow = true;
+      cpu = 42;
+      await bridge.pollHealth(bridge.health.seq, "tok");
+      const doc = dom.window.document;
+      expect(doc.querySelector("#healthCpu .health-value")?.textContent).toBe("42%");
+      expect(doc.querySelectorAll("#slowRequests tbody tr")).toHaveLength(3);
+      expect(bridge.health.timer).not.toBeNull();
+    });
+
+    it("clears the previous session's list on a new sign-in", async () => {
+      let fail = false;
+      const booted = await boot([], (p) => {
+        if (fail && p.startsWith("/system/")) throw new Error("down");
+        return p === "/system/slow-requests" ? SLOW : p.startsWith("/system/stats") ? STATS : {};
+      });
+      dom = booted.dom;
+      const { bridge } = booted;
+      bridge.state.me = { permissions: ADMINISTRATOR };
+      render(dom, await bridge.renderDashboard());
+      expect(bridge.health.slow).not.toBeNull();
+
+      fail = true;
+      bridge.state.token = "other";
+      const host = render(dom, await bridge.renderDashboard());
+      expect(bridge.health.slow).toBeNull();
+      expect(host.querySelector("#slowRequests tbody")).toBeNull();
+    });
   });
 });

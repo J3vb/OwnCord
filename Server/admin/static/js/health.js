@@ -1,6 +1,7 @@
 /* OwnCord admin panel: the Dashboard health row. Four tiles (CPU, RAM, disk
    free, uptime) from GET /system/stats, each CPU and RAM tile with a one-hour
-   line, refreshed every 5 seconds while the Dashboard is on screen.
+   line, refreshed every 5 seconds while the Dashboard is on screen. Under it,
+   the slow requests card (GET /system/slow-requests) on the same poll.
 
    Polling belongs to one Dashboard render at a time. Each render starts a new
    generation (health.seq); a poll checks it still owns the page (same
@@ -9,7 +10,7 @@
    leaving the page, signing out or re-rendering is dropped and its loop ends.
    A figure the server could not read is null and shows as a dash, never 0. */
 const HEALTH_POLL_MS=5000;
-const health={seq:0,timer:null,data:null,token:''};
+const health={seq:0,timer:null,data:null,slow:null,token:''};
 /* The first answer is waited for at most this long, so a hung request cannot
    hold the rest of the Dashboard on "Loading"; the loop paints it later. */
 const HEALTH_FIRST_WAIT_MS=3000;
@@ -28,7 +29,7 @@ async function startHealthPoll(){
   const seq=++health.seq,token=state.token;
   /* Another session's figures are never shown, even while this one's first
      answer is late or fails. */
-  if(health.token!==token){health.data=null;health.token=token}
+  if(health.token!==token){health.data=null;health.slow=null;health.token=token}
   let waited;
   const first=loadHealth(seq,token).then(ok=>{
     if(healthOwns(seq,token)&&ok)paintHealth();
@@ -52,18 +53,58 @@ async function pollHealth(seq,token){
    refusal (the permission was removed) or the session ended. A failed read
    keeps the last figures and the loop. */
 async function loadHealth(seq,token){
+  const[ok]=await Promise.all([loadStats(seq,token),loadSlowRequests(seq,token)]);
+  return ok;
+}
+async function loadStats(seq,token){
   try{
     const data=await api('GET','/system/stats?window=1h');
     if(healthOwns(seq,token))health.data=data;
     return true;
   }catch(e){return!(e&&(e.status===403||e.status===401))&&state.token===token}
 }
+/* The card is a side panel of the row: a failed read keeps its last list and
+   never stops the poll; the stats read decides that. */
+async function loadSlowRequests(seq,token){
+  try{
+    const data=await api('GET','/system/slow-requests');
+    if(healthOwns(seq,token))health.slow=data;
+  }catch(e){/* keep the last list */}
+}
 function paintHealth(){
   const el=document.getElementById('healthRow');
   if(el)el.innerHTML=healthTiles(health.data);
+  const slow=document.getElementById('slowRequests');
+  if(slow)slow.innerHTML=slowRequestsBody(health.slow);
 }
 function healthRow(){
-  return'<section id="healthRow" class="health-row" aria-label="Server resources">'+healthTiles(health.data)+'</section>';
+  return'<section id="healthRow" class="health-row" aria-label="Server resources">'+healthTiles(health.data)+'</section>'
+    +'<section class="section-card" aria-labelledby="slowRequestsTitle"><div class="section-card-header"><h3 id="slowRequestsTitle">Slow requests</h3><span class="checks-sum">Last hour</span></div>'
+    +'<div class="section-card-body" id="slowRequests">'+slowRequestsBody(health.slow)+'</div></section>';
+}
+
+/* The ten slowest kinds of request in the last hour. Typical is the median,
+   worst the single slowest call; a route is its pattern, so ids never show.
+   Streams and other long-lived connections are never recorded. */
+const SLOW_WARN_MS=500,SLOW_CRIT_MS=2000;
+function slowMs(ms){
+  if(typeof ms!=='number')return HEALTH_DASH;
+  return ms>=1000?(ms/1000).toFixed(ms>=10000?0:1)+' s':ms<1?'<1 ms':Math.round(ms)+' ms';
+}
+function slowCell(ms){
+  const tone=typeof ms==='number'?ms>=SLOW_CRIT_MS?' slow-crit':ms>=SLOW_WARN_MS?' slow-warn':'':'';
+  return'<td class="num'+tone+'">'+slowMs(ms)+'</td>';
+}
+function slowRequestsBody(d){
+  if(!d)return'<p class="muted">'+HEALTH_DASH+'</p>';
+  const rows=d.routes||[];
+  if(!rows.length)return'<p class="muted">No requests in the last hour yet.</p>';
+  let html='<table class="tbl slow-tbl"><thead><tr><th>Route</th><th class="num">Calls</th><th class="num">Typical</th><th class="num">Worst</th></tr></thead><tbody>';
+  rows.forEach(r=>{
+    html+='<tr><td class="slow-route"><span class="badge badge-muted">'+esc(r.method)+'</span> <code>'+esc(r.route)+'</code></td>'
+      +'<td class="num">'+(typeof r.count==='number'?r.count.toLocaleString():HEALTH_DASH)+'</td>'+slowCell(r.p50_ms)+slowCell(r.max_ms)+'</tr>';
+  });
+  return html+'</tbody></table>';
 }
 
 const HEALTH_DASH='–';

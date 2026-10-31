@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/httperr"
+	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/sysstats"
 )
 
@@ -24,6 +25,9 @@ type SystemSources struct {
 	UploadBytes func(context.Context) (int64, error)
 	// Started is when the process started; zero leaves uptime out.
 	Started time.Time
+	// SlowRoutes holds request times per route for GET /system/slow-requests;
+	// nil answers an empty list.
+	SlowRoutes *metrics.SlowRoutes
 }
 
 // systemWindows are the history lengths the route serves.
@@ -113,5 +117,26 @@ func fillSystemDisk(ctx context.Context, d *systemDisk, src SystemSources) {
 		if n, err := src.UploadBytes(ctx); err == nil {
 			d.Uploads = &n
 		}
+	}
+}
+
+// slowRequestsLimit is how many routes the slow requests card lists.
+const slowRequestsLimit = 10
+
+type slowRequestsResponse struct {
+	WindowSeconds int                   `json:"window_seconds"`
+	Routes        []metrics.RouteTiming `json:"routes"`
+}
+
+// handleGetSlowRequests serves the Dashboard's slow requests card: the ten
+// slowest route patterns over the last hour, by their 95th percentile time.
+// Routes that stream or hold a connection open are never recorded (see
+// api.requestLogger), and a route shows as its pattern, never a raw path.
+func handleGetSlowRequests(src SystemSources) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, slowRequestsResponse{
+			WindowSeconds: int(metrics.SlowRouteWindow / time.Second),
+			Routes:        src.SlowRoutes.Slowest(slowRequestsLimit),
+		})
 	}
 }

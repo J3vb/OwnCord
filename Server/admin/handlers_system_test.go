@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/admin"
+	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/sysstats"
 )
 
@@ -130,5 +133,58 @@ func TestAdminAPI_SystemStats_NothingWired(t *testing.T) {
 	}
 	if s.Series == nil {
 		t.Error("series is null, want an empty array")
+	}
+}
+
+// GET /system/slow-requests lists route patterns slowest first, at most ten,
+// to View Diagnostics holders only; with no tracker the list is empty.
+func TestAdminAPI_SlowRequests(t *testing.T) {
+	database := openAdminTestDB(t)
+	slow := metrics.NewSlowRoutes(time.Now)
+	for i := range 12 {
+		slow.Observe(http.MethodGet, fmt.Sprintf("/api/v1/r%02d", i), time.Duration(i+1)*time.Millisecond)
+	}
+	slow.Observe(http.MethodPost, "/api/v1/channels/{id}/messages", 1500*time.Millisecond)
+
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{
+		System: admin.SystemSources{SlowRoutes: slow},
+	})
+	ownerToken := createAdminUser(t, database)
+
+	w := doRequest(t, handler, http.MethodGet, "/system/slow-requests", ownerToken, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		WindowSeconds int `json:"window_seconds"`
+		Routes        []struct {
+			Method string  `json:"method"`
+			Route  string  `json:"route"`
+			Count  uint64  `json:"count"`
+			P50    float64 `json:"p50_ms"`
+			P95    float64 `json:"p95_ms"`
+			Max    float64 `json:"max_ms"`
+		} `json:"routes"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.WindowSeconds != 3600 || len(got.Routes) != 10 {
+		t.Fatalf("window %d, %d routes; want 3600 and 10", got.WindowSeconds, len(got.Routes))
+	}
+	top := got.Routes[0]
+	if top.Method != http.MethodPost || top.Route != "/api/v1/channels/{id}/messages" || top.Count != 1 || top.Max != 1500 {
+		t.Errorf("top = %+v, want the 1.5 s message post", top)
+	}
+
+	_, modToken := createRoleUser(t, database, 10, "Moderator", moderatorMask, 60, "moduser")
+	if w := doRequest(t, handler, http.MethodGet, "/system/slow-requests", modToken, nil); w.Code != http.StatusForbidden {
+		t.Errorf("moderator status = %d, want 403", w.Code)
+	}
+
+	bare := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database), admin.SetupOptions{})
+	w = doRequest(t, bare, http.MethodGet, "/system/slow-requests", ownerToken, nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"routes":[]`) {
+		t.Errorf("no tracker: status %d body %s, want 200 with an empty list", w.Code, w.Body.String())
 	}
 }

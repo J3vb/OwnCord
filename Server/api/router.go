@@ -134,7 +134,9 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	r := chi.NewRouter()
 
-	routerMiddleware(r, cfg)
+	// Request times per route for the admin Dashboard's slow requests card.
+	slowRoutes := metrics.NewSlowRoutes(time.Now)
+	routerMiddleware(r, cfg, slowRoutes)
 
 	// Health check: unauthenticated, no versioning prefix. Hub-backed callbacks
 	// are late-bound closures set after hub creation; one handler instance backs
@@ -238,7 +240,7 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 
 	u := rt.Updater
 	adminHandler := admin.NewHandler(database, ver, hub, u, logBuf, cfg.Server.AllowedOrigins, svc.Permissions, svc,
-		adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes))
+		adminSetupOptions(cfg, rt, newDiscordImporter(database, svc, hub, store, rt), database.TotalAttachmentBytes, slowRoutes))
 	// The client's member actions, reachable without the /admin prefix (see
 	// admin.NewMemberAPI). Deliberately outside the admin CIDR gate below: they
 	// accept only a session or API token issued by this server, plus the
@@ -340,7 +342,7 @@ func routerHealthDeps(cfg *config.Config, database *db.DB, getOnlineUsers *func(
 // before panic recovery so the panic log carries the trace id, security
 // headers and the body cap before any handler runs) — keep it exactly as
 // written.
-func routerMiddleware(r chi.Router, cfg *config.Config) {
+func routerMiddleware(r chi.Router, cfg *config.Config, slow *metrics.SlowRoutes) {
 	r.Use(boundRequestID) // must precede RequestID — it reads the header verbatim
 	r.Use(middleware.RequestID)
 	r.Use(setRequestIDHeader) // echo request ID into response header
@@ -357,7 +359,7 @@ func routerMiddleware(r chi.Router, cfg *config.Config) {
 	// deployment records the real client rather than the proxy hop. Parsed
 	// once here, never on the request path.
 	proxyNets := parseCIDRList(cfg.Server.TrustedProxies)
-	r.Use(requestLogger(proxyNets)) // structured request/response logging
+	r.Use(requestLogger(proxyNets, slow)) // structured request/response logging
 	r.Use(SecurityHeadersWithTLS(cfg.TLS.Mode))
 	r.Use(MaxBodySizeUnless(defaultMaxBodySize, bodyCapExemptPattern, bodyCapExemptPrefixes...))
 	r.Use(requestDeadlineMiddleware()) // 15 s deadline on non-streaming routes
@@ -742,11 +744,14 @@ func recoverer(next http.Handler) http.Handler {
 	})
 }
 
-// requestLogger logs every HTTP request; health checks at Debug.
+// requestLogger logs every HTTP request; health checks at Debug. It also feeds
+// slow (nil skips it) with the request's route pattern and time, leaving out
+// the routes the request deadline exempts: they stream or hold a connection
+// open, so their time says nothing about slowness.
 // clientIPWithProxies resolves client_ip through trusted_proxies so
 // reverse-proxy deployments log the real client; proxyNets is parsed once at
 // construction, never on the request path.
-func requestLogger(proxyNets []*net.IPNet) func(http.Handler) http.Handler {
+func requestLogger(proxyNets []*net.IPNet, slow *metrics.SlowRoutes) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -754,6 +759,11 @@ func requestLogger(proxyNets []*net.IPNet) func(http.Handler) http.Handler {
 			next.ServeHTTP(ww, r)
 			elapsed := time.Since(start)
 			status := ww.Status()
+			if slow != nil && !requestDeadlineExemptRequest(r.Method, r.URL.EscapedPath()) {
+				if rctx := chi.RouteContext(r.Context()); rctx != nil {
+					slow.Observe(r.Method, rctx.RoutePattern(), elapsed)
+				}
+			}
 
 			path := r.URL.Path
 			reqID := middleware.GetReqID(r.Context())
