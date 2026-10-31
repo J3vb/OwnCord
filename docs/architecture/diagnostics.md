@@ -175,7 +175,7 @@ it on, the server, not the viewer's browser, fetches the link previews and
 outside images a web viewer opens, the way the desktop app's own broker does
 on the viewer's machine.
 So the compiled defaults still reach nowhere. The policy is written out as a contract in
-[trust-model.md](../trust-model.md#desktop-preview-destination-policy-c-09--contract-for-b7),
+[trust-model.md](trust-model-evidence.md#desktop-preview-destination-policy-c-09--contract-for-b7),
 clauses 2 through 6.
 
 Two things are deliberately **not** in the table. The startup banner used to
