@@ -47,10 +47,10 @@ import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
-import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/readState";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 const UNREAD: ReadyChannel[] = [
   {
@@ -104,7 +104,7 @@ describe("SidebarArea - server name menu", () => {
       categories: [],
     }));
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     uiStore.setState((prev) => ({
       ...prev,
       collapsedCategories: new Set(),

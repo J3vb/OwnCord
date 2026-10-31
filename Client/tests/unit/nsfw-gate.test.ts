@@ -1,16 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createNsfwConsentBar, createNsfwGate } from "@components/NsfwGate";
+import { useMountContainer } from "../helpers/mountContainer";
 
 describe("NsfwGate component", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   function mountGate(overrides?: { onAccept?: () => Promise<void>; onCancel?: () => void }) {

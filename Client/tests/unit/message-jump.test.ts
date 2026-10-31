@@ -28,15 +28,6 @@ vi.mock("@lib/ui/toast", () => ({
   initToast: vi.fn(),
 }));
 
-// jsdom has no ResizeObserver — MessageList needs one to mount.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageJumper } from "../../src/pages/main-page/MessageJump";
 import { createMessageController } from "../../src/pages/main-page/MessageController";
 import { createMessageList } from "@components/MessageList";
@@ -53,12 +44,15 @@ import {
 import type { Message } from "@stores/messages.store";
 import { channelsStore, setChannels } from "@stores/channels.store";
 import { setDmChannels } from "@stores/dm.store";
-import { membersStore } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import type { MessageResponse, ReadyChannel } from "@lib/types";
 import { expectConsole } from "../helpers/console";
+import { buildMessage } from "../helpers/messageFactory";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
+import { useMountContainer } from "../helpers/mountContainer";
 
 const CHANNELS: ReadyChannel[] = [
   { id: 1, name: "general", type: "text", category: null, position: 0 },
@@ -66,15 +60,8 @@ const CHANNELS: ReadyChannel[] = [
 ];
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMessagesState();
+  resetMembersState();
   authStore.setState(() => ({
     token: "t",
     user: { id: 1, username: "alice", avatar: null, role: "member" },
@@ -93,22 +80,9 @@ function resetStores(): void {
 }
 
 function makeMessage(overrides: Partial<Message> & { id: number }): Message {
-  return {
-    channelId: 1,
-    user: { id: 1, username: "Alice", avatar: null },
-    content: `Message ${overrides.id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
+  return buildMessage(overrides, {
     timestamp: "2026-01-15T12:00:00Z",
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-    ...overrides,
-  };
+  });
 }
 
 function response(id: number): MessageResponse {
@@ -686,14 +660,8 @@ describe("Copy Message Link action", () => {
 
 describe("permalink chips in message content", () => {
   let container: HTMLDivElement;
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.appendChild(container);
-  });
-
-  afterEach(() => {
-    container.remove();
+  useMountContainer((mounted) => {
+    container = mounted;
   });
 
   it("renders a pasted permalink as a compact chip naming the channel", () => {

@@ -12,9 +12,9 @@ import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
-import { membersStore } from "../../src/stores/members.store";
 import { invalidateMuteCache, muteChannel, setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { startMuteExpiryWatch } from "@lib/prefs/channelMuteExpiry";
+import { resetMembersState } from "../helpers/storeResets";
 
 describe("timed mute expiry redraws the sidebar", () => {
   let container: HTMLDivElement;
@@ -34,7 +34,7 @@ describe("timed mute expiry redraws the sidebar", () => {
       categories: [],
     }));
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
     voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
     authStore.setState(() => ({

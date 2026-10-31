@@ -33,6 +33,7 @@ import { createMemberList } from "@components/MemberList";
 import { openUserReport } from "../../src/features/reports/openers";
 import { Permission, type UserStatus } from "../../src/lib/types";
 import { ApiClientError } from "../../src/lib/api";
+import { resetMembersState } from "../helpers/storeResets";
 
 // ---------------------------------------------------------------------------
 // Store reset
@@ -49,10 +50,7 @@ function resetStores(): void {
     motd: null,
     isAuthenticated: true,
   }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   // Role lookups read the dispatcher-updated channels.store (see the role-source
   // unification). Seed via the same setRoles action the dispatcher calls.
   channelsStore.setState(() => ({

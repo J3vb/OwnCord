@@ -21,6 +21,7 @@ import { applyPickedMentions, tokensToPickedText } from "../../src/lib/text/pick
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { membersStore } from "../../src/stores/members.store";
+import { resetMembersState } from "../helpers/storeResets";
 
 function member(id: number, username: string, displayName?: string) {
   return {
@@ -166,7 +167,7 @@ describe("id mentions", () => {
   });
 
   it("highlights by id even when the member list does not hold the user", () => {
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     expect(mentionsCurrentUser("<@12>")).toBe(true);
   });
 

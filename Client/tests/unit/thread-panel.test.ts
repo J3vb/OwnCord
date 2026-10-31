@@ -1,13 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 const noteSeen = vi.hoisted(() => vi.fn());
 vi.mock("@components/message-list/attachments", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@components/message-list/attachments")>()),
@@ -61,6 +53,7 @@ import {
   signInAs,
 } from "../helpers/message-actions-fixtures";
 import { makeThread } from "../helpers/thread-fixtures";
+import "../helpers/resizeObserverStub";
 
 const PARENT = 1;
 const THREAD = 91;

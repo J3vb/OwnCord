@@ -27,7 +27,6 @@ import {
   uiStore,
 } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
-import { membersStore } from "../../src/stores/members.store";
 import { channelGroups } from "../../src/features/channels/channelRowModel";
 import { visibleCategories } from "../../src/lib/permissions";
 import { migrateCollapsedToCategoryIds } from "../../src/features/channels/collapsedMigration";
@@ -42,6 +41,7 @@ import {
 } from "../../src/features/channels/categoryActions";
 import { ApiClientError } from "@lib/api";
 import type { ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 type Row = Partial<ReadyChannel> & Pick<ReadyChannel, "id" | "name" | "type" | "position">;
 
@@ -312,7 +312,7 @@ describe("category header menu", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     voiceStore.setState((prev) => ({ ...prev, voiceStates: new Map() }));
     uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
     container = document.createElement("div");

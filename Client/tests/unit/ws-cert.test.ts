@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // vi.mock is hoisted per file; the factories resolve to the shared handles
 // exported from ./helpers/ws-mocks (see that module's doc comment).
@@ -10,25 +10,15 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 
-import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
 
 describe("cert mismatch blocking", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("should block reconnect when cert mismatch detected", async () => {
@@ -446,19 +436,8 @@ describe("cert mismatch blocking", () => {
 
 describe("disconnect() resets reconnectAttempt", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("resets the backoff exponent so a later session's first retry uses the short delay", async () => {
@@ -598,19 +577,8 @@ describe("normalizeHostForCertCompare", () => {
 
 describe("cert-tofu non-mismatch statuses", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("trusted_first_use status does not block reconnect", async () => {
@@ -657,19 +625,8 @@ describe("cert-tofu non-mismatch statuses", () => {
 
 describe("acceptCertFingerprint edge cases", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   it("calls Tauri invoke with correct command and args", async () => {
@@ -757,19 +714,8 @@ describe("acceptCertFingerprint edge cases", () => {
 
 describe("disconnect resets certMismatchBlock", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   // DP-54 follow-up: the desktop proxy reports a failed TLS handshake (a

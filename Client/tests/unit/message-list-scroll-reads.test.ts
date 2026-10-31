@@ -14,26 +14,18 @@ globalThis.ResizeObserver = class {
 
 import { createMessageList } from "@components/MessageList";
 import { messagesStore } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import type { Message } from "@stores/messages.store";
+import { buildMessage } from "../helpers/messageFactory";
+import { resetMembersState } from "../helpers/storeResets";
 
 function makeMessage(id: number): Message {
-  return {
-    id,
-    channelId: 1,
-    user: { id: id, username: `user${id}`, avatar: null },
-    content: `Message ${id}`,
-    replyTo: null,
-    attachments: [],
-    reactions: [],
-    pinned: false,
-    editedAt: null,
-    deleted: false,
-    timestamp: new Date(Date.UTC(2024, 0, 15, 12, 0, id)).toISOString(),
-    status: "sent",
-    correlationId: null,
-    errorCode: null,
-  };
+  return buildMessage(
+    { id },
+    {
+      user: { id: id, username: `user${id}`, avatar: null },
+      timestamp: new Date(Date.UTC(2024, 0, 15, 12, 0, id)).toISOString(),
+    },
+  );
 }
 
 describe("MessageList scroll frame layout reads", () => {
@@ -53,7 +45,7 @@ describe("MessageList scroll frame layout reads", () => {
       historyLoadState: new Map(),
       detachedChannels: new Set(),
     }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     rafs = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => rafs.push(cb));
     container = document.createElement("div");

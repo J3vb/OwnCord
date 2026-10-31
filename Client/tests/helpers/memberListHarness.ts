@@ -6,6 +6,7 @@ import { authStore } from "@stores/auth.store";
 import { setRoles } from "@stores/channels.store";
 import { type UserStatus } from "../../src/lib/types";
 import { applyThemeByName } from "@lib/prefs/themes";
+import { resetMembersState } from "./storeResets";
 
 /**
  * Give the role clamp (B9 Q13) the dark theme's surfaces to measure names
@@ -21,10 +22,7 @@ export function useDarkSurfaces(): void {
 }
 
 export function resetStore(): void {
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   // Role list drives member-list grouping/colors — reset so tests that seed
   // roles don't leak into the ones asserting the fallback groups.
   setRoles([]);

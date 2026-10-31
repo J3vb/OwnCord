@@ -34,8 +34,8 @@ vi.mock("@lib/voice/connectionStats", () => ({
 import { createVoiceWidget } from "@components/VoiceWidget";
 import { voiceStore } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
-import { membersStore } from "@stores/members.store";
 import { setConnectionStatus } from "@stores/ui.store";
+import { resetMembersState } from "../helpers/storeResets";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -56,10 +56,7 @@ function resetStores(): void {
     activeChannelId: null,
     roles: [],
   }));
-  membersStore.setState(() => ({
-    members: new Map(),
-    typingUsers: new Map(),
-  }));
+  resetMembersState();
   // Voice controls freeze while the socket is down; an active call is live.
   setConnectionStatus("connected");
 }

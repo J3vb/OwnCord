@@ -9,6 +9,7 @@ import { loadUserStatus, saveUserStatus, saveCustomStatus } from "@lib/presence/
 import { createPresenceSender } from "@lib/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
+import { resetMembersState } from "../helpers/storeResets";
 
 function setAuthState(
   user: { username: string; custom_status?: string | null } | null,
@@ -374,7 +375,7 @@ describe("StatusPicker wired to UserBar", () => {
 
     expect(input.value).toBe("");
     opts.presenceSender.destroy();
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
   });
 
   it("status picker is disabled without a ws send path even when connected", () => {

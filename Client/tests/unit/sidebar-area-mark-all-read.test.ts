@@ -53,9 +53,9 @@ import { channelsStore, setChannels, setRoles } from "../../src/stores/channels.
 import { dmStore } from "../../src/stores/dm.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore } from "../../src/stores/ui.store";
-import { membersStore } from "../../src/stores/members.store";
 import { setMarkReadSender } from "@lib/readState";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
+import { resetMembersState } from "../helpers/storeResets";
 
 const CHANNELS: ReadyChannel[] = [
   {
@@ -102,7 +102,7 @@ describe("SidebarArea — Mark All as Read", () => {
       categories: [],
     }));
     dmStore.setState(() => ({ channels: [] }));
-    membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+    resetMembersState();
     uiStore.setState((prev) => ({
       ...prev,
       collapsedCategories: new Set(),

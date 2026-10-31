@@ -10,14 +10,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class {
-    observe(): void {}
-    unobserve(): void {}
-    disconnect(): void {}
-  } as unknown as typeof ResizeObserver;
-}
-
 import { createMessageList } from "@components/MessageList";
 import type { MessageListOptions } from "@components/MessageList";
 import {
@@ -28,7 +20,6 @@ import {
 } from "@stores/messages.store";
 import type { MessageResponse } from "@lib/types";
 import type { Message } from "@stores/messages.store";
-import { membersStore } from "@stores/members.store";
 import {
   channelsStore,
   setChannels,
@@ -40,6 +31,8 @@ import { closeSettings, openSettings } from "@stores/ui.store";
 import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
 import { createReconnectClock } from "../../src/features/connection/dispatchContext";
 import { formatMessageTimestamp } from "@lib/text/formatting";
+import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
+import "../helpers/resizeObserverStub";
 
 const CHANNEL_ID = 1;
 const ME = 1;
@@ -57,15 +50,8 @@ function nextFrame(): Promise<void> {
 }
 
 function resetStores(): void {
-  messagesStore.setState(() => ({
-    messagesByChannel: new Map(),
-    pendingSends: new Map(),
-    loadedChannels: new Set(),
-    hasMore: new Map(),
-    historyLoadState: new Map(),
-    detachedChannels: new Set(),
-  }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMessagesState();
+  resetMembersState();
   channelsStore.setState(() => ({
     channels: new Map(),
     activeChannelId: null,

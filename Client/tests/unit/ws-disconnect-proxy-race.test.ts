@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", async () => ({
   invoke: (await import("./helpers/ws-mocks")).mockInvoke,
@@ -8,28 +8,18 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 
-import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
+import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
 import { expectConsole } from "../helpers/console";
+import { useWsClientFixture } from "../helpers/wsClientFixture";
 
 // disconnectProxy() awaits the transport's disconnect and then marks the proxy
 // closed. If a newer connect() opened its own proxy while that await was
 // pending, the late write must not close the live attempt's proxy.
 describe("disconnectProxy vs a newer connect", () => {
   let client: ReturnType<typeof createWsClient>;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    mockInvoke.mockReset();
-    mockInvoke.mockResolvedValue(undefined);
-    mockListen.mockClear();
-    eventHandlers.clear();
-    client = createWsClient();
-  });
-
-  afterEach(() => {
-    client.disconnect();
-    vi.useRealTimers();
+  useWsClientFixture((created) => {
+    client = created;
   });
 
   const cfg = { host: "localhost:8443", token: "t" };

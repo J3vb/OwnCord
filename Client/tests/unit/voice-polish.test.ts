@@ -49,8 +49,8 @@ import { createVoiceWidget } from "../../src/components/VoiceWidget";
 import { createVideoGrid, type TileConfig } from "../../src/components/VideoGrid";
 import { voiceStore } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
-import { membersStore } from "../../src/stores/members.store";
 import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
+import { resetMembersState } from "../helpers/storeResets";
 
 function resetStores(): void {
   voiceStore.setState(() => ({
@@ -71,7 +71,7 @@ function resetStores(): void {
     roles: [],
     categories: [],
   }));
-  membersStore.setState(() => ({ members: new Map(), typingUsers: new Map() }));
+  resetMembersState();
   setConnectionStatus("connected");
 }
 
